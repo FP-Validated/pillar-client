@@ -1,0 +1,101 @@
+[workspace]
+members = [
+    "crates/pillar-api",
+    "crates/pillar-core",
+    "crates/pillar-metrics",
+    "crates/pillar-config",
+    "crates/pillar-client",
+    "crates/pillar-layerzero",
+    "crates/pillar-runtime",
+    "crates/pillar-signer",
+    "crates/pillar-cli",
+    "crates/pillar-bench",
+]
+default-members = [
+    "crates/pillar-api",
+    "crates/pillar-core",
+    "crates/pillar-metrics",
+    "crates/pillar-config",
+    "crates/pillar-client",
+    "crates/pillar-layerzero",
+    "crates/pillar-runtime",
+    "crates/pillar-signer",
+    "crates/pillar-cli",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/FP-Validated/pillar-client"
+rust-version = "1.94.1"
+version = "2.1.0"
+
+# Arithmetic on attacker-influenced on-chain payloads must never wrap silently:
+# a panic is recoverable per request, a wrapped offset is a wrong signature.
+[profile.release]
+overflow-checks = true
+
+[workspace.lints.rust]
+non_ascii_idents = "deny"
+unsafe_code = "forbid"
+unsafe_op_in_unsafe_fn = "deny"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "deny"
+mem_forget = "deny"
+todo = "deny"
+unimplemented = "deny"
+undocumented_unsafe_blocks = "deny"
+
+[workspace.dependencies]
+anyhow = "1"
+async-trait = "0.1"
+aws-config = { version = "1.11.0", default-features = false, features = ["default-https-client", "rt-tokio", "credentials-process", "sso"] }
+azure_core = "1.0.0"
+azure_identity = "1.0.0"
+azure_security_keyvault_keys = "1.0.0"
+aws-sdk-kms = { version = "1.117.0", default-features = false, features = ["default-https-client", "rt-tokio"] }
+aws-sdk-lambda = { version = "1.141.0", default-features = false, features = ["default-https-client", "rt-tokio"] }
+aws-sdk-s3 = { version = "1.144.0", default-features = false, features = ["default-https-client", "rt-tokio", "http-1x", "sigv4a"] }
+aws-sdk-secretsmanager = { version = "1.114.0", default-features = false, features = ["default-https-client", "rt-tokio"] }
+axum = "0.7"
+base64 = "0.22"
+bech32 = "0.12.0"
+bip32 = "0.5.3"
+bip39 = "2.2.2"
+blake2 = "0.10.6"
+bs58 = "0.5"
+bytes = "1"
+criterion = { version = "0.7", features = ["async_tokio"] }
+ed25519-dalek = "2.2.0"
+futures = "0.3"
+google-cloud-kms-v1 = "1.11.0"
+google-cloud-storage = "1.15.0"
+hmac = "0.12"
+http = "1"
+hex = "0.4"
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["http1", "server", "server-auto", "tokio"] }
+sha3 = "0.10"
+sha2 = "0.10"
+spki = "0.7.3"
+indexmap = { version = "2", features = ["serde"] }
+k256 = { version = "0.13.4", features = ["ecdsa"] }
+pem-rfc7468 = { version = "1.0.0", features = ["alloc"] }
+num-bigint = "0.4"
+pbkdf2 = "0.12"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+ripemd = "0.1.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tokio = { version = "1", features = ["io-util", "macros", "rt-multi-thread", "signal", "time", "sync", "net"] }
+tower = { version = "0.5", features = ["util"] }
+tracing = "0.1"
+ton_core = "0.1.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+url = "2.5"

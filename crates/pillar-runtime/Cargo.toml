@@ -1,0 +1,49 @@
+[package]
+name = "pillar-runtime"
+description = "Composition root wiring configuration, providers, LayerZero, validation and signing for the Pillar DVN client."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+aws-config.workspace = true
+aws-sdk-kms.workspace = true
+aws-sdk-lambda.workspace = true
+aws-sdk-s3.workspace = true
+aws-sdk-secretsmanager.workspace = true
+azure_core.workspace = true
+azure_identity.workspace = true
+azure_security_keyvault_keys.workspace = true
+base64.workspace = true
+bech32.workspace = true
+bs58.workspace = true
+futures.workspace = true
+pillar-api = { path = "../pillar-api" }
+pillar-config = { path = "../pillar-config" }
+pillar-core = { path = "../pillar-core" }
+pillar-metrics = { path = "../pillar-metrics" }
+pillar-layerzero = { path = "../pillar-layerzero" }
+ton_core.workspace = true
+pillar-signer = { path = "../pillar-signer" }
+google-cloud-storage.workspace = true
+hex.workspace = true
+indexmap.workspace = true
+reqwest.workspace = true
+ripemd.workspace = true
+serde.workspace = true
+sha2.workspace = true
+sha3.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+# `tokio::time::advance` for the provider-config age tests: paused-clock only,
+# never compiled into the binary.
+tokio = { workspace = true, features = ["test-util"] }

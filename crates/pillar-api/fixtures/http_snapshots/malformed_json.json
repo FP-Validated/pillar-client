@@ -1,0 +1,7 @@
+{
+  "httpStatus": 400,
+  "body": {
+    "statusCode": 400,
+    "body": "Failed to parse the request body as JSON: EOF while parsing an object at line 1 column 1"
+  }
+}

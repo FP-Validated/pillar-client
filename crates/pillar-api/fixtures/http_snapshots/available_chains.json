@@ -1,0 +1,18 @@
+{
+  "httpStatus": 200,
+  "body": {
+    "statusCode": 200,
+    "body": [
+      "ethereum",
+      "bsc",
+      "avalanche",
+      "polygon",
+      "arbitrum",
+      "optimism",
+      "base",
+      "hyperliquid",
+      "tempo",
+      "solana"
+    ]
+  }
+}

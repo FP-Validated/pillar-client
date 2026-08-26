@@ -1,0 +1,12 @@
+{
+  "httpStatus": 200,
+  "body": {
+    "statusCode": 200,
+    "body": [
+      {
+        "address": "0x06bb41FE76F41429f55aC8C355ac8669769A1ba1",
+        "publicKey": "0xca11e4b7d37870aca2ace4d5dee1dd296e6d76c7ff757c648d41f1e65d495d740897f8edc07fea309c99494ab3f2115c27f1f8aca0d0843ce485e6266ed351f1"
+      }
+    ]
+  }
+}

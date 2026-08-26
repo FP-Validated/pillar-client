@@ -1,0 +1,53 @@
+# Rust build outputs
+/target/
+**/*.rs.bk
+
+# Local agent/tooling state
+/.codegraph/
+/.omp/
+/.justsend/
+AGENTS.md
+
+# Local-only tests, scripts, fixtures, and reports.
+# Put ad-hoc experiments here so Cargo builds and source packaging do not
+# mistake them for project-owned tests or tools.
+/local/
+/local-tests/
+/local-scripts/
+
+# Local planning and operation docs
+/docs/
+
+# Local Python/analysis environments
+/.xlsx-venv/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Local environment and secret material
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Logs, reports, and temporary files
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+.DS_Store
+
+# Local spreadsheet scratch files
+*.xlsx
+~$*.xlsx
+
+# Maintainer-only parity tooling. It requires inputs that are not part of
+# this repository, so it is kept out of the tree rather than shipped broken.
+/scripts/check-parity-coverage.mjs
+/scripts/parity-coverage-fixtures.json

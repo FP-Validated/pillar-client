@@ -1,0 +1,22 @@
+[package]
+name = "pillar-client"
+description = "Client library for the Pillar LayerZero DVN service API."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+futures.workspace = true
+pillar-core = { path = "../pillar-core" }
+regex.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true

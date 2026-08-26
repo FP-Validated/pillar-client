@@ -1,0 +1,3 @@
+# LayerZero-v2 9c741e7f9790639537b1710a203bcdfd73b0b9ac
+# ReadLib1002.sol lines 162-166: verify accepts bytes32 _payloadHash. Vector uses resolved payload hash for guid + 0x1234.
+0xf88abc595e28aef608f02e2cb392ee165d48839a586a039288a41fb611bfb7db

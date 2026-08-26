@@ -1,0 +1,7 @@
+{
+  "httpStatus": 400,
+  "body": {
+    "statusCode": 400,
+    "body": "skipVId is not supported for v2 requests"
+  }
+}

@@ -1,0 +1,5 @@
+# Keep local-only experiments out of default search and structure scans.
+/local/
+/local-tests/
+/local-scripts/
+

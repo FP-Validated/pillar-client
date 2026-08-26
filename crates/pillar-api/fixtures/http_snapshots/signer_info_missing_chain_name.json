@@ -1,0 +1,7 @@
+{
+  "httpStatus": 400,
+  "body": {
+    "statusCode": 400,
+    "body": "Invalid input - Missing chainName query parameter"
+  }
+}

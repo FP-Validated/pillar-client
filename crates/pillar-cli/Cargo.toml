@@ -1,0 +1,28 @@
+[package]
+name = "pillar-cli"
+description = "Server binary for the Pillar LayerZero DVN client."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+axum.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+pillar-api = { path = "../pillar-api" }
+pillar-config = { path = "../pillar-config" }
+pillar-runtime = { path = "../pillar-runtime" }
+anyhow.workspace = true
+tokio.workspace = true
+tower.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[[bin]]
+name = "pillar"
+path = "src/main.rs"

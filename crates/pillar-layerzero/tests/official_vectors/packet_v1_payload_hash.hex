@@ -1,0 +1,3 @@
+# LayerZero-v2 9c741e7f9790639537b1710a203bcdfd73b0b9ac
+# PacketV1Codec.sol lines 53-55, 101-107: payload is guid + message, payloadHash is keccak256(payload).
+0x08eed9e984b654cded42042a70953b0e5c143f47cb44b60296d86f5345656887

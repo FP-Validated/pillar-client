@@ -1,0 +1,20 @@
+[package]
+name = "pillar-metrics"
+description = "Prometheus metric rendering for the Pillar LayerZero DVN client."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+pillar-core = { path = "../pillar-core" }
+tokio.workspace = true
+indexmap.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

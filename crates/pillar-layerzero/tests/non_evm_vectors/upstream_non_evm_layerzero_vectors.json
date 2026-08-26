@@ -1,0 +1,162 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-09T03:55:00+09:00",
+  "source": {
+    "package": "@monorepo/lz-v2-sdk",
+    "packageVersion": "0.0.0",
+    "files": [
+      {
+        "path": "apps/upstream/src/app/sdks/upstreamSdk/factory.ts",
+        "sha256": "69a116512803d60734c5c050cebf7740052201ef3e3f4ad06ea847b2ec34b899",
+        "behaviorLines": "32-88"
+      },
+      {
+        "path": "apps/upstream/src/app/sdks/upstreamSdk/aptos/index.ts",
+        "sha256": "d394b2eb1980570fd13513b2d0d11af6ce31339cd6a45c572deec560259399e2",
+        "behaviorLines": "44-206"
+      },
+      {
+        "path": "apps/upstream/src/app/sdks/upstreamSdk/solana/index.ts",
+        "sha256": "bd20a5c1c37909c3f6476fc5deb36f9f0bf51890454eafcf71b74fef3dcc7042",
+        "behaviorLines": "35-172"
+      },
+      {
+        "path": "apps/upstream/src/app/sdks/upstreamSdk/sui/index.ts",
+        "sha256": "debbeb0a884272882b941ab4c79032f0b48eb0e8e5c81387e414ae893b33c2b4",
+        "behaviorLines": "34-156"
+      },
+      {
+        "path": "apps/upstream/src/app/sdks/upstreamSdk/starknet/index.ts",
+        "sha256": "847fb00b9b24acb73d8105df14fcb281ca95a77c1bec93acde5c87a2cafcd863",
+        "behaviorLines": "42-168"
+      },
+      {
+        "path": "apps/upstream/src/app/sdks/upstreamSdk/stellar/index.ts",
+        "sha256": "737db2d78eadc107396efaeeb06ea22e76d9a3a937c33ecd79dd32108dabcc08",
+        "behaviorLines": "133-271"
+      },
+      {
+        "path": "apps/upstream/src/app/sdks/upstreamSdk/ton/index.ts",
+        "sha256": "ec8874e197dc6f7132c02584c8c8782acb7092efef2025e680cb47dc7022e8ba",
+        "behaviorLines": "77-160"
+      }
+    ]
+  },
+  "sampleInput": {
+    "protocol": "ULN V302 message verification",
+    "srcChainName": "ethereum",
+    "message": "0xdeadbeef",
+    "nonce": 7,
+    "srcEid": 30101,
+    "guid": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "sender": "0x1111111111111111111111111111111111111111",
+    "receiver": "0x2222222222222222222222222222222222222222",
+    "blockConfirmation": 64,
+    "expiration": 1,
+    "vId": "7"
+  },
+  "vectors": [
+    {
+      "id": "initia-move-uln-v3-hash-verify",
+      "todo": "Todo 06",
+      "chainFamily": "Initia/Move",
+      "chainNames": ["initia", "movement"],
+      "upstreamFactory": "ChainType.INITIA and ChainType.APTOS both construct UpstreamAptosSdk",
+      "upstreamBehavior": {
+        "buildULNV2VerifyPayload": "rejects non-empty vId with 'VId is not supported on aptos yet', otherwise hashPropose(proof.lookupHash, blockConfirmation, expiration)",
+        "buildULNV3VerifyPayload": "hashVerify(packetHeader, payloadHash, blockConfirmation, bytes32(target ULN), parseInt(vId), expiration)",
+        "buildULNReadV1VerifyPayload": "throws 'Not implemented'"
+      },
+      "currentRustBehavior": "initia and movement are supported LayerZero destinations through AptosUlnPayloadBuilder using Move-family hashVerify/hashPropose semantics",
+      "missingBuilderBehavior": "preserve Move-family builder registration for initia and movement and the Upstream-backed Aptos rejection text"
+    },
+    {
+      "id": "solana-uln-v3-execute-transaction-digest",
+      "todo": "Todo 06",
+      "chainFamily": "Solana",
+      "chainNames": ["solana"],
+      "upstreamFactory": "ChainType.SOLANA constructs UpstreamSolanaSdk",
+      "upstreamBehavior": {
+        "buildULNV2VerifyPayload": "throws 'Not implemented: Solana only supports EndpointV2'",
+        "buildULNV3VerifyPayload": "requires dvnPda, requires UlnVersion.V302, serializes DVNProgram.types.executeTransactionDigestBeet, and hashes digest bytes with keccak_256",
+        "buildULNReadV1VerifyPayload": "throws 'Not implemented'"
+      },
+      "sourceBackedExpected": {
+        "input": {
+          "blockConfirmation": 64,
+          "expiration": 1900000000,
+          "vId": "168",
+          "guid": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "dvnPda": "HtEYV4xB4wvsj5fgTkcfuChYpvGYzgzwvNhgDZQNh7wW"
+        },
+        "hashCallData": "07ebd4396fa094b6edf6b2e2036e584515b30525ebfd991e6b00711482cd05b2",
+        "dvnHashCallDataDvnCallData": "a8000000619e429a1de67854bd455ee6643f568d6236cde8e9442a3abf029f016faae63004000000fadaeccd4478463214d9a94537bfa687a1e9176e12a48888491d9502f7dace21010014c2a38c1f456b6f2835f17d52792a5a451352a8bcd8b109cdadaa915b4e9245000164addff32f7e70f064aaeb7199486126df6abfa7e1b33d41a4673fab178685340000619e429a1de67854bd455ee6643f568d6236cde8e9442a3abf029f016faae63000008100000085a18d3078c65896010000000000000007000075950000000000000000000000001111111111111111111111111111111111111111000075d8000000000000000000000000222222222222222222222222222222222222222208eed9e984b654cded42042a70953b0e5c143f47cb44b60296d86f5345656887400000000000000000b33f7100000000",
+        "dvnCallDataUlnCallData": "85a18d3078c65896010000000000000007000075950000000000000000000000001111111111111111111111111111111111111111000075d8000000000000000000000000222222222222222222222222222222222222222208eed9e984b654cded42042a70953b0e5c143f47cb44b60296d86f53456568874000000000000000"
+      },
+      "sourceBackedProvenance": {
+        "mode": "independent non-Rust reproduction from pinned TypeScript/LayerZero/Solana SDK modules",
+        "artifact": ".omo/evidence/pillar-upstream-compatibility-implementation/task-06-solana-independent-sdk-reproduction.json",
+        "observable": "matches hashCallData, dvnHashCallData.dvnCallData, and dvnCallData.ulnCallData exactly",
+        "note": "The full Upstream native extractor is still locally blocked by missing follow-redirects; this vector proves the exact corpus fixture with the static guid above. A calculateGuid native-pathway run would produce a different guid and different payload hash."
+      },
+      "currentRustBehavior": "solana V302 is supported through SolanaUlnPayloadBuilder and emits the exact corpus-backed unprefixed hash/digest/verify-instruction bytes",
+      "missingBuilderBehavior": "preserve V302 digest-byte construction from Solana verify instruction accounts/data and reject missing dvnPda with 'Solana: DVN Address is required for verify payload'"
+    },
+    {
+      "id": "sui-iotamove-uln-v3-hash-verify",
+      "todo": "Todo 07",
+      "chainFamily": "Sui/IotaMove",
+      "chainNames": ["sui", "iotal1"],
+      "upstreamFactory": "ChainType.SUI and ChainType.IOTAMOVE construct UpstreamSuiSdk",
+      "upstreamBehavior": {
+        "buildULNV2VerifyPayload": "throws 'SUI only supports ULN V302'",
+        "buildULNV3VerifyPayload": "hashVerify(packetHeader, payloadHash, blockConfirmation, bytes32(ULN package id), parseInt(vId), expiration)",
+        "buildULNReadV1VerifyPayload": "throws 'SUI only supports ULN V302'"
+      },
+      "currentRustBehavior": "sui and iotal1 are supported LayerZero destinations through SuiUlnPayloadBuilder with chain-specific ULN package ids",
+      "missingBuilderBehavior": "preserve Sui/IotaMove V302 hashVerify payloads and Upstream-backed non-V302 rejection text"
+    },
+    {
+      "id": "starknet-uln-v3-packed-outside-call",
+      "todo": "Todo 08",
+      "chainFamily": "Starknet",
+      "chainNames": ["starknet"],
+      "upstreamFactory": "ChainType.STARKNET constructs UpstreamStarknetSdk",
+      "upstreamBehavior": {
+        "buildULNV2VerifyPayload": "throws 'Starknet only supports EndpointV2'",
+        "buildULNV3VerifyPayload": "buildULNV3VerifyCall, pack vid as 4 bytes, call.to/expiration/selector/calldata as 32-byte values, then keccak_256 packed bytes",
+        "buildULNReadV1VerifyPayload": "throws 'FIXME STARKNET-READ: Read DVN is not available on Starknet'"
+      },
+      "currentRustBehavior": "starknet is a supported LayerZero destination through StarknetUlnPayloadBuilder with packed OutsideCall hashing",
+      "missingBuilderBehavior": "preserve the exact packed OutsideCall byte stream before hashing and the read-DVN rejection text"
+    },
+    {
+      "id": "stellar-uln-v3-xdr-call-vector",
+      "todo": "Todo 08",
+      "chainFamily": "Stellar",
+      "chainNames": ["stellar"],
+      "upstreamFactory": "ChainType.STELLAR constructs UpstreamStellarSdk",
+      "upstreamBehavior": {
+        "buildULNV2VerifyPayload": "throws 'Stellar only supports EndpointV2'",
+        "buildULNV3VerifyPayload": "requires dvnAddress, builds Soroban XDR Vec<Call>, prefixes vid as u32 BE plus expiration as u64 BE, then keccak_256",
+        "buildULNReadV1VerifyPayload": "throws 'Read DVN is not available on Stellar'"
+      },
+      "currentRustBehavior": "stellar is a supported LayerZero destination through StellarUlnPayloadBuilder with Soroban XDR call-vector hashing",
+      "missingBuilderBehavior": "preserve the same Soroban XDR call vector and missing dvnAddress rejection text"
+    },
+    {
+      "id": "ton-uln-v3-boc-dvn-verify-cell",
+      "todo": "Todo 08",
+      "chainFamily": "TON",
+      "chainNames": ["ton"],
+      "upstreamFactory": "ChainType.TON constructs UpstreamTonSdk",
+      "upstreamBehavior": {
+        "buildULNV2VerifyPayload": "throws 'Method not implemented.'",
+        "buildULNV3VerifyPayload": "selects deprecated or current ULN manager, builds TON ulnCallData and dvnVerifyCallData cells, and returns dvnVerifyCallData.hash()",
+        "buildULNReadV1VerifyPayload": "throws 'FIXME TON-READ: Method not implemented.'"
+      },
+      "currentRustBehavior": "ton is a supported LayerZero destination through TonUlnPayloadBuilder with BOC-backed DVN verify cell hashing",
+      "missingBuilderBehavior": "preserve the BOC-backed DVN verify cell and explicit TON read TODO rejection"
+    }
+  ]
+}

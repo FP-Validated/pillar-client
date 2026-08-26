@@ -1,0 +1,28 @@
+[package]
+name = "pillar-layerzero"
+description = "LayerZero packet, proof and ULN verify call-data builders used by the Pillar DVN client."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+bs58.workspace = true
+ed25519-dalek.workspace = true
+pillar-core = { path = "../pillar-core" }
+hex.workspace = true
+indexmap.workspace = true
+sha2.workspace = true
+serde_json.workspace = true
+sha3.workspace = true
+ton_core.workspace = true
+num-bigint.workspace = true
+
+[dev-dependencies]
+pillar-config = { path = "../pillar-config" }
+tokio.workspace = true

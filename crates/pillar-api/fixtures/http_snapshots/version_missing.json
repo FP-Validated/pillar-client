@@ -1,0 +1,7 @@
+{
+  "httpStatus": 500,
+  "body": {
+    "statusCode": 500,
+    "body": "PILLAR_IMAGE_VERSION is not set"
+  }
+}

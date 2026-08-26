@@ -1,0 +1,3 @@
+# LayerZero-v2 9c741e7f9790639537b1710a203bcdfd73b0b9ac
+# ReadCmdCodecV1.sol lines 97-120, 190-212: request version, label, resolver type, size, target, marker, confirmations, to, calldata.
+0x010102000100270000759600000000006553f100000c1111111111111111111111111111111111111111deadbeef

@@ -1,0 +1,23 @@
+[package]
+name = "pillar-core"
+description = "Request models and sign workflow for the Pillar LayerZero DVN client."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+futures.workspace = true
+hex.workspace = true
+indexmap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha3.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true

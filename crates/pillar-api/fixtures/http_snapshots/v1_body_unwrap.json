@@ -1,0 +1,15 @@
+{
+  "httpStatus": 200,
+  "body": {
+    "statusCode": 200,
+    "body": {
+      "signatures": [
+        {
+          "signature": "0xsig",
+          "address": "0xaddr"
+        }
+      ],
+      "payload": "0xpayload"
+    }
+  }
+}
