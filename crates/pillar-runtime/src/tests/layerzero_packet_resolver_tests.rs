@@ -1321,3 +1321,82 @@ async fn a_skipped_ton_uri_does_not_count_as_a_quorum_failure() {
         "quorum was reached from the one usable URI, so nothing may be counted: {rendered}"
     );
 }
+
+/// A `ReadV1002` packet must survive the resolver and land on the read arms of the
+/// pathway mapping and the payload hash.
+///
+/// Before the fix this failed with `No chain name for endpoint id 4294967295`: the two
+/// endpoint ids are flipped for a read packet, so the post-flip `src_eid` is a channel,
+/// and both ids were then looked up in `chain_name_by_eid` - a map built from chain names
+/// that never holds a channel id. Every read packet died here, before any payload builder
+/// ran.
+///
+/// Upstream references: the flip is
+/// `packages/sdks/lz-v2-sdk/src/endpoint/evm/decoders/index.ts:292-295`, and both chain
+/// names coming from `dstEid` is `formatPathwayId`,
+/// `packages/sdks/lz-v2-sdk/src/utils/common/index.ts:24-26`.
+#[tokio::test]
+async fn runtime_evm_resolver_maps_a_read_channel_pathway_like_typescript() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let transport = RecordingTransport {
+        calls: calls.clone(),
+        responses: Arc::new(Mutex::new(vec![Ok(json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": packet_sent_read_v1002_data(),
+        }))])),
+    };
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "ethereum".to_string(),
+            ProviderConfig {
+                uris: vec![ProviderUri::Uri("https://eth-rpc.example".to_string())],
+                quorum: Some(1),
+            },
+        )]),
+        Some(&["ethereum".to_string()]),
+    )
+    .unwrap();
+    let resolver = EvmPacketSentResolver::new(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        transport,
+        evm_packet_sent_resolver_config("ReadV1002"),
+    );
+
+    let sent_event = resolver
+        .get_lz_sent_event("0xtx", &evm_read_packet_sent_request())
+        .await
+        .expect("a read packet must resolve");
+
+    // The flipped ids are kept verbatim - both are signed inside the packet header.
+    assert_eq!(
+        sent_event.lz_message_id.pathway_id.extra["srcEid"],
+        4_294_967_295_u64
+    );
+    assert_eq!(sent_event.lz_message_id.pathway_id.extra["dstEid"], 30_101);
+    // Both names resolve to the chain, never to the channel.
+    assert_eq!(
+        sent_event.lz_message_id.pathway_id.src_chain_name,
+        "ethereum"
+    );
+    assert_eq!(
+        sent_event.lz_message_id.pathway_id.dst_chain_name,
+        "ethereum"
+    );
+    assert_eq!(
+        sent_event.lz_message_id.uln_send_version,
+        Value::from("ReadV1002")
+    );
+
+    // And the read arm of the payload hash is now reachable: a read source hashes the
+    // message alone, so the guid is excluded.
+    let proof = pillar_layerzero::compute_lz_packet_v1_proof_from_event(&sent_event)
+        .expect("proof from the resolved read event");
+    let expected = format!(
+        "0x{}",
+        hex::encode(<sha3::Keccak256 as sha3::Digest>::digest(
+            hex::decode("deadbeef").expect("message bytes")
+        ))
+    );
+    assert_eq!(proof.payload_hash, expected);
+}

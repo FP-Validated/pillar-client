@@ -1378,3 +1378,86 @@ async fn evm_payload_builder_builds_read_dvn_result_with_read_target() {
         "0xf88abc595e28aef608f02e2cb392ee165d48839a586a039288a41fb611bfb7db"
     );
 }
+
+/// `ChannelId` in `@layerzerolabs/lz-definitions@3.1.2` (`dist/index.d.ts:2982-2994`)
+/// declares exactly ten read channels, 4_294_967_295 down to 4_294_967_286. Upstream
+/// tests membership with `Object.values(ChannelId).includes(Number(endpointId))`
+/// (TS: `packages/common-model/src/utils/index.ts:38-40`), so the boundaries below are
+/// the whole contract: one past either end is an ordinary chain endpoint.
+#[test]
+fn read_channel_endpoint_ids_match_ts_channel_id_enum() {
+    assert!(is_lz_read_endpoint_id(4_294_967_295));
+    assert!(is_lz_read_endpoint_id(4_294_967_286));
+    assert!(!is_lz_read_endpoint_id(4_294_967_285));
+    assert!(!is_lz_read_endpoint_id(30_101));
+    assert!(!is_lz_read_endpoint_id(0));
+}
+
+fn packet_with_src_eid(src_eid: u32) -> LzPacketV1 {
+    LzPacketV1 {
+        nonce: 7,
+        src_eid,
+        sender: "0x1111111111111111111111111111111111111111".to_string(),
+        dst_eid: 30_101,
+        receiver: "0x2222222222222222222222222222222222222222".to_string(),
+        guid: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string(),
+        message: "0xdeadbeef".to_string(),
+    }
+}
+
+fn keccak_hex(parts: &[&str]) -> String {
+    let mut pre_image = Vec::new();
+    for part in parts {
+        pre_image.extend_from_slice(&decode_hex_bytes(part).expect("hex part"));
+    }
+    format!("0x{}", hex::encode(Keccak256::digest(&pre_image)))
+}
+
+/// Upstream: `isLzReadEndpointId(srcEid) ? keccak256(codec.message()) : codec.payloadHash()`
+/// (TS: `packages/sdks/lz-v2-sdk/src/utils/common/index.ts:68-72`). A read source hashes
+/// the message alone, so the guid is excluded from the signed payload hash.
+#[test]
+fn read_channel_source_hashes_the_message_alone_like_typescript() {
+    let proof = compute_lz_packet_v1_proof(&packet_with_src_eid(4_294_967_295)).expect("proof");
+    assert_eq!(proof.payload_hash, keccak_hex(&["0xdeadbeef"]));
+}
+
+/// The non-read arm of the same upstream expression: `codec.payloadHash()` is
+/// `keccak(guid || message)`.
+#[test]
+fn non_read_source_hashes_guid_and_message_like_typescript() {
+    let proof = compute_lz_packet_v1_proof(&packet_with_src_eid(30_101)).expect("proof");
+    assert_eq!(
+        proof.payload_hash,
+        keccak_hex(&[
+            "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "0xdeadbeef",
+        ])
+    );
+}
+
+/// The two proof fields are the only chain-derived inputs to the signed ULN call data,
+/// so a caller must never be able to supply them. `LzSentEvent.extra` accepts unknown
+/// keys, and an earlier revision short-circuited to `extra.packetHeader` /
+/// `extra.payloadHash` when both were present. Upstream never does this:
+/// `computeLZMessageV2Proof` always re-encodes
+/// (TS: `packages/sdks/lz-v2-sdk/src/utils/common/index.ts:63-78`).
+#[test]
+fn proof_ignores_a_precomputed_proof_supplied_in_the_event_extra() {
+    let derived = compute_lz_packet_v1_proof_from_event(&evm_sent_event()).expect("derived proof");
+
+    let mut event = evm_sent_event();
+    event.extra.insert(
+        "packetHeader".to_string(),
+        Value::from("0xdeadbeefdeadbeef"),
+    );
+    event.extra.insert(
+        "payloadHash".to_string(),
+        Value::from("0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"),
+    );
+
+    let observed = compute_lz_packet_v1_proof_from_event(&event).expect("proof");
+    assert_eq!(observed.packet_header, derived.packet_header);
+    assert_eq!(observed.payload_hash, derived.payload_hash);
+    assert_ne!(observed.packet_header, "0xdeadbeefdeadbeef");
+}

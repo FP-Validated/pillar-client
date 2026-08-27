@@ -3,18 +3,23 @@ use serde_json::Value;
 
 use super::{compute_lz_packet_v1_proof, EvmUlnProof, LzPacketV1};
 
+/// Derives the ULN proof from the observed event, always by re-encoding the packet.
+///
+/// The proof's two fields are the only chain-derived inputs to the signed ULN call
+/// data, so they are never taken from the event verbatim. `sent_event.extra` is an
+/// open map (`LzSentEvent.extra` flattens unknown keys), and this function used to
+/// short-circuit to `extra.packetHeader` / `extra.payloadHash` when both were
+/// present. No resolver ever wrote those keys into `extra` - every producer writes
+/// them into the response `details` (`abi/details.rs`, `solana.rs`, `aptos.rs`,
+/// `sui.rs`, `other_non_evm/{starknet,stellar}.rs`) - so the branch was dead, but it
+/// let any future producer or deserialized input choose the signed bytes directly.
+///
+/// Upstream has no such short-circuit either: `computeLZMessageV2Proof` always
+/// re-encodes (TS: `packages/sdks/lz-v2-sdk/src/utils/common/index.ts:63-78`, which
+/// calls `encodeLZMessage` then `PacketV1Codec.fromBytes`).
 pub fn compute_lz_packet_v1_proof_from_event(
     sent_event: &LzSentEvent,
 ) -> Result<EvmUlnProof, AppCoreError> {
-    if let (Some(packet_header), Some(payload_hash)) = (
-        optional_extra_string(sent_event, "packetHeader"),
-        optional_extra_string(sent_event, "payloadHash"),
-    ) {
-        return Ok(EvmUlnProof {
-            packet_header,
-            payload_hash,
-        });
-    }
     compute_lz_packet_v1_proof(&packet_from_event(sent_event)?)
 }
 

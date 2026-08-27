@@ -124,3 +124,51 @@ fn official_vectors_read_lib1002_verify_call_data_matches_sha_pinned_source() {
         official_vector_hex("read_lib1002_verify_calldata.hex")
     );
 }
+
+/// Ties the read arm of the signed payload hash to the SHA-pinned corpus instead of a
+/// hand-built message.
+///
+/// On the read path the packet's message IS the `ReadCmdCodecV1` request, and upstream
+/// hashes the message alone for a read source
+/// (`isLzReadEndpointId(srcEid) ? keccak256(codec.message()) : codec.payloadHash()`,
+/// TS: `packages/sdks/lz-v2-sdk/src/utils/common/index.ts:68-72`), which is why upstream
+/// calls that value the cmdHash where it consumes it
+/// (`// Proof.payloadHash is the cmdHash in ReadV1002`,
+/// TS: `packages/sdks/lz-v2-sdk/src/uln/evm/index.ts:323`).
+///
+/// So for the corpus's own request the signed payload hash must be `keccak(request)`, and
+/// it must NOT be `keccak(guid || request)` - the guid is excluded. Both are asserted, so
+/// the test fails if the branch is removed rather than merely reporting a different value.
+///
+/// `read_cmd_hash.hex` is deliberately not used here: it is a `0x9999...` sentinel that
+/// pins the ReadLib1002 calldata encoding, not a real command hash.
+#[test]
+fn official_vectors_read_payload_hash_is_the_command_hash_for_a_read_source() {
+    let request = official_vector_hex("read_cmd_codec_v1_request.hex");
+    let guid = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    let packet = LzPacketV1 {
+        nonce: 1,
+        // ChannelId.READ_CHANNEL_1, @layerzerolabs/lz-definitions@3.1.2
+        // dist/index.d.ts:2982-2994.
+        src_eid: 4_294_967_295,
+        sender: "0x1111111111111111111111111111111111111111".to_string(),
+        dst_eid: 30_101,
+        receiver: "0x2222222222222222222222222222222222222222".to_string(),
+        guid: guid.to_string(),
+        message: request.clone(),
+    };
+
+    let proof = compute_lz_packet_v1_proof(&packet).expect("proof for a read packet");
+
+    let command_bytes = decode_hex_bytes(&request).expect("request bytes");
+    let command_hash = format!("0x{}", hex::encode(Keccak256::digest(&command_bytes)));
+    assert_eq!(proof.payload_hash, command_hash);
+
+    let mut with_guid = decode_hex_bytes(guid).expect("guid bytes");
+    with_guid.extend_from_slice(&command_bytes);
+    let message_path_hash = format!("0x{}", hex::encode(Keccak256::digest(&with_guid)));
+    assert_ne!(
+        proof.payload_hash, message_path_hash,
+        "a read source must not hash guid || message"
+    );
+}

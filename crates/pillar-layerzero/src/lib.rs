@@ -55,7 +55,8 @@ pub use packet::{
     build_evm_lz_v1_packet_payload_v2_from_event, compute_lz_packet_v1_proof,
     compute_lz_packet_v1_proof_from_event, decode_evm_legacy_packet_v2_payload,
     decode_evm_packet_sent_log, decode_lz_packet_v1, derive_evm_feather_hash_info,
-    encode_lz_packet_v1, native_hash_by_chain_name, EvmPacketSent, EvmUlnProof, LzPacketV1,
+    encode_lz_packet_v1, is_lz_read_endpoint_id, native_hash_by_chain_name, EvmPacketSent,
+    EvmUlnProof, LzPacketV1,
 };
 pub use read_v1002::{
     build_evm_uln_read_v1_verify_call_data, decode_evm_read_command,

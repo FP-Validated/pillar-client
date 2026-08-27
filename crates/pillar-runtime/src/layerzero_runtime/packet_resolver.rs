@@ -453,11 +453,46 @@ where
                 ))
             })?;
         let mut packet = packet_sent.packet;
-        if uln_send_version == "ReadV1002" {
+        // The flip is upstream's, and it comes before the pathway is formed:
+        //
+        //   if (UlnVersion.ReadV1002 === ulnSendVersion) {
+        //       // Flip srcEid and dstEid for the packet
+        //       ;[packet.srcEid, packet.dstEid] = [packet.dstEid, packet.srcEid]
+        //   }
+        //
+        // TS: `packages/sdks/lz-v2-sdk/src/endpoint/evm/decoders/index.ts:292-295`.
+        // After it, a read packet's `src_eid` holds the read channel and `dst_eid` holds
+        // the chain.
+        if uln_send_version == ULN_VERSION_READ_V1002 {
             std::mem::swap(&mut packet.src_eid, &mut packet.dst_eid);
         }
-        let src_chain_name = self.chain_name_for_eid(packet.src_eid)?;
+        // Both names then come from `dst_eid`, because `src_eid` is a channel and not a
+        // chain. Upstream:
+        //
+        //   const srcChainName = isLzReadEndpointId(rawPathwayId.srcEid)
+        //       ? getChainName(rawPathwayId.dstEid)
+        //       : getChainName(rawPathwayId.srcEid)
+        //   const dstChainName = getChainName(rawPathwayId.dstEid)
+        //
+        // TS: `formatPathwayId`, `packages/sdks/lz-v2-sdk/src/utils/common/index.ts:19-36`;
+        // `isLzReadEndpointId` is `packages/common-model/src/utils/index.ts:38-40` over
+        // `ChannelId` from `@layerzerolabs/lz-definitions@3.1.2`.
+        //
+        // Previously both ids were looked up unconditionally, so the post-flip `src_eid`
+        // lookup hit a channel id. `chain_name_by_eid` is built from chain names
+        // (`runtime_chain_name_by_endpoint_id`) and never holds one, so every read packet
+        // failed here - before reaching the payload builders. Read could not complete at
+        // all, which is why correcting it cannot regress a working pathway. The flipped
+        // ids themselves are left exactly as upstream leaves them: both are signed
+        // (`encode_lz_packet_v1` writes `src_eid` at bytes[9..13] and `dst_eid` at
+        // bytes[45..49] of the packet header) and `compute_lz_packet_v1_proof` branches
+        // the signed payload hash on `src_eid`.
         let dst_chain_name = self.chain_name_for_eid(packet.dst_eid)?;
+        let src_chain_name = if is_lz_read_endpoint_id(packet.src_eid) {
+            dst_chain_name.clone()
+        } else {
+            self.chain_name_for_eid(packet.src_eid)?
+        };
         let mut pathway_extra = IndexMap::new();
         pathway_extra.insert("srcEid".to_string(), Value::from(packet.src_eid));
         pathway_extra.insert("dstEid".to_string(), Value::from(packet.dst_eid));

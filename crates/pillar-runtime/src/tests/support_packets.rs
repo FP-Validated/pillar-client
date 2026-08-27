@@ -20,6 +20,64 @@ pub(super) fn packet_sent_endpoint_v2_data() -> Value {
     })
 }
 
+/// A `ReadV1002` PacketSent whose raw `dstEid` is `ChannelId.READ_CHANNEL_1`
+/// (`0xffffffff` = 4_294_967_295, `@layerzerolabs/lz-definitions@3.1.2`
+/// `dist/index.d.ts:2982-2994`). Upstream flips the two endpoint ids for a read packet
+/// before forming the pathway (TS:
+/// `packages/sdks/lz-v2-sdk/src/endpoint/evm/decoders/index.ts:292-295`), so after the
+/// flip `src_eid` is the channel and `dst_eid` is the chain - which is what makes the
+/// read arms of `formatPathwayId` and `computeLZMessageV2Proof` fire.
+pub(super) fn packet_sent_read_v1002_data() -> Value {
+    json!({
+        "logs": [{
+            "address": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "topics": [pillar_layerzero::ENDPOINT_V2_PACKET_SENT_TOPIC],
+            "data": concat!(
+                "0x",
+                "0000000000000000000000000000000000000000000000000000000000000060",
+                "0000000000000000000000000000000000000000000000000000000000000100",
+                "0000000000000000000000003333333333333333333333333333333333333333",
+                "0000000000000000000000000000000000000000000000000000000000000075",
+                "010000000000000007000075950000000000000000000000001111111111111111111111111111111111111111ffffffff0000000000000000000000002222222222222222222222222222222222222222bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbdeadbeef",
+                "0000000000000000000000",
+                "0000000000000000000000000000000000000000000000000000000000000002",
+                "1234000000000000000000000000000000000000000000000000000000000000",
+            )
+        }]
+    })
+}
+
+/// The request a DVN receives for the packet above: the endpoint ids are the POST-flip
+/// pair, and both chain names are the chain, because `formatPathwayId` maps
+/// `srcChainName` from `dstEid` when `srcEid` is a read channel (TS:
+/// `packages/sdks/lz-v2-sdk/src/utils/common/index.ts:24-26`).
+pub(super) fn evm_read_packet_sent_request() -> LzMessageId {
+    LzMessageId {
+        pathway_id: PathwayId {
+            src_chain_name: "ethereum".to_string(),
+            dst_chain_name: "ethereum".to_string(),
+            extra: IndexMap::from([
+                ("srcEid".to_string(), Value::from(4_294_967_295_u64)),
+                ("dstEid".to_string(), Value::from(30_101)),
+                (
+                    "sender".to_string(),
+                    Value::from(
+                        "0x0000000000000000000000001111111111111111111111111111111111111111",
+                    ),
+                ),
+                (
+                    "receiver".to_string(),
+                    Value::from(
+                        "0x0000000000000000000000002222222222222222222222222222222222222222",
+                    ),
+                ),
+            ]),
+        },
+        nonce: 7,
+        uln_send_version: Value::from("ReadV1002"),
+    }
+}
+
 pub(super) fn packet_sent_uln301_data() -> Value {
     json!({
         "logs": [{

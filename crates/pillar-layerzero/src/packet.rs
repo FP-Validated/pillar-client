@@ -160,10 +160,61 @@ pub fn decode_lz_packet_v1(value: &str) -> Result<LzPacketV1, AppCoreError> {
     })
 }
 
+/// The LayerZero read-channel endpoint ids, `ChannelId.READ_CHANNEL_1` through
+/// `READ_CHANNEL_10` in `@layerzerolabs/lz-definitions@3.1.2`
+/// (`dist/index.d.ts:2982-2994`): 4_294_967_295 down to 4_294_967_286. The ten
+/// values are contiguous, so an inclusive range is exactly the enum's value set -
+/// upstream tests membership with `Object.values(ChannelId).includes(Number(eid))`
+/// (TS: `packages/common-model/src/utils/index.ts:38-40`).
+const READ_CHANNEL_EID_RANGE: std::ops::RangeInclusive<u32> = 4_294_967_286..=4_294_967_295;
+
+/// Whether a source endpoint id addresses a read channel rather than a chain.
+pub fn is_lz_read_endpoint_id(endpoint_id: u32) -> bool {
+    READ_CHANNEL_EID_RANGE.contains(&endpoint_id)
+}
+
+/// Splits an encoded PacketV1 into the signed header and payload hash.
+///
+/// The payload hash depends on the source endpoint. A read channel hashes the
+/// message alone; every other source hashes `guid || message`. Upstream:
+///
+/// ```text
+/// const payloadHash = isLzReadEndpointId(lzMessage.lzMessageId.pathwayId.srcEid)
+///     ? ethers.utils.keccak256(codec.message())
+///     : codec.payloadHash()
+/// ```
+///
+/// TS: `packages/sdks/lz-v2-sdk/src/utils/common/index.ts:68-72`. In the encoding
+/// `encode_lz_packet_v1` produces, `codec.header()` is `[..81]`,
+/// `codec.payloadHash()` is `keccak(guid || message)` = `keccak([81..])`, and
+/// `codec.message()` is `[113..]` - guid occupies `[81..113]`.
+///
+/// On the read path that message is the read command, so `keccak(message)` is the
+/// command hash - which upstream states outright where it consumes the value:
+/// `// Proof.payloadHash is the cmdHash in ReadV1002`
+/// (TS: `packages/sdks/lz-v2-sdk/src/uln/evm/index.ts:323`).
+///
+/// This matters because `payload_hash` is signed: it is the second `bytes32`
+/// argument of both `ReceiveUln302.verify` and `ReadLib1002.verify`
+/// (`read_v1002.rs:build_evm_uln_read_v1_verify_call_data`).
+///
+/// How a read packet gets here: `EvmPacketSentResolver` flips the two endpoint ids for
+/// `ReadV1002`, exactly as upstream's decoder does (TS:
+/// `packages/sdks/lz-v2-sdk/src/endpoint/evm/decoders/index.ts:292-295`), so the
+/// post-flip `src_eid` is the read channel. Both chain names are then mapped from
+/// `dst_eid` (`formatPathwayId`, TS: `utils/common/index.ts:24-26`), because a channel
+/// is not a chain and `chain_name_by_eid` only ever holds chains. That mapping is what
+/// makes this branch reachable - looking `src_eid` up directly failed every read packet
+/// with `No chain name for endpoint id 4294967295`. Covered end to end by
+/// `runtime_evm_resolver_maps_a_read_channel_pathway_like_typescript`.
 pub fn compute_lz_packet_v1_proof(packet: &LzPacketV1) -> Result<EvmUlnProof, AppCoreError> {
     let encoded = encode_lz_packet_v1(packet)?;
     let packet_header = format!("0x{}", hex::encode(&encoded[..81]));
-    let payload_hash = keccak256_hex(&encoded[81..]);
+    let payload_hash = if is_lz_read_endpoint_id(packet.src_eid) {
+        keccak256_hex(&encoded[113..])
+    } else {
+        keccak256_hex(&encoded[81..])
+    };
     Ok(EvmUlnProof {
         packet_header,
         payload_hash,
