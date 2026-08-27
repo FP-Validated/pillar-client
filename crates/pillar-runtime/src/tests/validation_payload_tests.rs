@@ -1063,3 +1063,47 @@ async fn runtime_rpc_validation_checks_resolves_stellar_transaction_from_address
     assert_eq!(calls[0].2["method"], "getTransaction");
     assert_eq!(calls[0].2["params"], json!({"hash": "0xtx"}));
 }
+
+/// Companion to the timestamp exhaustiveness test, for the `_ => generic EVM` arm at
+/// `validation_extra_context.rs:144`. That arm calls `observe_transaction_from`, which
+/// issues `eth_getTransactionByHash`. A non-EVM chain reaching it would have its source
+/// address read with Ethereum semantics, and because every arm there ends in `.ok()`,
+/// the failure would arrive as a missing quorum observation rather than an error naming
+/// the real cause.
+#[tokio::test]
+async fn no_non_evm_chain_falls_through_to_the_evm_transaction_from_default() {
+    for chain_name in &super::validation_timestamp_tests::non_evm_chain_roster() {
+        let getter = StaticProviderConfig::new(
+            indexmap::IndexMap::from([(
+                chain_name.clone(),
+                ProviderConfig {
+                    uris: vec![ProviderUri::Uri(format!("https://{chain_name}.example/"))],
+                    quorum: Some(1),
+                },
+            )]),
+            Some(std::slice::from_ref(chain_name)),
+        )
+        .unwrap();
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let transport = RecordingTransport {
+            calls: calls.clone(),
+            responses: Arc::new(Mutex::new(vec![Ok(json!({})); 32])),
+        };
+        let checks = RuntimeRpcValidationChecks::from_getter(
+            &ProviderSnapshotHandle::from_getter(&getter),
+            transport,
+        );
+
+        let _ = checks
+            .source_transaction_from_address(chain_name, "0xtx")
+            .await;
+
+        for (_, _, body) in calls.lock().unwrap().iter() {
+            assert_ne!(
+                body["method"], "eth_getTransactionByHash",
+                "{chain_name} is a non-EVM chain but reached the EVM transaction-from \
+                 default, so its source address would be read with Ethereum semantics"
+            );
+        }
+    }
+}

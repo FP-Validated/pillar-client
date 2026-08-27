@@ -683,3 +683,56 @@ async fn runtime_rpc_validation_checks_stellar_ledger_readiness() {
         .iter()
         .any(|(_, _, body)| body["method"] == "getLatestLedger"));
 }
+
+/// Companion to the timestamp exhaustiveness test, for the generic EVM block-confirmation
+/// fallback that begins at `validation_readiness.rs:338`. It calls
+/// `observe_block_confirmations`, which issues `eth_getTransactionReceipt`. Readiness is
+/// the check that decides whether a packet has been confirmed enough to sign, so a
+/// non-EVM chain answered with Ethereum receipt semantics is the worst of the three.
+#[tokio::test]
+async fn no_non_evm_chain_falls_through_to_the_evm_block_confirmation_default() {
+    for chain_name in &super::validation_timestamp_tests::non_evm_chain_roster() {
+        let getter = StaticProviderConfig::new(
+            indexmap::IndexMap::from([(
+                chain_name.clone(),
+                ProviderConfig {
+                    uris: vec![ProviderUri::Uri(format!("https://{chain_name}.example/"))],
+                    quorum: Some(1),
+                },
+            )]),
+            Some(std::slice::from_ref(chain_name)),
+        )
+        .unwrap();
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let transport = RecordingTransport {
+            calls: calls.clone(),
+            responses: Arc::new(Mutex::new(vec![Ok(json!({})); 32])),
+        };
+        let checks = RuntimeRpcValidationChecks::from_getter(
+            &ProviderSnapshotHandle::from_getter(&getter),
+            transport,
+        );
+        let mut sent_event = readiness_sent_event();
+        sent_event.lz_message_id.pathway_id.src_chain_name = chain_name.clone();
+
+        let _ = checks
+            .validate_readiness_with_quorum(
+                &sent_event,
+                &SigningContext::Message {
+                    expiration: 1,
+                    skip_v_id: None,
+                    dvn_address: None,
+                    block_confirmation: 8,
+                },
+            )
+            .await;
+
+        for (_, _, body) in calls.lock().unwrap().iter() {
+            assert_ne!(
+                body["method"], "eth_getTransactionReceipt",
+                "{chain_name} is a non-EVM chain but reached the EVM block-confirmation \
+                 default, so its readiness would be decided with Ethereum receipt semantics"
+            );
+        }
+    }
+}
