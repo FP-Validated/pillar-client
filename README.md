@@ -277,26 +277,39 @@ cargo test --workspace
 cargo audit && cargo deny check     # dependency and license policy
 ```
 
-`crates/pillar-config/src/generated_layerzero_evm.rs` and
-`generated_ton_layerzero.rs` are generated tables — never edit them by hand.
-Regenerate them with the scripts in `scripts/`; they read the upstream
-LayerZero deployment configuration from the path given by `PILLAR_AUDIT_ROOT`:
+`crates/pillar-config/src/generated_layerzero_evm.rs`,
+`generated_layerzero_environment.rs` and `generated_ton_layerzero.rs` are generated
+tables — never edit them by hand. There is one generator per file, and every one of
+the three reads the upstream LayerZero deployment configuration from the path given
+by `PILLAR_AUDIT_ROOT`:
 
 ```bash
-# LayerZero endpoint ids and EVM deployments
-PILLAR_AUDIT_ROOT=/path/to/upstream/source \
+export PILLAR_AUDIT_ROOT=/path/to/upstream/source
+
+# per-environment chain capability (1221 entries)
+node scripts/generate-layerzero-environment-capability.mjs
+
+# LayerZero endpoint ids and EVM deployments (853 endpoints, 3911 deployments)
 LZ_DEFINITIONS_ROOT=/path/to/@layerzerolabs/lz-definitions \
   node scripts/generate-layerzero-static-config.mjs
 
-# TON code cells and deployments
+# TON code cells and deployments (23 cells, 29 deployments)
 LZ_TON_SDK_ROOT=/path/to/@layerzerolabs/lz-ton-sdk-v2 \
   node scripts/generate-ton-static-config.mjs
 ```
 
 `LZ_DEFINITIONS_ROOT` and `LZ_TON_SDK_ROOT` accept any extracted copy of the
 published npm packages, for example `npm pack @layerzerolabs/lz-definitions@3.1.2`
-followed by `tar xzf` — the generated files record the package version and input
-hashes so a regeneration can be checked byte for byte.
+followed by `tar xzf`. No other install is needed. The TON generator needs a
+*complete* package, artifacts directory included, so use the packed tarball rather
+than a partial local copy.
+
+The generated files record the package version and input hashes, so a regeneration
+is checked by `git diff --stat crates/pillar-config/src/generated_*.rs` being empty.
+That byte-for-byte comparison is the only check that catches an address value
+changed in place: `scripts/check-generated-config-integrity.mjs`, which runs in CI,
+needs no upstream source and therefore only reconciles each file against the row
+counts in its own provenance header.
 
 Benchmarks are opt-in: `cargo bench -p pillar-bench`.
 
