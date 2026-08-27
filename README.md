@@ -182,7 +182,7 @@ Optional:
 | `EXTRA_CONTEXT_REQUEST_URL` / `EXTRA_CONTEXT_REQUEST_AUTH_TOKEN` | External extra-context check over HTTPS. |
 | `EXTRA_CONTEXT_AWS_LAMBDA_NAME` | External extra-context check over Lambda (mutually exclusive with the URL form). |
 | `PILLAR_IMAGE_VERSION` | Version string reported by `GET /version` and `pillar_build_info`. |
-| `PILLAR_MAX_CONNECTIONS` | Concurrent connection cap (default 1024). |
+| `PILLAR_MAX_CONNECTIONS` | Concurrent connection cap (default 1024). The server speaks HTTP/1.1 only, so a connection carries one request at a time and this is also the in-flight request bound. |
 | `PILLAR_SHUTDOWN_GRACE_SECONDS` | Drain budget after a shutdown signal (default 25). |
 
 Production guidance: use `SIGNER_TYPE=KMS`. Mnemonic backends exist for local

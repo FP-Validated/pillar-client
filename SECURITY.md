@@ -66,7 +66,12 @@ The following are deployment-side controls the software cannot enforce for you:
   `pillar_signer_errors_total` and `pillar_provider_request_errors_total`.
 - Rate-limit the signing routes upstream of the process. There is no rate
   limiting in this workspace; the only throughput controls are
-  `PILLAR_MAX_CONNECTIONS` (default 1024) and the 58s request timeout. One
+  `PILLAR_MAX_CONNECTIONS` (default 1024) and the 58s request timeout. That cap
+  bounds in-flight requests, not just sockets, because the server speaks
+  HTTP/1.1 only and a connection carries one request at a time. The protocol
+  surface is pinned by a test: hyper's `http2` feature is enabled process-wide
+  by the AWS and GCP client stacks, and an HTTP/2 connection would multiplex up
+  to 200 concurrent streams behind a single connection permit. One
   sign request fans out to every configured provider URI for the source chain
   before any expensive validation, and a request that proceeds adds several
   more quorum'd reads, so an unthrottled caller amplifies load onto your own

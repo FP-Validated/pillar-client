@@ -6,6 +6,23 @@ the Prometheus metric names.
 
 ## Unreleased
 
+### Fixed
+- The server no longer speaks HTTP/2. It was serving h2 prior-knowledge
+  connections, which nothing here asked for: `hyper`'s `http2` feature is
+  enabled process-wide by `aws-smithy-http-client` and `tonic` for the KMS and
+  storage clients, and the `hyper-util` `auto` builder then negotiated it. The
+  accept loop holds one semaphore permit per connection, so a single h2
+  connection multiplexed up to 200 concurrent streams - the SETTINGS frame
+  advertised `MAX_CONCURRENT_STREAMS=200` - behind one permit, and
+  `PILLAR_MAX_CONNECTIONS` bounded sockets rather than work. Connections are now
+  served by `hyper::server::conn::http1`, and a test writes the h2 preface and
+  fails if it is answered. The `server-auto` feature is also dropped, but that
+  alone would not prevent a regression: `hyper_util::server::conn::auto` is
+  gated on `any(http1, http2)`, both of which the reqwest client stack enables,
+  so the module stays compiled regardless of what this workspace declares.
+  `auto::Builder::http1_only()` could not express this: hyper-util documents it
+  as a no-op under `serve_connection_with_upgrades`.
+
 ### Changed
 - The payload-already-signed check now asks the destination endpoint which
   receive library the receiver OApp actually uses, instead of deriving it from

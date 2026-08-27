@@ -465,6 +465,16 @@ impl PillarApp {
             }
         }
 
+        // The send version alone picks the builder, exactly as upstream does
+        // (TS: `apps/gasolina/src/app/app.ts:466-468`,
+        // `hashCallDataBuilders[lzMessageId.ulnSendVersion]`). The destination's
+        // receive ULN version is deliberately not consulted here: upstream reads
+        // it only inside the already-selected V3 builder, to pick the target
+        // contract (`sdks/gasolinaSdk/evm/index.ts:194-211`), and that is
+        // mirrored by `evm_receive_version_from_dst_eid`. A packet sent on V2
+        // therefore keeps a V2 builder even if the destination has since
+        // migrated - matching upstream is the contract, and diverging would sign
+        // call data the upstream service would not produce.
         let builder_key = request
             .lz_message_id
             .uln_send_version

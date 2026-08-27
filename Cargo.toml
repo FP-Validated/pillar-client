@@ -78,7 +78,15 @@ hmac = "0.12"
 http = "1"
 hex = "0.4"
 hyper = { version = "1", features = ["http1", "server"] }
-hyper-util = { version = "0.1", features = ["http1", "server", "server-auto", "tokio"] }
+# Only the tokio IO adapter is used. `server-auto` is deliberately absent
+# because its builder negotiates h2, which would let one connection multiplex
+# many requests behind the single semaphore permit `PILLAR_MAX_CONNECTIONS`
+# accounts for. Dropping the feature only removes our declared dependence on
+# it: `hyper_util::server::conn::auto` is gated on `any(http1, http2)`, and the
+# reqwest client stack enables both, so the module stays compiled and
+# importable. The test that writes the h2 preface is what actually holds the
+# line.
+hyper-util = { version = "0.1", features = ["tokio"] }
 sha3 = "0.10"
 sha2 = "0.10"
 spki = "0.7.3"
