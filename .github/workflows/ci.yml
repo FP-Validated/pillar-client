@@ -17,6 +17,19 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
+  # The generated LayerZero config carries signing-critical address tables, and the
+  # repository's guidance is to regenerate rather than hand-edit them. This reconciles each
+  # file against its own provenance header so a hand-edited row count or a stripped header
+  # fails the build. It needs no upstream checkout, unlike scripts/check-*-parity*.mjs and
+  # scripts/check-parity-coverage.mjs, which both require PILLAR_AUDIT_ROOT - the private
+  # TypeScript service - and therefore cannot run here.
+  generated-config:
+    name: generated config integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: node scripts/check-generated-config-integrity.mjs
+
   build:
     name: fmt, clippy, test
     runs-on: ubuntu-latest
