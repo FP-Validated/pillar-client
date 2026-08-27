@@ -1400,3 +1400,63 @@ async fn runtime_evm_resolver_maps_a_read_channel_pathway_like_typescript() {
     );
     assert_eq!(proof.payload_hash, expected);
 }
+
+/// The fifth and last dispatch site: `EvmPacketSentResolver::get_lz_sent_event`. Its
+/// terminal guard (`packet_resolver.rs:795-803`) rejects a chain that is not a trusted
+/// EVM packet emitter, which is why a missing arm normally fails closed rather than
+/// computing the wrong answer. That guard is exactly what makes the failure invisible
+/// in the one configuration where it matters: a chain that IS configured as a trusted
+/// EVM emitter passes the guard and gets decoded from Ethereum receipt logs.
+///
+/// So each chain is deliberately configured as a trusted EVM emitter here - the worst
+/// case, not the convenient one - and the observable is the EVM receipt call the
+/// fallback issues.
+#[tokio::test]
+async fn no_non_evm_chain_falls_through_to_the_evm_receipt_decode() {
+    for chain_name in &super::validation_timestamp_tests::non_evm_chain_roster() {
+        let getter = StaticProviderConfig::new(
+            indexmap::IndexMap::from([(
+                chain_name.clone(),
+                ProviderConfig {
+                    uris: vec![ProviderUri::Uri(format!("https://{chain_name}.example/"))],
+                    quorum: Some(1),
+                },
+            )]),
+            Some(std::slice::from_ref(chain_name)),
+        )
+        .unwrap();
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let mut config = evm_packet_sent_resolver_config("V302");
+        config.trusted_packet_emitters_by_chain_name.insert(
+            chain_name.clone(),
+            HashSet::from(["0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".to_string()]),
+        );
+        let resolver = EvmPacketSentResolver::new(
+            &ProviderSnapshotHandle::from_getter(&getter),
+            RecordingTransport {
+                calls: calls.clone(),
+                responses: Arc::new(Mutex::new(vec![Ok(json!({})); 32])),
+            },
+            config,
+        );
+        let lz_message_id = LzMessageId {
+            pathway_id: PathwayId {
+                src_chain_name: chain_name.clone(),
+                dst_chain_name: "ethereum".to_string(),
+                extra: IndexMap::new(),
+            },
+            nonce: 7,
+            uln_send_version: Value::from("V302"),
+        };
+
+        let _ = resolver.get_lz_sent_event("0xtx", &lz_message_id).await;
+
+        for (_, _, body) in calls.lock().unwrap().iter() {
+            assert_ne!(
+                body["method"], "eth_getTransactionReceipt",
+                "{chain_name} is a non-EVM chain but reached the EVM receipt decode, so \
+                 its PacketSent event would be read from Ethereum receipt logs"
+            );
+        }
+    }
+}

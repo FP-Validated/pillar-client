@@ -5,13 +5,21 @@ use super::*;
 /// Derived, never written down, so a tenth non-EVM chain enters every caller of this
 /// helper the moment it enters that table.
 pub(super) fn non_evm_chain_roster() -> Vec<String> {
-    let available = pillar_config::layerzero_available_chain_names("mainnet").unwrap();
-    let by_type = pillar_config::static_chain_type_by_chain_name(&available).unwrap();
-    let mut non_evm: Vec<String> = by_type
-        .iter()
-        .filter(|(_, chain_type)| !matches!(chain_type.as_str(), "EVM" | "TRON"))
-        .map(|(chain_name, _)| chain_name.clone())
-        .collect();
+    // Every environment, not just mainnet. LayerZero ships a chain on testnet first,
+    // so a mainnet-only roster would leave exactly the newest chain - the one most
+    // likely to be missing an arm - out of these tests.
+    let mut non_evm: Vec<String> = Vec::new();
+    for environment in ["mainnet", "testnet", "sandbox"] {
+        let available = pillar_config::layerzero_available_chain_names(environment).unwrap();
+        let by_type = pillar_config::static_chain_type_by_chain_name(&available).unwrap();
+        for (chain_name, chain_type) in &by_type {
+            if !matches!(chain_type.as_str(), "EVM" | "TRON")
+                && !non_evm.iter().any(|known| known == chain_name)
+            {
+                non_evm.push(chain_name.clone());
+            }
+        }
+    }
     non_evm.sort();
     assert!(
         non_evm.len() >= 9,

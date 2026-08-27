@@ -1107,3 +1107,62 @@ async fn no_non_evm_chain_falls_through_to_the_evm_transaction_from_default() {
         }
     }
 }
+
+/// The fourth dispatch site: `validation_payload.rs`. Its EVM fallback begins with a
+/// receive-contract lookup (`validation_payload.rs:78-86`) that names EVM in its error,
+/// and the harness configures none - so reaching the EVM path is observable as that
+/// exact error, without needing the path to issue an RPC at all.
+///
+/// This is the check that decides whether a payload has already been signed, so a
+/// non-EVM chain answered through the EVM receive contracts would be asking the wrong
+/// contract whether this DVN already verified the packet.
+#[tokio::test]
+async fn no_non_evm_chain_falls_through_to_the_evm_payload_check() {
+    let event = payload_signed_sent_event();
+    assert!(
+        event.extra.contains_key("guid"),
+        "the fixture must carry a guid, or validation_payload.rs:12-14 returns Ok before \
+         any chain dispatch and this test proves nothing"
+    );
+
+    for chain_name in &super::validation_timestamp_tests::non_evm_chain_roster() {
+        let getter = StaticProviderConfig::new(
+            indexmap::IndexMap::from([(
+                chain_name.clone(),
+                ProviderConfig {
+                    uris: vec![ProviderUri::Uri(format!("https://{chain_name}.example/"))],
+                    quorum: Some(1),
+                },
+            )]),
+            Some(std::slice::from_ref(chain_name)),
+        )
+        .unwrap();
+        let checks = RuntimeRpcValidationChecks::from_getter(
+            &ProviderSnapshotHandle::from_getter(&getter),
+            RecordingTransport {
+                calls: Arc::new(Mutex::new(Vec::new())),
+                responses: Arc::new(Mutex::new(vec![Ok(json!({})); 32])),
+            },
+        );
+        let mut event = payload_signed_sent_event();
+        event.lz_message_id.pathway_id.dst_chain_name = chain_name.clone();
+
+        let outcome = checks
+            .validate_payload_not_signed(
+                &event,
+                "0x3333333333333333333333333333333333333333",
+                chain_name,
+            )
+            .await;
+
+        if let Err(error) = outcome {
+            assert!(
+                !error
+                    .to_string()
+                    .contains("No EVM LayerZero receive contracts"),
+                "{chain_name} is a non-EVM chain but reached the EVM payload check, so \
+                 whether this DVN already signed would be read from EVM receive contracts"
+            );
+        }
+    }
+}
