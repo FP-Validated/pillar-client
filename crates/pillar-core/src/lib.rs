@@ -475,7 +475,11 @@ impl PillarApp {
         // The send version alone picks the builder, exactly as upstream does
         // (TS: `apps/gasolina/src/app/app.ts:466-467`,
         // `hashCallDataBuilders[lzMessageId.ulnSendVersion]`; there is no
-        // `builderVersion` override anywhere in that file). The destination's
+        // `builderVersion` override anywhere in that file). Every TS citation
+        // here was read from the upstream tree `SECURITY.md` identifies by
+        // content hash; a review reporting otherwise from a different archive is
+        // answered there, including why that is "does not reproduce" rather than
+        // "is false". The destination's
         // receive ULN version is deliberately not consulted here, and upstream
         // reads it in exactly two places, neither of which is builder
         // selection:

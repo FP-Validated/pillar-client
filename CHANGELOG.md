@@ -32,11 +32,17 @@ the Prometheus metric names.
 
 ### Changed
 - `SECURITY.md` and the builder-selection comment in `pillar-core` now cite the
-  upstream call chain rather than asserting parity. Two independent reviews
+  upstream call chain rather than asserting parity, and identify the exact tree
+  they were read from by the `chainNames/*.ts` content hashes already recorded in
+  the generated environment table's provenance header. Two independent reviews
   reported that upstream runs an entity/category provider trust model and a
-  V2-to-V3 receive-library builder override; neither exists on the upstream
-  runtime path in the pinned source, and the dormant scaffolding that prompted
-  both readings is now named explicitly, with the reason it is dormant.
+  V2-to-V3 receive-library builder override. Neither is on the runtime path in
+  that tree, and the dormant scaffolding that prompted both readings is now named
+  explicitly along with the reason it is dormant. One review's source was a
+  differently-rooted archive that has not been obtained, so its claims are
+  recorded as not reproducing against the identified tree rather than as
+  refuted — a distinction worth keeping, since only one of those two statements
+  is something this workspace can establish.
 
 - The server no longer speaks HTTP/2. It was serving h2 prior-knowledge
   connections, which nothing here asked for: `hyper`'s `http2` feature is

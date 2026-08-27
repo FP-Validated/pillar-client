@@ -59,13 +59,30 @@ The following are deployment-side controls the software cannot enforce for you:
   a split result fails closed rather than taking a majority — but agreement
   only proves the answers match, not that they were reached independently.
   Provider independence is yours to arrange and audit. This matches the
-  upstream service, whose provider entry is likewise `{ uris, quorum }`
-  (`packages/common-model/src/provider.ts:6-9`) and whose quorum likewise
-  counts matching responses (`packages/common-utils/src/multiFallbackQuorum.ts:35-48`).
+  upstream service as pinned below, whose provider entry is likewise
+  `{ uris, quorum }` (`packages/common-model/src/provider.ts:6-9`) and whose
+  quorum likewise counts matching responses
+  (`packages/common-utils/src/multiFallbackQuorum.ts:35-48`).
 
-  Two separate reviews have read the upstream tree and reported that an
+  Two separate reviews have read an upstream tree and reported that an
   entity/category/endpoint-type trust model is already live there, so the
-  evidence is spelled out. Upstream does contain that scaffolding —
+  evidence is spelled out — and scoped, because a claim about "upstream" is
+  only as good as the tree it was read from. Everything below was checked
+  against one specific upstream tree: the one whose
+  `packages/static-config/src/chainNames/{mainnet,testnet,sandbox}.ts` hash to
+  the three `sha256` values in the provenance header of
+  `crates/pillar-config/src/generated_layerzero_environment.rs`. That is the
+  tree this workspace's generators consume, and those hashes are the identity —
+  quoting them is how you confirm you are reading the same bytes this paragraph
+  was written from.
+
+  One of the two reviews named its source as a differently-rooted archive that
+  is not that tree and that has not been obtained here. So the accurate
+  statement is that its claims **do not reproduce against the tree identified
+  above** — not that they are false of whatever it read. Those are different
+  claims and only the first one is established. If that archive is produced,
+  re-run this comparison before trusting either account. The identified tree
+  contains the scaffolding —
   `ProviderCategory` and `QuorumStrategy` declarations at
   `packages/common-model/src/provider.ts:120-152`, the v2 entry shape
   `{ uri, category, entity, headers? }` at
