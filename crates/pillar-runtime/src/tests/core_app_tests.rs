@@ -199,7 +199,7 @@ async fn core_api_app_from_runtime_parts_assembles_working_server_app() {
     assert_eq!(response.debug_info.unwrap().dvn_hash_call_data, "0xfeed");
 }
 
-/// The stage histogram is documented at `README.md:237-239` and shipped in the
+/// The stage histogram is documented in `README.md` and shipped in the
 /// snapshot fixture, so an operator builds dashboards on it. That only holds if
 /// the *production* assembler injects a real observer: a unit test that calls
 /// the observer directly proves the observer works and says nothing about

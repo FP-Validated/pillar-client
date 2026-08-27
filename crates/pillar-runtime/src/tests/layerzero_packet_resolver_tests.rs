@@ -1138,9 +1138,10 @@ async fn an_accepted_refresh_moves_where_the_signing_path_dispatches() {
     );
 }
 
-/// `pillar_provider_request_errors_total{kind="quorum"}` is documented as
-/// "quorum was not met for that chain" (`README.md:264-265`). That is only true
-/// if every quorum path records it. The Move and TON resolvers each build their
+/// `README.md` documents `pillar_provider_request_errors_total{kind="quorum"}`
+/// as "provider quorum was not reached for that chain, and every quorum path
+/// reports it, EVM and non-EVM alike". That second clause is only true if every
+/// quorum path records it. The Move and TON resolvers each build their
 /// own `ExactQuorumAccumulator` and used to call `finish` directly, so a chain
 /// family could fail quorum on every provider and the counter stayed at zero -
 /// an operator alerting on this metric would see nothing at all.

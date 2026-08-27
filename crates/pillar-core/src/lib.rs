@@ -81,11 +81,12 @@ pub struct PillarApiRequestV1 {
     pub message_hash: String,
 }
 
-/// The protocol's closed set of send versions. Upstream validates the field
-/// against a native enum at the HTTP boundary
-/// (TS: `apps/gasolina/src/bootstrap.ts:130-157`), so anything outside this set
-/// is a malformed request rather than an unsupported deployment. Shared with
-/// `pillar-api` so the boundary and the core cannot drift apart.
+/// The send versions this service accepts. Anything outside the set is treated
+/// as a malformed request rather than an unsupported deployment, which is also
+/// what upstream does: it parses the field against a native enum at the HTTP
+/// boundary (TS: `apps/gasolina/src/bootstrap.ts:130-157`, read from the tree
+/// `SECURITY.md` identifies by content hash). Shared with `pillar-api` so the
+/// boundary and the core cannot drift apart.
 pub const KNOWN_ULN_SEND_VERSIONS: [&str; 4] = ["V2", "V301", "V302", "ReadV1002"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

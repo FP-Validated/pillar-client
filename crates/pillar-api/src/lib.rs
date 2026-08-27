@@ -1716,9 +1716,10 @@ mod tests {
         assert!(app.v2_requests.lock().await.is_empty());
     }
 
-    /// The four protocol versions are a closed set upstream, so an unrecognised
-    /// string is a client error too. Whether a recognised version is *enabled*
-    /// stays a core decision, because that depends on operator configuration.
+    /// This service treats the four protocol versions as a closed set, so an
+    /// unrecognised string is a client error too. Whether a recognised version
+    /// is *enabled* stays a core decision, because that depends on operator
+    /// configuration rather than on the protocol.
     #[tokio::test]
     async fn rejects_unknown_uln_send_version_at_http_boundary() {
         let app = TestApp::new();

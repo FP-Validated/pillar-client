@@ -66,23 +66,10 @@ The following are deployment-side controls the software cannot enforce for you:
 
   Two separate reviews have read an upstream tree and reported that an
   entity/category/endpoint-type trust model is already live there, so the
-  evidence is spelled out — and scoped, because a claim about "upstream" is
-  only as good as the tree it was read from. Everything below was checked
-  against one specific upstream tree: the one whose
-  `packages/static-config/src/chainNames/{mainnet,testnet,sandbox}.ts` hash to
-  the three `sha256` values in the provenance header of
-  `crates/pillar-config/src/generated_layerzero_environment.rs`. That is the
-  tree this workspace's generators consume, and those hashes are the identity —
-  quoting them is how you confirm you are reading the same bytes this paragraph
-  was written from.
-
-  One of the two reviews named its source as a differently-rooted archive that
-  is not that tree and that has not been obtained here. So the accurate
-  statement is that its claims **do not reproduce against the tree identified
-  above** — not that they are false of whatever it read. Those are different
-  claims and only the first one is established. If that archive is produced,
-  re-run this comparison before trusting either account. The identified tree
-  contains the scaffolding —
+  evidence is spelled out. Everything here was checked against the single
+  upstream tree identified under "Which upstream tree the `TS:` citations refer
+  to" below, which also records why one of those reviews is answered with "does
+  not reproduce" rather than "is false". That tree contains the scaffolding —
   `ProviderCategory` and `QuorumStrategy` declarations at
   `packages/common-model/src/provider.ts:120-152`, the v2 entry shape
   `{ uri, category, entity, headers? }` at
@@ -128,6 +115,37 @@ The following are deployment-side controls the software cannot enforce for you:
 
 These are known, unresolved weaknesses. They are documented here rather than in
 an issue tracker because each one can change whether a signature is correct.
+
+### Which upstream tree the `TS:` citations refer to
+
+This workspace ports an upstream TypeScript service, and its source carries 39
+citations of the form `TS: <path>:<lines>`. They all refer to one tree: the one
+whose `packages/static-config/src/chainNames/{mainnet,testnet,sandbox}.ts` hash
+to the three `sha256` values in the provenance header of
+`crates/pillar-config/src/generated_layerzero_environment.rs`. The upstream
+source is not a published package, so content hashes are the identity — quoting
+those three values is how you confirm you are reading the bytes these citations
+were written against.
+
+This matters because a claim about "upstream" is only as good as the tree it was
+read from, and that has already gone wrong twice. Two independent reviews
+reported that upstream runs an entity/category/endpoint-type provider trust
+model, and that it switches the hash-call-data builder from V2 to V3 when a
+packet was sent on ULN V2 but the destination receive library has migrated.
+Neither is on the runtime path in the tree identified above. One of those reviews
+named its source as a differently-rooted archive that is not that tree and that
+has not been obtained here, so the accurate statement is that its claims **do not
+reproduce against the identified tree** — not that they are false of whatever it
+read. Those are different claims and only the first is established. If that
+archive is produced, re-run the comparison before trusting either account.
+
+If you point this service at an upstream deployment built from a newer tree,
+this section and the provider-independence bullet above are what to re-check
+first. The behaviour under discussion is load-bearing for signature
+correctness: `hashCallDataBuilders[lzMessageId.ulnSendVersion]` selecting a V2
+builder for a migrated pathway would sign call data the destination rejects,
+and a quorum that counts URIs rather than operators can be satisfied by one
+operator twice.
 
 ### Stellar deployment addresses disagree with LayerZero's live metadata
 
