@@ -62,6 +62,26 @@ The following are deployment-side controls the software cannot enforce for you:
   upstream service, whose provider entry is likewise `{ uris, quorum }`
   (`packages/common-model/src/provider.ts:6-9`) and whose quorum likewise
   counts matching responses (`packages/common-utils/src/multiFallbackQuorum.ts:35-48`).
+
+  Two separate reviews have read the upstream tree and reported that an
+  entity/category/endpoint-type trust model is already live there, so the
+  evidence is spelled out. Upstream does contain that scaffolding —
+  `ProviderCategory` and `QuorumStrategy` declarations at
+  `packages/common-model/src/provider.ts:120-152`, the v2 entry shape
+  `{ uri, category, entity, headers? }` at
+  `packages/common-utils/src/providerValidate.ts:13-25`, and strategy evaluation
+  in `packages/common-utils/src/quorumStrategy.ts` — but **none of it has a
+  caller outside its own file and its tests**. The live path is
+  `apps/gasolina/src/index.ts:361-363` -> `runGasolina:327-335` ->
+  `apps/gasolina/src/bootstrap.ts:206-213` ->
+  `apps/gasolina/src/app/bootstrap.ts:123-124` (`new App(...)`), with providers
+  built at `packages/dynamic-config/src/boostrapConfig/index.ts:103-159`, whose
+  S3 and GCS object key defaults to `providers.json`. No `providers-v2.json` or
+  `quorum-strategy.json` exists anywhere in the tree, and
+  `packages/common-aptos/src/provider.ts:19` carries
+  `// TODO(providers-v2): drop`, which is upstream describing a migration it has
+  not made. If you point this service at an upstream deployment that has since
+  migrated, this paragraph is what to re-check first.
 - Alert on `pillar_provider_config_age_seconds` (stale provider configuration),
   `pillar_signer_errors_total` and `pillar_provider_request_errors_total`.
 - Rate-limit the signing routes upstream of the process. There is no rate

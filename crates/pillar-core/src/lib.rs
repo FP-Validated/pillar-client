@@ -81,6 +81,13 @@ pub struct PillarApiRequestV1 {
     pub message_hash: String,
 }
 
+/// The protocol's closed set of send versions. Upstream validates the field
+/// against a native enum at the HTTP boundary
+/// (TS: `apps/gasolina/src/bootstrap.ts:130-157`), so anything outside this set
+/// is a malformed request rather than an unsupported deployment. Shared with
+/// `pillar-api` so the boundary and the core cannot drift apart.
+pub const KNOWN_ULN_SEND_VERSIONS: [&str; 4] = ["V2", "V301", "V302", "ReadV1002"];
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PathwayId {
@@ -466,25 +473,54 @@ impl PillarApp {
         }
 
         // The send version alone picks the builder, exactly as upstream does
-        // (TS: `apps/gasolina/src/app/app.ts:466-468`,
-        // `hashCallDataBuilders[lzMessageId.ulnSendVersion]`). The destination's
-        // receive ULN version is deliberately not consulted here: upstream reads
-        // it only inside the already-selected V3 builder, to pick the target
-        // contract (`sdks/gasolinaSdk/evm/index.ts:194-211`), and that is
-        // mirrored by `evm_receive_version_from_dst_eid`. A packet sent on V2
-        // therefore keeps a V2 builder even if the destination has since
-        // migrated - matching upstream is the contract, and diverging would sign
-        // call data the upstream service would not produce.
+        // (TS: `apps/gasolina/src/app/app.ts:466-467`,
+        // `hashCallDataBuilders[lzMessageId.ulnSendVersion]`; there is no
+        // `builderVersion` override anywhere in that file). The destination's
+        // receive ULN version is deliberately not consulted here, and upstream
+        // reads it in exactly two places, neither of which is builder
+        // selection:
+        //
+        // 1. `app.ts:620-632` looks up the real receive version from the
+        //    destination endpoint and passes it to `hasPayloadSigned` -
+        //    validation only. Pillar mirrors that in
+        //    `validation_payload_receive_library`.
+        // 2. `sdks/gasolinaSdk/evm/index.ts:137-145` maps a chain id to a ULN
+        //    version to pick the target contract *inside* the already-selected
+        //    V3 builder (`:194-211`), mirrored by
+        //    `evm_receive_version_from_dst_eid`.
+        //
+        // So a packet sent on V2 keeps a V2 builder even if the destination has
+        // since migrated. Two separate reviews have read this comment and
+        // concluded the opposite, so it is spelled out: consulting the receive
+        // version here would sign call data the upstream service would not
+        // produce.
+        //
+        // The version is caller input on both routes - `sign_request_v1` copies
+        // `PillarApiRequestV1.uln_version` straight into `uln_send_version` -
+        // so a malformed or unrecognised value is a client error, never an
+        // internal fault. Only a missing always-installed builder indicates our
+        // own wiring is broken.
         let builder_key = request
             .lz_message_id
             .uln_send_version
             .as_str()
-            .ok_or_else(|| AppCoreError::Internal("Invalid ulnSendVersion".to_string()))?;
+            .ok_or_else(|| {
+                AppCoreError::BadRequest(format!(
+                    "Invalid ulnSendVersion: expected one of {}, got {}",
+                    KNOWN_ULN_SEND_VERSIONS.join(", "),
+                    request.lz_message_id.uln_send_version
+                ))
+            })?;
         let builder = self
             .hash_call_data_builders
             .get(builder_key)
             .ok_or_else(|| {
-                if matches!(builder_key, "V2" | "V301") {
+                if !KNOWN_ULN_SEND_VERSIONS.contains(&builder_key) {
+                    AppCoreError::BadRequest(format!(
+                        "Invalid ulnSendVersion: expected one of {}, got {builder_key}",
+                        KNOWN_ULN_SEND_VERSIONS.join(", ")
+                    ))
+                } else if matches!(builder_key, "V2" | "V301") {
                     AppCoreError::BadRequest(format!("Unsupported ulnSendVersion {builder_key}"))
                 } else {
                     AppCoreError::Internal(format!(
@@ -1115,6 +1151,33 @@ mod tests {
             stage_observer: Arc::new(NoopSignStageObserver),
             debug_mode: true,
         }
+    }
+
+    /// `PillarApiRequestV1.uln_version` is copied straight into
+    /// `uln_send_version` (see `sign_request_v1`), so the v1 route can hand the
+    /// core a non-string too. A caller's malformed version must never be
+    /// reported as an internal fault, whichever route it arrived on.
+    #[tokio::test]
+    async fn rejects_non_string_uln_send_version_as_client_error() {
+        let mut request = request_v2("V302");
+        request.lz_message_id.uln_send_version = Value::from(302);
+
+        let error = app().sign_request_v2(request).await.unwrap_err();
+
+        assert!(
+            matches!(error, AppCoreError::BadRequest(_)),
+            "a malformed caller field must not be an internal fault: {error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_unrecognised_uln_send_version_as_client_error() {
+        let error = app().sign_request_v2(request_v2("V999")).await.unwrap_err();
+
+        assert!(
+            matches!(error, AppCoreError::BadRequest(_)),
+            "an unrecognised version is caller input, not a wiring bug: {error:?}"
+        );
     }
 
     fn app_with_resolver(sent_event_resolver: Arc<dyn SentEventResolver>) -> PillarApp {

@@ -185,7 +185,12 @@ where
                 return Ok(value);
             }
         }
-        accumulator.finish(&format!("Move transaction for {src_tx_hash}"))
+        self.finish_quorum(
+            chain_name,
+            accumulator,
+            &format!("Move transaction for {src_tx_hash}"),
+        )
+        .await
     }
     async fn get_sui_events(
         &self,
@@ -297,11 +302,37 @@ where
             }
         }
 
-        if let Some(metrics) = &self.metrics {
-            let mut metrics = metrics.lock().await;
-            metrics.record_provider_request_error(chain_name, "quorum");
+        self.finish_quorum(chain_name, accumulator, context).await
+    }
+
+    /// Every quorum path ends here so the counter cannot fall out of step with
+    /// the accumulator. `pillar_provider_request_errors_total{kind="quorum"}` is
+    /// documented as "quorum was not met for that chain", and the Move and TON
+    /// resolvers build their own accumulators; when they called `finish`
+    /// directly, a whole chain family could fail on every provider while the
+    /// counter an operator alerts on stayed at zero.
+    ///
+    /// The counter follows the verdict, not the fact that the response loop
+    /// ended. Reaching this point does not imply failure: the TON path skips
+    /// URIs whose `v3-endpoint` will not parse, so it pushes fewer futures than
+    /// the accumulator's declared total, `remaining` never falls to zero,
+    /// `unambiguous_result` therefore never fires, and `finish` can still
+    /// succeed on the responses that did arrive. Recording before consulting the
+    /// result counted those successes as quorum failures.
+    async fn finish_quorum<V: Clone>(
+        &self,
+        chain_name: &str,
+        accumulator: ExactQuorumAccumulator<V>,
+        context: &str,
+    ) -> Result<V, AppCoreError> {
+        let result = accumulator.finish(context);
+        if result.is_err() {
+            if let Some(metrics) = &self.metrics {
+                let mut metrics = metrics.lock().await;
+                metrics.record_provider_request_error(chain_name, "quorum");
+            }
         }
-        accumulator.finish(context)
+        result
     }
 
     fn solana_transaction_to_lz_sent_event(
@@ -486,7 +517,12 @@ where
                 return Ok(value);
             }
         }
-        accumulator.finish(&format!("TON transaction trace for {src_tx_hash}"))
+        self.finish_quorum(
+            "ton",
+            accumulator,
+            &format!("TON transaction trace for {src_tx_hash}"),
+        )
+        .await
     }
 
     fn chain_name_for_eid(&self, eid: u32) -> Result<String, AppCoreError> {

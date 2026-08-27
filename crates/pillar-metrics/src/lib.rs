@@ -109,7 +109,12 @@ impl PillarMetrics {
             ),
             provider_request_errors_total: CounterMetric::new(
                 "pillar_provider_request_errors_total",
-                "Provider request failures recorded by kind in Pillar.",
+                // Names what it counts rather than implying every provider
+                // failure. Only source-event resolution reports here, and only
+                // when quorum was unreachable; per-stage failures, validation
+                // included, surface as
+                // pillar_sign_stage_duration_seconds{status="error"}.
+                "Source-event resolution failures by chain and kind in Pillar; kind=quorum means provider quorum was not reached.",
             ),
         }
     }

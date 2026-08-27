@@ -24,7 +24,12 @@ pub fn core_api_app_from_runtime_parts(parts: RuntimeCoreAppParts) -> CoreApiApp
             validator: parts.dependencies.validator,
             signer_getter: parts.signer_getter,
             legacy_chain_name_resolver: parts.dependencies.legacy_chain_name_resolver,
-            stage_observer: Arc::new(pillar_core::NoopSignStageObserver),
+            // The same registry the HTTP surface renders, so a sign request's
+            // stage timings reach `/metrics`. A no-op here leaves the
+            // documented `pillar_sign_stage_duration_seconds` family rendering
+            // its HELP and TYPE lines with no samples under them, forever,
+            // which reads to an operator as "no signing happened".
+            stage_observer: Arc::new(PillarMetricsStageObserver::new(parts.metrics.clone())),
             debug_mode: parts.runtime_config.debug_mode,
         },
         parts

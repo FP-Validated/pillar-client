@@ -1,5 +1,6 @@
 use super::*;
 use pillar_layerzero::{encode_lz_packet_v1, LzPacketV1};
+use pillar_metrics::PillarMetrics;
 
 #[derive(Clone)]
 struct QuorumDelayTransport {
@@ -1134,5 +1135,188 @@ async fn an_accepted_refresh_moves_where_the_signing_path_dispatches() {
             "https://refreshed.example/".to_string()
         ],
         "the resolver must dispatch to the generation now serving"
+    );
+}
+
+/// `pillar_provider_request_errors_total{kind="quorum"}` is documented as
+/// "quorum was not met for that chain" (`README.md:264-265`). That is only true
+/// if every quorum path records it. The Move and TON resolvers each build their
+/// own `ExactQuorumAccumulator` and used to call `finish` directly, so a chain
+/// family could fail quorum on every provider and the counter stayed at zero -
+/// an operator alerting on this metric would see nothing at all.
+#[tokio::test]
+async fn move_quorum_failure_records_a_provider_request_error() {
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "aptos".to_string(),
+            ProviderConfig {
+                uris: vec![ProviderUri::Uri("https://aptos.example/".to_string())],
+                quorum: Some(1),
+            },
+        )]),
+        None,
+    )
+    .unwrap();
+    let metrics = Arc::new(tokio::sync::Mutex::new(PillarMetrics::new()));
+    let mut config = evm_packet_sent_resolver_config("V302");
+    config.chain_name_by_eid.insert(30_500, "aptos".to_string());
+    // The trusted-emitter lookup runs before any provider is dialled, so
+    // without this the request is rejected before quorum is even attempted.
+    config
+        .trusted_move_packet_emitters_by_chain_name
+        .insert("aptos".to_string(), HashSet::from(["0xabc".to_string()]));
+    let resolver = EvmPacketSentResolver::new(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        RecordingTransport {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            responses: Arc::new(Mutex::new(vec![Err("provider unreachable".to_string())])),
+        },
+        config,
+    )
+    .with_metrics(metrics.clone());
+
+    let request = LzMessageId {
+        pathway_id: PathwayId {
+            src_chain_name: "aptos".to_string(),
+            dst_chain_name: "ethereum".to_string(),
+            extra: IndexMap::new(),
+        },
+        nonce: 7,
+        uln_send_version: Value::from("V302"),
+    };
+    resolver
+        .get_lz_sent_event("0xtx", &request)
+        .await
+        .expect_err("every provider failed, so quorum cannot be met");
+
+    let rendered = metrics
+        .lock()
+        .await
+        .render_prometheus("mainnet", "test-version");
+    assert!(
+        rendered
+            .contains("pillar_provider_request_errors_total{chain=\"aptos\",kind=\"quorum\"} 1"),
+        "the Move quorum failure went uncounted: {rendered}"
+    );
+}
+
+#[tokio::test]
+async fn ton_quorum_failure_records_a_provider_request_error() {
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "ton".to_string(),
+            ProviderConfig {
+                uris: vec![ProviderUri::Uri(
+                    "https://ton.example/?v3-endpoint=https://ton.example/v3".to_string(),
+                )],
+                quorum: Some(1),
+            },
+        )]),
+        None,
+    )
+    .unwrap();
+    let metrics = Arc::new(tokio::sync::Mutex::new(PillarMetrics::new()));
+    let mut config = evm_packet_sent_resolver_config("V302");
+    config.chain_name_by_eid.insert(30_300, "ton".to_string());
+    config
+        .trusted_ton_packet_emitters_by_chain_name
+        .insert("ton".to_string(), HashSet::from(["0xabc".to_string()]));
+    let resolver = EvmPacketSentResolver::new(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        RecordingTransport {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            responses: Arc::new(Mutex::new(vec![Err("provider unreachable".to_string())])),
+        },
+        config,
+    )
+    .with_metrics(metrics.clone());
+
+    let request = LzMessageId {
+        pathway_id: PathwayId {
+            src_chain_name: "ton".to_string(),
+            dst_chain_name: "ethereum".to_string(),
+            extra: IndexMap::new(),
+        },
+        nonce: 7,
+        uln_send_version: Value::from("V302"),
+    };
+    resolver
+        .get_lz_sent_event("0xtx", &request)
+        .await
+        .expect_err("every provider failed, so quorum cannot be met");
+
+    let rendered = metrics
+        .lock()
+        .await
+        .render_prometheus("mainnet", "test-version");
+    assert!(
+        rendered.contains("pillar_provider_request_errors_total{chain=\"ton\",kind=\"quorum\"} 1"),
+        "the TON quorum failure went uncounted: {rendered}"
+    );
+}
+
+/// The TON resolver skips URIs it cannot parse a `v3-endpoint` out of, so it
+/// pushes fewer futures than the accumulator's declared total. `remaining` then
+/// never reaches zero, `unambiguous_result` keeps returning `None`, the loop
+/// drains and `finish` still succeeds on the responses it did get. Recording
+/// before consulting that result therefore counts a *successful* resolution as a
+/// quorum failure - the counter must follow the verdict, not the fact that the
+/// loop ended.
+#[tokio::test]
+async fn a_skipped_ton_uri_does_not_count_as_a_quorum_failure() {
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "ton".to_string(),
+            ProviderConfig {
+                uris: vec![
+                    ProviderUri::Uri(
+                        "https://ton.example/?v3-endpoint=https://ton.example/v3".to_string(),
+                    ),
+                    // No v3-endpoint: skipped before a future is pushed.
+                    ProviderUri::Uri("https://ton-broken.example/".to_string()),
+                ],
+                quorum: Some(1),
+            },
+        )]),
+        None,
+    )
+    .unwrap();
+    let metrics = Arc::new(tokio::sync::Mutex::new(PillarMetrics::new()));
+    let mut config = evm_packet_sent_resolver_config("V302");
+    config.chain_name_by_eid.insert(30_300, "ton".to_string());
+    config
+        .trusted_ton_packet_emitters_by_chain_name
+        .insert("ton".to_string(), HashSet::from(["0xabc".to_string()]));
+    let resolver = EvmPacketSentResolver::new(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        RecordingTransport {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            responses: Arc::new(Mutex::new(vec![Ok(json!({"trace": []}))])),
+        },
+        config,
+    )
+    .with_metrics(metrics.clone());
+
+    let request = LzMessageId {
+        pathway_id: PathwayId {
+            src_chain_name: "ton".to_string(),
+            dst_chain_name: "ethereum".to_string(),
+            extra: IndexMap::new(),
+        },
+        nonce: 7,
+        uln_send_version: Value::from("V302"),
+    };
+    // The trace decodes to no matching packet, so resolution still fails - but
+    // it fails *after* quorum was reached, which is not a provider failure.
+    let _ = resolver.get_lz_sent_event("0xtx", &request).await;
+
+    let rendered = metrics
+        .lock()
+        .await
+        .render_prometheus("mainnet", "test-version");
+    let counted = rendered.contains("pillar_provider_request_errors_total{chain=\"ton\"");
+    assert!(
+        !counted,
+        "quorum was reached from the one usable URI, so nothing may be counted: {rendered}"
     );
 }

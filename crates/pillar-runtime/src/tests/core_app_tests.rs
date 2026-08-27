@@ -113,12 +113,14 @@ fn runtime_core_dependencies_apply_supported_ulns_only_to_legacy_builders() {
         .contains_key("ReadV1002"));
 }
 
-#[tokio::test]
-async fn core_api_app_from_runtime_parts_assembles_working_server_app() {
+/// The production assembler's inputs, shared by the tests below so that a
+/// composition defect shows up in every one of them rather than in whichever
+/// test happened to rebuild the literal.
+fn runtime_core_app_parts(metrics: Arc<tokio::sync::Mutex<PillarMetrics>>) -> RuntimeCoreAppParts {
     let mut provider_health = ProviderHealthSnapshot::new();
     provider_health.insert("ethereum".to_string(), true);
     provider_health.insert("bsc".to_string(), true);
-    let app = core_api_app_from_runtime_parts(RuntimeCoreAppParts {
+    RuntimeCoreAppParts {
         runtime_config: RuntimeConfig {
             server_port: 3000,
             provider_config_type: pillar_config::ProviderConfigType::LOCAL,
@@ -164,8 +166,15 @@ async fn core_api_app_from_runtime_parts_assembles_working_server_app() {
             validator: Arc::new(NoopValidator),
             legacy_chain_name_resolver: Arc::new(FixedChainResolver),
         },
-        metrics: Arc::new(tokio::sync::Mutex::new(PillarMetrics::new())),
-    });
+        metrics,
+    }
+}
+
+#[tokio::test]
+async fn core_api_app_from_runtime_parts_assembles_working_server_app() {
+    let app = core_api_app_from_runtime_parts(runtime_core_app_parts(Arc::new(
+        tokio::sync::Mutex::new(PillarMetrics::new()),
+    )));
 
     assert_eq!(
         app.get_available_chain_names(),
@@ -188,4 +197,37 @@ async fn core_api_app_from_runtime_parts_assembles_working_server_app() {
     assert_eq!(response.payload, "0xresolved");
     assert_eq!(response.signatures[0].signature, "sig:bsc:wallet-1:0xfeed");
     assert_eq!(response.debug_info.unwrap().dvn_hash_call_data, "0xfeed");
+}
+
+/// The stage histogram is documented at `README.md:237-239` and shipped in the
+/// snapshot fixture, so an operator builds dashboards on it. That only holds if
+/// the *production* assembler injects a real observer: a unit test that calls
+/// the observer directly proves the observer works and says nothing about
+/// whether anything ever calls it. This test drives the assembler the
+/// composition root uses and then reads the HTTP surface's own registry.
+#[tokio::test]
+async fn production_composition_records_every_sign_stage() {
+    let metrics = Arc::new(tokio::sync::Mutex::new(PillarMetrics::new()));
+    let app = core_api_app_from_runtime_parts(runtime_core_app_parts(metrics.clone()));
+
+    app.sign_request_v2(request_v2()).await.unwrap();
+
+    let rendered = metrics
+        .lock()
+        .await
+        .render_prometheus("mainnet", "test-version");
+    assert!(
+        rendered.contains("pillar_sign_stage_duration_seconds"),
+        "the family the README documents is absent from /metrics: {rendered}"
+    );
+    for stage in ["get_sent_event", "validate", "build_hash_call_data", "sign"] {
+        assert!(
+            rendered.contains(&format!("stage=\"{stage}\"")),
+            "stage {stage} recorded nothing: {rendered}"
+        );
+    }
+    assert!(
+        rendered.contains("src_chain=\"ethereum\"") && rendered.contains("dst_chain=\"bsc\""),
+        "the pathway labels are missing or transposed: {rendered}"
+    );
 }

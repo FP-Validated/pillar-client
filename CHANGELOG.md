@@ -7,6 +7,37 @@ the Prometheus metric names.
 ## Unreleased
 
 ### Fixed
+- `pillar_sign_stage_duration_seconds` now records. The production composition
+  injected `NoopSignStageObserver`, so the family rendered its `HELP` and `TYPE`
+  lines with no samples beneath them — indistinguishable, to an operator, from a
+  service that had signed nothing. `PillarMetricsStageObserver` existed but was
+  never constructed anywhere outside unit tests, which is why no test caught it:
+  they exercised the observer directly rather than the assembler. A test now
+  drives the real assembler and reads the registry the HTTP surface serves.
+- A malformed protocol field is a 400, not a 500. `ulnSendVersion` and the
+  pathway extras deserialise as `serde_json::Value`, and the HTTP boundary
+  checked presence only, so a non-string version reached the core, which could
+  only classify it as an internal fault. The boundary now type-checks the
+  protocol fields against the closed version set, matching where upstream puts
+  its Zod schema, and the core reports caller input as `BadRequest` on both the
+  v1 and v2 routes — v1 copies its `ulnVersion` straight through.
+- `pillar_provider_request_errors_total` covers every quorum path. The Move and
+  TON resolvers built their own accumulators and called `finish` directly, so
+  those chain families could fail quorum on every provider while the counter an
+  operator alerts on stayed at zero. All three paths now end in one
+  `finish_quorum` helper. The metric's `HELP` text no longer claims to count
+  provider failures generally; validation-stage provider failures surface as
+  `pillar_sign_stage_duration_seconds{status="error"}` instead, which is now
+  a real signal rather than an empty family.
+
+### Changed
+- `SECURITY.md` and the builder-selection comment in `pillar-core` now cite the
+  upstream call chain rather than asserting parity. Two independent reviews
+  reported that upstream runs an entity/category provider trust model and a
+  V2-to-V3 receive-library builder override; neither exists on the upstream
+  runtime path in the pinned source, and the dormant scaffolding that prompted
+  both readings is now named explicitly, with the reason it is dormant.
+
 - The server no longer speaks HTTP/2. It was serving h2 prior-knowledge
   connections, which nothing here asked for: `hyper`'s `http2` feature is
   enabled process-wide by `aws-smithy-http-client` and `tonic` for the KMS and

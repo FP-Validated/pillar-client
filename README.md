@@ -261,8 +261,12 @@ response with a server log line on its own.
   `pillar_provider_config_age_seconds` carry the failure.
 - `pillar_signer_errors_total{backend}` — signing and key-fetch failures per
   signer backend
-- `pillar_provider_request_errors_total{chain,kind}` — provider RPC failures;
-  `kind=quorum` means quorum was not reached for that chain
+- `pillar_provider_request_errors_total{chain,kind}` — source-event resolution
+  failures; `kind=quorum` means provider quorum was not reached for that chain,
+  and every quorum path reports it, EVM and non-EVM alike. This family is
+  deliberately not a catch-all: a provider failure during validation shows up as
+  `pillar_sign_stage_duration_seconds{stage="validate",status="error"}`, and
+  the stage a request died in is the more useful signal there.
 
 ## Development
 

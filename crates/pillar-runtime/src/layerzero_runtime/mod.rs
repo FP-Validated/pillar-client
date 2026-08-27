@@ -27,7 +27,7 @@ use pillar_layerzero::{
     UlnV3PayloadBuilder, ULN_VERSION_READ_V1002, ULN_VERSION_V2, ULN_VERSION_V301,
     ULN_VERSION_V302,
 };
-use pillar_metrics::PillarMetrics;
+use pillar_metrics::{PillarMetrics, PillarMetricsStageObserver};
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},

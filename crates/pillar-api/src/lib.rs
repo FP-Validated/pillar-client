@@ -10,7 +10,7 @@ use axum::{
 };
 use pillar_core::{
     AppCoreError, BadRequestError, PillarApiRequestV1, PillarApiRequestV2, PillarApiResponse,
-    PillarApp, ProviderHealthSnapshot, ResponseEnvelope,
+    PillarApp, ProviderHealthSnapshot, ResponseEnvelope, KNOWN_ULN_SEND_VERSIONS,
 };
 use pillar_metrics::PillarMetrics;
 use regex::Regex;
@@ -406,12 +406,50 @@ fn parse_json_payload(payload: Result<Json<Value>, JsonRejection>) -> Result<Val
     }
 }
 
+/// Presence and type checks for the protocol fields, at the same boundary
+/// upstream puts them: `apps/gasolina/src/bootstrap.ts:130-157` parses the body
+/// with a Zod schema (numeric EIDs, string addresses, a native `UlnVersion`
+/// enum) and answers 400 before the app is called.
+///
+/// Presence alone is not enough. `PathwayId::extra` and `uln_send_version` are
+/// `serde_json::Value`, so a wrong-typed field deserialises happily and only
+/// fails deep in the core, where the least-wrong classification is an internal
+/// fault - a 500 that blames the server for the caller's payload. Missing-field
+/// wording is unchanged so the existing contract still holds.
 fn validate_v2_request_shape(value: &Value) -> Result<(), AppError> {
     let mut missing_fields = Vec::new();
+    let mut invalid_fields = Vec::new();
     let top_level_fields = ["srcTxHash", "lzMessageId", "signingContext", "messageHash"];
     for field in top_level_fields {
         if value.get(field).is_none_or(Value::is_null) {
             missing_fields.push(field.to_string());
+        }
+    }
+    for field in ["srcTxHash", "messageHash"] {
+        if let Some(present) = value.get(field).filter(|value| !value.is_null()) {
+            if !present.is_string() {
+                invalid_fields.push(format!("{field}: expected a string"));
+            }
+        }
+    }
+
+    if let Some(message_id) = value.get("lzMessageId") {
+        if let Some(version) = message_id
+            .get("ulnSendVersion")
+            .filter(|value| !value.is_null())
+        {
+            match version.as_str() {
+                None => {
+                    invalid_fields.push("lzMessageId.ulnSendVersion: expected a string".to_string())
+                }
+                Some(version) if !KNOWN_ULN_SEND_VERSIONS.contains(&version) => {
+                    invalid_fields.push(format!(
+                        "lzMessageId.ulnSendVersion: expected one of {}",
+                        KNOWN_ULN_SEND_VERSIONS.join(", ")
+                    ));
+                }
+                Some(_) => {}
+            }
         }
     }
 
@@ -420,10 +458,32 @@ fn validate_v2_request_shape(value: &Value) -> Result<(), AppError> {
         .and_then(|message_id| message_id.get("pathwayId"))
     {
         for field in ["srcEid", "dstEid", "sender", "receiver"] {
-            if pathway_id.get(field).is_none_or(Value::is_null) {
+            let Some(present) = pathway_id.get(field).filter(|value| !value.is_null()) else {
                 missing_fields.push(format!("lzMessageId.pathwayId.{field}"));
+                continue;
+            };
+            let well_typed = match field {
+                "srcEid" | "dstEid" => present.is_u64(),
+                _ => present.is_string(),
+            };
+            if !well_typed {
+                let expected = if matches!(field, "srcEid" | "dstEid") {
+                    "a non-negative integer"
+                } else {
+                    "a string"
+                };
+                invalid_fields.push(format!(
+                    "lzMessageId.pathwayId.{field}: expected {expected}"
+                ));
             }
         }
+    }
+
+    if missing_fields.is_empty() && !invalid_fields.is_empty() {
+        return Err(AppError::BadRequest(format!(
+            "Invalid request: {}",
+            invalid_fields.join("; ")
+        )));
     }
 
     if missing_fields.is_empty() {
@@ -1629,6 +1689,73 @@ mod tests {
             requests[0].lz_message_id.pathway_id.extra["receiver"],
             "0xreceiver"
         );
+    }
+
+    /// Upstream validates the protocol fields with a Zod schema at the HTTP
+    /// boundary and answers 400 (TS: `apps/gasolina/src/bootstrap.ts:130-157`
+    /// feeding a parsed schema into `signRequestV2`). Presence-only checks let a
+    /// wrong-typed `ulnSendVersion` through to the core, which can only classify
+    /// it as an internal fault and answer 500 - blaming the server for a
+    /// caller's malformed request.
+    #[tokio::test]
+    async fn rejects_wrong_typed_uln_send_version_at_http_boundary() {
+        let app = TestApp::new();
+        let mut request = v2_request_json(false);
+        request["lzMessageId"]["ulnSendVersion"] = Value::from(302);
+        let (status, json) = post_json_with_app(app.clone(), "/v2/resolve-and-sign", request).await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(json["statusCode"], 400);
+        assert!(
+            json["body"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("ulnSendVersion"),
+            "the error must name the offending field: {json}"
+        );
+        assert!(app.v2_requests.lock().await.is_empty());
+    }
+
+    /// The four protocol versions are a closed set upstream, so an unrecognised
+    /// string is a client error too. Whether a recognised version is *enabled*
+    /// stays a core decision, because that depends on operator configuration.
+    #[tokio::test]
+    async fn rejects_unknown_uln_send_version_at_http_boundary() {
+        let app = TestApp::new();
+        let mut request = v2_request_json(false);
+        request["lzMessageId"]["ulnSendVersion"] = Value::from("V999");
+        let (status, json) = post_json_with_app(app.clone(), "/v2/resolve-and-sign", request).await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(json["statusCode"], 400);
+        assert!(
+            json["body"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("ulnSendVersion"),
+            "the error must name the offending field: {json}"
+        );
+        assert!(app.v2_requests.lock().await.is_empty());
+    }
+
+    /// Upstream types the pathway as numeric EIDs and string addresses, so a
+    /// transposed payload is rejected before any provider is dialled.
+    #[tokio::test]
+    async fn rejects_wrong_typed_pathway_fields_at_http_boundary() {
+        let app = TestApp::new();
+        let mut request = v2_request_json(false);
+        request["lzMessageId"]["pathwayId"]["srcEid"] = Value::from("30101");
+        request["lzMessageId"]["pathwayId"]["sender"] = Value::from(42);
+        let (status, json) = post_json_with_app(app.clone(), "/v2/resolve-and-sign", request).await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(json["statusCode"], 400);
+        let body = json["body"].as_str().unwrap_or_default().to_string();
+        assert!(
+            body.contains("srcEid") && body.contains("sender"),
+            "both offending fields must be named: {body}"
+        );
+        assert!(app.v2_requests.lock().await.is_empty());
     }
 
     #[tokio::test]
