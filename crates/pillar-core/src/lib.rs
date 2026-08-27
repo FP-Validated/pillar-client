@@ -81,13 +81,27 @@ pub struct PillarApiRequestV1 {
     pub message_hash: String,
 }
 
-/// The send versions this service accepts. Anything outside the set is treated
-/// as a malformed request rather than an unsupported deployment, which is also
-/// what upstream does: it parses the field against a native enum at the HTTP
-/// boundary (TS: `apps/gasolina/src/bootstrap.ts:130-157`, read from the tree
-/// `SECURITY.md` identifies by content hash). Shared with `pillar-api` so the
-/// boundary and the core cannot drift apart.
-pub const KNOWN_ULN_SEND_VERSIONS: [&str; 4] = ["V2", "V301", "V302", "ReadV1002"];
+/// Every member of the protocol's send-version enum. A value outside this set
+/// is a malformed request; a value inside it that this service installs no
+/// builder for is an *unsupported* one, and the two must not be conflated -
+/// answering "expected one of V2, V301, V302, ReadV1002" to a `V1` request would
+/// tell the caller that `V1` is not a LayerZero version.
+///
+/// The set mirrors upstream's enum, which likewise carries six members while its
+/// builder map installs four (TS: `packages/common-model/src/v1/lzMessage.ts:48-55`
+/// for the enum and `:57` for the `z.nativeEnum` schema the HTTP boundary parses
+/// with; `apps/gasolina/src/app/hashCallDataBuilder/index.ts:31-36` for the map).
+/// So a `V1` request reaching a missing builder is upstream's shape too, not a
+/// divergence. Read from the tree `SECURITY.md` identifies by content hash.
+///
+/// Shared with `pillar-api` so the boundary and the core cannot drift apart.
+pub const ULN_SEND_VERSIONS: [&str; 6] = ["V1", "V2", "V300", "V301", "V302", "ReadV1002"];
+
+/// The versions whose builders are always installed, so a missing entry means
+/// this workspace's wiring is broken rather than that the caller asked for
+/// something unavailable. `V2` and `V301` are deliberately absent: they are
+/// gated by `LAYERZERO_SUPPORTED_ULN_VERSIONS`.
+const ALWAYS_BUILT_ULN_SEND_VERSIONS: [&str; 2] = ["V302", "ReadV1002"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -512,7 +526,7 @@ impl PillarApp {
             .ok_or_else(|| {
                 AppCoreError::BadRequest(format!(
                     "Invalid ulnSendVersion: expected one of {}, got {}",
-                    KNOWN_ULN_SEND_VERSIONS.join(", "),
+                    ULN_SEND_VERSIONS.join(", "),
                     request.lz_message_id.uln_send_version
                 ))
             })?;
@@ -520,17 +534,17 @@ impl PillarApp {
             .hash_call_data_builders
             .get(builder_key)
             .ok_or_else(|| {
-                if !KNOWN_ULN_SEND_VERSIONS.contains(&builder_key) {
+                if !ULN_SEND_VERSIONS.contains(&builder_key) {
                     AppCoreError::BadRequest(format!(
                         "Invalid ulnSendVersion: expected one of {}, got {builder_key}",
-                        KNOWN_ULN_SEND_VERSIONS.join(", ")
+                        ULN_SEND_VERSIONS.join(", ")
                     ))
-                } else if matches!(builder_key, "V2" | "V301") {
-                    AppCoreError::BadRequest(format!("Unsupported ulnSendVersion {builder_key}"))
-                } else {
+                } else if ALWAYS_BUILT_ULN_SEND_VERSIONS.contains(&builder_key) {
                     AppCoreError::Internal(format!(
                         "No hashCallDataBuilder for ulnSendVersion {builder_key}"
                     ))
+                } else {
+                    AppCoreError::BadRequest(format!("Unsupported ulnSendVersion {builder_key}"))
                 }
             })?;
 
@@ -1173,6 +1187,29 @@ mod tests {
             matches!(error, AppCoreError::BadRequest(_)),
             "a malformed caller field must not be an internal fault: {error:?}"
         );
+    }
+
+    /// A protocol version with no builder installed is "unsupported", not
+    /// "invalid" and not an internal fault. Upstream's enum carries six members
+    /// (`V1`, `V2`, `V300`, `V301`, `V302`, `ReadV1002`) while its builder map
+    /// installs four, so `V1` reaching a missing builder is upstream's normal
+    /// shape too.
+    #[tokio::test]
+    async fn reports_unbuildable_protocol_versions_as_unsupported() {
+        for version in ["V1", "V300"] {
+            let error = app()
+                .sign_request_v2(request_v2(version))
+                .await
+                .unwrap_err();
+
+            match error {
+                AppCoreError::BadRequest(message) => assert!(
+                    message.contains("Unsupported"),
+                    "{version} is a real version with no builder, so it is unsupported rather than invalid: {message}"
+                ),
+                other => panic!("{version} must be a client error, got {other:?}"),
+            }
+        }
     }
 
     #[tokio::test]

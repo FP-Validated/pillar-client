@@ -10,7 +10,7 @@ use axum::{
 };
 use pillar_core::{
     AppCoreError, BadRequestError, PillarApiRequestV1, PillarApiRequestV2, PillarApiResponse,
-    PillarApp, ProviderHealthSnapshot, ResponseEnvelope, KNOWN_ULN_SEND_VERSIONS,
+    PillarApp, ProviderHealthSnapshot, ResponseEnvelope, ULN_SEND_VERSIONS,
 };
 use pillar_metrics::PillarMetrics;
 use regex::Regex;
@@ -442,10 +442,10 @@ fn validate_v2_request_shape(value: &Value) -> Result<(), AppError> {
                 None => {
                     invalid_fields.push("lzMessageId.ulnSendVersion: expected a string".to_string())
                 }
-                Some(version) if !KNOWN_ULN_SEND_VERSIONS.contains(&version) => {
+                Some(version) if !ULN_SEND_VERSIONS.contains(&version) => {
                     invalid_fields.push(format!(
                         "lzMessageId.ulnSendVersion: expected one of {}",
-                        KNOWN_ULN_SEND_VERSIONS.join(", ")
+                        ULN_SEND_VERSIONS.join(", ")
                     ));
                 }
                 Some(_) => {}
@@ -1737,6 +1737,33 @@ mod tests {
             "the error must name the offending field: {json}"
         );
         assert!(app.v2_requests.lock().await.is_empty());
+    }
+
+    /// `V1` and `V300` are real members of the protocol's version enum that this
+    /// service installs no builder for - the same situation as a `V2` an
+    /// operator has gated off, and not the same as a typo. The boundary must let
+    /// them through so the core can answer "unsupported", because telling a
+    /// caller that `V1` is not a LayerZero version would be false.
+    #[tokio::test]
+    async fn admits_protocol_versions_this_service_cannot_build() {
+        for version in ["V1", "V300"] {
+            let app = TestApp::new();
+            let mut request = v2_request_json(false);
+            request["lzMessageId"]["ulnSendVersion"] = Value::from(version);
+            let (status, json) =
+                post_json_with_app(app.clone(), "/v2/resolve-and-sign", request).await;
+
+            assert_ne!(
+                status,
+                StatusCode::BAD_REQUEST,
+                "{version} is a protocol version, so the boundary must not call it malformed: {json}"
+            );
+            assert_eq!(
+                app.v2_requests.lock().await.len(),
+                1,
+                "{version} never reached the core"
+            );
+        }
     }
 
     /// Upstream types the pathway as numeric EIDs and string addresses, so a
