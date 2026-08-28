@@ -311,6 +311,61 @@ fn historical_pathway_request(normalized: &Value) -> LzMessageId {
     }
 }
 
+/// Conventional BIP44 path per chain type, so the signer derives with the curve and
+/// account layout the destination actually uses rather than an EVM path everywhere.
+fn signer_path(chain_type: &str) -> &'static str {
+    match chain_type {
+        "APTOS" => "m/44'/637'/0'/0'/0'",
+        "SOLANA" => "m/44'/501'/0'/0'",
+        "SUI" | "IOTAMOVE" => "m/44'/784'/0'/0'/0'",
+        // Initia derives an Ed25519 key locally (`chain_address/chains.rs:206-212`),
+        // and the Ed25519 parser requires every segment hardened.
+        "INITIA" => "m/44'/118'/0'/0'/0'",
+        "TON" => "m/44'/607'/0'",
+        "STARKNET" => "m/44'/9004'/0'/0/0",
+        "STELLAR" => "m/44'/148'/0'",
+        _ => "m/44'/60'/0'/0/0",
+    }
+}
+
+/// A real local-mnemonic signer for one destination chain, so the smoke can show the
+/// hash reaching the signer stage rather than stopping at the builder.
+async fn historical_signer(
+    chain_name: &str,
+    chain_type: &str,
+) -> Result<LocalMnemonicSignerAssembly, String> {
+    let wallet = format!("wallet-{chain_type}");
+    let vars = HashMap::from([
+        (SIGNER_TYPE.to_string(), "LOCAL_MNEMONIC".to_string()),
+        (
+            pillar_config::LZ_WALLETS.to_string(),
+            config_wallet_json(&wallet, chain_type, "secret"),
+        ),
+        (
+            pillar_config::LZ_WALLET_MNEMONIC_MAPPING.to_string(),
+            format!(
+                r#"{{"{wallet}-{chain_type}":{{"mnemonic":"test test test test test test test test test test test junk","path":"{}"}}}}"#,
+                signer_path(chain_type)
+            ),
+        ),
+    ]);
+    let chain_type_by_chain_name =
+        HashMap::from([(chain_name.to_string(), chain_type.to_string())]);
+    let config = runtime_signer_config_from_env_map(
+        &vars,
+        &[chain_name.to_string()],
+        &chain_type_by_chain_name,
+    )?;
+    local_mnemonic_signer_assembly_from_config(
+        config,
+        HashMap::from([(
+            chain_name.to_string(),
+            signer_chain_type_from_config(chain_type)?,
+        )]),
+    )
+    .await
+}
+
 fn hex_eq(value: &str) -> String {
     value.trim_start_matches("0x").to_lowercase()
 }
@@ -382,6 +437,9 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
     // Collected rather than asserted one at a time: when a shared encoder breaks, the
     // useful output is every pathway it broke, not the alphabetically first one.
     let mut mismatches: Vec<String> = Vec::new();
+    let mut signed: Vec<String> = Vec::new();
+    let mut rejected: Vec<String> = Vec::new();
+    let mut unsignable: Vec<String> = Vec::new();
 
     for expected in reference["pathways"].as_array().expect("pathways") {
         let id = expected["id"].as_str().unwrap();
@@ -549,6 +607,77 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
                 ));
             }
         }
+        // Signer stage: the hash a pathway produces must be a signable input for the
+        // destination's own chain type, and the signer must actually be reached.
+        let chain_type = pillar_config::static_chain_type_name(dst_chain_name).unwrap();
+        match historical_signer(dst_chain_name, chain_type).await {
+            Ok(assembly) => {
+                let signature = assembly
+                    .signer_getter
+                    .pillar_sign(
+                        dst_chain_name,
+                        &format!("wallet-{chain_type}"),
+                        &result.hash_call_data,
+                    )
+                    .await
+                    .unwrap_or_else(|error| panic!("{id}: signer refused the hash: {error:?}"));
+                assert!(
+                    signature.signature.len() > 2,
+                    "{id}: signer returned an empty signature"
+                );
+                signed.push(id.to_string());
+            }
+            Err(error) => unsignable.push(format!("{id}: {error}")),
+        }
+
+        // Reject path: the same receipt with the packet emitted by something other
+        // than the endpoint must be refused before any payload exists. Upstream is
+        // structurally immune - it reads the endpoint contract's own logs - so this
+        // is the arm where only this service can get it wrong.
+        let mut foreign = pathway["receipt"].clone();
+        for log in foreign["logs"].as_array_mut().unwrap() {
+            log["address"] = Value::from("0x00000000000000000000000000000000deadbeef");
+        }
+        let foreign_transport = RecordingTransport {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            responses: Arc::new(Mutex::new(vec![Ok(json!({
+                "jsonrpc": "2.0", "id": 1, "result": foreign,
+            }))])),
+        };
+        let foreign_parts = runtime_layerzero_parts_from_evm_config(
+            &ProviderSnapshotHandle::from_getter(&getter),
+            foreign_transport,
+            environment,
+            &chain_names,
+            RuntimeLayerZeroDependencyInputs {
+                uln_v2_payload_builder: recorder.clone(),
+                read_payload_resolver: recorder.clone(),
+                validation_checks: Arc::new(FixedValidationChecks {
+                    current_timestamp: 777,
+                    calls: Arc::new(Mutex::new(Vec::new())),
+                    ranges: Arc::new(Mutex::new(Vec::new())),
+                }),
+                legacy_chain_name_resolver: Arc::new(FixedChainResolver),
+                metrics: Arc::new(tokio::sync::Mutex::new(pillar_metrics::PillarMetrics::new())),
+            },
+        )
+        .unwrap();
+        let refused = foreign_parts
+            .sent_event_resolver
+            .get_lz_sent_event(
+                pathway["txHash"].as_str().unwrap(),
+                &historical_pathway_request(normalized),
+            )
+            .await;
+        // Refused twice over: the log filter drops it, and if that filter is
+        // neutered a second gate still refuses by name. The mutation log removes
+        // both to show neither is decoration.
+        assert!(
+            refused.is_err(),
+            "{id}: an untrusted emitter produced an event"
+        );
+        rejected.push(id.to_string());
+
         compared.push(id.to_string());
     }
 
@@ -574,4 +703,14 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
         "Gate 0 blocked pathways must stay named"
     );
     assert_eq!(compared.len(), 15, "compared pathways: {compared:?}");
+    assert!(
+        unsignable.is_empty(),
+        "every compared pathway must reach a signer: {unsignable:?}"
+    );
+    assert_eq!(signed.len(), compared.len(), "signed pathways: {signed:?}");
+    assert_eq!(
+        rejected.len(),
+        compared.len(),
+        "untrusted-emitter rejections: {rejected:?}"
+    );
 }

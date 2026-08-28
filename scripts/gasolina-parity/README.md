@@ -11,7 +11,7 @@ rather than this repository's opinion of it.
 | `emit-ton-dvn-verify.ts` | `crates/pillar-layerzero/tests/gasolina_parity/ton_dvn_verify.json` |
 | `emit-historical-smoke.ts` | `crates/pillar-runtime/tests/gasolina_parity/historical_smoke.json` |
 
-All three are read-only: no RPC, no signer, no network, no writes to the upstream
+All four are read-only: no RPC, no signer, no network, no writes to the upstream
 checkout.
 
 They have to run *inside* the upstream pnpm workspace, because they import
