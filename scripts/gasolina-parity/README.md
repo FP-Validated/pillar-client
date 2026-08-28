@@ -11,8 +11,9 @@ rather than this repository's opinion of it.
 | `emit-ton-dvn-verify.ts` | `crates/pillar-layerzero/tests/gasolina_parity/ton_dvn_verify.json` |
 | `emit-historical-smoke.ts` | `crates/pillar-runtime/tests/gasolina_parity/historical_smoke.json` |
 
-All four are read-only: no RPC, no signer, no network, no writes to the upstream
-checkout.
+All four are read-only in the sense that matters: no RPC, no network, no writes to
+the upstream checkout. `emit-historical-smoke.ts` does run upstream's signer, with a
+well-known test mnemonic that exists only in that file.
 
 They have to run *inside* the upstream pnpm workspace, because they import
 `@monorepo/*` packages that only resolve from a workspace member's directory.
@@ -86,10 +87,28 @@ agreed almost everywhere: folding the V2 endpoint id matches the EndpointV1 id f
 services are driven from those recorded receipts, so the comparison is offline even
 though the packets are real.
 
-`emit-historical-smoke.ts` runs upstream's **public** entrypoint -
-`GasolinaSdkFactory.getSdk(dstChainName).buildULNV3VerifyPayload(...)` - rather than
-recomposing its steps, because `GasolinaEvmSdk.buildDvnCallData` derives the receive
-ULN version from the destination endpoint id and a recomposed harness skips that.
+`emit-historical-smoke.ts` drives upstream's **public** stages, in the order
+`app.ts:signRequestV2` drives them, rather than recomposing their internals:
+
+| stage | upstream entrypoint | how it runs offline |
+|---|---|---|
+| resolve the sent event | `EndpointV2Sdk.getLZSentEvent` | the receipt provider is stubbed with the recorded receipt; nothing else is reached |
+| build the payload | `GasolinaSdkFactory.getSdk(dst).buildULNV3VerifyPayload` | providers are `{}`; no compared family reads one |
+| sign | `GasolinaSignerAdapterGetter.getSignerAdapter(dst, wallet).gasolinaSign` | a local mnemonic, same string and derivation path handed to both services |
+
+Recomposition was the earlier mistake: `GasolinaEvmSdk.buildDvnCallData` derives the
+receive ULN version from the destination endpoint id, and a harness that pins V302
+skips that derivation entirely.
+
+Both event resolvers are exercised, because upstream has two: the factory picks the
+viem implementation for testnet and the ethers one for mainnet
+(`endpoint/factory.ts:33-55`), while this service has a single resolver that has to
+match both.
+
+Each pathway is also replayed with the `PacketSent` log re-emitted from an address
+that is not the endpoint. Upstream refuses it - `Packet does not match lzMessageId`,
+from its own address filter - and the fixture records that refusal, so the reject
+arm is a comparison rather than an assumption about upstream's shape.
 
 Three things the fixture records rather than hides:
 
@@ -103,6 +122,23 @@ Three things the fixture records rather than hides:
 - `iotal1` has no pathway at all: 0 packets to it in 275,000 mainnet blocks. On
   testnet, `aptos`, `initia` and `iotal1` likewise had none in 500,000 sepolia
   blocks, and the other testnet source chains carry almost no traffic.
+
+## Two divergences this comparison found
+
+Both were in the signer stage, and neither is visible from a hash comparison:
+
+- **Solana address.** Upstream takes the first 32 bytes of whatever public key the
+  provider returned, with no prefix handling
+  (`gasolina-signer-adapter/src/solana/index.ts:9-11`). Azure returns a bare 64-byte
+  `x || y` (`azureKmsSignerAdapter.ts:170-172`), so there those bytes are X; a local
+  mnemonic key is SEC1-uncompressed, so they are `04` followed by 31 bytes of X.
+  This service normalized the two shapes together and so published a different
+  Solana DVN address than the running service for every locally signed request.
+- **Initia signing key.** Upstream's Initia adapter overrides neither
+  `privateKeySignatureType` nor the address one, so it inherits ECDSA for both -
+  Initia is the one Move-adjacent chain that does not override. This service derived
+  an Ed25519 key for local signing, which produced a signature that did not
+  correspond to the address it advertised.
 
 Starknet's `ulnCallData` is compared as felt *values* rather than as a string:
 starknet.js renders some felts as decimal and strips leading zeros, this service

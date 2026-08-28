@@ -299,10 +299,29 @@ fn solana_address_is_base58_first_32_public_key_bytes() {
     );
 }
 
+/// Upstream applies no prefix handling whatsoever: the address is the first 32
+/// bytes of whatever the provider returned
+/// (`gasolina-signer-adapter/src/solana/index.ts:9-11`). The two providers return
+/// different shapes, so the same key material legitimately yields two addresses,
+/// and normalizing them together is what diverged from the running service.
 #[test]
-fn solana_address_matches_upstream_for_azure_uncompressed_key() {
+fn solana_address_keeps_the_sec1_prefix_like_upstream() {
+    // A local-mnemonic key is SEC1-uncompressed, so the leading `04` is part of the
+    // first 32 bytes upstream hands to `new web3.PublicKey(...)`.
     assert_eq!(
         SolanaChain.signer_address(&ecdsa_public_key_a()).unwrap(),
+        "JcaArBtuPANRW1jYJo6vLTo6nPrLwiBnozFuN7PgvzQ"
+    );
+}
+
+#[test]
+fn solana_address_of_a_bare_azure_coordinate_pair_is_the_x_coordinate() {
+    // Azure hands back `x || y` with no prefix (`azureKmsSignerAdapter.ts:170-172`),
+    // so there the first 32 bytes really are X.
+    assert_eq!(
+        SolanaChain
+            .signer_address(&ecdsa_public_key_a()[1..])
+            .unwrap(),
         "9pjvUx5h2dQUrj76Gqmwe24PXPHW3eWFGBuUgVW5BVPS"
     );
 }
@@ -364,9 +383,12 @@ async fn solana_signer_info_preserves_all_64_azure_coordinate_bytes() {
 
     let signer_info = signer.get_signer_info().await.unwrap();
 
+    // The address differs from the bare-coordinate case above by exactly the SEC1
+    // prefix, because upstream never removes it before taking 32 bytes. Only the
+    // reported public key is normalized, which is a separate surface.
     assert_eq!(
         signer_info.address,
-        "EboBSUoobiqt7JYcH46ro7TGBjtE2vczKnUmsiWy6Ffy"
+        "KhLrwX6FuKJfNtoxn2meHYBxKjvazGPHbfMdmx78HZ6"
     );
     assert_eq!(
         signer_info.public_key,

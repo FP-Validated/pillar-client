@@ -87,8 +87,14 @@ impl ChainAddress for AptosChain {
 pub struct SolanaChain;
 
 impl ChainAddress for SolanaChain {
+    // Upstream takes the first 32 bytes of whatever public key it was handed, with no
+    // prefix handling at all (`gasolina-signer-adapter/src/solana/index.ts:9-11`).
+    // That matters because the two sources have different shapes: Azure KMS returns a
+    // bare 64-byte `X||Y` (`azureKmsSignerAdapter.ts:170-172`), so the first 32 bytes
+    // are X, while a local mnemonic key is SEC1-uncompressed, so the first 32 bytes
+    // are `04` followed by 31 bytes of X. Stripping the `04` here produced a different
+    // Solana address than the running service for every locally signed request.
     fn signer_address(&self, public_key: &[u8]) -> Result<String, SignerError> {
-        let public_key = solana_address_public_key(public_key);
         if public_key.len() < 32 {
             return Err(SignerError::Message(format!(
                 "Solana public key must be at least 32 bytes, got {}",
@@ -112,13 +118,6 @@ impl ChainAddress for SolanaChain {
         } else {
             public_key
         }
-    }
-}
-
-fn solana_address_public_key(public_key: &[u8]) -> &[u8] {
-    match public_key {
-        [0x04, body @ ..] if body.len() == 64 => body,
-        _ => public_key,
     }
 }
 
@@ -203,17 +202,11 @@ impl ChainAddress for InitiaChain {
             .map_err(|error| SignerError::Message(error.to_string()))
     }
 
-    fn private_key_signature_type(&self, is_kms: bool) -> SignatureType {
-        if is_kms {
-            SignatureType::Ecdsa
-        } else {
-            SignatureType::Ed25519
-        }
-    }
-
-    fn address_private_key_signature_type(&self, _is_kms: bool) -> SignatureType {
-        SignatureType::Ecdsa
-    }
+    // No key-type override, deliberately. Upstream's Initia adapter declares neither
+    // `privateKeySignatureType` nor an address-specific one
+    // (`gasolina-signer-adapter/src/initia/index.ts`), so it inherits the ECDSA base
+    // for both signing and the address. Aptos, Solana, Sui and TON do override;
+    // Initia is the one Move-adjacent chain that does not.
 }
 
 #[derive(Clone)]

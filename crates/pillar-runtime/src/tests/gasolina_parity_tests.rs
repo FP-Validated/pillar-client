@@ -318,8 +318,9 @@ fn signer_path(chain_type: &str) -> &'static str {
         "APTOS" => "m/44'/637'/0'/0'/0'",
         "SOLANA" => "m/44'/501'/0'/0'",
         "SUI" | "IOTAMOVE" => "m/44'/784'/0'/0'/0'",
-        // Initia derives an Ed25519 key locally (`chain_address/chains.rs:206-212`),
-        // and the Ed25519 parser requires every segment hardened.
+        // Initia signs with an ECDSA key like upstream, so this is an ordinary BIP32
+        // path; every segment is hardened only because that is what the table below
+        // was first written with and both services are handed the same string.
         "INITIA" => "m/44'/118'/0'/0'/0'",
         "TON" => "m/44'/607'/0'",
         "STARKNET" => "m/44'/9004'/0'/0/0",
@@ -607,8 +608,10 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
                 ));
             }
         }
-        // Signer stage: the hash a pathway produces must be a signable input for the
-        // destination's own chain type, and the signer must actually be reached.
+        // Signer stage, compared rather than merely reached. Both services are handed
+        // the same well-known mnemonic and the same derivation path, so the signature
+        // and the address they publish must be identical bytes. This is the stage the
+        // earlier version of this test only asserted was non-empty.
         let chain_type = pillar_config::static_chain_type_name(dst_chain_name).unwrap();
         match historical_signer(dst_chain_name, chain_type).await {
             Ok(assembly) => {
@@ -621,19 +624,43 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
                     )
                     .await
                     .unwrap_or_else(|error| panic!("{id}: signer refused the hash: {error:?}"));
-                assert!(
-                    signature.signature.len() > 2,
-                    "{id}: signer returned an empty signature"
-                );
+                for (field, ours, theirs) in [
+                    (
+                        "signature",
+                        hex_eq(&signature.signature),
+                        hex_eq(expected["signature"].as_str().expect("upstream signed")),
+                    ),
+                    (
+                        "signerAddress",
+                        signature.address.clone(),
+                        expected["signerAddress"]
+                            .as_str()
+                            .expect("upstream addressed")
+                            .to_string(),
+                    ),
+                ] {
+                    if ours != theirs {
+                        mismatches.push(format!(
+                            "{id}: {field}\n      ours {ours}\n      them {theirs}"
+                        ));
+                    }
+                }
                 signed.push(id.to_string());
             }
             Err(error) => unsignable.push(format!("{id}: {error}")),
         }
 
-        // Reject path: the same receipt with the packet emitted by something other
-        // than the endpoint must be refused before any payload exists. Upstream is
-        // structurally immune - it reads the endpoint contract's own logs - so this
-        // is the arm where only this service can get it wrong.
+        // Both services must refuse the tampered receipt. Upstream's own refusal is
+        // recorded in the fixture by running its resolver over the same bytes, so
+        // this is a comparison and not an assumption about upstream's shape.
+        let upstream_refusal = expected["foreignEmitter"].as_str().unwrap_or("(absent)");
+        assert!(
+            upstream_refusal.starts_with("refused:"),
+            "{id}: upstream accepted a foreign emitter: {upstream_refusal}"
+        );
+
+        // This service's own refusal of the same tampered receipt, before any
+        // payload exists.
         let mut foreign = pathway["receipt"].clone();
         for log in foreign["logs"].as_array_mut().unwrap() {
             log["address"] = Value::from("0x00000000000000000000000000000000deadbeef");
