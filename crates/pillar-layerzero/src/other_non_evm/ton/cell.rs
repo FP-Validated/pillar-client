@@ -99,25 +99,41 @@ mod tests {
     // target: dvnAddressImplementation })`), encoder at
     // `packages/contracts/lz-ton-contracts/src/classes/index.ts:103`.
     //
-    // Evidence limit: neither constant has a source-backed reproduction. The
-    // corpus entry `ton-uln-v3-boc-dvn-verify-cell` carries `upstreamBehavior`
-    // only — not the `sourceBackedExpected` block that
-    // `solana-uln-v3-execute-transaction-digest` has — and the upstream fixture
-    // extractor covers sui/starknet/solana. These tests therefore lock the codec
-    // against a recorded value; they do not prove byte parity with a TS run.
-    const DVN_CALL_DATA_BOC: &str = "b5ee9c72410204010001570001ef65786563506172616d73815ee4ffc625ed4a7b82befffffffffffffffffffffffffffffffffffffffffffffccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc00000001c4fecc02652abd38461e7f7e3139969b96902727f10fbc612990b3ad243f4a6c8e3e6724f9a7973e010197000000004d644164647293ff2057bffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0ac9e984a38af418a0481fd5fe59f44be3e53ad657c9d296f40be4fddaec930202016700556c6e566572696679615ee4ffcffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc000000000000001e0300a700000000417474657374815ed897bfffffffffffffffffffffffffffffffffffffffffffffffffffffffffff8561f69eed245ee440b8e885dc3d2c3cf862d6dd7edec8ec57fa2a6e9ae0db4000000000000001021da1ae04";
-    const DVN_CALL_DATA_HASH: &str =
-        "ed48fa88b46b0044f359a8ee91c5e12772bf731eb09ce22837f6a7965fa0607d";
+    // The BOC and its representation hash come from the parity fixture: upstream
+    // parsed this exact BOC with `@ton/core` and reported both its hash and its
+    // re-serialized bytes, so neither constant is this port checking itself.
+    // `payload.rs`'s `build_matches_gasolina_for_every_ton_vector` covers the
+    // built payloads; these two cover the primitives underneath them.
+    fn codec_lock() -> (String, String) {
+        let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.push("tests");
+        path.push("gasolina_parity");
+        path.push("ton_dvn_verify.json");
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("missing {}: {error}", path.display()));
+        let fixture: serde_json::Value = serde_json::from_str(&raw).expect("parses");
+        let lock = &fixture["codecLock"];
+        assert_eq!(
+            lock["boc"], lock["reserializedBoc"],
+            "upstream's own round trip must be byte-identical for this to mean anything"
+        );
+        (
+            lock["boc"].as_str().unwrap().to_string(),
+            lock["reprHash"].as_str().unwrap().to_string(),
+        )
+    }
 
     #[test]
-    fn repr_hash_matches_recorded_execute_params_cell() {
-        let cell = boc_from_hex(DVN_CALL_DATA_BOC).expect("parse recorded BOC");
-        assert_eq!(repr_hash_hex(&cell).unwrap(), DVN_CALL_DATA_HASH);
+    fn repr_hash_matches_upstream_for_the_execute_params_cell() {
+        let (boc, expected_hash) = codec_lock();
+        let cell = boc_from_hex(&boc).expect("parse BOC");
+        assert_eq!(repr_hash_hex(&cell).unwrap(), expected_hash);
     }
 
     #[test]
     fn boc_round_trip_is_byte_identical() {
-        let cell = boc_from_hex(DVN_CALL_DATA_BOC).expect("parse recorded BOC");
-        assert_eq!(boc_to_hex(&cell).unwrap(), DVN_CALL_DATA_BOC);
+        let (boc, _) = codec_lock();
+        let cell = boc_from_hex(&boc).expect("parse BOC");
+        assert_eq!(boc_to_hex(&cell).unwrap(), boc);
     }
 }

@@ -124,106 +124,89 @@ pub fn build_ton_dvn_verify(
 mod tests {
     use super::*;
     use pillar_config::ton_code_cell;
+    use serde_json::Value;
 
-    fn code() -> TonContractCodeCells {
-        TonContractCodeCells {
+    fn gasolina_parity_json(name: &str) -> String {
+        let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.push("tests");
+        path.push("gasolina_parity");
+        path.push(name);
+        std::fs::read_to_string(&path).unwrap_or_else(|error| {
+            panic!(
+                "missing Gasolina parity fixture {}: {error}",
+                path.display()
+            )
+        })
+    }
+
+    /// These BOCs are upstream's output, not values this port recorded from
+    /// itself. The fixture was produced by running `buildDvnVerifyCallData`,
+    /// `buildULNCallData` and the two address constructors from
+    /// `@monorepo/lz-ton-contracts` over the same inputs; its `_provenance`
+    /// block carries the entrypoints and the argument that the reproduction
+    /// touches no node. Before that reproduction existed these values could
+    /// only be described as codec regression locks.
+    ///
+    /// The three vectors are the cases where the cell encoding can go wrong
+    /// without the others noticing: a normal single-cell message, an empty
+    /// message, and a 200-byte message that forces `hexToCells` to split on a
+    /// non byte-aligned 1023-bit boundary.
+    #[test]
+    fn build_matches_gasolina_for_every_ton_vector() {
+        let fixture: Value =
+            serde_json::from_str(&gasolina_parity_json("ton_dvn_verify.json")).expect("parses");
+        let code = TonContractCodeCells {
             uln: ton_code_cell("Uln").unwrap().to_string(),
             uln_connection: ton_code_cell("UlnConnection").unwrap().to_string(),
+        };
+
+        let vectors = fixture["vectors"].as_array().expect("vectors");
+        assert_eq!(vectors.len(), 3, "every recorded vector must be compared");
+
+        for vector in vectors {
+            let id = vector["id"].as_str().unwrap();
+            let input = &vector["input"];
+            let out = build_ton_dvn_verify(&TonDvnVerifyRequest {
+                src_eid: u32::try_from(input["srcEid"].as_u64().unwrap()).unwrap(),
+                dst_eid: u32::try_from(input["dstEid"].as_u64().unwrap()).unwrap(),
+                sender: input["sender"].as_str().unwrap(),
+                receiver: input["receiver"].as_str().unwrap(),
+                guid: input["guid"].as_str().unwrap(),
+                nonce: input["nonce"].as_u64().unwrap(),
+                message: input["message"].as_str().unwrap(),
+                block_confirmation: input["blockConfirmation"].as_i64().unwrap(),
+                expiration: input["expiration"].as_i64().unwrap(),
+                uln_manager_address: vector["ulnManagerAddress"].as_str().unwrap(),
+                target: input["dvnImplementation"].as_str().unwrap(),
+                code: &code,
+            })
+            .unwrap_or_else(|error| panic!("{id}: build failed: {error:?}"));
+
+            assert_eq!(
+                out.packet_hash,
+                vector["packetHash"].as_str().unwrap(),
+                "{id}: lz::Packet representation hash"
+            );
+            assert_eq!(
+                out.target_contract,
+                vector["targetContract"].as_str().unwrap(),
+                "{id}: addressToHex(uln.address)"
+            );
+            assert_eq!(
+                out.uln_call_data_boc,
+                vector["ulnCallDataBoc"].as_str().unwrap(),
+                "{id}: md::MdAddress BOC"
+            );
+            assert_eq!(
+                out.dvn_call_data_boc,
+                vector["dvnCallDataBoc"].as_str().unwrap(),
+                "{id}: md::ExecuteParams BOC"
+            );
+            assert_eq!(
+                out.hash_call_data,
+                format!("0x{}", vector["hashCallData"].as_str().unwrap()),
+                "{id}: signed hash"
+            );
         }
-    }
-
-    #[test]
-    fn build_matches_oracle_vec_a() {
-        let code = code();
-        let out = build_ton_dvn_verify(&TonDvnVerifyRequest {
-            src_eid: 30101,
-            dst_eid: 30343,
-            sender: "0x1111111111111111111111111111111111111111",
-            receiver: "0:2222222222222222222222222222222222222222222222222222222222222222",
-            guid: "0x3333333333333333333333333333333333333333333333333333333333333333",
-            nonce: 42,
-            message: "0xcafebabe",
-            block_confirmation: 15,
-            expiration: 1234567890,
-            uln_manager_address: "EQAGtSsRq69lvx_0fFfokLpK1qdaaIWbvlpRwfxFGVTFTLrH",
-            target: "0:4444444444444444444444444444444444444444444444444444444444444444",
-            code: &code,
-        })
-        .unwrap();
-        assert_eq!(
-            out.packet_hash,
-            "89d2af9622b30f26deeb8af84a30559d55a0ac6e7cdf77ca6e1b48f125062469"
-        );
-        assert_eq!(
-            out.hash_call_data,
-            "0x5e098fe4a9092360a48d98507c75e2e4808170d27ef37fe380d95c8fdddd07b6"
-        );
-        assert_eq!(out.uln_call_data_boc, "b5ee9c724101030100dc000197000000004d644164647293ff2057bffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd806e41da72dfea3810968100343c9e6885a828d334d76475f1d1a12677fa48fe01016700556c6e566572696679615ee4ffcffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc00000000000000aa0200a700000000417474657374815ed897bffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe274abe588acc3c9b7bae2be128c156755682b1b9f37ddf29b86d23c4941891a4000000000000003eee35d5a2");
-        assert_eq!(out.dvn_call_data_boc, "b5ee9c72410204010001570001ef65786563506172616d73815ee4ffc625ed4a7b82befffffffffffffffffffffffffffffffffffffffffffffd11111111111111111111111111111111111111111111111111111111111111100000000126580b4a652abd385d1313776775216ef61bb53bd51b863623f633635f429e54ebd5baebb7daaf72010197000000004d644164647293ff2057bffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd806e41da72dfea3810968100343c9e6885a828d334d76475f1d1a12677fa48fe02016700556c6e566572696679615ee4ffcffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc00000000000000aa0300a700000000417474657374815ed897bffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe274abe588acc3c9b7bae2be128c156755682b1b9f37ddf29b86d23c4941891a4000000000000003e7d0b6586");
-        assert_eq!(
-            out.target_contract,
-            "0x1744c4ddd9dd485bbd86ed4ef546e18d88fd8cd8d7d0a7953af56ebaedf6abdc"
-        );
-    }
-
-    #[test]
-    fn build_matches_oracle_vec_b_empty_message() {
-        let code = code();
-        let out = build_ton_dvn_verify(&TonDvnVerifyRequest {
-            src_eid: 30101,
-            dst_eid: 30343,
-            sender: "0x00000000000000000000000000000000deadbeef",
-            receiver: "0:2222222222222222222222222222222222222222222222222222222222222222",
-            guid: "0x1111111111111111111111111111111111111111111111111111111111111111",
-            nonce: 1,
-            message: "0x",
-            block_confirmation: 1,
-            expiration: 2000000000,
-            uln_manager_address: "EQAGtSsRq69lvx_0fFfokLpK1qdaaIWbvlpRwfxFGVTFTLrH",
-            target: "0:4444444444444444444444444444444444444444444444444444444444444444",
-            code: &code,
-        })
-        .unwrap();
-        assert_eq!(
-            out.packet_hash,
-            "f9b4a8491dd87066fd8e5b12dffb34538cb7021e18e0d6cc75cec950ccdfa545"
-        );
-        assert_eq!(
-            out.hash_call_data,
-            "0x8821c83eca090defb0ef1dda1728a474a1a23442e8021d11119c618963c59b5b"
-        );
-        assert_eq!(out.dvn_call_data_boc, "b5ee9c72410204010001570001ef65786563506172616d73815ee4ffc625ed4a7b82befffffffffffffffffffffffffffffffffffffffffffffd111111111111111111111111111111111111111111111111111111111111111000000001dcd65002652abd385d1313776775216ef61bb53bd51b863623f633635f429e54ebd5baebb7daaf72010197000000004d644164647293ff2057bffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc0a340fcc8f0896efee58a8073ff83b1f552424483648896ab841cf2b09fb10da02016700556c6e566572696679615ee4ffcffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc00000000000000060300a700000000417474657374815ed897bfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe6d2a1247761c19bf6396c4b7fecd14e32dc087863835b31d73b2543337e95140000000000000006635a9c2d");
-    }
-
-    #[test]
-    fn build_matches_oracle_vec_c_large_multicell_message() {
-        // 200-byte message -> multi-cell hex_to_cells chain (non-byte-aligned
-        // 1023-bit split), the load-bearing path feeding packet_hash.
-        let code = code();
-        let message = format!("0x{}", "0123456789abcdef".repeat(25));
-        let out = build_ton_dvn_verify(&TonDvnVerifyRequest {
-            src_eid: 30101,
-            dst_eid: 30343,
-            sender: "0x1111111111111111111111111111111111111111",
-            receiver: "0:2222222222222222222222222222222222222222222222222222222222222222",
-            guid: "0x5555555555555555555555555555555555555555555555555555555555555555",
-            nonce: 7,
-            message: &message,
-            block_confirmation: 20,
-            expiration: 1_700_000_000,
-            uln_manager_address: "EQAGtSsRq69lvx_0fFfokLpK1qdaaIWbvlpRwfxFGVTFTLrH",
-            target: "0:4444444444444444444444444444444444444444444444444444444444444444",
-            code: &code,
-        })
-        .unwrap();
-        assert_eq!(
-            out.packet_hash,
-            "b12317bfeb0de4d97f9c7a24da3de08bbab61c22c5fcc99972e2cd2741ae091a"
-        );
-        assert_eq!(
-            out.hash_call_data,
-            "0x6a77fe5945a0c8d3550f8d6b9a19d0603e27374036abb7e1e6c96507f3e7fca6"
-        );
-        assert_eq!(out.dvn_call_data_boc, "b5ee9c72410204010001570001ef65786563506172616d73815ee4ffc625ed4a7b82befffffffffffffffffffffffffffffffffffffffffffffd111111111111111111111111111111111111111111111111111111111111111000000001954fc402652abd385d1313776775216ef61bb53bd51b863623f633635f429e54ebd5baebb7daaf72010197000000004d644164647293ff2057bffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd806e41da72dfea3810968100343c9e6885a828d334d76475f1d1a12677fa48fe02016700556c6e566572696679615ee4ffcffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc000000000000001e0300a700000000417474657374815ed897bffffffffffffffffffffffffffffffffffffffffffffffffffffffffffec48c5effac379365fe71e89368f7822eead8708b17f32665cb8b349d06b824680000000000000052faf64559");
     }
 }

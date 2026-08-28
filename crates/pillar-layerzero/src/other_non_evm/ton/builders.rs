@@ -154,19 +154,8 @@ pub fn build_execute_params(
 
 #[cfg(test)]
 mod tests {
-    use super::super::cell::{boc_from_hex, boc_to_hex, repr_hash_hex};
-    use super::super::cl_declare::cl_get_uint_be;
+    use super::super::cell::{boc_to_hex, repr_hash_hex};
     use super::*;
-
-    const ULN_CALL_DATA_BOC: &str = "b5ee9c724101030100dc000197000000004d644164647293ff2057bffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0ac9e984a38af418a0481fd5fe59f44be3e53ad657c9d296f40be4fddaec930201016700556c6e566572696679615ee4ffcffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc000000000000001e0200a700000000417474657374815ed897bfffffffffffffffffffffffffffffffffffffffffffffffffffffffffff8561f69eed245ee440b8e885dc3d2c3cf862d6dd7edec8ec57fa2a6e9ae0db40000000000000010207a1486a";
-    const DVN_CALL_DATA_BOC: &str = "b5ee9c72410204010001570001ef65786563506172616d73815ee4ffc625ed4a7b82befffffffffffffffffffffffffffffffffffffffffffffccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc00000001c4fecc02652abd38461e7f7e3139969b96902727f10fbc612990b3ad243f4a6c8e3e6724f9a7973e010197000000004d644164647293ff2057bffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0ac9e984a38af418a0481fd5fe59f44be3e53ad657c9d296f40be4fddaec930202016700556c6e566572696679615ee4ffcffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc000000000000001e0300a700000000417474657374815ed897bfffffffffffffffffffffffffffffffffffffffffffffffffffffffffff8561f69eed245ee440b8e885dc3d2c3cf862d6dd7edec8ec57fa2a6e9ae0db4000000000000001021da1ae04";
-    const DVN_CALL_DATA_HASH: &str =
-        "ed48fa88b46b0044f359a8ee91c5e12772bf731eb09ce22837f6a7965fa0607d";
-    const PACKET_HASH: &str = "e1587da7bb4917b9102e3a21770f4b0f3e18b5b75fb7b23b15fe8a9ba6b836d0";
-    const TARGET: &str = "11879fdf8c4e65a6e5a409c9fc43ef184a642ceb490fd29b238f99c93e69e5cf";
-    const NONCE: u64 = 7;
-    const CONFIRMATIONS: i64 = 64;
-    const EXPIRATION: i64 = 1_900_000_000;
 
     fn to_32(hex: &str) -> [u8; 32] {
         let bytes = hex::decode(hex.trim_start_matches("0x")).unwrap();
@@ -175,62 +164,70 @@ mod tests {
         out
     }
 
-    #[test]
-    fn uln_call_data_matches_recorded_vector() {
-        // Extract the opaque UlnConnection address embedded in the recorded vector
-        // (md::MdAddress field 1) and rebuild from semantic inputs.
-        let golden = boc_from_hex(ULN_CALL_DATA_BOC).unwrap();
-        let uln_conn_addr: [u8; 32] = cl_get_uint_be(&golden, 1, 256).unwrap().try_into().unwrap();
-
-        let rebuilt =
-            build_uln_call_data(&uln_conn_addr, NONCE, CONFIRMATIONS, &to_32(PACKET_HASH)).unwrap();
-        assert_eq!(boc_to_hex(&rebuilt).unwrap(), ULN_CALL_DATA_BOC);
+    fn ton_vectors() -> Vec<serde_json::Value> {
+        let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.push("tests");
+        path.push("gasolina_parity");
+        path.push("ton_dvn_verify.json");
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("missing {}: {error}", path.display()));
+        let fixture: serde_json::Value = serde_json::from_str(&raw).expect("parses");
+        fixture["vectors"].as_array().expect("vectors").clone()
     }
 
+    /// The two cell encoders, checked one level below `build_ton_dvn_verify`: the
+    /// opaque addresses and the packet hash are supplied rather than derived, so a
+    /// failure here is the encoder rather than the address derivation. Every
+    /// expected value is upstream's, taken from the same parity fixture
+    /// `payload.rs` uses.
     #[test]
-    fn dvn_call_data_matches_recorded_vector() {
-        let golden_uln = boc_from_hex(ULN_CALL_DATA_BOC).unwrap();
-        let uln_conn_addr: [u8; 32] = cl_get_uint_be(&golden_uln, 1, 256)
-            .unwrap()
-            .try_into()
-            .unwrap();
-        let golden_dvn = boc_from_hex(DVN_CALL_DATA_BOC).unwrap();
-        // Opaque, on-chain / derivation-supplied inputs, extracted from the vector:
-        // field 0 = target (dvnAddressImplementation), field 4 = forwardingAddress (uln.address).
-        let target: [u8; 32] = cl_get_uint_be(&golden_dvn, 0, 256)
-            .unwrap()
-            .try_into()
-            .unwrap();
-        let uln_addr: [u8; 32] = cl_get_uint_be(&golden_dvn, 4, 256)
-            .unwrap()
-            .try_into()
-            .unwrap();
-        // forwardingAddress equals the details targetContract (0x11879fdf... = uln.address).
-        assert_eq!(hex::encode(uln_addr), TARGET);
-        // Semantic fields must decode to the known values.
-        let exp = u64::from_be_bytes(
-            cl_get_uint_be(&golden_dvn, 2, 64)
-                .unwrap()
-                .try_into()
-                .unwrap(),
-        );
-        let op = u32::from_be_bytes(
-            cl_get_uint_be(&golden_dvn, 3, 32)
-                .unwrap()
-                .try_into()
-                .unwrap(),
-        );
-        assert_eq!(exp, EXPIRATION as u64);
-        assert_eq!(op as u64, OP_ULN_VERIFY);
+    fn uln_and_execute_params_encoders_match_upstream_from_semantic_inputs() {
+        for vector in ton_vectors() {
+            let id = vector["id"].as_str().unwrap();
+            let input = &vector["input"];
+            let nonce = input["nonce"].as_u64().unwrap();
+            let confirmations = input["blockConfirmation"].as_i64().unwrap();
+            let expiration = input["expiration"].as_i64().unwrap();
 
-        let uln_call_data =
-            build_uln_call_data(&uln_conn_addr, NONCE, CONFIRMATIONS, &to_32(PACKET_HASH)).unwrap();
-        let dvn =
-            build_execute_params(&target, uln_call_data, EXPIRATION, OP_ULN_VERIFY, &uln_addr)
-                .unwrap();
+            let uln_call_data = build_uln_call_data(
+                &to_32(vector["ulnConnectionAddress"].as_str().unwrap()),
+                nonce,
+                confirmations,
+                &to_32(vector["packetHash"].as_str().unwrap()),
+            )
+            .unwrap();
+            assert_eq!(
+                boc_to_hex(&uln_call_data).unwrap(),
+                vector["ulnCallDataBoc"].as_str().unwrap(),
+                "{id}: md::MdAddress"
+            );
 
-        assert_eq!(boc_to_hex(&dvn).unwrap(), DVN_CALL_DATA_BOC);
-        assert_eq!(repr_hash_hex(&dvn).unwrap(), DVN_CALL_DATA_HASH);
+            let dvn = build_execute_params(
+                &to_32(
+                    input["dvnImplementation"]
+                        .as_str()
+                        .unwrap()
+                        .split(':')
+                        .nth(1)
+                        .unwrap(),
+                ),
+                uln_call_data,
+                expiration,
+                OP_ULN_VERIFY,
+                &to_32(vector["targetContract"].as_str().unwrap()),
+            )
+            .unwrap();
+            assert_eq!(
+                boc_to_hex(&dvn).unwrap(),
+                vector["dvnCallDataBoc"].as_str().unwrap(),
+                "{id}: md::ExecuteParams"
+            );
+            assert_eq!(
+                repr_hash_hex(&dvn).unwrap(),
+                vector["hashCallData"].as_str().unwrap(),
+                "{id}: signed hash"
+            );
+        }
     }
 
     #[test]
