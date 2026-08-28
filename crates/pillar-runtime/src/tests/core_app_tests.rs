@@ -240,6 +240,7 @@ struct VerticalTransport {
     calls: RecordedJsonCalls,
     receipt: Arc<Mutex<Option<Value>>>,
     dst_receive_uln_302: &'static str,
+    extra_context_verdict: Arc<Mutex<bool>>,
 }
 
 #[async_trait]
@@ -253,7 +254,16 @@ impl JsonRpcTransport for VerticalTransport {
         self.calls
             .lock()
             .unwrap()
-            .push((url, headers, body.clone()));
+            .push((url.clone(), headers, body.clone()));
+        // The extra-context endpoint is not JSON-RPC: it is a plain POST of
+        // `{sentEvent, from}` whose truthy body is the verdict
+        // (`validation_extra_context.rs:32-47`).
+        if url == EXTRA_CONTEXT_URL {
+            return match *self.extra_context_verdict.lock().unwrap() {
+                true => Ok(json!(true)),
+                false => Ok(json!(false)),
+            };
+        }
         match body["method"].as_str().unwrap_or_default() {
             "eth_getTransactionReceipt" => self
                 .receipt
@@ -263,9 +273,19 @@ impl JsonRpcTransport for VerticalTransport {
                 .ok_or_else(|| "receipt unavailable".to_string()),
             "eth_blockNumber" => Ok(json!({"result": "0x64"})),
             "eth_chainId" => Ok(json!({"result": "0x1"})),
-            "eth_getBlockByNumber" => {
-                Ok(json!({"result": {"number": "0x64", "timestamp": "0x6862d3a5"}}))
-            }
+            // URL-aware on purpose. Readiness asks the source for "latest" and the
+            // expiration window asks the destination, both with this same method.
+            // Answering them identically would hide a check that reads the wrong
+            // chain, so the destination's block is recent and the source's is years
+            // older - the expiration in `vertical_request` only fits the former.
+            "eth_getBlockByNumber" => Ok(json!({"result": {
+                "number": "0x64",
+                "timestamp": if url.contains("dst-rpc") {
+                    DESTINATION_BLOCK_TIMESTAMP
+                } else {
+                    STALE_SOURCE_BLOCK_TIMESTAMP
+                }
+            }})),
             "eth_getTransactionByHash" => {
                 Ok(json!({"result": {"from": "0x1111111111111111111111111111111111111111"}}))
             }
@@ -309,6 +329,17 @@ impl JsonRpcTransport for VerticalTransport {
         Err("unexpected GET on the EVM vertical".to_string())
     }
 }
+
+/// The expiration in `vertical_request` sits inside the window this timestamp opens.
+const DESTINATION_BLOCK_TIMESTAMP: &str = "0x6862d3a5";
+/// Years earlier, so an expiration check that read the source chain would reject the
+/// request rather than quietly agree with the destination.
+const STALE_SOURCE_BLOCK_TIMESTAMP: &str = "0x6000d3a5";
+/// Configuring this is what makes `validate_extra_context_request` do anything at all:
+/// with neither a URL nor a Lambda name it returns `Ok(())` immediately
+/// (`validation_extra_context.rs:13-16`), so a vertical test that leaves it unset never
+/// exercises the stage it claims to cover.
+const EXTRA_CONTEXT_URL: &str = "https://extra-context.example/verify";
 
 /// The addresses the production wiring actually trusts, per environment
 /// (`layerzero_runtime/config/evm.rs:70-92` reads them from the generated deployment
@@ -427,6 +458,14 @@ fn vertical_env_map(env: &VerticalEnvironment) -> HashMap<String, String> {
                 env.src_chain, env.dst_chain
             ),
         ),
+        (
+            pillar_config::EXTRA_CONTEXT_REQUEST_URL.to_string(),
+            EXTRA_CONTEXT_URL.to_string(),
+        ),
+        (
+            pillar_config::EXTRA_CONTEXT_REQUEST_AUTH_TOKEN.to_string(),
+            "extra-context-token".to_string(),
+        ),
         (SIGNER_TYPE.to_string(), "LOCAL_MNEMONIC".to_string()),
         (
             pillar_config::LZ_WALLETS.to_string(),
@@ -443,11 +482,20 @@ async fn vertical_app(
     env: &VerticalEnvironment,
     receipt: Option<Value>,
 ) -> (RuntimeServerApp<VerticalTransport>, RecordedJsonCalls) {
+    vertical_app_with_extra_context(env, receipt, true).await
+}
+
+async fn vertical_app_with_extra_context(
+    env: &VerticalEnvironment,
+    receipt: Option<Value>,
+    extra_context_verdict: bool,
+) -> (RuntimeServerApp<VerticalTransport>, RecordedJsonCalls) {
     let calls: RecordedJsonCalls = Arc::new(Mutex::new(Vec::new()));
     let transport = VerticalTransport {
         calls: calls.clone(),
         receipt: Arc::new(Mutex::new(receipt)),
         dst_receive_uln_302: env.dst_receive_uln_302,
+        extra_context_verdict: Arc::new(Mutex::new(extra_context_verdict)),
     };
     let app =
         RuntimeServerApp::from_env_map_with_runtime_core(vertical_env_map(env), transport, || {
@@ -481,16 +529,45 @@ async fn stages_of(app: &RuntimeServerApp<VerticalTransport>) -> Vec<String> {
         .collect()
 }
 
+/// The `{sentEvent, from}` body the extra-context stage posts
+/// (`validation_extra_context.rs:28-31`), or `None` if that POST never happened.
+fn extra_context_payload(calls: &RecordedJsonCalls) -> Option<Value> {
+    calls
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|(url, _, _)| url == EXTRA_CONTEXT_URL)
+        .map(|(_, _, body)| body.clone())
+}
+
+fn extra_context_headers(calls: &RecordedJsonCalls) -> Option<HashMap<String, String>> {
+    calls
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|(url, _, _)| url == EXTRA_CONTEXT_URL)
+        .map(|(_, headers, _)| headers.clone())
+}
+
 fn observed_methods(calls: &RecordedJsonCalls) -> Vec<String> {
     calls
         .lock()
         .unwrap()
         .iter()
-        .map(|(_, _, body)| {
-            let method = body["method"].as_str().unwrap_or("?");
+        .map(|(url, _, body)| {
+            let host = if url == EXTRA_CONTEXT_URL {
+                "extra-context"
+            } else if url.contains("dst-rpc") {
+                "dst"
+            } else {
+                "src"
+            };
+            let method = body["method"].as_str().unwrap_or("post");
             match body["params"][0]["data"].as_str() {
-                Some(data) => format!("{method}[sel={}]", &data[..data.len().min(10)]),
-                None => method.to_string(),
+                Some(data) => {
+                    format!("{host}:{method}[sel={}]", &data[..data.len().min(10)])
+                }
+                None => format!("{host}:{method}"),
             }
         })
         .collect()
@@ -525,6 +602,76 @@ async fn assert_vertical_completes(env: &VerticalEnvironment) {
     assert!(
         response.signatures.is_empty().eq(&false),
         "the {} vertical produced no signature",
+        env.environment
+    );
+    // Proof that the extra-context stage was configured into existence rather than
+    // skipped: the endpoint was POSTed to, and the source-transaction lookup it
+    // depends on was issued against the SOURCE chain.
+    // Proof that the stage did its work, not merely that some request reached the
+    // URL: the body carries the sent event and the `from` the source lookup resolved,
+    // and the configured auth token is attached.
+    let payload = extra_context_payload(&calls).unwrap_or_else(|| {
+        panic!(
+            "the extra-context endpoint was never called on {}, so that stage was \
+             bypassed; methods={methods:?}",
+            env.environment
+        )
+    });
+    assert_eq!(
+        payload["from"], "0x1111111111111111111111111111111111111111",
+        "the extra-context body did not carry the address the source lookup resolved: \
+         {payload}"
+    );
+    assert_eq!(
+        payload["sentEvent"]["onChainEvent"]["txHash"], "0xtx",
+        "the extra-context body did not carry the sent event: {payload}"
+    );
+    // The guid the observable names, carried out of the decoded packet rather than
+    // supplied by the caller.
+    assert_eq!(
+        payload["sentEvent"]["guid"],
+        "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "the extra-context body did not carry the packet's guid: {payload}"
+    );
+    // The pathway is this environment's, resolved from the real endpoint id tables.
+    assert_eq!(
+        payload["sentEvent"]["lzMessageId"]["pathwayId"]["srcEid"], env.src_eid,
+        "the extra-context body carried the wrong source endpoint id: {payload}"
+    );
+    assert_eq!(
+        payload["sentEvent"]["lzMessageId"]["pathwayId"]["srcChainName"], env.src_chain,
+        "the extra-context body carried the wrong source chain: {payload}"
+    );
+    // And the packet was attributed to the address the production wiring trusts,
+    // which is the whole reason the shared fixture had to be rewritten.
+    assert_eq!(
+        payload["sentEvent"]["packetEmitAddress"],
+        env.src_endpoint_v2.to_lowercase(),
+        "the packet was not attributed to this environment's EndpointV2: {payload}"
+    );
+    assert_eq!(
+        extra_context_headers(&calls)
+            .unwrap_or_default()
+            .get("Authorization")
+            .map(String::as_str),
+        Some("Bearer extra-context-token"),
+        "the configured extra-context auth token was not attached"
+    );
+    assert!(
+        methods
+            .iter()
+            .any(|call| call == "src:eth_getTransactionByHash"),
+        "the source-transaction lookup behind extra context never ran on {}; \
+         methods={methods:?}",
+        env.environment
+    );
+    // The expiration window is the destination's, not the source's: the source's
+    // stale block would have rejected this request.
+    assert!(
+        methods
+            .iter()
+            .any(|call| call == "dst:eth_getBlockByNumber"),
+        "the destination was never asked for its latest block on {}; methods={methods:?}",
         env.environment
     );
 }
@@ -611,5 +758,48 @@ async fn production_vertical_never_signs_when_validation_rejects_the_request() {
     assert!(
         stages.iter().all(|stage| stage != "sign"),
         "a rejected validation reached the key; stages={stages:?}"
+    );
+}
+
+/// The extra-context stage is the last thing the validator does, and its verdict comes
+/// from an external service rather than from a chain. A falsy verdict must reject, and
+/// must reject before the builder and the key - which is only observable at all because
+/// `EXTRA_CONTEXT_REQUEST_URL` is configured; without it the stage returns `Ok(())`
+/// immediately (`validation_extra_context.rs:13-16`).
+#[tokio::test]
+async fn production_vertical_never_signs_when_extra_context_rejects_the_request() {
+    let (app, calls) = vertical_app_with_extra_context(
+        &MAINNET_VERTICAL,
+        Some(vertical_receipt(&MAINNET_VERTICAL)),
+        false,
+    )
+    .await;
+
+    let outcome = app
+        .sign_request_v2(vertical_request(&MAINNET_VERTICAL))
+        .await;
+
+    let methods = observed_methods(&calls);
+    assert!(
+        outcome.is_err(),
+        "a falsy extra-context verdict must fail the request, got {outcome:?}"
+    );
+    assert!(
+        methods.iter().any(|call| call == "extra-context:post"),
+        "the extra-context endpoint was never consulted, so this test proves nothing; \
+         methods={methods:?}"
+    );
+    let stages = stages_of(&app).await;
+    assert!(
+        stages.iter().any(|stage| stage == "validate"),
+        "the vertical did not reach the validator; stages={stages:?}"
+    );
+    assert!(
+        stages.iter().all(|stage| stage != "build_hash_call_data"),
+        "the builder ran after extra context rejected; stages={stages:?}"
+    );
+    assert!(
+        stages.iter().all(|stage| stage != "sign"),
+        "a rejected extra-context verdict reached the key; stages={stages:?}"
     );
 }
