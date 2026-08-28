@@ -239,7 +239,9 @@ async fn production_composition_records_every_sign_stage() {
 struct VerticalTransport {
     calls: RecordedJsonCalls,
     receipt: Arc<Mutex<Option<Value>>>,
+    dst_endpoint_v2: &'static str,
     dst_receive_uln_302: &'static str,
+    dst_receive_uln_302_view: &'static str,
     extra_context_verdict: Arc<Mutex<bool>>,
 }
 
@@ -298,19 +300,48 @@ impl JsonRpcTransport for VerticalTransport {
             //   0x3c782a52 hashLookup(bytes32,bytes32,address)
             "eth_call" => {
                 let data = body["params"][0]["data"].as_str().unwrap_or_default();
-                match &data[..data.len().min(10)] {
-                    // -> (address lib, bool isDefault)
+                let to = body["params"][0]["to"].as_str().unwrap_or_default();
+                let selector = &data[..data.len().min(10)];
+                // Each selector belongs to exactly one contract, so the target is
+                // asserted here rather than left to chance. Swapping the receive
+                // contract for its view - the two are different addresses and only
+                // the view answers `verifiable` - is otherwise invisible.
+                let expected = match selector {
+                    "0x402f8468" => self.dst_endpoint_v2,
+                    "0x43ea4fa9" | "0x3c782a52" => self.dst_receive_uln_302,
+                    "0x27d12cd9" => self.dst_receive_uln_302_view,
+                    other => {
+                        return Err(format!(
+                            "unstubbed eth_call selector {other} to {to}: {body}"
+                        ))
+                    }
+                };
+                if to.to_lowercase() != expected.to_lowercase() {
+                    return Err(format!(
+                        "eth_call {selector} went to {to}, expected {expected}"
+                    ));
+                }
+                match selector {
+                    // EndpointV2.getReceiveLibrary(address,uint32) -> (address, bool)
                     "0x402f8468" => Ok(json!({"result": format!(
                         "0x{:0>64}{:0>64}",
                         self.dst_receive_uln_302[2..].to_lowercase(),
                         "1"
                     )})),
-                    // one word read as the required confirmations (`abi.rs:344-350`)
+                    // ReceiveUln302.getUlnConfig(address,uint32): one word read as the
+                    // required confirmations (`abi.rs:344-350`).
                     "0x43ea4fa9" => Ok(json!({"result": format!("0x{:0>64}", "1")})),
-                    // -> (bool submitted, uint64 confirmations) (`abi.rs:305-308`).
-                    // Not yet submitted, which is what makes this payload signable.
+                    // ReceiveUln302.hashLookup(bytes32,bytes32,address) ->
+                    // (bool submitted, uint64 confirmations) (`abi.rs:305-308`).
+                    // Not submitted, which is what makes this payload signable.
                     "0x3c782a52" => Ok(json!({"result": format!("0x{}", "0".repeat(128))})),
-                    _ => Ok(json!({"result": format!("0x{}", "0".repeat(64))})),
+                    // ReceiveUln302View.verifiable(bytes,bytes32) -> delivery state
+                    // (`abi.rs:330-340`). 0 is `Verifying`: the packet is still
+                    // collecting verifications, so this DVN has not signed it yet.
+                    // Stated explicitly - a zero-word catch-all produced this same
+                    // answer by accident and hid the call entirely.
+                    "0x27d12cd9" => Ok(json!({"result": format!("0x{:0>64}", "0")})),
+                    other => Err(format!("unreachable selector {other}")),
                 }
             }
             other => Err(format!("unstubbed method {other}: {body}")),
@@ -354,7 +385,9 @@ struct VerticalEnvironment {
     dst_eid: u32,
     src_endpoint_v2: &'static str,
     src_send_uln_302: &'static str,
+    dst_endpoint_v2: &'static str,
     dst_receive_uln_302: &'static str,
+    dst_receive_uln_302_view: &'static str,
 }
 
 const MAINNET_VERTICAL: VerticalEnvironment = VerticalEnvironment {
@@ -365,7 +398,9 @@ const MAINNET_VERTICAL: VerticalEnvironment = VerticalEnvironment {
     dst_eid: 30_102,
     src_endpoint_v2: "0x1a44076050125825900e736c501f859c50fE728c",
     src_send_uln_302: "0xbB2Ea70C9E858123480642Cf96acbcCE1372dCe1",
+    dst_endpoint_v2: "0x1a44076050125825900e736c501f859c50fE728c",
     dst_receive_uln_302: "0xB217266c3A98C8B2709Ee26836C98cf12f6cCEC1",
+    dst_receive_uln_302_view: "0x311867F9cF785f4233fbb0cC6CAd2dd3f071F0FF",
 };
 
 /// Testnet is not mainnet with different numbers: `ethereum` has a testnet endpoint id
@@ -379,7 +414,9 @@ const TESTNET_VERTICAL: VerticalEnvironment = VerticalEnvironment {
     dst_eid: 40_102,
     src_endpoint_v2: "0x6EDCE65403992e310A62460808c4b910D972f10f",
     src_send_uln_302: "0xcc1ae8Cf5D3904Cef3360A9532B477529b177cCE",
+    dst_endpoint_v2: "0x6EDCE65403992e310A62460808c4b910D972f10f",
     dst_receive_uln_302: "0x188d4bbCeD671A7aA2b5055937F79510A32e9683",
+    dst_receive_uln_302_view: "0xECbc738D306c51E504C4020a4643C4f2FA9ec1a4",
 };
 
 fn vertical_receipt(env: &VerticalEnvironment) -> Value {
@@ -494,7 +531,9 @@ async fn vertical_app_with_extra_context(
     let transport = VerticalTransport {
         calls: calls.clone(),
         receipt: Arc::new(Mutex::new(receipt)),
+        dst_endpoint_v2: env.dst_endpoint_v2,
         dst_receive_uln_302: env.dst_receive_uln_302,
+        dst_receive_uln_302_view: env.dst_receive_uln_302_view,
         extra_context_verdict: Arc::new(Mutex::new(extra_context_verdict)),
     };
     let app =
