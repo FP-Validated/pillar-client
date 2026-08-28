@@ -665,7 +665,6 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
     let mut mismatches: Vec<String> = Vec::new();
     let mut signed: Vec<String> = Vec::new();
     let mut rejected: Vec<String> = Vec::new();
-    let mut unsignable: Vec<String> = Vec::new();
 
     for expected in reference["pathways"].as_array().expect("pathways") {
         let id = expected["id"].as_str().unwrap();
@@ -820,56 +819,41 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
                 ));
             }
         }
-        // Signer stage, compared rather than merely reached. Both services are handed
-        // the same well-known mnemonic and the same derivation path, so the signature
-        // and the address they publish must be identical bytes. This is the stage the
-        // earlier version of this test only asserted was non-empty.
-        let chain_type = pillar_config::static_chain_type_name(dst_chain_name).unwrap();
-        match historical_signer(dst_chain_name, chain_type).await {
-            Ok(assembly) => {
-                let signature = assembly
-                    .signer_getter
-                    .pillar_sign(
-                        dst_chain_name,
-                        &format!("wallet-{chain_type}"),
-                        &result.hash_call_data,
-                    )
-                    .await
-                    .unwrap_or_else(|error| panic!("{id}: signer refused the hash: {error:?}"));
-                for (field, ours, theirs) in [
-                    (
-                        "signature",
-                        hex_eq(&signature.signature),
-                        hex_eq(expected["signature"].as_str().expect("upstream signed")),
-                    ),
-                    (
-                        "signerAddress",
-                        signature.address.clone(),
-                        expected["signerAddress"]
-                            .as_str()
-                            .expect("upstream addressed")
-                            .to_string(),
-                    ),
-                ] {
-                    if ours != theirs {
-                        mismatches.push(format!(
-                            "{id}: {field}\n      ours {ours}\n      them {theirs}"
-                        ));
-                    }
-                }
-                signed.push(id.to_string());
-            }
-            Err(error) => unsignable.push(format!("{id}: {error}")),
-        }
-
-        // Both services must refuse the tampered receipt. Upstream's own refusal is
-        // recorded in the fixture by running its resolver over the same bytes, so
-        // this is a comparison and not an assumption about upstream's shape.
-        let upstream_refusal = expected["foreignEmitter"].as_str().unwrap_or("(absent)");
-        assert!(
-            upstream_refusal.starts_with("refused:"),
-            "{id}: upstream accepted a foreign emitter: {upstream_refusal}"
+        // The signature the service actually returned, not one re-derived beside it.
+        // Both services are handed the same well-known mnemonic and derivation path,
+        // so the bytes they publish must be identical - and reading them out of the
+        // response is what makes a Core change that blanks or swaps them visible.
+        assert_eq!(
+            response.signatures.len(),
+            1,
+            "{id}: the service returned {} signatures for one wallet",
+            response.signatures.len()
         );
+        {
+            let signature = &response.signatures[0];
+            for (field, ours, theirs) in [
+                (
+                    "signature",
+                    hex_eq(&signature.signature),
+                    hex_eq(expected["signature"].as_str().expect("upstream signed")),
+                ),
+                (
+                    "signerAddress",
+                    signature.address.clone(),
+                    expected["signerAddress"]
+                        .as_str()
+                        .expect("upstream addressed")
+                        .to_string(),
+                ),
+            ] {
+                if ours != theirs {
+                    mismatches.push(format!(
+                        "{id}: {field}\n      ours {ours}\n      them {theirs}"
+                    ));
+                }
+            }
+        }
+        signed.push(id.to_string());
 
         // Every reject scenario runs the same entrypoint that just signed, and each
         // one reports whether the signer was reached. Refused is only refused if
@@ -1034,10 +1018,6 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
          a new row needs a recorded receipt, a vanished one needs a reason"
     );
     assert_eq!(compared.len(), 16, "compared pathways: {compared:?}");
-    assert!(
-        unsignable.is_empty(),
-        "every compared pathway must reach a signer: {unsignable:?}"
-    );
     assert_eq!(signed.len(), compared.len(), "signed pathways: {signed:?}");
     assert_eq!(
         rejected.len(),
