@@ -27,7 +27,7 @@ async fn runtime_core_dependencies_from_layerzero_parts_uses_layerzero_builder_f
             validation_checks: checks.clone(),
             legacy_chain_name_resolver: Arc::new(FixedChainResolver),
         },
-        "mainnet",
+        test_v_ids("mainnet"),
         &["V2".to_string(), "V301".to_string()],
     );
 
@@ -101,7 +101,7 @@ fn runtime_core_dependencies_apply_supported_ulns_only_to_legacy_builders() {
             }),
             legacy_chain_name_resolver: Arc::new(FixedChainResolver),
         },
-        "mainnet",
+        test_v_ids("mainnet"),
         &[],
     );
 

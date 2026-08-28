@@ -65,7 +65,7 @@ async fn runtime_layerzero_parts_from_evm_config_wires_evm_resolver_and_builders
         parts.uln_v3_payload_builder,
         parts.uln_read_v1_payload_builder,
         parts.read_payload_resolver,
-        "mainnet",
+        test_v_ids("mainnet"),
     );
     let result = hash_builders["V302"]
         .build_dvn_hash_call_data(
@@ -127,7 +127,7 @@ async fn runtime_layerzero_parts_match_upstream_base_route_hashes() {
         parts.uln_v3_payload_builder,
         parts.uln_read_v1_payload_builder,
         parts.read_payload_resolver,
-        "mainnet",
+        test_v_ids("mainnet"),
     );
     let fixtures = [
         (
@@ -262,7 +262,7 @@ async fn runtime_layerzero_parts_routes_aptos_destination_to_aptos_builder() {
         parts.uln_v3_payload_builder,
         parts.uln_read_v1_payload_builder,
         parts.read_payload_resolver,
-        "mainnet",
+        test_v_ids("mainnet"),
     );
     let sent_event = LzSentEvent {
         lz_message_id: LzMessageId {

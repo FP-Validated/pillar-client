@@ -99,7 +99,8 @@ where
                 },
             )
             .map_err(|error| error.to_string())?,
-            environment,
+            runtime_v_id_by_chain_name(&environment, &available_chain_names)
+                .map_err(|error| error.to_string())?,
             &runtime_config.supported_uln_versions,
         );
 

@@ -48,7 +48,7 @@ async fn other_non_evm_rejected_paths_match_upstream() {
     for case in cases {
         let resolver = Arc::new(Recorder::default());
         let builders =
-            build_hash_call_data_builders(case.v2, case.v3, case.read, resolver, "mainnet");
+            build_hash_call_data_builders(case.v2, case.v3, case.read, resolver, test_v_ids());
         let mut event = sent_event();
         event.lz_message_id.pathway_id.dst_chain_name = case.chain_name.to_string();
 
@@ -97,7 +97,7 @@ async fn stellar_uln_v3_rejects_missing_dvn_address_like_upstream() {
         stellar.clone(),
         stellar,
         resolver,
-        "mainnet",
+        test_v_ids(),
     );
     let mut event = sent_event();
     event.lz_message_id.pathway_id.dst_chain_name = "stellar".to_string();

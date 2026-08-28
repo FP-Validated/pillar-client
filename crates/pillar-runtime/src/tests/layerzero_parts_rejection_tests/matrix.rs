@@ -118,16 +118,16 @@ const HASH_MATRIX_CASES: &[HashMatrixCase] = &[
     },
     HashMatrixCase {
         chain_name: "sui",
-        dst_eid: 39_000,
+        dst_eid: 30_378,
         dvn_address: None,
-        expected_hash: "a3a435b92460100101237390814fd76b78120635c4cc0f3e2836ed5bfb4d0d54",
+        expected_hash: "b15ba9d11b5958dcaae668461f92994edfdc59afce3ca6ccf8d8367040616054",
         expected_target: "3ce7457bed48ad23ee5d611dd3172ae4fbd0a22ea0e846782a7af224d905dbb0",
     },
     HashMatrixCase {
         chain_name: "iotal1",
-        dst_eid: 39_200,
+        dst_eid: 30_423,
         dvn_address: None,
-        expected_hash: "62c93905a668edcc42c971b69ff87e1bd4af96f1c5fdad3f0d2c68e4db0b0211",
+        expected_hash: "916f7c3c1530260b01fdd6475fd0c7fc253ccc959dce2dcbfe8bf6ac8ab6784c",
         expected_target: "042e3bb837e5528e495124542495b9df5016acd011d89838ae529db5a814499e",
     },
     HashMatrixCase {
@@ -139,9 +139,9 @@ const HASH_MATRIX_CASES: &[HashMatrixCase] = &[
     },
     HashMatrixCase {
         chain_name: "stellar",
-        dst_eid: 30_500,
+        dst_eid: 30_600,
         dvn_address: Some("0x3333333333333333333333333333333333333333"),
-        expected_hash: "0xaf085cf8915739d0bf1c1a7c99ed88b4d194431087472ddc62acd89fc730d437",
+        expected_hash: "0x1ee926374bd0eb73aab04c3ce3458a53d26deb1b7008283847dfa3f2934499e3",
         expected_target: "CA5R2JQYRJXFLWHE3XLLIO32HMF4MIDYY2NLWMGYYQDWKU6BTXL7URJI",
     },
 ];
@@ -196,7 +196,7 @@ fn runtime_matrix_hash_builders(
         parts.uln_v3_payload_builder,
         parts.uln_read_v1_payload_builder,
         parts.read_payload_resolver,
-        "mainnet",
+        test_v_ids("mainnet"),
     );
     (hash_builders, recorder)
 }

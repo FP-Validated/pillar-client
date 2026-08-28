@@ -276,7 +276,7 @@ async fn factory_matches_typescript_uln_version_mapping() {
         recorder.clone(),
         recorder.clone(),
         recorder,
-        "mainnet",
+        test_v_ids(),
     );
     assert!(builders.contains_key(ULN_VERSION_V2));
     assert!(builders.contains_key(ULN_VERSION_V301));
@@ -298,7 +298,7 @@ async fn destination_router_keeps_default_builder_for_unregistered_chain() {
         router.clone(),
         router,
         recorder.clone(),
-        "mainnet",
+        test_v_ids(),
     );
 
     let result = builders[ULN_VERSION_V302]
@@ -329,7 +329,7 @@ async fn uln_v3_rejects_read_context_like_typescript() {
         recorder.clone(),
         recorder.clone(),
         recorder,
-        "mainnet",
+        test_v_ids(),
     );
     let err = builders[ULN_VERSION_V302]
         .build_dvn_hash_call_data(
@@ -360,7 +360,7 @@ async fn uln_read_rejects_message_context_with_existing_error_text() {
         recorder.clone(),
         recorder.clone(),
         recorder,
-        "mainnet",
+        test_v_ids(),
     );
     let err = builders[ULN_VERSION_READ_V1002]
         .build_dvn_hash_call_data(
@@ -1460,4 +1460,31 @@ fn proof_ignores_a_precomputed_proof_supplied_in_the_event_extra() {
     assert_eq!(observed.packet_header, derived.packet_header);
     assert_eq!(observed.payload_hash, derived.payload_hash);
     assert_ne!(observed.packet_header, "0xdeadbeefdeadbeef");
+}
+
+/// The vId table the runtime builds at startup, reduced to the chains these tests
+/// drive. The values are upstream's own: the EndpointV1 chain id for EVM chains,
+/// and the V2 id folded into the V1 range for the non-EVM ones (TS:
+/// `packages/static-config/src/index.ts:211-243`). The real table is checked
+/// against upstream for every chain by `pillar-runtime`'s
+/// `v_id_by_chain_name_matches_upstream_for_every_available_chain`.
+fn test_v_ids() -> HashMap<String, String> {
+    [
+        ("aptos", "108"),
+        ("base", "184"),
+        ("bsc", "102"),
+        ("ethereum", "101"),
+        ("initia", "326"),
+        ("iotal1", "423"),
+        ("movement", "325"),
+        ("solana", "168"),
+        ("starknet", "500"),
+        ("stellar", "600"),
+        ("sui", "378"),
+        ("ton", "343"),
+        ("tron", "420"),
+    ]
+    .into_iter()
+    .map(|(chain_name, v_id)| (chain_name.to_string(), v_id.to_string()))
+    .collect()
 }

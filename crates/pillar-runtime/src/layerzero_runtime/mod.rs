@@ -5,7 +5,8 @@ use indexmap::IndexMap;
 use pillar_api::{CoreApiApp, SignerInfo};
 use pillar_config::{
     layerzero_available_chain_names, layerzero_chain_name_by_evm_endpoint_id,
-    layerzero_contract_address, static_chain_type_by_chain_name, ConfigError, RuntimeConfig,
+    layerzero_contract_address, layerzero_evm_endpoint_id, layerzero_evm_endpoint_id_for_version,
+    static_chain_type_by_chain_name, ConfigError, RuntimeConfig,
 };
 use pillar_core::{
     AppCoreError, AppValidator, HashCallDataBuilder, LegacyChainNameResolver, LzMessageId,
@@ -94,7 +95,8 @@ pub use config::{
     runtime_aptos_layerzero_config, runtime_chain_name_by_endpoint_id,
     runtime_evm_layerzero_config, runtime_evm_uln_payload_builder,
     runtime_layerzero_parts_from_evm_config, runtime_rpc_validation_checks_from_evm_config,
-    RuntimeLayerZeroDependencyInputs, RuntimeTonLayerZeroConfig, SuiPayloadContracts,
+    runtime_v_id_by_chain_name, RuntimeLayerZeroDependencyInputs, RuntimeTonLayerZeroConfig,
+    SuiPayloadContracts,
 };
 pub use core_app::{
     core_api_app_from_runtime_parts, runtime_core_dependencies_from_layerzero_parts,

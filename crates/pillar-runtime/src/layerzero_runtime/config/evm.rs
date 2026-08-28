@@ -145,12 +145,8 @@ pub fn runtime_evm_layerzero_config(
     })
 }
 
-fn add_non_evm_destination_endpoint_ids(
-    environment: &str,
-    chain_names: &[String],
-    chain_name_by_eid: &mut HashMap<u32, String>,
-) {
-    let endpoint_ids = match environment {
+fn non_evm_destination_endpoint_ids(environment: &str) -> &'static [(&'static str, u32)] {
+    match environment {
         "mainnet" => &[
             ("aptos", 30_108),
             ("solana", 30_168),
@@ -181,12 +177,60 @@ fn add_non_evm_destination_endpoint_ids(
             ("ton", 50_343),
         ][..],
         _ => &[],
-    };
-    for (chain_name, endpoint_id) in endpoint_ids {
+    }
+}
+
+fn add_non_evm_destination_endpoint_ids(
+    environment: &str,
+    chain_names: &[String],
+    chain_name_by_eid: &mut HashMap<u32, String>,
+) {
+    for (chain_name, endpoint_id) in non_evm_destination_endpoint_ids(environment) {
         if chain_names.iter().any(|candidate| candidate == chain_name) {
             chain_name_by_eid.insert(*endpoint_id, (*chain_name).to_string());
         }
     }
+}
+
+/// The `vId` packed into every signed DVN call data, per destination chain.
+///
+/// Upstream reads it out of a table rather than computing it: the vId is the
+/// EndpointV1 chain id, and only a fixed list of non-EVM chains folds the V2 id
+/// into the V1 range instead (TS:
+/// `packages/static-config/src/index.ts:211-243`). Folding the V2 id for every
+/// chain is a different function. On testnet the two disagree for five deployed
+/// chains - `doma`, `dos`, `lineasep`, `scroll` and `zksyncsep`, where the V1 id
+/// is not `V2 % 30_000` - and since the vId is signed, disagreeing means signing
+/// the wrong bytes.
+///
+/// Resolution order mirrors upstream: the EndpointV1 id when the chain has one,
+/// otherwise the folded V2 id. Only non-EVM chains lack a V1 id, which is
+/// exactly upstream's second branch.
+pub fn runtime_v_id_by_chain_name(
+    environment: &str,
+    chain_names: &[String],
+) -> Result<HashMap<String, String>, ConfigError> {
+    let non_evm = non_evm_destination_endpoint_ids(environment);
+    let mut v_id_by_chain_name = HashMap::with_capacity(chain_names.len());
+    for chain_name in chain_names {
+        if let Ok(endpoint_v1) =
+            layerzero_evm_endpoint_id_for_version(chain_name, environment, "V1")
+        {
+            v_id_by_chain_name.insert(chain_name.clone(), endpoint_v1.to_string());
+            continue;
+        }
+        let endpoint_v2 = non_evm
+            .iter()
+            .find(|(name, _)| name == chain_name)
+            .map(|(_, endpoint_id)| *endpoint_id)
+            .or_else(|| layerzero_evm_endpoint_id(chain_name, environment).ok())
+            .ok_or_else(|| ConfigError::MissingLayerZeroEndpointId {
+                environment: environment.to_string(),
+                chain_name: chain_name.clone(),
+            })?;
+        v_id_by_chain_name.insert(chain_name.clone(), (endpoint_v2 % 30_000).to_string());
+    }
+    Ok(v_id_by_chain_name)
 }
 
 fn trusted_solana_endpoint_program_ids(environment: &str) -> Result<HashSet<String>, ConfigError> {

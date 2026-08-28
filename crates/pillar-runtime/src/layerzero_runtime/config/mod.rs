@@ -7,7 +7,7 @@ mod parts;
 pub use evm::{
     runtime_chain_name_by_endpoint_id, runtime_evm_layerzero_config,
     runtime_evm_uln_payload_builder, runtime_rpc_validation_checks_from_evm_config,
-    starknet_uln_302_for_environment, stellar_uln_302_for_environment,
+    runtime_v_id_by_chain_name, starknet_uln_302_for_environment, stellar_uln_302_for_environment,
 };
 pub use non_evm::{
     runtime_aptos_layerzero_config, runtime_sui_layerzero_config, runtime_sui_payload_contracts,

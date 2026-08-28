@@ -49,6 +49,7 @@ use support_transports::*;
 use support_validation_layerzero::*;
 
 mod core_app_tests;
+mod gasolina_parity_tests;
 mod layerzero_config_tests;
 mod layerzero_packet_resolver_tests;
 mod layerzero_parts_non_evm_wiring_tests;
@@ -86,3 +87,11 @@ mod validation_timestamp_tests;
 
 use signer_config_tests::*;
 use validation_readiness_tests::*;
+
+/// The real startup vId table, so these tests sign with the same verifier id
+/// production would rather than a literal that could drift from the deployment
+/// tables.
+fn test_v_ids(environment: &str) -> HashMap<String, String> {
+    let chain_names = pillar_config::layerzero_available_chain_names(environment).unwrap();
+    runtime_v_id_by_chain_name(environment, &chain_names).unwrap()
+}

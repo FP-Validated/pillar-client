@@ -45,7 +45,7 @@ pub fn core_api_app_from_runtime_parts(parts: RuntimeCoreAppParts) -> CoreApiApp
 
 pub fn runtime_core_dependencies_from_layerzero_parts<C>(
     parts: RuntimeLayerZeroDependencyParts<C>,
-    environment: impl Into<String>,
+    v_id_by_chain_name: HashMap<String, String>,
     supported_uln_versions: &[String],
 ) -> RuntimeCoreAppDependencies
 where
@@ -56,7 +56,7 @@ where
         parts.uln_v3_payload_builder,
         parts.uln_read_v1_payload_builder,
         parts.read_payload_resolver,
-        environment,
+        v_id_by_chain_name,
     );
     // The variable only gates the legacy `V2` and `V301` builders; `V302` and
     // `ReadV1002` are always kept, so any other entry silently does nothing.

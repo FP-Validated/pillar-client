@@ -11,10 +11,10 @@ pub use layerzero_runtime::{
     core_api_app_from_runtime_parts, runtime_aptos_layerzero_config,
     runtime_core_dependencies_from_layerzero_parts, runtime_evm_layerzero_config,
     runtime_evm_uln_payload_builder, runtime_layerzero_parts_from_evm_config,
-    runtime_rpc_validation_checks_from_evm_config, EvmPacketSentResolver,
-    EvmPacketSentResolverConfig, RuntimeAptosLayerZeroConfig, RuntimeCoreAppDependencies,
-    RuntimeCoreAppParts, RuntimeEvmLayerZeroConfig, RuntimeExtraContextConfig,
-    RuntimeLayerZeroDependencyParts, RuntimeRpcValidationChecks,
+    runtime_rpc_validation_checks_from_evm_config, runtime_v_id_by_chain_name,
+    EvmPacketSentResolver, EvmPacketSentResolverConfig, RuntimeAptosLayerZeroConfig,
+    RuntimeCoreAppDependencies, RuntimeCoreAppParts, RuntimeEvmLayerZeroConfig,
+    RuntimeExtraContextConfig, RuntimeLayerZeroDependencyParts, RuntimeRpcValidationChecks,
 };
 pub use provider_health::{
     normalize_provider_health_entry, AwsLambdaInvokeClient, AwsSdkLambdaInvokeClient,

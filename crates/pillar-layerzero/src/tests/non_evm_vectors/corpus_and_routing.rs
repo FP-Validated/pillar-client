@@ -16,7 +16,7 @@ async fn destination_router_rejects_unsupported_non_evm_destination() {
         router.clone(),
         router,
         recorder.clone(),
-        "mainnet",
+        test_v_ids(),
     );
     let mut event = sent_event();
     event.lz_message_id.pathway_id.dst_chain_name = "solana".to_string();
@@ -97,7 +97,7 @@ async fn destination_router_rejects_each_upstream_non_evm_gap_chain() {
         router.clone(),
         router,
         recorder.clone(),
-        "mainnet",
+        test_v_ids(),
     );
 
     for chain_name in UPSTREAM_NON_EVM_GAP_CHAINS {
@@ -158,7 +158,7 @@ async fn destination_router_uses_aptos_builder_for_aptos_destination() {
         router.clone(),
         router,
         default.clone(),
-        "mainnet",
+        test_v_ids(),
     );
 
     let result = builders[ULN_VERSION_V302]

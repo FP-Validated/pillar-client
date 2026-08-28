@@ -50,22 +50,24 @@ async fn runtime_layerzero_parts_routes_sui_iotamove_v302_like_upstream() {
         parts.uln_v3_payload_builder,
         parts.uln_read_v1_payload_builder,
         parts.read_payload_resolver,
-        "mainnet",
+        test_v_ids("mainnet"),
     );
     let cases = [
         (
             "sui",
-            39_000_u64,
-            "a3a435b92460100101237390814fd76b78120635c4cc0f3e2836ed5bfb4d0d54",
+            30_378_u64,
+            "378",
+            "b15ba9d11b5958dcaae668461f92994edfdc59afce3ca6ccf8d8367040616054",
         ),
         (
             "iotal1",
-            39_200_u64,
-            "62c93905a668edcc42c971b69ff87e1bd4af96f1c5fdad3f0d2c68e4db0b0211",
+            30_423_u64,
+            "423",
+            "916f7c3c1530260b01fdd6475fd0c7fc253ccc959dce2dcbfe8bf6ac8ab6784c",
         ),
     ];
 
-    for (chain_name, dst_eid, expected_hash) in cases {
+    for (chain_name, dst_eid, v_id, expected_hash) in cases {
         let sent_event = LzSentEvent {
             lz_message_id: LzMessageId {
                 pathway_id: PathwayId {
@@ -108,6 +110,9 @@ async fn runtime_layerzero_parts_routes_sui_iotamove_v302_like_upstream() {
             .await
             .unwrap();
 
+        // The vId is the upstream value for this destination, so the hash below is
+        // locked over a realistic payload rather than a synthetic endpoint id.
+        assert_eq!(result.details["dvnCallData"]["vid"], v_id);
         assert_eq!(result.hash_call_data, expected_hash);
     }
     assert!(recorder.calls.lock().await.is_empty());

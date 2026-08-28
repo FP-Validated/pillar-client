@@ -44,12 +44,21 @@ async fn initia_and_movement_vectors_use_move_hash_verify_like_upstream() {
         router.clone(),
         router,
         default.clone(),
-        "mainnet",
+        test_v_ids(),
     );
 
-    for chain_name in MOVE_CHAIN_NAMES {
+    // Endpoint id and chain name have to name the same chain: the vId is keyed by
+    // destination chain name upstream, so a packet claiming `initia` while
+    // carrying Aptos's endpoint id has no single right answer.
+    for (chain_name, dst_eid, v_id) in [("initia", 30_326_u64, "326"), ("movement", 30_325, "325")]
+    {
         let mut event = aptos_sent_event();
-        event.lz_message_id.pathway_id.dst_chain_name = (*chain_name).to_string();
+        event.lz_message_id.pathway_id.dst_chain_name = chain_name.to_string();
+        event
+            .lz_message_id
+            .pathway_id
+            .extra
+            .insert("dstEid".to_string(), Value::from(dst_eid));
         let result = builders[ULN_VERSION_V302]
             .build_dvn_hash_call_data(
                 &event,
@@ -64,7 +73,7 @@ async fn initia_and_movement_vectors_use_move_hash_verify_like_upstream() {
             .unwrap();
 
         assert_eq!(result.details["ulnCallData"]["methodName"], "hashPropose");
-        assert_eq!(result.details["dvnCallData"]["vid"], "108");
+        assert_eq!(result.details["dvnCallData"]["vid"], v_id);
         assert_ne!(result.hash_call_data, "0xv3");
     }
     assert!(default.calls.lock().await.is_empty());

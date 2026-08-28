@@ -51,7 +51,7 @@ async fn runtime_layerzero_parts_routes_non_evm_destinations_to_registered_build
         parts.uln_v3_payload_builder,
         parts.uln_read_v1_payload_builder,
         parts.read_payload_resolver,
-        "mainnet",
+        test_v_ids("mainnet"),
     );
 
     let starknet = hash_builders[ULN_VERSION_V302]
@@ -77,7 +77,7 @@ async fn runtime_layerzero_parts_routes_non_evm_destinations_to_registered_build
 
     let stellar = hash_builders[ULN_VERSION_V302]
         .build_dvn_hash_call_data(
-            &non_evm_sent_event("stellar", 30_500),
+            &non_evm_sent_event("stellar", 30_600),
             &SigningContext::Message {
                 expiration: 1_900_000_000,
                 skip_v_id: None,
@@ -89,7 +89,7 @@ async fn runtime_layerzero_parts_routes_non_evm_destinations_to_registered_build
         .unwrap();
     assert_eq!(
         stellar.hash_call_data,
-        "0xaf085cf8915739d0bf1c1a7c99ed88b4d194431087472ddc62acd89fc730d437"
+        "0x1ee926374bd0eb73aab04c3ce3458a53d26deb1b7008283847dfa3f2934499e3"
     );
     assert_eq!(
         stellar.details["dvnCallData"]["targetContract"],
@@ -169,7 +169,7 @@ async fn runtime_layerzero_parts_wires_starknet_and_stellar_on_testnet() {
         parts.uln_v3_payload_builder,
         parts.uln_read_v1_payload_builder,
         parts.read_payload_resolver,
-        "testnet",
+        test_v_ids("testnet"),
     );
     for (chain_name, dst_eid, expected_target) in [
         (
