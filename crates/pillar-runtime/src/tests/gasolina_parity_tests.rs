@@ -665,6 +665,25 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
     let mut mismatches: Vec<String> = Vec::new();
     let mut signed: Vec<String> = Vec::new();
     let mut rejected: Vec<String> = Vec::new();
+    let mut policy_refused: Vec<String> = Vec::new();
+
+    // Upstream signs these and a real receipt exists for them, so they are not
+    // absent from the acceptance matrix below - they are refused on purpose.
+    // The pinned Stellar ULN302 was confirmed on chain (2026-08-28) to be a
+    // superseded generation, and that id is hashed into the attestation rather
+    // than merely addressed by it, so producing a signature would mean emitting
+    // an attestation no live verifier reads. Asserted as a refusal, with the
+    // reason, so the gate cannot decay back into a silent signature.
+    const REFUSED_BY_POLICY: &[(&str, &str)] = &[
+        (
+            "mainnet-stellar",
+            "stellar deployment for mainnet is unconfirmed",
+        ),
+        (
+            "testnet-stellar",
+            "stellar deployment for testnet is unconfirmed",
+        ),
+    ];
 
     for expected in reference["pathways"].as_array().expect("pathways") {
         let id = expected["id"].as_str().unwrap();
@@ -719,6 +738,25 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
             message_hash: pillar_core::hash_sent_event_message_for_pillar(&sent_event)
                 .unwrap_or_else(|error| panic!("{id}: hashing the message failed: {error:?}")),
         };
+
+        if let Some((_, reason)) = REFUSED_BY_POLICY.iter().find(|(row, _)| *row == id) {
+            let error = app
+                .sign_request_v2(request.clone())
+                .await
+                .expect_err("a destination with an unconfirmed deployment must not sign");
+            let rendered = format!("{error:?}");
+            assert!(
+                rendered.contains(reason),
+                "{id}: expected the provenance refusal to name {reason}, got {rendered}"
+            );
+            assert_eq!(
+                signer_calls.load(std::sync::atomic::Ordering::SeqCst),
+                0,
+                "{id}: a refused destination must never reach the signer"
+            );
+            policy_refused.push(id.to_string());
+            continue;
+        }
 
         // The service entrypoint, not the builder underneath it: protocol checks,
         // message hash, readiness, expiration, already-signed, build, sign. A reject
@@ -1017,7 +1055,14 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
         "the acceptance matrix and the compared rows disagree; \
          a new row needs a recorded receipt, a vanished one needs a reason"
     );
-    assert_eq!(compared.len(), 16, "compared pathways: {compared:?}");
+    policy_refused.sort();
+    assert_eq!(
+        policy_refused,
+        vec!["mainnet-stellar".to_string(), "testnet-stellar".to_string()],
+        "destinations refused for unconfirmed provenance must stay named: re-pinning \
+         Stellar to a confirmed deployment moves these back into `compared`"
+    );
+    assert_eq!(compared.len(), 14, "compared pathways: {compared:?}");
     assert_eq!(signed.len(), compared.len(), "signed pathways: {signed:?}");
     assert_eq!(
         rejected.len(),

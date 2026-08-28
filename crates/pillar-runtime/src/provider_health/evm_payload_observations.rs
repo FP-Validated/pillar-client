@@ -106,23 +106,28 @@ pub(crate) async fn observe_payload_signed<T>(
     url: String,
     headers: HashMap<String, String>,
     observation: EvmPayloadSignedObservation<'_>,
-) -> (String, PayloadSignedValidity)
+) -> Option<(String, PayloadSignedValidity)>
 where
     T: JsonRpcTransport,
 {
+    // `None` means this provider could not answer, and upstream's rejected
+    // promise never reaches the quorum function either. It must not be folded
+    // into a value: two providers that both failed have agreed on nothing, and
+    // letting them agree would allow a pair of dead endpoints to decide a
+    // request that a healthy endpoint could have answered.
     let resolved = match resolve_receive_library(&transport, &url, &headers, &observation).await {
         Ok(resolved) => resolved,
-        Err(_) => return ("missing".to_string(), PayloadSignedValidity::Missing),
+        Err(_) => return None,
     };
     let (receive_library, receive_version) = match resolved {
         ResolvedReceiveLibrary::Known { address, version } => (address, version),
         ResolvedReceiveLibrary::Unsupported { address } => {
             // Agreed on by every honest provider, so the quorum settles and the
             // request is refused rather than falling through to a guess.
-            return (
+            return Some((
                 format!("unsupported:{}", address.to_lowercase()),
                 PayloadSignedValidity::UnsupportedReceiveLibrary,
-            );
+            ));
         }
     };
 
@@ -186,15 +191,15 @@ where
             } else {
                 PayloadSignedValidity::NotSigned
             };
-            (
+            Some((
                 format!(
                     "{}:{receive_version}:{dvn_confirmed}:{inbound_confirmations}:{verification_state:?}",
                     receive_library.to_lowercase()
                 ),
                 validity,
-            )
+            ))
         }
-        Err(_) => ("missing".to_string(), PayloadSignedValidity::Missing),
+        Err(_) => None,
     }
 }
 

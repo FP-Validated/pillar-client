@@ -122,7 +122,7 @@ where
                 if !delay.is_zero() {
                     tokio::time::sleep(delay).await;
                 }
-                let (fingerprint, validity) = observe_ton_payload_signed(
+                let observation = observe_ton_payload_signed(
                     transport,
                     url,
                     headers,
@@ -136,7 +136,7 @@ where
                     },
                 )
                 .await;
-                (index, Some((fingerprint, validity)))
+                (index, observation)
             });
         }
         let context = format!("payload-signed validation for chain {dst_chain_name}");
@@ -152,7 +152,7 @@ async fn observe_ton_payload_signed<T>(
     url: String,
     headers: HashMap<String, String>,
     observation: TonPayloadSignedObservation<'_>,
-) -> (String, PayloadSignedValidity)
+) -> Option<(String, PayloadSignedValidity)>
 where
     T: JsonRpcTransport,
 {
@@ -169,21 +169,40 @@ where
     // (`fetchQuorumedStorageCell`), so both cells go into the fingerprint: two
     // providers that disagree on storage must not be counted as agreeing just
     // because the derived verdict happens to match.
-    let Some((connection_storage_boc, connection_storage)) =
-        ton_storage_cell(&transport, &url, headers.clone(), uln_connection_address).await
-    else {
-        return ("missing".to_string(), PayloadSignedValidity::Missing);
-    };
-    let Some((uln_storage_boc, uln_storage)) =
-        ton_storage_cell(&transport, &url, headers.clone(), uln_address).await
-    else {
-        return ("missing".to_string(), PayloadSignedValidity::Missing);
+    // The `'0'` bucket refuses the request just as upstream's throw does, but
+    // it is a vote, so providers that agree the contract is not active reach a
+    // quorum on that fact rather than being confused with providers that never
+    // answered.
+    let inactive = || Some(("0".to_string(), PayloadSignedValidity::Missing));
+
+    let (connection_storage_boc, connection_storage) =
+        match ton_storage_cell(&transport, &url, headers.clone(), uln_connection_address).await {
+            TonStorageRead::Cell(boc, cell) => (boc, cell),
+            TonStorageRead::Inactive => return inactive(),
+            TonStorageRead::Unavailable => return None,
+        };
+    let (uln_storage_boc, uln_storage) =
+        match ton_storage_cell(&transport, &url, headers.clone(), uln_address).await {
+            TonStorageRead::Cell(boc, cell) => (boc, cell),
+            TonStorageRead::Inactive => return inactive(),
+            TonStorageRead::Unavailable => return None,
+        };
+    // Past this point the inputs are the agreed cells, so a decode failure is
+    // deterministic rather than provider-specific: upstream decodes once, after
+    // the quorum, and throws. Fingerprinted by the cells that produced it so
+    // providers failing on the same bytes agree, and providers failing on
+    // different bytes do not.
+    let undecodable = || {
+        Some((
+            format!("undecodable:{connection_storage_boc}:{uln_storage_boc}"),
+            PayloadSignedValidity::Missing,
+        ))
     };
     let Ok(default_receive_config) = uln_default_receive_config(&uln_storage) else {
-        return ("missing".to_string(), PayloadSignedValidity::Missing);
+        return undecodable();
     };
     let Ok(default_receive_config_boc) = ton_boc_to_base64(&default_receive_config) else {
-        return ("missing".to_string(), PayloadSignedValidity::Missing);
+        return undecodable();
     };
 
     let state = observe_ton_committable_view(
@@ -196,9 +215,9 @@ where
         &default_receive_config_boc,
     )
     .await;
-    let Some(state) = state else {
-        return ("missing".to_string(), PayloadSignedValidity::Missing);
-    };
+    // Another RPC round trip, so a failure here is the provider's, not the
+    // chain's: it does not vote.
+    let state = state?;
 
     let attestation = dvn_attestation(
         &connection_storage,
@@ -208,7 +227,7 @@ where
         packet_hash_be,
     );
     let Ok(attestation) = attestation else {
-        return ("missing".to_string(), PayloadSignedValidity::Missing);
+        return undecodable();
     };
 
     // `hasPayloadSigned`: the committable state wins, otherwise the DVN
@@ -223,10 +242,31 @@ where
     } else {
         PayloadSignedValidity::NotSigned
     };
-    (
+    Some((
         format!("{connection_storage_boc}:{uln_storage_boc}:{state}:{attestation:?}"),
         validity,
-    )
+    ))
+}
+
+/// One provider's answer to `fetchQuorumedStorageCell`.
+///
+/// Upstream splits these three ways and this port must too, because two of them
+/// vote in the quorum and one does not. `tonContractStateQuorumFn`
+/// (`@monorepo/multiprovider` `src/ton.ts:108-116`) folds a null response, a
+/// non-active state, and missing data into the single string `'0'`, which is a
+/// value like any other: providers agreeing on it reach quorum, and
+/// `fetchQuorumedStorageCell` then throws on the agreed non-active state. A
+/// provider that cannot answer at all rejects instead, so it never reaches the
+/// quorum function.
+enum TonStorageRead {
+    /// Active with data. Upstream fingerprints the storage BOC itself.
+    Cell(String, TonStorageCell),
+    /// Upstream's `'0'` bucket. Votes.
+    Inactive,
+    /// Transport, JSON-shape, or BOC decode failure. Must not vote: a fast
+    /// failure that counted as a response could outrace a healthy provider and
+    /// decide the request by itself whenever the quorum is 1.
+    Unavailable,
 }
 
 /// `fetchQuorumedStorageCell` for one provider: toncenter v2
@@ -236,7 +276,7 @@ async fn ton_storage_cell<T>(
     url: &str,
     headers: HashMap<String, String>,
     address: &str,
-) -> Option<(String, TonStorageCell)>
+) -> TonStorageRead
 where
     T: JsonRpcTransport,
 {
@@ -246,21 +286,31 @@ where
         "method": "getAddressInformation",
         "params": { "address": address },
     });
-    let response = transport
-        .post_json(url.to_string(), headers, body)
-        .await
-        .ok()?;
-    let result = response.get("result")?;
+    let Ok(response) = transport.post_json(url.to_string(), headers, body).await else {
+        return TonStorageRead::Unavailable;
+    };
+    // No `result` at all is a malformed answer, not a statement about the
+    // contract; upstream's provider would have rejected.
+    let Some(result) = response.get("result") else {
+        return TonStorageRead::Unavailable;
+    };
     let state = result.get("state").and_then(Value::as_str);
-    let data = result
+    // An uninitialized or frozen contract has no storage to decode, and neither
+    // does an active one that reports no data. Both are upstream's `'0'`.
+    if !(matches!(state, Some("active")) || state.is_none()) {
+        return TonStorageRead::Inactive;
+    }
+    let Some(data) = result
         .get("data")
         .and_then(Value::as_str)
-        .filter(|data| !data.is_empty())?;
-    // An uninitialized or frozen contract has no storage to decode.
-    if !(matches!(state, Some("active")) || state.is_none()) {
-        return None;
+        .filter(|data| !data.is_empty())
+    else {
+        return TonStorageRead::Inactive;
+    };
+    match boc_from_base64(data) {
+        Ok(cell) => TonStorageRead::Cell(data.to_string(), cell),
+        Err(_) => TonStorageRead::Unavailable,
     }
-    Some((data.to_string(), boc_from_base64(data).ok()?))
 }
 
 /// `provider.v2.getView(address, 'committableView', args)`: the returned stack's

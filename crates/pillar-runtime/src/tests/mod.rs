@@ -34,6 +34,7 @@ use std::sync::{Arc, Mutex};
 type RecordedJsonCall = (String, HashMap<String, String>, Value);
 type RecordedJsonCalls = Arc<Mutex<Vec<RecordedJsonCall>>>;
 
+mod stellar_provenance_tests;
 mod support_app;
 mod support_core;
 mod support_packets;
@@ -59,6 +60,7 @@ mod layerzero_parts_wiring_tests;
 mod layerzero_read_payload_tests;
 mod layerzero_uln_v2_feather_tests;
 mod layerzero_uln_v2_mpt_tests;
+mod payload_signed_family_tests;
 mod provider_config_refresh_tests;
 mod provider_health_aptos_tests;
 mod provider_health_common_tests;

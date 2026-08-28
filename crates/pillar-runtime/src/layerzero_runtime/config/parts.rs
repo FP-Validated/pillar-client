@@ -116,22 +116,49 @@ where
         );
     }
     if chain_names.iter().any(|chain_name| chain_name == "stellar") {
-        non_evm_builder_chain_names.insert("stellar".to_string());
         let address = stellar_uln_302_for_environment(environment)?;
-        let stellar_payload_builder =
-            Arc::new(StellarUlnPayloadBuilder::new(address).map_err(|_| {
-                ConfigError::InvalidNonEvmUlnAddress {
-                    environment: environment.to_string(),
-                    chain_name: "stellar".to_string(),
-                    address: address.to_string(),
-                }
-            })?);
-        routed_payload_builder = routed_payload_builder.with_chain_builder(
-            "stellar",
-            stellar_payload_builder.clone(),
-            stellar_payload_builder.clone(),
-            stellar_payload_builder,
-        );
+        non_evm_builder_chain_names.insert("stellar".to_string());
+        // Every other chain trusts the pinned upstream table. Stellar cannot:
+        // the pinned ids were confirmed on chain to be a superseded generation,
+        // and this id is hashed into the attestation rather than merely
+        // addressed by it, so a build would emit an attestation no live
+        // verifier reads. Refuse per request rather than at assembly, so one
+        // unconfirmed chain does not stop the service serving the others.
+        // Derived from the disagreement rather than hardcoded, so re-pinning
+        // the table above reopens the chain with no further change here.
+        let unconfirmed = stellar_uln_302_published_for_environment(environment)
+            .filter(|published| *published != address)
+            .map(|published| ConfigError::UnconfirmedDeploymentGeneration {
+                environment: environment.to_string(),
+                chain_name: "stellar".to_string(),
+                pinned: address.to_string(),
+                published: published.to_string(),
+                confirmed_on: "2026-08-28".to_string(),
+            });
+        if let Some(unconfirmed) = unconfirmed {
+            let refuse = Arc::new(UnavailableUlnPayloadBuilder::new(unconfirmed.to_string()));
+            routed_payload_builder = routed_payload_builder.with_chain_builder(
+                "stellar",
+                refuse.clone(),
+                refuse.clone(),
+                refuse,
+            );
+        } else {
+            let stellar_payload_builder =
+                Arc::new(StellarUlnPayloadBuilder::new(address).map_err(|_| {
+                    ConfigError::InvalidNonEvmUlnAddress {
+                        environment: environment.to_string(),
+                        chain_name: "stellar".to_string(),
+                        address: address.to_string(),
+                    }
+                })?);
+            routed_payload_builder = routed_payload_builder.with_chain_builder(
+                "stellar",
+                stellar_payload_builder.clone(),
+                stellar_payload_builder.clone(),
+                stellar_payload_builder,
+            );
+        }
     }
     if chain_names.iter().any(|chain_name| chain_name == "ton") {
         if let Some(ton_config) = runtime_ton_layerzero_config(environment) {

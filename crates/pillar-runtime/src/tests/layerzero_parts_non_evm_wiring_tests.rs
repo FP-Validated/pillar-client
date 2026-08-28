@@ -75,6 +75,9 @@ async fn runtime_layerzero_parts_routes_non_evm_destinations_to_registered_build
         "0x0727f40349719ac76861a51a0b3d3e07be1577fff137bb81a5dc32e5a5c61d38"
     );
 
+    // Stellar routes to a registered builder like its neighbours, but that
+    // builder refuses: the pinned ULN302 was confirmed on chain to be a
+    // superseded generation, and it is hashed into the attestation.
     let stellar = hash_builders[ULN_VERSION_V302]
         .build_dvn_hash_call_data(
             &non_evm_sent_event("stellar", 30_600),
@@ -86,14 +89,10 @@ async fn runtime_layerzero_parts_routes_non_evm_destinations_to_registered_build
             },
         )
         .await
-        .unwrap();
-    assert_eq!(
-        stellar.hash_call_data,
-        "0x1ee926374bd0eb73aab04c3ce3458a53d26deb1b7008283847dfa3f2934499e3"
-    );
-    assert_eq!(
-        stellar.details["dvnCallData"]["targetContract"],
-        "CA5R2JQYRJXFLWHE3XLLIO32HMF4MIDYY2NLWMGYYQDWKU6BTXL7URJI"
+        .expect_err("an unconfirmed destination deployment must not produce a payload");
+    assert!(
+        format!("{stellar:?}").contains("stellar deployment for mainnet is unconfirmed"),
+        "expected the provenance refusal, got {stellar:?}"
     );
 
     let ton_error = hash_builders[ULN_VERSION_V302]
@@ -171,35 +170,32 @@ async fn runtime_layerzero_parts_wires_starknet_and_stellar_on_testnet() {
         parts.read_payload_resolver,
         test_v_ids("testnet"),
     );
-    for (chain_name, dst_eid, expected_target) in [
-        (
-            "starknet",
-            40_500,
-            "0x0706572d6f7b938c813a20dc1b0328b83de939066e25bd0fbe14c270077f769d",
-        ),
-        (
-            "stellar",
-            40_600,
-            "CAWCTJDDZZEWYARYCY6IP7LJ5WAR5XHNDBNDNRFYNS5ZX22MH3RPSJSH",
-        ),
-    ] {
-        let result = hash_builders[ULN_VERSION_V302]
-            .build_dvn_hash_call_data(
-                &non_evm_sent_event(chain_name, dst_eid),
-                &SigningContext::Message {
-                    expiration: 1_900_000_000,
-                    skip_v_id: None,
-                    dvn_address: Some("0x3333333333333333333333333333333333333333".to_string()),
-                    block_confirmation: 64,
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            result.details["dvnCallData"]["targetContract"],
-            expected_target
-        );
-    }
+    let context = || SigningContext::Message {
+        expiration: 1_900_000_000,
+        skip_v_id: None,
+        dvn_address: Some("0x3333333333333333333333333333333333333333".to_string()),
+        block_confirmation: 64,
+    };
+
+    let starknet = hash_builders[ULN_VERSION_V302]
+        .build_dvn_hash_call_data(&non_evm_sent_event("starknet", 40_500), &context())
+        .await
+        .unwrap();
+    assert_eq!(
+        starknet.details["dvnCallData"]["targetContract"],
+        "0x0706572d6f7b938c813a20dc1b0328b83de939066e25bd0fbe14c270077f769d"
+    );
+
+    // Testnet was redeployed too, and later than mainnet, so the refusal is not
+    // a mainnet-only rule.
+    let stellar = hash_builders[ULN_VERSION_V302]
+        .build_dvn_hash_call_data(&non_evm_sent_event("stellar", 40_600), &context())
+        .await
+        .expect_err("an unconfirmed destination deployment must not produce a payload");
+    assert!(
+        format!("{stellar:?}").contains("stellar deployment for testnet is unconfirmed"),
+        "expected the provenance refusal, got {stellar:?}"
+    );
 }
 
 fn non_evm_sent_event(dst_chain_name: &str, dst_eid: u64) -> LzSentEvent {

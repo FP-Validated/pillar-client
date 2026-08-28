@@ -58,7 +58,10 @@ where
                 }
                 let observation =
                     observe_solana_payload_signed(transport, url, headers, request, pubkeys).await;
-                (index, Some((format!("{observation:?}"), observation)))
+                (
+                    index,
+                    observation.map(|value| (format!("{value:?}"), value)),
+                )
             });
         }
         let context = format!("payload-signed validation for chain {dst_chain_name}");
@@ -75,7 +78,7 @@ async fn observe_solana_payload_signed<T>(
     headers: HashMap<String, String>,
     request: SolanaPayloadSignedRequest,
     pubkeys: [String; 5],
-) -> PayloadSignedValidity
+) -> Option<PayloadSignedValidity>
 where
     T: JsonRpcTransport,
 {
@@ -123,9 +126,12 @@ where
     .await;
 
     match observation {
-        Ok(true) => PayloadSignedValidity::Signed,
-        Ok(false) => PayloadSignedValidity::NotSigned,
-        Err(_) => PayloadSignedValidity::Missing,
+        Ok(true) => Some(PayloadSignedValidity::Signed),
+        Ok(false) => Some(PayloadSignedValidity::NotSigned),
+        // The accounts could not be fetched or decoded. Upstream's provider
+        // rejects here, so this contributes nothing to the quorum: providers
+        // that failed have not agreed that the payload is unsigned.
+        Err(_) => None,
     }
 }
 

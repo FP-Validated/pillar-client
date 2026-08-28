@@ -526,3 +526,221 @@ async fn runtime_rpc_validation_checks_skips_ton_payload_without_guid() {
         .unwrap();
     assert!(calls.lock().unwrap().is_empty(), "V1 messages are skipped");
 }
+
+/// `getAddressInformation` for a contract that exists but holds no storage.
+/// Upstream's `tonContractStateQuorumFn` folds this into the string `'0'`,
+/// which is a value providers can agree on - not the absence of an answer.
+fn inactive_address_information() -> Result<Value, String> {
+    Ok(json!({ "result": { "state": "uninitialized", "data": "" } }))
+}
+
+fn ton_quorum_checks(
+    providers: Vec<(&str, Vec<Result<Value, String>>)>,
+    quorum: u64,
+) -> RuntimeRpcValidationChecks<PerUrlTransport> {
+    let getter = StaticProviderConfig::new(
+        IndexMap::from([(
+            "ton".to_string(),
+            ProviderConfig {
+                uris: providers
+                    .iter()
+                    .map(|(url, _)| ProviderUri::Uri((*url).to_string()))
+                    .collect(),
+                quorum: Some(quorum),
+            },
+        )]),
+        Some(&["ton".to_string()]),
+    )
+    .unwrap();
+    let transport = PerUrlTransport {
+        responses: Arc::new(Mutex::new(
+            providers
+                .into_iter()
+                .map(|(url, queue)| (url.to_string(), queue))
+                .collect::<HashMap<_, _>>(),
+        )),
+    };
+    runtime_rpc_validation_checks_from_evm_config(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        transport,
+        "mainnet",
+        &["ton".to_string()],
+    )
+    .unwrap()
+}
+
+/// Upstream buckets a non-active contract as `'0'` and lets providers agree on
+/// it; `fetchQuorumedStorageCell` then throws on the agreed state. Two
+/// providers that both see an uninitialized contract have therefore agreed
+/// about the chain, and the refusal is a determined verdict.
+#[tokio::test]
+async fn ton_quorum_lets_providers_agree_that_the_contract_is_not_active() {
+    let checks = ton_quorum_checks(
+        vec![
+            (
+                "https://ton-a.example",
+                vec![inactive_address_information()],
+            ),
+            (
+                "https://ton-b.example",
+                vec![inactive_address_information()],
+            ),
+        ],
+        2,
+    );
+
+    let error = checks
+        .validate_payload_not_signed(&ton_sent_event(), CONFIGURED_VERIFIER, "ton")
+        .await
+        .unwrap_err();
+
+    // The determined-state refusal, not the no-quorum one.
+    assert_eq!(
+        format!("{error}"),
+        "Payload-signed validation unavailable for chain ton",
+        "agreeing that the contract is not active is a verdict, not a failure to answer"
+    );
+}
+
+/// The mirror of the case above, and the reason the two must not share a
+/// bucket. Upstream's provider rejects when it cannot answer, so a dead
+/// provider never reaches the quorum function at all. Folding "no answer" into
+/// the same value as "not active" would let two dead providers manufacture
+/// agreement about a chain neither of them read.
+#[tokio::test]
+async fn ton_quorum_refuses_to_let_dead_providers_agree() {
+    let checks = ton_quorum_checks(
+        vec![
+            (
+                "https://ton-a.example",
+                vec![Err("connection refused".to_string())],
+            ),
+            (
+                "https://ton-b.example",
+                vec![Err("connection refused".to_string())],
+            ),
+        ],
+        2,
+    );
+
+    let error = checks
+        .validate_payload_not_signed(&ton_sent_event(), CONFIGURED_VERIFIER, "ton")
+        .await
+        .unwrap_err();
+
+    let rendered = format!("{error}");
+    assert!(
+        rendered.contains("0 distinct successful responses, 2 errors"),
+        "two providers that never answered must be counted as errors, not as an \
+         agreeing majority: {rendered}"
+    );
+}
+
+/// The behavioural consequence. A provider that cannot answer must not be able
+/// to outvote one that can: with a quorum of one, the single healthy provider
+/// decides the request. While transport failures voted, its answer was one
+/// candidate among two and the request was refused for ambiguity.
+#[tokio::test(start_paused = true)]
+async fn ton_quorum_lets_one_healthy_provider_outweigh_a_dead_one() {
+    let checks = ton_quorum_checks(
+        vec![
+            (
+                "https://ton-dead.example",
+                vec![Err("connection refused".to_string())],
+            ),
+            (
+                "https://ton-live.example",
+                vec![
+                    address_information(EMPTY_CONNECTION),
+                    address_information(ULN_STORAGE),
+                    committable_view(0),
+                ],
+            ),
+        ],
+        1,
+    );
+
+    checks
+        .validate_payload_not_signed(&ton_sent_event(), CONFIGURED_VERIFIER, "ton")
+        .await
+        .expect("the one provider that answered says the payload is unsigned");
+}
+
+/// The mixed case the two buckets exist for: one provider reads the chain and
+/// reports a non-active contract, two others never answer.
+///
+/// Upstream has one `'0'` against a quorum of two and two rejected promises, so
+/// it cannot reach quorum and the request fails as incomplete. Sharing a bucket
+/// would instead give three "missing" votes, clear the quorum, and report a
+/// verdict about a chain only one provider actually read.
+#[tokio::test]
+async fn ton_quorum_does_not_mix_a_read_contract_with_providers_that_never_answered() {
+    let checks = ton_quorum_checks(
+        vec![
+            (
+                "https://ton-a.example",
+                vec![inactive_address_information()],
+            ),
+            (
+                "https://ton-b.example",
+                vec![Err("connection refused".to_string())],
+            ),
+            (
+                "https://ton-c.example",
+                vec![Err("connection refused".to_string())],
+            ),
+        ],
+        2,
+    );
+
+    let error = checks
+        .validate_payload_not_signed(&ton_sent_event(), CONFIGURED_VERIFIER, "ton")
+        .await
+        .unwrap_err();
+
+    let rendered = format!("{error}");
+    assert!(
+        rendered.contains("1 distinct successful responses, 2 errors"),
+        "one provider read the chain and two did not; they must not add up to a \
+         quorum: {rendered}"
+    );
+}
+
+/// The other direction of the mixed case: the readers are the majority.
+///
+/// Two providers agree the contract is not active and one never answered.
+/// Upstream reaches its quorum of two on `'0'` and throws on the agreed state,
+/// so the verdict is determined and the straggler is irrelevant. The failing
+/// provider must neither block that quorum nor be counted into it.
+#[tokio::test]
+async fn ton_quorum_reaches_a_verdict_when_the_readers_outnumber_the_failures() {
+    let checks = ton_quorum_checks(
+        vec![
+            (
+                "https://ton-a.example",
+                vec![inactive_address_information()],
+            ),
+            (
+                "https://ton-b.example",
+                vec![Err("connection refused".to_string())],
+            ),
+            (
+                "https://ton-c.example",
+                vec![inactive_address_information()],
+            ),
+        ],
+        2,
+    );
+
+    let error = checks
+        .validate_payload_not_signed(&ton_sent_event(), CONFIGURED_VERIFIER, "ton")
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        format!("{error}"),
+        "Payload-signed validation unavailable for chain ton",
+        "two providers read the same non-active contract, so the verdict is determined \
+         rather than an incomplete response set"
+    );
+}

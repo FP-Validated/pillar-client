@@ -105,7 +105,7 @@ where
                 if !delay.is_zero() {
                     tokio::time::sleep(delay).await;
                 }
-                let (fingerprint, validity) = observe_payload_signed(
+                let observation = observe_payload_signed(
                     transport,
                     url,
                     headers,
@@ -119,7 +119,7 @@ where
                     },
                 )
                 .await;
-                (index, Some((fingerprint, validity)))
+                (index, observation)
             });
         }
         let context = format!("payload-signed validation for chain {dst_chain_name}");
@@ -194,7 +194,7 @@ where
                 if !delay.is_zero() {
                     tokio::time::sleep(delay).await;
                 }
-                let (fingerprint, validity) = observe_move_payload_signed(
+                let observation = observe_move_payload_signed(
                     transport,
                     url,
                     headers,
@@ -211,7 +211,7 @@ where
                     },
                 )
                 .await;
-                (index, Some((fingerprint, validity)))
+                (index, observation)
             });
         }
         let context = format!("payload-signed validation for chain {dst_chain_name}");
@@ -266,7 +266,10 @@ where
                     &proof.payload_hash,
                 )
                 .await;
-                (index, Some((format!("{observation:?}"), observation)))
+                (
+                    index,
+                    observation.map(|value| (format!("{value:?}"), value)),
+                )
             });
         }
         let context = format!("payload-signed validation for chain {dst_chain_name}");
@@ -323,7 +326,7 @@ async fn observe_move_payload_signed<T>(
     base_url: String,
     headers: HashMap<String, String>,
     observation: MovePayloadSignedObservation<'_>,
-) -> (String, PayloadSignedValidity)
+) -> Option<(String, PayloadSignedValidity)>
 where
     T: JsonRpcTransport,
 {
@@ -340,8 +343,11 @@ where
         packet_header,
         payload_hash,
     } = observation;
+    // `None` throughout: upstream's provider rejects when a view cannot be
+    // read, so a provider that failed contributes nothing to the quorum rather
+    // than agreeing with every other provider that also failed.
     let Ok(header) = hex::decode(packet_header.trim_start_matches("0x")) else {
-        return ("missing".to_string(), PayloadSignedValidity::Missing);
+        return None;
     };
     let header_hash = format!("0x{}", hex::encode(Keccak256::digest(header)));
     let src_eid = src_eid.to_string();
@@ -380,17 +386,17 @@ where
     let (Some(state), Some(confirmations), Some(required_confirmations)) =
         (state, confirmations, required_confirmations)
     else {
-        return ("missing".to_string(), PayloadSignedValidity::Missing);
+        return None;
     };
     let validity = if state == 2 || confirmations >= required_confirmations {
         PayloadSignedValidity::Signed
     } else {
         PayloadSignedValidity::NotSigned
     };
-    (
+    Some((
         format!("{state}:{confirmations}:{required_confirmations}"),
         validity,
-    )
+    ))
 }
 
 fn move_uln_config_confirmations(encoded: &str) -> Option<u64> {
@@ -537,15 +543,15 @@ async fn observe_starknet_payload_signed<T>(
     verifier_address: &str,
     packet_header: &str,
     payload_hash: &str,
-) -> PayloadSignedValidity
+) -> Option<PayloadSignedValidity>
 where
     T: JsonRpcTransport,
 {
     let Ok(header) = decode_bytes32_or_longer(packet_header) else {
-        return PayloadSignedValidity::Missing;
+        return None;
     };
     let Ok(payload_hash) = decode_bytes32(payload_hash) else {
-        return PayloadSignedValidity::Missing;
+        return None;
     };
     use sha3::{Digest, Keccak256};
     let header_hash: [u8; 32] = Keccak256::digest(header).into();
@@ -584,9 +590,12 @@ where
         })
         .as_deref()
     {
-        Some("0x0" | "0") => PayloadSignedValidity::NotSigned,
-        Some("0x1" | "1") => PayloadSignedValidity::Signed,
-        _ => PayloadSignedValidity::Missing,
+        Some("0x0" | "0") => Some(PayloadSignedValidity::NotSigned),
+        Some("0x1" | "1") => Some(PayloadSignedValidity::Signed),
+        // An unreachable node and a contract that answered something this
+        // build cannot read are both "no answer from this provider": upstream
+        // throws in either case, and a throw does not vote.
+        _ => None,
     }
 }
 

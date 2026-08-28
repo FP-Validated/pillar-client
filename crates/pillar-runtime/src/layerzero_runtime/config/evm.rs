@@ -322,6 +322,32 @@ pub fn stellar_uln_302_for_environment(environment: &str) -> Result<&'static str
     }
 }
 
+/// What LayerZero's metadata service publishes as the Stellar ULN302 today.
+///
+/// This exists to disagree with `stellar_uln_302_for_environment` on purpose.
+/// The table above mirrors the pinned upstream package, which is the rule for
+/// every other chain; for Stellar the pinned values were confirmed on chain on
+/// 2026-08-28 to be a superseded generation. Same deployer per network, but
+/// disjoint wasm for both EndpointV2 and ULN302, and the live generation was
+/// deployed roughly three and a half months later. The evidence - wasm hashes,
+/// deployment dates, deployer accounts, lifetime activity - is pinned in
+/// `crates/pillar-runtime/tests/onchain_provenance/stellar_deployment.json`.
+///
+/// Callers compare the two and refuse rather than sign, because
+/// `pillar_layerzero::StellarUlnPayloadBuilder` hashes this id into the DVN
+/// attestation. Re-pinning the table above to a confirmed deployment closes the
+/// disagreement and reopens the chain with no further code change.
+///
+/// `None` means LayerZero publishes no deployment for that environment, so
+/// there is nothing to disagree with - sandbox and localnet stay usable.
+pub fn stellar_uln_302_published_for_environment(environment: &str) -> Option<&'static str> {
+    match environment {
+        "mainnet" => Some("CCV4HEII3UC65THWGSRM2DVIJLB6HS6YMUHDTTHUECX2RHTP5FA2GOBA"),
+        "testnet" => Some("CCMLPCAWCPIIMXOHJJKU3NZLOFTT2O6QTB2UUFPN6SEHLK35QRHVKKMB"),
+        _ => None,
+    }
+}
+
 pub fn runtime_evm_uln_payload_builder(
     environment: &str,
     chain_names: &[String],

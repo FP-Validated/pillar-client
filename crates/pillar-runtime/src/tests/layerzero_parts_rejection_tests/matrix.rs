@@ -42,6 +42,71 @@ async fn runtime_layerzero_matrix_routes_completed_non_evm_builders() {
     assert!(recorder.calls.lock().await.is_empty());
 }
 
+/// A registered destination that refuses is not the same as an unregistered
+/// one. If Stellar were simply left out, the router would fall through to the
+/// default EVM builder and hand back an EVM-shaped attestation for a Stellar
+/// packet - a wrong answer instead of no answer. It must be present and refuse.
+#[tokio::test]
+async fn runtime_layerzero_matrix_refuses_stellar_for_unconfirmed_deployment() {
+    let (hash_builders, recorder) = runtime_matrix_hash_builders(&["ethereum", "stellar"]);
+
+    let error = hash_builders[ULN_VERSION_V302]
+        .build_dvn_hash_call_data(
+            &matrix_sent_event("stellar", 30_600),
+            &message_context(
+                1_900_000_000,
+                Some("0x3333333333333333333333333333333333333333"),
+            ),
+        )
+        .await
+        .expect_err("the pinned Stellar deployment is unconfirmed, so it must not build");
+
+    let rendered = format!("{error:?}");
+    // The pinned generation, the published one, and the consequence: an
+    // operator reading this line should not have to find the commit.
+    for needle in [
+        "CA5R2JQYRJXFLWHE3XLLIO32HMF4MIDYY2NLWMGYYQDWKU6BTXL7URJI",
+        "CCV4HEII3UC65THWGSRM2DVIJLB6HS6YMUHDTTHUECX2RHTP5FA2GOBA",
+        "signed over",
+    ] {
+        assert!(
+            rendered.contains(needle),
+            "the refusal must name {needle}, got {rendered}"
+        );
+    }
+    assert!(recorder.calls.lock().await.is_empty());
+}
+
+/// The reachable case, and the reason the gate lives in the builder rather than
+/// in the already-signed validator.
+///
+/// `PillarApp::sign_request_v2` only runs the payload-signed check when the
+/// request carries a `dvnAddress` (`pillar-core/src/lib.rs:602-609`), and the
+/// validator's own Stellar arm refuses only there. A request without one skips
+/// that arm entirely, so before this gate existed it went all the way to a
+/// signature over the superseded ULN302 id. The refusal must therefore not
+/// depend on `dvnAddress`, and it must be the provenance refusal rather than a
+/// complaint about the missing address.
+#[tokio::test]
+async fn runtime_layerzero_matrix_refuses_stellar_even_without_a_dvn_address() {
+    let (hash_builders, recorder) = runtime_matrix_hash_builders(&["ethereum", "stellar"]);
+
+    let error = hash_builders[ULN_VERSION_V302]
+        .build_dvn_hash_call_data(
+            &matrix_sent_event("stellar", 30_600),
+            &message_context(1_900_000_000, None),
+        )
+        .await
+        .expect_err("a request without a dvnAddress must not slip past the gate");
+
+    let rendered = format!("{error:?}");
+    assert!(
+        rendered.contains("stellar deployment for mainnet is unconfirmed"),
+        "the refusal must be about provenance, not about the absent dvnAddress: {rendered}"
+    );
+    assert!(recorder.calls.lock().await.is_empty());
+}
+
 #[tokio::test]
 async fn source_chain_parity_routes_movement_destination() {
     let (hash_builders, recorder) = runtime_matrix_hash_builders(&["ethereum", "movement"]);
@@ -137,13 +202,8 @@ const HASH_MATRIX_CASES: &[HashMatrixCase] = &[
         expected_hash: "0xcbdab5c30da0f9a063c70b87823f1448e7d62b90c4219a4d7b702b374def9290",
         expected_target: "0x0727f40349719ac76861a51a0b3d3e07be1577fff137bb81a5dc32e5a5c61d38",
     },
-    HashMatrixCase {
-        chain_name: "stellar",
-        dst_eid: 30_600,
-        dvn_address: Some("0x3333333333333333333333333333333333333333"),
-        expected_hash: "0x1ee926374bd0eb73aab04c3ce3458a53d26deb1b7008283847dfa3f2934499e3",
-        expected_target: "CA5R2JQYRJXFLWHE3XLLIO32HMF4MIDYY2NLWMGYYQDWKU6BTXL7URJI",
-    },
+    // Stellar is deliberately absent: it is registered but refuses. See
+    // `runtime_layerzero_matrix_refuses_stellar_for_unconfirmed_deployment`.
 ];
 
 fn runtime_matrix_hash_builders(

@@ -1,0 +1,109 @@
+{
+  "_provenance": {
+    "what": "Whether the Stellar EndpointV2/ULN302 contract ids pinned by upstream @layerzerolabs/lz-stellar-sdk@3.0.167 are the ones LayerZero runs today. The ULN302 id is hashed into the DVN attestation, so a superseded id produces a signature aimed at a contract no live verifier reads.",
+    "capturedAt": "2026-08-28T08:27:12Z",
+    "sources": {
+      "pinnedTable": "gasolina-audit/packages/contracts/lz-stellar-sdk/src/contractGetters.ts lines 40-43 (testnet) and 60-63 (mainnet)",
+      "liveMetadata": "https://metadata.layerzero-api.com/v1/metadata/deployments",
+      "onChain": "https://api.stellar.expert/explorer/{public,testnet}/contract/<id>"
+    },
+    "howToRegenerate": "Re-run the probe in this repo history: fetch the metadata deployments document, then read each contract id from stellar.expert. No key needed.",
+    "verdict": "Two separate generations by the SAME deployer per network, not a metadata error. Generation 1 (pinned) and generation 2 (live) have disjoint wasm hashes for BOTH EndpointV2 and ULN302, and generation 2 was deployed ~3.5 months later. Signing against generation 1 is therefore not trustworthy."
+  },
+  "generations": {
+    "pinnedUpstream": {
+      "note": "What lz-stellar-sdk@3.0.167 hard-codes, and what this repo mirrors.",
+      "mainnet": {
+        "endpointV2": {
+          "contract": "CAA4ZB7DNJ7KIZDEVDQRAZOQHYOV6U42LGBW375ZG7HIMUILA5FPXKQH",
+          "wasm": "0f3336cb82c088d8430af0b9110c309baa6c2eade24e65d35b16650d197d1592",
+          "creator": "GBOAT7TNKGIMFK4LB4ZIOZWYMJ3CS52A57PMOZ3E5TYIBV4XMF6WAHOJ",
+          "createdUnix": 1774844408,
+          "createdUtc": "2026-03-30",
+          "lifetimeEvents": 112,
+          "lifetimeSubinvocations": 144,
+          "storageEntries": 59
+        },
+        "uln302": {
+          "contract": "CA5R2JQYRJXFLWHE3XLLIO32HMF4MIDYY2NLWMGYYQDWKU6BTXL7URJI",
+          "wasm": "e5a97c9d7e69b9c03a9ba3b415c069d07a9b5282737921ba1f4a99b256510ab9",
+          "creator": "GBOAT7TNKGIMFK4LB4ZIOZWYMJ3CS52A57PMOZ3E5TYIBV4XMF6WAHOJ",
+          "createdUnix": 1774844467,
+          "createdUtc": "2026-03-30",
+          "lifetimeEvents": 106,
+          "lifetimeSubinvocations": 102,
+          "storageEntries": 33
+        }
+      },
+      "testnet": {
+        "endpointV2": {
+          "contract": "CBQOTWFU4N4DWFWYIU7EY62DXNCZH5N3U3XHKQW326CGY4CI6GT6Q5AF",
+          "wasm": "0f3336cb82c088d8430af0b9110c309baa6c2eade24e65d35b16650d197d1592",
+          "creator": "GCRN5PMAG5FM5QLCH7BUZPRQ7UIW37LBZLF2BIDEOSG4ZQ6HYRC45ALA",
+          "createdUnix": 1775683052,
+          "createdUtc": "2026-04-08",
+          "lifetimeEvents": 170,
+          "lifetimeSubinvocations": 227,
+          "storageEntries": 108
+        },
+        "uln302": {
+          "contract": "CAWCTJDDZZEWYARYCY6IP7LJ5WAR5XHNDBNDNRFYNS5ZX22MH3RPSJSH",
+          "wasm": "e5a97c9d7e69b9c03a9ba3b415c069d07a9b5282737921ba1f4a99b256510ab9",
+          "creator": "GCRN5PMAG5FM5QLCH7BUZPRQ7UIW37LBZLF2BIDEOSG4ZQ6HYRC45ALA",
+          "createdUnix": 1775683077,
+          "createdUtc": "2026-04-08",
+          "lifetimeEvents": 328,
+          "lifetimeSubinvocations": 297,
+          "storageEntries": 204
+        }
+      }
+    },
+    "liveMetadata": {
+      "note": "What LayerZero's metadata service publishes today.",
+      "mainnet": {
+        "endpointV2": {
+          "contract": "CCQLLRE5JBAWYCW3KTWOIWLMFDUOKROQVZNSALQMGOSXNW3ERUOWTZGK",
+          "wasm": "2411385509a00aeab0aed1236fb9cfa07106fbd8675232382bb15b6b07c704b9",
+          "creator": "GBOAT7TNKGIMFK4LB4ZIOZWYMJ3CS52A57PMOZ3E5TYIBV4XMF6WAHOJ",
+          "createdUnix": 1784159749,
+          "createdUtc": "2026-07-15",
+          "lifetimeEvents": 790,
+          "lifetimeSubinvocations": 529,
+          "storageEntries": 424
+        },
+        "uln302": {
+          "contract": "CCV4HEII3UC65THWGSRM2DVIJLB6HS6YMUHDTTHUECX2RHTP5FA2GOBA",
+          "wasm": "96ae13fb9f00b73ff08e276622392fac05525bfadaafae55a11aabcb06160957",
+          "creator": "GBOAT7TNKGIMFK4LB4ZIOZWYMJ3CS52A57PMOZ3E5TYIBV4XMF6WAHOJ",
+          "createdUnix": 1784161355,
+          "createdUtc": "2026-07-16",
+          "lifetimeEvents": 1158,
+          "lifetimeSubinvocations": 1320,
+          "storageEntries": 521
+        }
+      },
+      "testnet": {
+        "endpointV2": {
+          "contract": "CALTBA5S6GRJEHAXFP45LGGLKWWAF7HTZCPNUBUJF2HWWRRLQNV35AIV",
+          "wasm": "2411385509a00aeab0aed1236fb9cfa07106fbd8675232382bb15b6b07c704b9",
+          "creator": "GCRN5PMAG5FM5QLCH7BUZPRQ7UIW37LBZLF2BIDEOSG4ZQ6HYRC45ALA",
+          "createdUnix": 1785869224,
+          "createdUtc": "2026-08-04",
+          "lifetimeEvents": 88,
+          "lifetimeSubinvocations": 112,
+          "storageEntries": 42
+        },
+        "uln302": {
+          "contract": "CCMLPCAWCPIIMXOHJJKU3NZLOFTT2O6QTB2UUFPN6SEHLK35QRHVKKMB",
+          "wasm": "96ae13fb9f00b73ff08e276622392fac05525bfadaafae55a11aabcb06160957",
+          "creator": "GCRN5PMAG5FM5QLCH7BUZPRQ7UIW37LBZLF2BIDEOSG4ZQ6HYRC45ALA",
+          "createdUnix": 1785874179,
+          "createdUtc": "2026-08-04",
+          "lifetimeEvents": 102,
+          "lifetimeSubinvocations": 96,
+          "storageEntries": 36
+        }
+      }
+    }
+  }
+}

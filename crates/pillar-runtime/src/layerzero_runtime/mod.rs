@@ -81,6 +81,7 @@ mod read_payload;
 mod ton_v3_builder;
 mod types;
 mod uln_v2_builder;
+mod unavailable_builder;
 mod validation_extra_context;
 mod validation_impl;
 mod validation_payload;
@@ -113,3 +114,4 @@ pub use types::{
     RuntimeSuiLayerZeroConfig,
 };
 pub(crate) use uln_v2_builder::RuntimeEvmUlnV2PayloadBuilder;
+pub use unavailable_builder::UnavailableUlnPayloadBuilder;

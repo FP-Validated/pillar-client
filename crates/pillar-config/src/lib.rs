@@ -192,6 +192,26 @@ pub enum ConfigError {
         chain_name: String,
         contract_name: String,
     },
+    /// The destination's pinned deployment was confirmed on chain to be a
+    /// superseded generation. The ULN address is hashed into the attestation,
+    /// so signing anyway would emit a signature aimed at a contract no live
+    /// verifier reads - a silently useless attestation rather than a loud
+    /// failure. Refuse instead, and name both generations so the operator can
+    /// re-pin from a source they trust.
+    #[error(
+        "LayerZero {chain_name} deployment for {environment} is unconfirmed: this build pins \
+         {pinned}, but LayerZero's metadata service publishes {published}. Confirmed on chain \
+         {confirmed_on}: separate generations by the same deployer, with disjoint code. The \
+         address is signed over, so {chain_name} destinations are refused until the pinned \
+         table is re-derived from a confirmed deployment."
+    )]
+    UnconfirmedDeploymentGeneration {
+        environment: String,
+        chain_name: String,
+        pinned: String,
+        published: String,
+        confirmed_on: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

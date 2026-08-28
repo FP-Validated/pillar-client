@@ -147,7 +147,7 @@ where
                     },
                 )
                 .await;
-                (index, Some(observation))
+                (index, observation)
             });
         }
         let context = format!("payload-signed validation for chain {dst_chain_name}");
@@ -170,22 +170,12 @@ struct SuiPayloadSignedObservation<'a> {
 /// One provider's full Sui payload-signed observation, fingerprinted by every
 /// value it agreed on so a provider disagreeing on state, confirmations or the
 /// required threshold cannot be counted as agreeing.
+///
+/// `None` means this provider could not answer - an object it needed was
+/// unresolvable, a `devInspect` failed, or a return value would not decode.
+/// Upstream's provider rejects in each of those cases, so none of them vote:
+/// providers that failed have not agreed that the payload is unsigned.
 async fn observe_sui_payload_signed<T>(
-    transport: &T,
-    url: &str,
-    headers: HashMap<String, String>,
-    observation: SuiPayloadSignedObservation<'_>,
-) -> (String, PayloadSignedValidity)
-where
-    T: JsonRpcTransport,
-{
-    match try_observe_sui_payload_signed(transport, url, headers, observation).await {
-        Some((fingerprint, validity)) => (fingerprint, validity),
-        None => ("missing".to_string(), PayloadSignedValidity::Missing),
-    }
-}
-
-async fn try_observe_sui_payload_signed<T>(
     transport: &T,
     url: &str,
     headers: HashMap<String, String>,
