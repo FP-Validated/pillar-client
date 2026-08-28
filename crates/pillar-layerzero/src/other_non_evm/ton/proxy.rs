@@ -91,3 +91,35 @@ mod tests {
         assert_eq!(decode_proxy_admin_target(&to_base64(&other)).unwrap(), None);
     }
 }
+
+#[cfg(test)]
+mod gasolina_parity {
+    use super::*;
+    use serde_json::Value;
+
+    /// The decoded admin becomes the DVN `ExecuteParams.target`, which is signed, so
+    /// deciding it by reading upstream is not enough. This compares against what
+    /// upstream's own `getCellName` + `lzDecodeClass('Proxy', ...)` return for the
+    /// same cells (`lz-ton-contracts/src/index.ts:634-666`). The quorum fetch that
+    /// wraps the decode upstream is not covered here; the cell is supplied.
+    #[test]
+    fn proxy_target_matches_gasolina_for_every_recorded_cell() {
+        let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.extend(["tests", "gasolina_parity", "ton_proxy_target.json"]);
+        let fixture: Value = serde_json::from_str(
+            &std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("missing {}: {error}", path.display())),
+        )
+        .expect("parses");
+
+        let cases = fixture["cases"].as_array().expect("cases");
+        assert!(cases.len() >= 2, "both branches must be covered");
+        for case in cases {
+            let id = case["id"].as_str().expect("id");
+            let ours = decode_proxy_admin_target(case["storageBoc"].as_str().expect("boc"))
+                .unwrap_or_else(|error| panic!("{id}: decode failed: {error:?}"));
+            let theirs = case["target"].as_str().map(str::to_string);
+            assert_eq!(ours, theirs, "{id}: resolved DVN implementation");
+        }
+    }
+}

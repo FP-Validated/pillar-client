@@ -1,0 +1,36 @@
+{
+  "_provenance": {
+    "capturedAt": "2026-08-28T05:43:39Z",
+    "howToRegenerate": "scripts/gasolina-parity/emit-ton-proxy-target.ts - see that directory README",
+    "notCovered": "the quorum fetch that wraps the decode (fetchQuorumedStorageCell)",
+    "readOnly": "no RPC, no signer, no network; the storage cell is supplied, not fetched",
+    "what": "The DVN implementation address upstream resolves from a TON proxy storage cell"
+  },
+  "cases": [
+    {
+      "cellName": "pfProxy",
+      "id": "proxy-admin-target",
+      "isProxy": true,
+      "note": "a Proxy cell: the admin is the implementation the DVN call targets",
+      "storageBoc": "te6cckEBAwEAwAABVwAAAHBmUHJveHmT/wBXv//////////////////////////////////////9AQHXd3JrQ29yU3RvcpP/IFe4Je////////////////////////////////////6qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAgBARERERERERERERERERERERERERERERERERERERERERET8w675",
+      "target": "0:4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    {
+      "cellName": "Packet",
+      "id": "not-a-proxy",
+      "isProxy": false,
+      "note": "a live mainnet TON packet cell: upstream raises NotProxyError and falls back to the DVN address",
+      "storageBoc": "te6cckECAwEAAQIAAqcAAAAAUGFja2V0k/8k/9YV7gZ7/////////////////////////////////AAAAAAAACC+wF+gw+I94oCV5eVzBiOtBeGC+YH6RkkAD9WyGdOQI/oBAgDnAAAAAAAAcGF0aFFe4F+1J+4Ke/////////////////////////////////wAAdZUAAAAAAAAAAAAAAAAfdIx23kaOnRG9NA+p1cut8xXfsAAAdocd31gAUhdO0d0NZsNb/cGl/Maa9PSuNhVLE9z8bBSjX4AZAADAAAAAAAAAAAAAAAAAAAAAAAAABZUK6RjAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVPDPWw==",
+      "target": null
+    }
+  ],
+  "producedBy": {
+    "entrypoints": [
+      "packages/contracts/lz-ton-contracts/src/index.ts:getCellName",
+      "packages/contracts/lz-ton-contracts/src/index.ts:lzDecodeClass",
+      "packages/contracts/lz-ton-contracts/src/index.ts:getImplementationContract (decode half)"
+    ],
+    "notCovered": "the quorum fetch around the decode (fetchQuorumedStorageCell); the cell is supplied",
+    "upstream": "gasolina-audit"
+  }
+}

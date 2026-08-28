@@ -1,6 +1,6 @@
 # Gasolina parity fixtures
 
-These four scripts produce the fixtures the parity tests read. They import the
+These five scripts produce the fixtures the parity tests read. They import the
 upstream TypeScript service's own functions, so the fixtures are upstream's output
 rather than this repository's opinion of it.
 
@@ -10,8 +10,9 @@ rather than this repository's opinion of it.
 | `emit-v-id-table.ts` | `crates/pillar-runtime/tests/gasolina_parity/v_id_by_chain_name.json` |
 | `emit-ton-dvn-verify.ts` | `crates/pillar-layerzero/tests/gasolina_parity/ton_dvn_verify.json` |
 | `emit-historical-smoke.ts` | `crates/pillar-runtime/tests/gasolina_parity/historical_smoke.json` |
+| `emit-ton-proxy-target.ts` | `crates/pillar-layerzero/tests/gasolina_parity/ton_proxy_target.json` |
 
-All four are read-only in the sense that matters: no RPC, no network, no writes to
+All five are read-only in the sense that matters: no RPC, no network, no writes to
 the upstream checkout. `emit-historical-smoke.ts` does run upstream's signer, with a
 well-known test mnemonic that exists only in that file.
 
@@ -112,10 +113,13 @@ arm is a comparison rather than an assumption about upstream's shape.
 
 Three things the fixture records rather than hides:
 
-- `mainnet-ton` is not compared. Upstream's TON verify path resolves the DVN proxy's
-  implementation through a quorum-backed storage read
-  (`gasolinaSdk/ton/index.ts:144-159`), which no argument bypasses. TON's payload
-  builders are compared through `ton_dvn_verify.json` instead.
+- `mainnet-ton` is not compared *in this fixture*. Upstream's TON verify path resolves
+  the DVN proxy's implementation through a quorum-backed storage read
+  (`gasolinaSdk/ton/index.ts:144-159`), which no argument bypasses. TON is covered by
+  two other fixtures instead: `ton_dvn_verify.json` for the payload builders, and
+  `ton_proxy_target.json` for the decode that turns a proxy storage cell into the
+  address the DVN call targets - the half of `getImplementationContract` that decides
+  a signed value. The quorum fetch wrapping that decode is still uncompared.
 - The two Stellar pathways are Gate 0 blocked. They are compared and they match, but
   per the plan they are not a rollout signal until the deployment addresses are
   confirmed on-chain.
@@ -139,6 +143,19 @@ Both were in the signer stage, and neither is visible from a hash comparison:
   Initia is the one Move-adjacent chain that does not override. This service derived
   an Ed25519 key for local signing, which produced a signature that did not
   correspond to the address it advertised.
+
+## What is still not compared
+
+- Upstream's TON quorum fetch (`fetchQuorumedStorageCell`). Its decode is compared;
+  the fetch would need a recorded toncenter account state and `getContractStorage`
+  response, which nothing in the tree records yet.
+- The already-signed rejection, which is an on-chain read rather than an offline
+  decision, and is covered by its own criterion.
+- A testnet Move, IOTA or TON pathway. Not an omission: there is no such packet to
+  record. Sepolia carries none in 1,000,000 blocks, and base-sepolia, bsc-testnet,
+  amoy, arbitrum-sepolia, optimism-sepolia and avalanche-fuji carry none in 250,000
+  blocks each. What those testnets do carry - solana, sui, starknet, stellar - is in
+  the fixture.
 
 Starknet's `ulnCallData` is compared as felt *values* rather than as a string:
 starknet.js renders some felts as decimal and strips leading zeros, this service
