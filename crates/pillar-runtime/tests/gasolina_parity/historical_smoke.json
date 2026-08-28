@@ -1,0 +1,832 @@
+{
+  "_provenance": {
+    "capturedAt": "2026-08-28T03:27:52Z",
+    "howToRegenerate": "scripts/gasolina-parity/emit-historical-smoke.ts - see that directory README",
+    "inputs": "crates/pillar-runtime/tests/gasolina_parity/historical_pathways.json",
+    "readOnly": "no RPC, no signer, no network; providers passed as {} because no compared family reads one on the verify path",
+    "what": "What upstream's public signing entrypoint produces for each recorded historical pathway"
+  },
+  "pathways": [
+    {
+      "dstChainName": "aptos",
+      "environment": "mainnet",
+      "expiration": 1900000000,
+      "family": "APTOS",
+      "gate0Blocked": null,
+      "hashCallData": "15a8f56428b9e52612f260e8e7cedbac6c69b91d95d74501d7b8aff846722414",
+      "id": "mainnet-aptos",
+      "normalizedEvent": {
+        "guid": "0xe6872c3500f9784dadcf17c4eca12d84a7a65f2a68c0f419700bc7e33af63fce",
+        "lzMessageId": {
+          "nonce": 74,
+          "pathwayId": {
+            "dstChainName": "aptos",
+            "dstEid": 30108,
+            "receiver": "0x04ffac784af8c817231b2df781126cee5e46d4ea5b172e3942620f3209a74401",
+            "sender": "0xb42c089066084c2cbaae3d15a3acdc38d15b2506",
+            "srcChainName": "ethereum",
+            "srcEid": 30101
+          },
+          "ulnSendVersion": "V302"
+        },
+        "message": "0xc752d3c63346c5244a19f6a936078bcca6fafd84aabab3f3ffa827c8cecd2213000007049df17270",
+        "onChainEvent": {
+          "blockHash": "0x552971a752cdd936ff60e2dce3c37c1907cd698cc28198b4f4c0515762774be3",
+          "blockNumber": 25819993,
+          "chainName": "ethereum",
+          "txHash": "0xfd2fa473431f5d4ddc8b0c9637f84832d2548045cc19555976469f4dca829263"
+        },
+        "options": {
+          "lzReceive": {
+            "gas": "65000",
+            "value": "0"
+          },
+          "ordered": false
+        },
+        "sendLibrary": "0xbB2Ea70C9E858123480642Cf96acbcCE1372dCe1"
+      },
+      "srcChainName": "ethereum",
+      "targetContract": "0xc33752e0220faf79e45385dd73fb28d681dcd9f1569a1480725507c1f3c3aba9",
+      "txHash": "0xfd2fa473431f5d4ddc8b0c9637f84832d2548045cc19555976469f4dca829263",
+      "ulnCallData": "unknown in aptos",
+      "ulnCallDataDetails": {
+        "blockConfirmation": 15,
+        "methodName": "hashPropose",
+        "proof": {
+          "packetHeader": "0x01000000000000004a00007595000000000000000000000000b42c089066084c2cbaae3d15a3acdc38d15b25060000759c04ffac784af8c817231b2df781126cee5e46d4ea5b172e3942620f3209a74401",
+          "payloadHash": "0x68d21053fb69a0b2495199ef57d4ed5f3f01a91a7ff1c5ba1bc2b38c8fb1e2ab"
+        }
+      },
+      "vId": "108",
+      "vid": "108"
+    },
+    {
+      "dstChainName": "polygon",
+      "environment": "mainnet",
+      "expiration": 1900000000,
+      "family": "EVM",
+      "gate0Blocked": null,
+      "hashCallData": "0xac5eea865ade8d6bd00b92a68e50f5f117f66da178c6d71db604f528429ea2dc",
+      "id": "mainnet-polygon",
+      "normalizedEvent": {
+        "guid": "0x92636cf05f425a34167dd98966b076259194865bc6499dc7bbfabdcfbc23b482",
+        "lzMessageId": {
+          "nonce": 13331,
+          "pathwayId": {
+            "dstChainName": "polygon",
+            "dstEid": 30109,
+            "receiver": "0x6ba10300f0dc58b7a1e4c0e41f5dabb7d7829e13",
+            "sender": "0x6c96de32cea08842dcc4058c14d3aaad7fa41dee",
+            "srcChainName": "ethereum",
+            "srcEid": 30101
+          },
+          "ulnSendVersion": "V302"
+        },
+        "message": "0x000000000000000000000000a68e620138863f55a1f7e0f0d49d666bbe6670d7000000004a817c80",
+        "onChainEvent": {
+          "blockHash": "0x83db3c4617b5d0ea34fd3d91f5d88b0cb621c8518876bde726ea79cb124f81de",
+          "blockNumber": 25845997,
+          "chainName": "ethereum",
+          "txHash": "0x924394d5d315579f63ad8cd2f61e43e606eacc96015990fe72c440ce261182bf"
+        },
+        "options": {
+          "lzReceive": {
+            "gas": "150000",
+            "value": "0"
+          },
+          "ordered": false
+        },
+        "sendLibrary": "0xbB2Ea70C9E858123480642Cf96acbcCE1372dCe1"
+      },
+      "srcChainName": "ethereum",
+      "targetContract": "0x1322871e4ab09bc7f5717189434f97bbd9546e95",
+      "txHash": "0x924394d5d315579f63ad8cd2f61e43e606eacc96015990fe72c440ce261182bf",
+      "ulnCallData": "0x0223536e00000000000000000000000000000000000000000000000000000000000000600f2956c880eb0c26e736784e6f1317c4611665b8a75a48e5da1287bd51acffca000000000000000000000000000000000000000000000000000000000000000f0000000000000000000000000000000000000000000000000000000000000051010000000000003413000075950000000000000000000000006c96de32cea08842dcc4058c14d3aaad7fa41dee0000759d0000000000000000000000006ba10300f0dc58b7a1e4c0e41f5dabb7d7829e13000000000000000000000000000000",
+      "ulnCallDataDetails": {
+        "blockConfirmation": 15,
+        "methodName": "verify",
+        "proof": {
+          "packetHeader": "0x010000000000003413000075950000000000000000000000006c96de32cea08842dcc4058c14d3aaad7fa41dee0000759d0000000000000000000000006ba10300f0dc58b7a1e4c0e41f5dabb7d7829e13",
+          "payloadHash": "0x0f2956c880eb0c26e736784e6f1317c4611665b8a75a48e5da1287bd51acffca"
+        }
+      },
+      "vId": "109",
+      "vid": "109"
+    },
+    {
+      "dstChainName": "initia",
+      "environment": "mainnet",
+      "expiration": 1900000000,
+      "family": "INITIA",
+      "gate0Blocked": null,
+      "hashCallData": "5a89802847332a16df3e09db346bf146f8d5f0104bc3c9039ff929bf9e622dc3",
+      "id": "mainnet-initia",
+      "normalizedEvent": {
+        "guid": "0x40d92f8e7b774ed21fe656baf80976c910df5d5af369f1f58a4c98cced83ade5",
+        "lzMessageId": {
+          "nonce": 2431,
+          "pathwayId": {
+            "dstChainName": "initia",
+            "dstEid": 30326,
+            "receiver": "0xdd07f825254ed0d753da2b4af4484921c14cf6edd5b6e8fedf81b1bc07ea15de",
+            "sender": "0x66a503a1060ab3f2b1aaabed613fe30babbc1bde",
+            "srcChainName": "ethereum",
+            "srcEid": 30101
+          },
+          "ulnSendVersion": "V302"
+        },
+        "message": "0xe81950cf0154b9379ea0636552bc6b54bb0356ff5435c23990f54314e77f9cf400000000000075300000000000000000000000003fa24be428381a5c5f89356dfee1bbbf590aee3f7b224074797065223a222f6962632e6170706c69636174696f6e732e7472616e736665722e76312e4d73675472616e73666572222c226d656d6f223a227b5c2265766d5c223a7b5c226d6573736167655c223a7b5c22636f6e74726163745f616464725c223a5c223078346562303844356331423041383231333033413836433762334143383035633237393364453738335c222c5c22696e7075745c223a5c2230783730316463663231303030303030303030303030303030303030303030303030336661323462653432383338316135633566383933353664666565316262626635393061656533663030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030363030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303036303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303034343639363236333266333333393330333233363431333334323433333534323333333133333335343334313433333734363431333533353335333134333332333833363431333033353435333233313335343634343431333234333333343333373339333133393335343534323337333334363336333633393339333633393336343633343436343630303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030305c227d7d7d222c227265636569766572223a22307834656230384435633142304138323133303341383643376233414338303563323739336445373833222c2273656e646572223a22696e6974313837337968657067387164396368756678346b6c6163646d68617673346d336c6d32356d6373222c22736f757263655f6368616e6e656c223a226368616e6e656c2d3235222c22736f757263655f706f7274223a227472616e73666572222c2274696d656f75745f686569676874223a7b227265766973696f6e5f686569676874223a2230222c227265766973696f6e5f6e756d626572223a2230227d2c2274696d656f75745f74696d657374616d70223a2231373837383435313034353333303030303030222c22746f6b656e223a7b22616d6f756e74223a223330303030222c2264656e6f6d223a226d6f76652f65646663646461636163373961623836373337613165396536353830353036366438626532383661333763623934663438383462383932623065333966393534227d7d",
+        "onChainEvent": {
+          "blockHash": "0xc3628be03d7a6fa9ab959cf37e27c5c50353da4591c6b3e37c8a27dd0f8eb526",
+          "blockNumber": 25847310,
+          "chainName": "ethereum",
+          "txHash": "0xf192880188b6bc61487bcc135b8b1125995d32f73b8642ac3988d0c4a5d7bfe3"
+        },
+        "options": {
+          "compose": [
+            {
+              "gas": "2000000",
+              "index": 0,
+              "value": "0"
+            }
+          ],
+          "lzReceive": {
+            "gas": "1000000",
+            "value": "0"
+          },
+          "ordered": false
+        },
+        "sendLibrary": "0xbB2Ea70C9E858123480642Cf96acbcCE1372dCe1"
+      },
+      "srcChainName": "ethereum",
+      "targetContract": "0x5aab6aa28749dd073c26c4703e14eb7e89dd6a25abc2e1f0e98de59f8203a012",
+      "txHash": "0xf192880188b6bc61487bcc135b8b1125995d32f73b8642ac3988d0c4a5d7bfe3",
+      "ulnCallData": "unknown in aptos",
+      "ulnCallDataDetails": {
+        "blockConfirmation": 15,
+        "methodName": "hashPropose",
+        "proof": {
+          "packetHeader": "0x01000000000000097f0000759500000000000000000000000066a503a1060ab3f2b1aaabed613fe30babbc1bde00007676dd07f825254ed0d753da2b4af4484921c14cf6edd5b6e8fedf81b1bc07ea15de",
+          "payloadHash": "0xd6f00f06271c307aaa50c0ab44a4b9622d337a174c6c56b692ab9b9756ec5f4c"
+        }
+      },
+      "vId": "326",
+      "vid": "326"
+    },
+    {
+      "dstChainName": "movement",
+      "environment": "mainnet",
+      "expiration": 1900000000,
+      "family": "MOVEMENT",
+      "gate0Blocked": null,
+      "hashCallData": "7f0d0f898e11a937b1d8470c9ebb4f78997d34a625ccea7f303fc6f23dd74301",
+      "id": "mainnet-movement",
+      "normalizedEvent": {
+        "guid": "0xc1a80809ff5601485b13c545cfa56eeb4a0bb4f22a511f5f370a105f705b1c3f",
+        "lzMessageId": {
+          "nonce": 6985,
+          "pathwayId": {
+            "dstChainName": "movement",
+            "dstEid": 30325,
+            "receiver": "0x4d2969d384e440db9f1a51391cfc261d1ec08ee1bdf7b9711a6c05d485a4110a",
+            "sender": "0xc209a627a7b0a19f16a963d9f7281667a2d9eff2",
+            "srcChainName": "ethereum",
+            "srcEid": 30101
+          },
+          "ulnSendVersion": "V302"
+        },
+        "message": "0x0d17b3d34d0a6718aa8e1206af923f4fa4f6eb8253a2b3fba0bd5f3530b608e90000000000000022",
+        "onChainEvent": {
+          "blockHash": "0x8da7e111a459073361d562a3b1635e555529dbb3db91030341cb85137724222a",
+          "blockNumber": 25812447,
+          "chainName": "ethereum",
+          "txHash": "0x68746081595dbddedb482719f2d65f601063989892fff8dfd50787d727a00cd5"
+        },
+        "options": {
+          "lzReceive": {
+            "gas": "200000",
+            "value": "0"
+          },
+          "ordered": false
+        },
+        "sendLibrary": "0xbB2Ea70C9E858123480642Cf96acbcCE1372dCe1"
+      },
+      "srcChainName": "ethereum",
+      "targetContract": "0xc33752e0220faf79e45385dd73fb28d681dcd9f1569a1480725507c1f3c3aba9",
+      "txHash": "0x68746081595dbddedb482719f2d65f601063989892fff8dfd50787d727a00cd5",
+      "ulnCallData": "unknown in aptos",
+      "ulnCallDataDetails": {
+        "blockConfirmation": 15,
+        "methodName": "hashPropose",
+        "proof": {
+          "packetHeader": "0x010000000000001b4900007595000000000000000000000000c209a627a7b0a19f16a963d9f7281667a2d9eff2000076754d2969d384e440db9f1a51391cfc261d1ec08ee1bdf7b9711a6c05d485a4110a",
+          "payloadHash": "0x6a0cc4cfab7d8ddddd081760474264b8995fa76f51daa9f615f40e8abd919253"
+        }
+      },
+      "vId": "325",
+      "vid": "325"
+    },
+    {
+      "dstChainName": "solana",
+      "environment": "mainnet",
+      "expiration": 1900000000,
+      "family": "SOLANA",
+      "gate0Blocked": null,
+      "hashCallData": "df168274ae58162f70f1b4f9a085904f77d60e5011edfc1e1611d7eb8dcc8927",
+      "id": "mainnet-solana",
+      "normalizedEvent": {
+        "guid": "0x3eb2bcb44e8a46525658dfd11848c106524d982606ac7f5b8c9f6b02238f875b",
+        "lzMessageId": {
+          "nonce": 2647,
+          "pathwayId": {
+            "dstChainName": "solana",
+            "dstEid": 30168,
+            "receiver": "AuVW19qwit2bxZqcspGZLsbq2ZiqosvryTNXE8UZSeGh",
+            "sender": "0xa2c323fe5a74adffad2bf3e007e36bb029606444",
+            "srcChainName": "ethereum",
+            "srcEid": 30101
+          },
+          "ulnSendVersion": "V302"
+        },
+        "message": "0x0236de2b2edcc13c04d28f5211935d5542290c9cc0826a4574adaa051709e939000000746b1d5cc3",
+        "onChainEvent": {
+          "blockHash": "0xa7a94118c17d85654e4834f8ed6836a5a4003f3021dc73675dd0031337120b3e",
+          "blockNumber": 25846367,
+          "chainName": "ethereum",
+          "txHash": "0x199c75c3fe04a24e5325ad4aa20e2258a24af50fe4eb79b7391eefc30129ea98"
+        },
+        "options": {
+          "lzReceive": {
+            "gas": "200000",
+            "value": "2500000"
+          },
+          "ordered": false
+        },
+        "sendLibrary": "0xbB2Ea70C9E858123480642Cf96acbcCE1372dCe1"
+      },
+      "srcChainName": "ethereum",
+      "targetContract": "7a4WjyR8VZ7yZz5XJAKm39BUGn5iT9CKcv2pmG9tdXVH",
+      "txHash": "0x199c75c3fe04a24e5325ad4aa20e2258a24af50fe4eb79b7391eefc30129ea98",
+      "ulnCallData": "85a18d3078c65896010000000000000a5700007595000000000000000000000000a2c323fe5a74adffad2bf3e007e36bb029606444000075d8932b9c090c43c0b5b1c2f23a681db44a0dd86290a18d285c1969a08bb1164dca952ff7cc89ba87e22a081d2d7fc6a2b1e6dde6d0f996a66d85e1478b6644dc6a0f00000000000000",
+      "ulnCallDataDetails": {
+        "blockConfirmation": 15,
+        "methodName": "verify",
+        "proof": {
+          "packetHeader": "0x010000000000000a5700007595000000000000000000000000a2c323fe5a74adffad2bf3e007e36bb029606444000075d8932b9c090c43c0b5b1c2f23a681db44a0dd86290a18d285c1969a08bb1164dca",
+          "payloadHash": "0x952ff7cc89ba87e22a081d2d7fc6a2b1e6dde6d0f996a66d85e1478b6644dc6a"
+        }
+      },
+      "vId": "168",
+      "vid": "168"
+    },
+    {
+      "dstChainName": "starknet",
+      "environment": "mainnet",
+      "expiration": 1900000000,
+      "family": "STARKNET",
+      "gate0Blocked": null,
+      "hashCallData": "0x43219b69f95c7377514692e39379a10a1e87e5384669c435f1b75ec000cf668b",
+      "id": "mainnet-starknet",
+      "normalizedEvent": {
+        "guid": "0x9b0caa6f5c142c2f018607eca8ffa666df5b0a2ead597d52c413ab75e869b0e3",
+        "lzMessageId": {
+          "nonce": 758,
+          "pathwayId": {
+            "dstChainName": "starknet",
+            "dstEid": 30500,
+            "receiver": "0x069ac468d7ad7324c2807d9422630c650729a46121f023b11a647edf173562f9",
+            "sender": "0x0555e30da8f98308edb960aa94c0db47230d2b9c",
+            "srcChainName": "ethereum",
+            "srcEid": 30101
+          },
+          "ulnSendVersion": "V302"
+        },
+        "message": "0x07fa3e9ef41cb56f866bc81f2de468ab6b2a946d0ec7d2b224d40070743aa8f60000000014d9f7f5",
+        "onChainEvent": {
+          "blockHash": "0x425e9a502d2833bbc1052fd5bb0cfa6e6f2917069311d931e7c7a532d269375b",
+          "blockNumber": 25846887,
+          "chainName": "ethereum",
+          "txHash": "0x3874a870a4fdf53054f285980756c9c8d9330d6cda53efacc983c4ba1e5b783a"
+        },
+        "options": {
+          "lzReceive": {
+            "gas": "50000",
+            "value": "0"
+          },
+          "ordered": false
+        },
+        "sendLibrary": "0xbB2Ea70C9E858123480642Cf96acbcCE1372dCe1"
+      },
+      "srcChainName": "ethereum",
+      "targetContract": "0x0727f40349719ac76861a51a0b3d3e07be1577fff137bb81a5dc32e5a5c61d38",
+      "txHash": "0x3874a870a4fdf53054f285980756c9c8d9330d6cda53efacc983c4ba1e5b783a",
+      "ulnCallData": "0x2,0x100000000000002f6000075950000000000000000000000000555e30da8f9,0x8308edb960aa94c0db47230d2b9c00007724069ac468d7ad7324c2807d9422,0x630c650729a46121f023b11a647edf173562f9,0x13,288590783456804034467983829533550257822,63232201942658007676105376037274045114,0xf",
+      "ulnCallDataDetails": {
+        "blockConfirmation": 15,
+        "methodName": "verify",
+        "proof": {
+          "packetHeader": "0x0100000000000002f6000075950000000000000000000000000555e30da8f98308edb960aa94c0db47230d2b9c00007724069ac468d7ad7324c2807d9422630c650729a46121f023b11a647edf173562f9",
+          "payloadHash": "0x2f921441048498e98ac49f9371fecabad91c902ad19d53a686941b121b79269e"
+        }
+      },
+      "vId": "500",
+      "vid": "500"
+    },
+    {
+      "dstChainName": "stellar",
+      "environment": "mainnet",
+      "expiration": 1900000000,
+      "family": "STELLAR",
+      "gate0Blocked": "Stellar deployment addresses require operator and on-chain confirmation",
+      "hashCallData": "0x99cc2f8105c4319c279f19be2bf687739aac917443d92f4c4769c569d9a6c5cb",
+      "id": "mainnet-stellar",
+      "normalizedEvent": {
+        "guid": "0x263c6fb532fa4d6e2d09a811a2f34005eb5ee8e23d04b06515b407e487bc63e1",
+        "lzMessageId": {
+          "nonce": 15,
+          "pathwayId": {
+            "dstChainName": "stellar",
+            "dstEid": 30600,
+            "receiver": "0x5d672cb21b3afcdda54546c7f5b9fd346920e41f8fe8f39e838e5d7bd7435546",
+            "sender": "0x6c96de32cea08842dcc4058c14d3aaad7fa41dee",
+            "srcChainName": "ethereum",
+            "srcEid": 30101
+          },
+          "ulnSendVersion": "V302"
+        },
+        "message": "0x18d06a1e6cf32a056c25d7345f0e893eeba521610c8bfe7a75c605201f1094de000000000cee16d0",
+        "onChainEvent": {
+          "blockHash": "0x2ff1cc73d137d4c5fb0f5218c9b82065e52410408f7a8e951006f6b0f21f4559",
+          "blockNumber": 25846303,
+          "chainName": "ethereum",
+          "txHash": "0x0b3c1405e04a8d82f319e93d0d6af18e5689d9e7176050b1737abf4010ba3ecd"
+        },
+        "options": {
+          "lzReceive": {
+            "gas": "500000",
+            "value": "0"
+          },
+          "ordered": false
+        },
+        "sendLibrary": "0xbB2Ea70C9E858123480642Cf96acbcCE1372dCe1"
+      },
+      "srcChainName": "ethereum",
+      "targetContract": "CA5R2JQYRJXFLWHE3XLLIO32HMF4MIDYY2NLWMGYYQDWKU6BTXL7URJI",
+      "txHash": "0x0b3c1405e04a8d82f319e93d0d6af18e5689d9e7176050b1737abf4010ba3ecd",
+      "ulnCallData": "execute_transaction([{ to: CA5R2JQYRJXFLWHE3XLLIO32HMF4MIDYY2NLWMGYYQDWKU6BTXL7URJI, func: verify, args: [0x3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a, 0x01000000000000000f000075950000000000000000000000006c96de32cea08842dcc4058c14d3aaad7fa41dee000077885d672cb21b3afcdda54546c7f5b9fd346920e41f8fe8f39e838e5d7bd7435546, 0x0b62f5862b65b7fdf146fec89532a4c3debd49a5090a2a173dc3b8de94c1e9f1, 15] }])",
+      "ulnCallDataDetails": {
+        "blockConfirmation": 15,
+        "methodName": "verify",
+        "proof": {
+          "packetHeader": "0x01000000000000000f000075950000000000000000000000006c96de32cea08842dcc4058c14d3aaad7fa41dee000077885d672cb21b3afcdda54546c7f5b9fd346920e41f8fe8f39e838e5d7bd7435546",
+          "payloadHash": "0x0b62f5862b65b7fdf146fec89532a4c3debd49a5090a2a173dc3b8de94c1e9f1"
+        }
+      },
+      "vId": "600",
+      "vid": "600"
+    },
+    {
+      "dstChainName": "sui",
+      "environment": "mainnet",
+      "expiration": 1900000000,
+      "family": "SUI",
+      "gate0Blocked": null,
+      "hashCallData": "2f1370f459b172d6d4ced9aebbdab91c9b5eb97b907db7b88c654c8f7a08aa2b",
+      "id": "mainnet-sui",
+      "normalizedEvent": {
+        "guid": "0x1324cf4e17358510745678140a29cf1d68c3fe4940f676330e7b38fd4bc5e9a3",
+        "lzMessageId": {
+          "nonce": 24,
+          "pathwayId": {
+            "dstChainName": "sui",
+            "dstEid": 30378,
+            "receiver": "0xa356ca2010fcdf44d6cecfcecf18b73c32188d361e39dff3a96ac8de0dec7b1b",
+            "sender": "0xe24a3dc889621612422a64e6388927901608b91d",
+            "srcChainName": "ethereum",
+            "srcEid": 30101
+          },
+          "ulnSendVersion": "V302"
+        },
+        "message": "0x187040e4b230e352758a4e7d76c9b42e1ec5191a5227007f688cd674005345630000000000989680",
+        "onChainEvent": {
+          "blockHash": "0x312bce4f890954cb96cb87f35b759803ecd7ce6259432a8ccd8bcf6ba0c30ecc",
+          "blockNumber": 25847150,
+          "chainName": "ethereum",
+          "txHash": "0xcdeed233251a426b475225857553939f4f059d1535c50db9a2a6747cf8d14ad2"
+        },
+        "options": {
+          "lzReceive": {
+            "gas": "500000",
+            "value": "0"
+          },
+          "ordered": false
+        },
+        "sendLibrary": "0xbB2Ea70C9E858123480642Cf96acbcCE1372dCe1"
+      },
+      "srcChainName": "ethereum",
+      "targetContract": "0x3ce7457bed48ad23ee5d611dd3172ae4fbd0a22ea0e846782a7af224d905dbb0",
+      "txHash": "0xcdeed233251a426b475225857553939f4f059d1535c50db9a2a6747cf8d14ad2",
+      "ulnCallData": "unknown in sui",
+      "ulnCallDataDetails": {
+        "blockConfirmation": 15,
+        "methodName": "hashPropose",
+        "proof": {
+          "packetHeader": "0x01000000000000001800007595000000000000000000000000e24a3dc889621612422a64e6388927901608b91d000076aaa356ca2010fcdf44d6cecfcecf18b73c32188d361e39dff3a96ac8de0dec7b1b",
+          "payloadHash": "0xa212feeb51d707cf53fe165fdb2aa50fc96aaac77d445834aa826dd7f2365002"
+        }
+      },
+      "vId": "378",
+      "vid": "378"
+    },
+    {
+      "dstChainName": "ton",
+      "environment": "mainnet",
+      "family": "TON",
+      "gate0Blocked": null,
+      "id": "mainnet-ton",
+      "skipped": "verify path performs a quorum-backed storage read to resolve the DVN proxy implementation; covered by ton_dvn_verify.json",
+      "srcChainName": "ethereum",
+      "txHash": "0x3f37a3b984e4bd35491507bf1a57a730a318eaeef86635a57eb499e701c8f167"
+    },
+    {
+      "dstChainName": "tron",
+      "environment": "mainnet",
+      "expiration": 1900000000,
+      "family": "TRON",
+      "gate0Blocked": null,
+      "hashCallData": "0xab597bfb4e4e78e0ca8751b613874ce2bbc0d81d03a13ae1df7687f41acc6229",
+      "id": "mainnet-tron",
+      "normalizedEvent": {
+        "guid": "0x6097e5c3e40712c0cebd5c01d535de5b475251b1f25a4da232b81f693886b6eb",
+        "lzMessageId": {
+          "nonce": 25800,
+          "pathwayId": {
+            "dstChainName": "tron",
+            "dstEid": 30420,
+            "receiver": "0x3a08f76772e200653bb55c2a92998daca62e0e97",
+            "sender": "0x1f748c76de468e9d11bd340fa9d5cbadf315dfb0",
+            "srcChainName": "ethereum",
+            "srcEid": 30101
+          },
+          "ulnSendVersion": "V302"
+        },
+        "message": "0x0002000000000000000000000000ef4831b98ec3df4e9d1325fb11300f40ee2dc0f3000000024fb9727e",
+        "onChainEvent": {
+          "blockHash": "0x2c9f5726a603b2fe148af1b1c161e14f92cfa3d1f372bddbd0710fe9f27deadf",
+          "blockNumber": 25846029,
+          "chainName": "ethereum",
+          "txHash": "0x699d9274932e07c3ded1102ea58e77600ccc7a6018c702e67ec632f897d814c0"
+        },
+        "options": {
+          "lzReceive": {
+            "gas": "200000",
+            "value": "0"
+          },
+          "ordered": false
+        },
+        "sendLibrary": "0xbB2Ea70C9E858123480642Cf96acbcCE1372dCe1"
+      },
+      "srcChainName": "ethereum",
+      "targetContract": "0x612215d4db0475a76dcaa36c7f9afd748c42ed2d",
+      "txHash": "0x699d9274932e07c3ded1102ea58e77600ccc7a6018c702e67ec632f897d814c0",
+      "ulnCallData": "0x0223536e0000000000000000000000000000000000000000000000000000000000000060e2e09f6f5ef1d259093c890e4a5290ea60418d02adc3d78e4b85f45af342035f000000000000000000000000000000000000000000000000000000000000000f00000000000000000000000000000000000000000000000000000000000000510100000000000064c8000075950000000000000000000000001f748c76de468e9d11bd340fa9d5cbadf315dfb0000076d40000000000000000000000003a08f76772e200653bb55c2a92998daca62e0e97000000000000000000000000000000",
+      "ulnCallDataDetails": {
+        "blockConfirmation": 15,
+        "methodName": "verify",
+        "proof": {
+          "packetHeader": "0x0100000000000064c8000075950000000000000000000000001f748c76de468e9d11bd340fa9d5cbadf315dfb0000076d40000000000000000000000003a08f76772e200653bb55c2a92998daca62e0e97",
+          "payloadHash": "0xe2e09f6f5ef1d259093c890e4a5290ea60418d02adc3d78e4b85f45af342035f"
+        }
+      },
+      "vId": "420",
+      "vid": "420"
+    },
+    {
+      "dstChainName": "basesep",
+      "environment": "testnet",
+      "expiration": 1900000000,
+      "family": "EVM",
+      "gate0Blocked": null,
+      "hashCallData": "0xb80a7895c8ca5b97aefc2a56a2c27b6dd741f8eea89db17ae36ae0f26a2f315f",
+      "id": "testnet-basesep",
+      "normalizedEvent": {
+        "guid": "0x71aab95cecd3791dc288f408e4a43cc4c878d1b9353f279734420280cb304975",
+        "lzMessageId": {
+          "nonce": 1567892,
+          "pathwayId": {
+            "dstChainName": "basesep",
+            "dstEid": 40245,
+            "receiver": "0xde287b4a0918102511b027d53688c169fb308762",
+            "sender": "0xe20534a32f9162488a90026f268a74fbe28d272d",
+            "srcChainName": "sepolia",
+            "srcEid": 40161
+          },
+          "ulnSendVersion": "V302"
+        },
+        "message": "0x0000000000000000000000009266e229dc682291c5f4c2882407af871afc31b50000000000007276",
+        "onChainEvent": {
+          "blockHash": "0x9b81eb2b3abe802491e009568d19b25d1c2e164f3ab426b3270cd6105fc813ca",
+          "blockNumber": 11572156,
+          "chainName": "sepolia",
+          "txHash": "0xe6578050f862fcb0f25a6fc7b5c25f41c4cec9770a5fb5e5398dd1ab6c592e5c"
+        },
+        "options": {
+          "lzReceive": {
+            "gas": "300000",
+            "value": "0"
+          },
+          "ordered": false
+        },
+        "sendLibrary": "0xcc1ae8Cf5D3904Cef3360A9532B477529b177cCE"
+      },
+      "srcChainName": "sepolia",
+      "targetContract": "0x12523de19dc41c91f7d2093e0cfbb76b17012c8d",
+      "txHash": "0xe6578050f862fcb0f25a6fc7b5c25f41c4cec9770a5fb5e5398dd1ab6c592e5c",
+      "ulnCallData": "0x0223536e00000000000000000000000000000000000000000000000000000000000000609e113d20f7bd6832ea9c87b66ea4079447dc55ab59532246317ce2c81298a716000000000000000000000000000000000000000000000000000000000000000f000000000000000000000000000000000000000000000000000000000000005101000000000017ec9400009ce1000000000000000000000000e20534a32f9162488a90026f268a74fbe28d272d00009d35000000000000000000000000de287b4a0918102511b027d53688c169fb308762000000000000000000000000000000",
+      "ulnCallDataDetails": {
+        "blockConfirmation": 15,
+        "methodName": "verify",
+        "proof": {
+          "packetHeader": "0x01000000000017ec9400009ce1000000000000000000000000e20534a32f9162488a90026f268a74fbe28d272d00009d35000000000000000000000000de287b4a0918102511b027d53688c169fb308762",
+          "payloadHash": "0x9e113d20f7bd6832ea9c87b66ea4079447dc55ab59532246317ce2c81298a716"
+        }
+      },
+      "vId": "10245",
+      "vid": "10245"
+    },
+    {
+      "dstChainName": "solana",
+      "environment": "testnet",
+      "expiration": 1900000000,
+      "family": "SOLANA",
+      "gate0Blocked": null,
+      "hashCallData": "0f85cc1733e2d45744411707b55d8293b8264e8d4d035fb88124f9cfab391dac",
+      "id": "testnet-solana",
+      "normalizedEvent": {
+        "guid": "0xc4adf4cfca92d8d221be4edaf1983cd21aee5096c8b6de213f97047339bc8f18",
+        "lzMessageId": {
+          "nonce": 11882,
+          "pathwayId": {
+            "dstChainName": "solana",
+            "dstEid": 40168,
+            "receiver": "EfiW8F41iEGBGXyBuaNtMdGQbJj4CpnjGHEwteHFRtTg",
+            "sender": "0xe62c29eaed07e3fa5bd517afca69416a86ccdf7e",
+            "srcChainName": "sepolia",
+            "srcEid": 40161
+          },
+          "ulnSendVersion": "V302"
+        },
+        "message": "0x01440ec24b79a860f8123fe84ad4379fd439f1ce04406c0b8f750650c2a03bff86aa02000000006a8f1abc000000006a8f28cc18cb24192fb3dfa365fb02f8d6780ffd6423a434f9307d2a2d21e7d6fd5bdb637f4cb590b3e89c4527f6a7ef7d450b5374c934cacfba7e96cb36f524",
+        "onChainEvent": {
+          "blockHash": "0x6c6842a168bb6fbcf42da64c1001c95e29f98c5fe0baf159404b0f261bc012c1",
+          "blockNumber": 11572173,
+          "chainName": "sepolia",
+          "txHash": "0xe9bbac31b4b13e37b7fd3216d7d2313583cb62811d7b4611baab93c89a6a5a01"
+        },
+        "options": {
+          "lzReceive": {
+            "gas": "500000",
+            "value": "10000000"
+          },
+          "ordered": false
+        },
+        "sendLibrary": "0xcc1ae8Cf5D3904Cef3360A9532B477529b177cCE"
+      },
+      "srcChainName": "sepolia",
+      "targetContract": "7a4WjyR8VZ7yZz5XJAKm39BUGn5iT9CKcv2pmG9tdXVH",
+      "txHash": "0xe9bbac31b4b13e37b7fd3216d7d2313583cb62811d7b4611baab93c89a6a5a01",
+      "ulnCallData": "85a18d3078c65896010000000000002e6a00009ce1000000000000000000000000e62c29eaed07e3fa5bd517afca69416a86ccdf7e00009ce8cb12ed6b7b5eb92fca72c5ceb8c7d190130ed9ade7b09a20d92faf7f0a7027973ad3cc6e89399e7744e103d15138a2562c1f600fe4738342624ac53fab3cbecc0f00000000000000",
+      "ulnCallDataDetails": {
+        "blockConfirmation": 15,
+        "methodName": "verify",
+        "proof": {
+          "packetHeader": "0x010000000000002e6a00009ce1000000000000000000000000e62c29eaed07e3fa5bd517afca69416a86ccdf7e00009ce8cb12ed6b7b5eb92fca72c5ceb8c7d190130ed9ade7b09a20d92faf7f0a702797",
+          "payloadHash": "0x3ad3cc6e89399e7744e103d15138a2562c1f600fe4738342624ac53fab3cbecc"
+        }
+      },
+      "vId": "10168",
+      "vid": "10168"
+    },
+    {
+      "dstChainName": "starknet",
+      "environment": "testnet",
+      "expiration": 1900000000,
+      "family": "STARKNET",
+      "gate0Blocked": null,
+      "hashCallData": "0xc118dd119cf0d4bd4b7fa6155dd49f7b66a8fc25530f77fde2c60956fbdb4e40",
+      "id": "testnet-starknet",
+      "normalizedEvent": {
+        "guid": "0xe37f41d2af61a42214776857830252cceb2cc34023601d4750dbd6abbfeb3ead",
+        "lzMessageId": {
+          "nonce": 5,
+          "pathwayId": {
+            "dstChainName": "starknet",
+            "dstEid": 40500,
+            "receiver": "0x07e9593b9a78dff63fe86a488710be4c683a1befcd24f697475e3e0ae86e75e5",
+            "sender": "0x9a4c4d10d548d44e12aa847636700f6f4bf16e12",
+            "srcChainName": "sepolia",
+            "srcEid": 40161
+          },
+          "ulnSendVersion": "V302"
+        },
+        "message": "0x004caecc014b985c4d1dd049da7649ee8001275099ede88c84f88df466f7d5e600000000004c4b40",
+        "onChainEvent": {
+          "blockHash": "0xcf7de79bb34d2957f67372563e5ea16c5e6de26d8387d45285f838e93d0bc335",
+          "blockNumber": 11493434,
+          "chainName": "sepolia",
+          "txHash": "0x26a0c5e1880b617616455e84e94a417d7b15df2769da13b7c968b93572f27322"
+        },
+        "options": {
+          "lzReceive": {
+            "gas": "200000",
+            "value": "0"
+          },
+          "ordered": false
+        },
+        "sendLibrary": "0xcc1ae8Cf5D3904Cef3360A9532B477529b177cCE"
+      },
+      "srcChainName": "sepolia",
+      "targetContract": "0x0706572d6f7b938c813a20dc1b0328b83de939066e25bd0fbe14c270077f769d",
+      "txHash": "0x26a0c5e1880b617616455e84e94a417d7b15df2769da13b7c968b93572f27322",
+      "ulnCallData": "0x2,0x1000000000000000500009ce10000000000000000000000009a4c4d10d548,0xd44e12aa847636700f6f4bf16e1200009e3407e9593b9a78dff63fe86a4887,0x10be4c683a1befcd24f697475e3e0ae86e75e5,0x13,26639027003027866656488280702683773762,155819222246687601686967881222716415721,0xf",
+      "ulnCallDataDetails": {
+        "blockConfirmation": 15,
+        "methodName": "verify",
+        "proof": {
+          "packetHeader": "0x01000000000000000500009ce10000000000000000000000009a4c4d10d548d44e12aa847636700f6f4bf16e1200009e3407e9593b9a78dff63fe86a488710be4c683a1befcd24f697475e3e0ae86e75e5",
+          "payloadHash": "0x7539b0cb65cf6852f12a32d5c3605ee9140a7d6f4b053c5aa7bf577fc6a4fb42"
+        }
+      },
+      "vId": "10500",
+      "vid": "10500"
+    },
+    {
+      "dstChainName": "stellar",
+      "environment": "testnet",
+      "expiration": 1900000000,
+      "family": "STELLAR",
+      "gate0Blocked": "Stellar deployment addresses require operator and on-chain confirmation",
+      "hashCallData": "0xd52c01441e80f590485b649053803052e2d2d67efe5c5df9baee222da4f08bc5",
+      "id": "testnet-stellar",
+      "normalizedEvent": {
+        "guid": "0xbfcca65fd759737db259f221c716d7fddbbf03dbadb500b2f5084979c742db4a",
+        "lzMessageId": {
+          "nonce": 1,
+          "pathwayId": {
+            "dstChainName": "stellar",
+            "dstEid": 40600,
+            "receiver": "0x7eb495bc20cadd5800b4766ba0dd4963cd4d69aefc609db469626535577ae586",
+            "sender": "0xb8b3f7e12702748e55ec42d08e533e829685a825",
+            "srcChainName": "sepolia",
+            "srcEid": 40161
+          },
+          "ulnSendVersion": "V302"
+        },
+        "message": "0x48656c6c6f2066726f6d205365706f6c6961",
+        "onChainEvent": {
+          "blockHash": "0xe0fdd5f089166032c209a185bc9af1f8aa48e7421cc75204cb86df9456da4b1d",
+          "blockNumber": 11369277,
+          "chainName": "sepolia",
+          "txHash": "0xe6298a903ce430677f6a46fe31650ee1b106f5d27bf065edd88b87b57e81f085"
+        },
+        "options": {
+          "lzReceive": {
+            "gas": "50000",
+            "value": "0"
+          },
+          "ordered": false
+        },
+        "sendLibrary": "0xcc1ae8Cf5D3904Cef3360A9532B477529b177cCE"
+      },
+      "srcChainName": "sepolia",
+      "targetContract": "CAWCTJDDZZEWYARYCY6IP7LJ5WAR5XHNDBNDNRFYNS5ZX22MH3RPSJSH",
+      "txHash": "0xe6298a903ce430677f6a46fe31650ee1b106f5d27bf065edd88b87b57e81f085",
+      "ulnCallData": "execute_transaction([{ to: CAWCTJDDZZEWYARYCY6IP7LJ5WAR5XHNDBNDNRFYNS5ZX22MH3RPSJSH, func: verify, args: [0x3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a, 0x01000000000000000100009ce1000000000000000000000000b8b3f7e12702748e55ec42d08e533e829685a82500009e987eb495bc20cadd5800b4766ba0dd4963cd4d69aefc609db469626535577ae586, 0xc2f4a27fa3042579bae010d04fd7391caca0cbc87295a5de8cca98b74b120f23, 15] }])",
+      "ulnCallDataDetails": {
+        "blockConfirmation": 15,
+        "methodName": "verify",
+        "proof": {
+          "packetHeader": "0x01000000000000000100009ce1000000000000000000000000b8b3f7e12702748e55ec42d08e533e829685a82500009e987eb495bc20cadd5800b4766ba0dd4963cd4d69aefc609db469626535577ae586",
+          "payloadHash": "0xc2f4a27fa3042579bae010d04fd7391caca0cbc87295a5de8cca98b74b120f23"
+        }
+      },
+      "vId": "10600",
+      "vid": "10600"
+    },
+    {
+      "dstChainName": "sui",
+      "environment": "testnet",
+      "expiration": 1900000000,
+      "family": "SUI",
+      "gate0Blocked": null,
+      "hashCallData": "525bec6a520bf08dd7a5d7b624d5b8cf8d3eb8e47c10803aa7e18754ca1ec62c",
+      "id": "testnet-sui",
+      "normalizedEvent": {
+        "guid": "0x0efbf412c681bb756221b643ca680bf8e3831ff1166b2932a7f29484b9f014e0",
+        "lzMessageId": {
+          "nonce": 83,
+          "pathwayId": {
+            "dstChainName": "sui",
+            "dstEid": 40378,
+            "receiver": "0xbaa795269923a56b3159e974ca05350318bcb6e629aea618d01fc496543efee5",
+            "sender": "0xe722b5d7e27f59daa03616cc819503a9a200939c",
+            "srcChainName": "sepolia",
+            "srcEid": 40161
+          },
+          "ulnSendVersion": "V302"
+        },
+        "message": "0x43f878f53ccbb3218e69a1299fe9e598edf57ab53ac81af79352bff4495ac68cf7ab82021fea106a70d56fc134549e7d381667f1f0f39038a93eb15788480fa0000000200000000005000000006a8f287a",
+        "onChainEvent": {
+          "blockHash": "0xafc5edc0b2d1713df975ed91e4d69478b8f59e92628f3c49e4e17a26258d323c",
+          "blockNumber": 11572164,
+          "chainName": "sepolia",
+          "txHash": "0xa225dc87c7e346f50ae7cc2af88ed3ddf50404111ce452321e1ef0c53d8496c1"
+        },
+        "options": {
+          "lzReceive": {
+            "gas": "200000",
+            "value": "0"
+          },
+          "ordered": false
+        },
+        "sendLibrary": "0xcc1ae8Cf5D3904Cef3360A9532B477529b177cCE"
+      },
+      "srcChainName": "sepolia",
+      "targetContract": "0xf5d69c7b0922ce0ab4540525fbc66ca25ce9f092c64b032b91e4c5625ea0fb24",
+      "txHash": "0xa225dc87c7e346f50ae7cc2af88ed3ddf50404111ce452321e1ef0c53d8496c1",
+      "ulnCallData": "unknown in sui",
+      "ulnCallDataDetails": {
+        "blockConfirmation": 15,
+        "methodName": "hashPropose",
+        "proof": {
+          "packetHeader": "0x01000000000000005300009ce1000000000000000000000000e722b5d7e27f59daa03616cc819503a9a200939c00009dbabaa795269923a56b3159e974ca05350318bcb6e629aea618d01fc496543efee5",
+          "payloadHash": "0xbc58550b6d0d29c16e9a6691e108f7e9574eeb2c34fac8febf208f5cc609be0d"
+        }
+      },
+      "vId": "10378",
+      "vid": "10378"
+    },
+    {
+      "dstChainName": "tron",
+      "environment": "testnet",
+      "expiration": 1900000000,
+      "family": "TRON",
+      "gate0Blocked": null,
+      "hashCallData": "0x664be8be41004e90388b38e1c7f7fafc50a94be9236a3312fd667fef8e1070c9",
+      "id": "testnet-tron",
+      "normalizedEvent": {
+        "guid": "0x918a07a616b328693f55d9fcc24af28e5df9f0b8d202e99cc1a0091fcdc40050",
+        "lzMessageId": {
+          "nonce": 40,
+          "pathwayId": {
+            "dstChainName": "tron",
+            "dstEid": 40420,
+            "receiver": "0x8c44c3fa08aeb92c73c7fecdced255de3eeacd51",
+            "sender": "0x2b4fde3068e5ea98461333cb8e32f7beb9c60d99",
+            "srcChainName": "sepolia",
+            "srcEid": 40161
+          },
+          "ulnSendVersion": "V302"
+        },
+        "message": "0x000000000000000000000000e2857abd72bb80ac3dd1d7b87b1d83242cda02d100000000004c2431",
+        "onChainEvent": {
+          "blockHash": "0x3e31d59085ee78aa5675e91418e3bc79e027b356146195447ac2b75f8d83b716",
+          "blockNumber": 11577421,
+          "chainName": "sepolia",
+          "txHash": "0x1d84652eeeaaddded227d94dc805a35172b17d549165e82fafc21afa5394d6c2"
+        },
+        "options": {
+          "lzReceive": {
+            "gas": "20000",
+            "value": "0"
+          },
+          "ordered": false
+        },
+        "sendLibrary": "0xcc1ae8Cf5D3904Cef3360A9532B477529b177cCE"
+      },
+      "srcChainName": "sepolia",
+      "targetContract": "0x843810eb9f002e940870a95b366cc59e623bf5f1",
+      "txHash": "0x1d84652eeeaaddded227d94dc805a35172b17d549165e82fafc21afa5394d6c2",
+      "ulnCallData": "0x0223536e00000000000000000000000000000000000000000000000000000000000000601ae62220a783f3c52837fac7ce446d57c43991ad455c3f3429842c20ac9309e7000000000000000000000000000000000000000000000000000000000000000f000000000000000000000000000000000000000000000000000000000000005101000000000000002800009ce10000000000000000000000002b4fde3068e5ea98461333cb8e32f7beb9c60d9900009de40000000000000000000000008c44c3fa08aeb92c73c7fecdced255de3eeacd51000000000000000000000000000000",
+      "ulnCallDataDetails": {
+        "blockConfirmation": 15,
+        "methodName": "verify",
+        "proof": {
+          "packetHeader": "0x01000000000000002800009ce10000000000000000000000002b4fde3068e5ea98461333cb8e32f7beb9c60d9900009de40000000000000000000000008c44c3fa08aeb92c73c7fecdced255de3eeacd51",
+          "payloadHash": "0x1ae62220a783f3c52837fac7ce446d57c43991ad455c3f3429842c20ac9309e7"
+        }
+      },
+      "vId": "10420",
+      "vid": "10420"
+    }
+  ],
+  "producedBy": {
+    "entrypoints": [
+      "packages/sdks/lz-v2-sdk/src/endpoint/evm/decoders/index.ts:extractLZEventFromPacketSentEvent",
+      "apps/gasolina/src/app/sdks/gasolinaSdk/factory.ts:GasolinaSdkFactory.getSdk",
+      "apps/gasolina/src/app/sdks/gasolinaSdk/<family>/index.ts:buildULNV3VerifyPayload",
+      "packages/static-config/src/index.ts:getVId"
+    ],
+    "upstream": "gasolina-audit"
+  }
+}

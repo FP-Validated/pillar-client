@@ -159,9 +159,14 @@ impl UlnV3PayloadBuilder for StellarUlnPayloadBuilder {
                     "expiration": expiration,
                     "vid": v_id,
                     "targetContract": self.uln_302,
-                    "ulnCallData": format!("execute_transaction([{{
- to: {}, func: verify, args: [{dvn_address}, {}, {}, {block_confirmation}]
-}}])", self.uln_302, proof.packet_header, proof.payload_hash),
+                    // Rendered on one line, exactly as upstream renders it
+                    // (TS: `apps/gasolina/src/app/sdks/gasolinaSdk/stellar/index.ts:183`),
+                    // so the debug envelope this service returns is comparable to
+                    // Gasolina's rather than merely equivalent.
+                    "ulnCallData": format!(
+                        "execute_transaction([{{ to: {}, func: verify, args: [{dvn_address}, {}, {}, {block_confirmation}] }}])",
+                        self.uln_302, proof.packet_header, proof.payload_hash
+                    ),
                 },
                 "ulnCallData": {
                     "methodName": "verify",

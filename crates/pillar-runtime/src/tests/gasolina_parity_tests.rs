@@ -292,3 +292,286 @@ async fn evm_signing_path_matches_gasolina_for_the_same_packet_sent_log() {
         );
     }
 }
+
+fn historical_pathway_request(normalized: &Value) -> LzMessageId {
+    let pathway = &normalized["lzMessageId"]["pathwayId"];
+    LzMessageId {
+        pathway_id: PathwayId {
+            src_chain_name: pathway["srcChainName"].as_str().unwrap().to_string(),
+            dst_chain_name: pathway["dstChainName"].as_str().unwrap().to_string(),
+            extra: IndexMap::from([
+                ("srcEid".to_string(), pathway["srcEid"].clone()),
+                ("dstEid".to_string(), pathway["dstEid"].clone()),
+                ("sender".to_string(), pathway["sender"].clone()),
+                ("receiver".to_string(), pathway["receiver"].clone()),
+            ]),
+        },
+        nonce: normalized["lzMessageId"]["nonce"].as_u64().unwrap(),
+        uln_send_version: normalized["lzMessageId"]["ulnSendVersion"].clone(),
+    }
+}
+
+fn hex_eq(value: &str) -> String {
+    value.trim_start_matches("0x").to_lowercase()
+}
+
+/// Starknet's `ulnCallData` is a debug rendering of the call's felts, and the two
+/// services inherit different renderings of the same values: starknet.js emits some
+/// felts as decimal and strips leading zeros
+/// (`apps/gasolina/src/app/sdks/gasolinaSdk/starknet/index.ts:89` is
+/// `call.calldata.join(',')`), while this service zero-pads every felt to 32 bytes.
+/// Chasing another library's formatting in a debug string would be brittle, so the
+/// felts are compared as numbers instead - which still fails if any value differs.
+fn felts(rendered: &str) -> Vec<String> {
+    rendered
+        .split(',')
+        .map(|felt| {
+            let felt = felt.trim();
+            let digits = felt.trim_start_matches("0x");
+            let radix = if felt.starts_with("0x") { 16 } else { 10 };
+            u128::from_str_radix(digits, radix)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|_| {
+                    // Wider than u128: normalise the hex form instead.
+                    let normalised = digits.trim_start_matches('0').to_lowercase();
+                    if normalised.is_empty() {
+                        "0".to_string()
+                    } else {
+                        normalised
+                    }
+                })
+        })
+        .collect()
+}
+
+/// The read-only smoke plan Unit 6 asks for (`docs/plans/2026-08-24-gasolina-mainnet-testnet-parity-plan.md:282-289`):
+/// known historical `PacketSent` transactions, at least one pathway per destination
+/// chain family, on both environments, put through each service's public signing
+/// path and compared on the normalized event, the target contract and the hash
+/// call data.
+///
+/// Both sides read the same recorded receipts (`historical_pathways.json`, captured
+/// with `eth_getTransactionReceipt` from public RPC). The upstream side
+/// (`historical_smoke.json`) came from upstream's own `GasolinaSdkFactory` ->
+/// `buildULNV3VerifyPayload`, not from a reimplementation of its steps - which
+/// matters because that method derives the *receive* ULN version from the
+/// destination endpoint id rather than trusting the send version.
+///
+/// What the fixture records as unavailable is asserted too, so a family cannot
+/// quietly vanish from the comparison: `mainnet-ton` is excluded because upstream's
+/// TON verify path performs a quorum-backed storage read, and the two Stellar
+/// pathways are Gate 0 blocked and therefore reported rather than treated as a
+/// rollout signal.
+#[tokio::test]
+async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
+    let pathways: Value =
+        serde_json::from_str(&gasolina_parity_json("historical_pathways.json")).expect("parses");
+    let reference: Value =
+        serde_json::from_str(&gasolina_parity_json("historical_smoke.json")).expect("parses");
+
+    let by_id: HashMap<&str, &Value> = pathways["pathways"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|pathway| (pathway["id"].as_str().unwrap(), pathway))
+        .collect();
+
+    let mut compared: Vec<String> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
+    let mut blocked: Vec<String> = Vec::new();
+    // Collected rather than asserted one at a time: when a shared encoder breaks, the
+    // useful output is every pathway it broke, not the alphabetically first one.
+    let mut mismatches: Vec<String> = Vec::new();
+
+    for expected in reference["pathways"].as_array().expect("pathways") {
+        let id = expected["id"].as_str().unwrap();
+        if expected.get("skipped").is_some() {
+            skipped.push(id.to_string());
+            continue;
+        }
+        if expected["gate0Blocked"].is_string() {
+            blocked.push(id.to_string());
+        }
+        let expected_hash = expected["hashCallData"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{id}: upstream produced no hash"));
+
+        let pathway = by_id[id];
+        let environment = pathway["environment"].as_str().unwrap();
+        let src_chain_name = pathway["srcChainName"].as_str().unwrap();
+        let dst_chain_name = pathway["dstChainName"].as_str().unwrap();
+        let chain_names = [src_chain_name.to_string(), dst_chain_name.to_string()];
+
+        let getter = StaticProviderConfig::new(
+            IndexMap::from([(
+                src_chain_name.to_string(),
+                ProviderConfig {
+                    uris: vec![ProviderUri::Uri("https://src.example/".to_string())],
+                    quorum: Some(1),
+                },
+            )]),
+            Some(&[src_chain_name.to_string()]),
+        )
+        .unwrap();
+        let transport = RecordingTransport {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            responses: Arc::new(Mutex::new(vec![Ok(json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": pathway["receipt"].clone(),
+            }))])),
+        };
+        let recorder = Arc::new(RuntimeLayerZeroRecorder::default());
+        let parts = runtime_layerzero_parts_from_evm_config(
+            &ProviderSnapshotHandle::from_getter(&getter),
+            transport,
+            environment,
+            &chain_names,
+            RuntimeLayerZeroDependencyInputs {
+                uln_v2_payload_builder: recorder.clone(),
+                read_payload_resolver: recorder.clone(),
+                validation_checks: Arc::new(FixedValidationChecks {
+                    current_timestamp: 777,
+                    calls: Arc::new(Mutex::new(Vec::new())),
+                    ranges: Arc::new(Mutex::new(Vec::new())),
+                }),
+                legacy_chain_name_resolver: Arc::new(FixedChainResolver),
+                metrics: Arc::new(tokio::sync::Mutex::new(pillar_metrics::PillarMetrics::new())),
+            },
+        )
+        .unwrap_or_else(|error| panic!("{id}: wiring failed: {error:?}"));
+
+        let normalized = &expected["normalizedEvent"];
+        let sent_event = parts
+            .sent_event_resolver
+            .get_lz_sent_event(
+                pathway["txHash"].as_str().unwrap(),
+                &historical_pathway_request(normalized),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{id}: resolving the packet failed: {error:?}"));
+
+        let hash_builders = build_hash_call_data_builders(
+            parts.uln_v2_payload_builder,
+            parts.uln_v3_payload_builder,
+            parts.uln_read_v1_payload_builder,
+            parts.read_payload_resolver,
+            runtime_v_id_by_chain_name(environment, &chain_names).unwrap(),
+        );
+        let signing = &pathway["signingContext"];
+        let result = hash_builders[ULN_VERSION_V302]
+            .build_dvn_hash_call_data(
+                &sent_event,
+                &SigningContext::Message {
+                    expiration: signing["expiration"].as_i64().unwrap(),
+                    skip_v_id: None,
+                    dvn_address: Some(signing["dvnAddress"].as_str().unwrap().to_string()),
+                    block_confirmation: signing["blockConfirmation"].as_i64().unwrap(),
+                },
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{id}: building the payload failed: {error:?}"));
+
+        let details = &result.details;
+        let dvn = &details["dvnCallData"];
+        for (field, ours, theirs) in [
+            (
+                "message",
+                sent_event.message.clone(),
+                normalized["message"].as_str().unwrap().to_string(),
+            ),
+            (
+                "guid",
+                sent_event.extra["guid"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                normalized["guid"].as_str().unwrap().to_string(),
+            ),
+            (
+                "dstChainName",
+                sent_event.lz_message_id.pathway_id.dst_chain_name.clone(),
+                dst_chain_name.to_string(),
+            ),
+            (
+                "nonce",
+                sent_event.lz_message_id.nonce.to_string(),
+                normalized["lzMessageId"]["nonce"]
+                    .as_u64()
+                    .unwrap()
+                    .to_string(),
+            ),
+            (
+                "ulnSendVersion",
+                sent_event
+                    .lz_message_id
+                    .uln_send_version
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+                normalized["lzMessageId"]["ulnSendVersion"]
+                    .as_str()
+                    .unwrap()
+                    .to_string(),
+            ),
+            (
+                "vId",
+                dvn["vid"].as_str().unwrap_or_default().to_string(),
+                expected["vid"].as_str().unwrap().to_string(),
+            ),
+            (
+                "targetContract",
+                hex_eq(dvn["targetContract"].as_str().unwrap_or_default()),
+                hex_eq(expected["targetContract"].as_str().unwrap()),
+            ),
+            {
+                let ours = dvn["ulnCallData"].as_str().unwrap_or_default();
+                let theirs = expected["ulnCallData"].as_str().unwrap_or_default();
+                if pathway["family"] == "STARKNET" {
+                    (
+                        "ulnCallData felts",
+                        felts(ours).join(","),
+                        felts(theirs).join(","),
+                    )
+                } else {
+                    ("ulnCallData", hex_eq(ours), hex_eq(theirs))
+                }
+            },
+            (
+                "hashCallData",
+                hex_eq(&result.hash_call_data),
+                hex_eq(expected_hash),
+            ),
+        ] {
+            if ours != theirs {
+                mismatches.push(format!(
+                    "{id}: {field}\n      ours {ours}\n      them {theirs}"
+                ));
+            }
+        }
+        compared.push(id.to_string());
+    }
+
+    assert!(
+        mismatches.is_empty(),
+        "{} field(s) diverge from Gasolina across {} pathways:\n  {}",
+        mismatches.len(),
+        compared.len(),
+        mismatches.join("\n  ")
+    );
+
+    compared.sort();
+    skipped.sort();
+    blocked.sort();
+    assert_eq!(
+        skipped,
+        vec!["mainnet-ton".to_string()],
+        "the only pathway upstream cannot produce offline is TON"
+    );
+    assert_eq!(
+        blocked,
+        vec!["mainnet-stellar".to_string(), "testnet-stellar".to_string()],
+        "Gate 0 blocked pathways must stay named"
+    );
+    assert_eq!(compared.len(), 15, "compared pathways: {compared:?}");
+}
