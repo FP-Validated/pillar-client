@@ -1,10 +1,10 @@
 {
   "_provenance": {
-    "capturedAt": "2026-08-28T05:02:34Z",
+    "capturedAt": "2026-08-28T06:03:50Z",
     "howToRegenerate": "scripts/gasolina-parity/emit-historical-smoke.ts - see that directory README",
     "inputs": "crates/pillar-runtime/tests/gasolina_parity/historical_pathways.json",
     "mnemonic": "test test test test test test test test test test test junk",
-    "readOnly": "no RPC, no network. The receipt provider is stubbed with the recorded receipt; the signer is a local mnemonic, never used for anything real",
+    "readOnly": "no live RPC. The EVM receipt provider and the TON DVN account state are both replayed from the pathway fixture; the signer is a local mnemonic, never used for anything real",
     "what": "What upstream's public entrypoints produce for each recorded historical pathway: source-event resolution, destination payload build, and the signer stage"
   },
   "pathways": [
@@ -488,14 +488,63 @@
       "vid": "378"
     },
     {
+      "derivationPath": "m/44'/607'/0'",
       "dstChainName": "ton",
       "environment": "mainnet",
+      "expiration": 1900000000,
       "family": "TON",
+      "foreignEmitter": "refused: Packet does not match lzMessageId",
       "gate0Blocked": null,
+      "hashCallData": "0cff3cb6e4c2dcf99cca4945a2190e805db75d5544964ea1dd8628e8c1ce4cc9",
       "id": "mainnet-ton",
-      "skipped": "verify path performs a quorum-backed storage read to resolve the DVN proxy implementation; covered by ton_dvn_verify.json",
+      "normalizedEvent": {
+        "guid": "0x741b64f37e27e06cd9200a0a63a9d4aebf6d9b9ee706c9871c67f47784cdefb1",
+        "lzMessageId": {
+          "nonce": 298,
+          "pathwayId": {
+            "dstChainName": "ton",
+            "dstEid": 30343,
+            "receiver": "0x90d9ff1c7814705fcc74f8b7598476d65f3b9536fc132729b0606f0be82e617f",
+            "sender": "0xb9c2321bb7d0db468f570d10a424d1cc8efd696c",
+            "srcChainName": "ethereum",
+            "srcEid": 30101
+          },
+          "ulnSendVersion": "V302"
+        },
+        "message": "0xfcd79429c113dcd437396311467dcc2dc1f3772c295cae75d07693e6e0ccef77000000000001878e",
+        "onChainEvent": {
+          "blockHash": "0x8c7031c39dace516e6276cfe77b01ce12b2145f1860ef84d99b7304cc1294e11",
+          "blockNumber": 25846209,
+          "chainName": "ethereum",
+          "txHash": "0x3f37a3b984e4bd35491507bf1a57a730a318eaeef86635a57eb499e701c8f167"
+        },
+        "options": {
+          "lzReceive": {
+            "gas": "712000",
+            "value": "0"
+          },
+          "ordered": false
+        },
+        "sendLibrary": "0xbB2Ea70C9E858123480642Cf96acbcCE1372dCe1"
+      },
+      "resolver": "EndpointV2EvmSdk",
+      "signature": "0x73c404946b52a6f047d528a71a4b49cbf4ebafd6731ae9777a998c08ffdd7e3016a8d9513743dd90109d20062ce9fe1ca0fea4d2121e169a0865070068ad514500",
+      "signerAddress": "0xc0fa29d67e6f5734c6be1da067fe00c898fe6aa8f5e01eaa73ca589fd41442a5",
+      "signerChainType": "TON",
       "srcChainName": "ethereum",
-      "txHash": "0x3f37a3b984e4bd35491507bf1a57a730a318eaeef86635a57eb499e701c8f167"
+      "targetContract": "0x0f59d60c2b3724c1662c9af5223d532d540e2214462424a85aaa4e841844a1bc",
+      "txHash": "0x3f37a3b984e4bd35491507bf1a57a730a318eaeef86635a57eb499e701c8f167",
+      "ulnCallData": "b5ee9c724101030100dc000197000000004d644164647293ff2057bffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc5d48bf5db473a54efb57bfae38881b26998596ae0d8b567f6782a23ca74d330e01016700556c6e566572696679615ee4ffcffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc00000000000004aa0200a700000000417474657374815ed897bffffffffffffffffffffffffffffffffffffffffffffffffffffffffffcc82ef746817f9b9a9bafef96a0cd415e8f98a1f671b356734fa7f0b8c01bb04c000000000000003e8e1378bd",
+      "ulnCallDataDetails": {
+        "blockConfirmation": 15,
+        "methodName": "2571808590",
+        "proof": {
+          "blockData": "320bbdd1a05fe6e6a6ebfbe5a8335057a3e6287d9c6cd59cd3e9fc2e3006ec13",
+          "lookupHash": "320bbdd1a05fe6e6a6ebfbe5a8335057a3e6287d9c6cd59cd3e9fc2e3006ec13"
+        }
+      },
+      "vId": "343",
+      "vid": "343"
     },
     {
       "derivationPath": "m/44'/60'/0'/0/0",

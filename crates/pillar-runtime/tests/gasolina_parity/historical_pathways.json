@@ -954,6 +954,12 @@
       "blockNumber": 25846209,
       "dstChainName": "ton",
       "dstEid": 30343,
+      "dvnAccountState": {
+        "address": "0:0d122dec4ec8bd66c68344faf0dd471d727a7d57a21b62051705bbe2e4c272a7",
+        "data": "te6cckEBAwEAwAABVwAAAHBmUHJveHmT/wBXv//////////////////////////////////////9AQHXd3JrQ29yU3RvcpP/IFe4Je////////////////////////////////////wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAgBACKERKG5sR2NtkY1FYE+uCmQSbkj+FEAj464AJqsDoWRDerTr",
+        "source": "toncenter getAddressInformation, LayerZero Labs DVN on TON mainnet",
+        "state": "active"
+      },
       "environment": "mainnet",
       "family": "TON",
       "gate0Blocked": null,
@@ -1068,7 +1074,7 @@
       "sendLibrary": "0xbb2ea70c9e858123480642cf96acbcce1372dce1",
       "signingContext": {
         "blockConfirmation": 15,
-        "dvnAddress": "0:4444444444444444444444444444444444444444444444444444444444444444",
+        "dvnAddress": "0:0d122dec4ec8bd66c68344faf0dd471d727a7d57a21b62051705bbe2e4c272a7",
         "expiration": 1900000000
       },
       "srcChainName": "ethereum",

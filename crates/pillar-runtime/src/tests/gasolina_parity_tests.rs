@@ -461,24 +461,48 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
         let dst_chain_name = pathway["dstChainName"].as_str().unwrap();
         let chain_names = [src_chain_name.to_string(), dst_chain_name.to_string()];
 
-        let getter = StaticProviderConfig::new(
-            IndexMap::from([(
-                src_chain_name.to_string(),
+        // A TON destination reads its DVN proxy's account state before it can name
+        // the contract the call targets, so that chain needs a provider and the read
+        // is replayed from the same recorded state upstream was given.
+        let dvn_state = pathway.get("dvnAccountState");
+        let mut provider_chains = vec![src_chain_name.to_string()];
+        let mut providers = IndexMap::from([(
+            src_chain_name.to_string(),
+            ProviderConfig {
+                uris: vec![ProviderUri::Uri("https://src.example/".to_string())],
+                quorum: Some(1),
+            },
+        )]);
+        if dvn_state.is_some() {
+            provider_chains.push(dst_chain_name.to_string());
+            providers.insert(
+                dst_chain_name.to_string(),
                 ProviderConfig {
-                    uris: vec![ProviderUri::Uri("https://src.example/".to_string())],
+                    uris: vec![ProviderUri::Uri("https://dst.example/".to_string())],
                     quorum: Some(1),
                 },
-            )]),
-            Some(&[src_chain_name.to_string()]),
-        )
-        .unwrap();
+            );
+        }
+        let getter = StaticProviderConfig::new(providers, Some(&provider_chains)).unwrap();
+        let mut responses = vec![Ok(json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": pathway["receipt"].clone(),
+        }))];
+        if let Some(state) = dvn_state {
+            // Repeated because the builder may read more than once; every copy is the
+            // same recorded bytes, so a second read cannot smuggle in a second answer.
+            responses.extend(std::iter::repeat_n(
+                Ok(json!({ "result": {
+                    "state": state["state"].clone(),
+                    "data": state["data"].clone(),
+                }})),
+                4,
+            ));
+        }
         let transport = RecordingTransport {
             calls: Arc::new(Mutex::new(Vec::new())),
-            responses: Arc::new(Mutex::new(vec![Ok(json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "result": pathway["receipt"].clone(),
-            }))])),
+            responses: Arc::new(Mutex::new(responses)),
         };
         let recorder = Arc::new(RuntimeLayerZeroRecorder::default());
         let parts = runtime_layerzero_parts_from_evm_config(
@@ -719,17 +743,35 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
     compared.sort();
     skipped.sort();
     blocked.sort();
-    assert_eq!(
-        skipped,
-        vec!["mainnet-ton".to_string()],
-        "the only pathway upstream cannot produce offline is TON"
+    assert!(
+        skipped.is_empty(),
+        "every recorded pathway is now comparable offline: {skipped:?}"
     );
     assert_eq!(
         blocked,
         vec!["mainnet-stellar".to_string(), "testnet-stellar".to_string()],
         "Gate 0 blocked pathways must stay named"
     );
-    assert_eq!(compared.len(), 15, "compared pathways: {compared:?}");
+    // Every destination family this service supports and that carries traffic, in
+    // both environments where such traffic exists. TON is here because its DVN proxy
+    // account state is recorded alongside the receipt, so upstream's implementation
+    // lookup is replayed rather than skipped.
+    let families: std::collections::BTreeSet<&str> = reference["pathways"]
+        .as_array()
+        .expect("pathways")
+        .iter()
+        .filter(|pathway| pathway.get("hashCallData").is_some())
+        .map(|pathway| pathway["family"].as_str().expect("family"))
+        .collect();
+    assert_eq!(
+        families.iter().copied().collect::<Vec<_>>(),
+        vec![
+            "APTOS", "EVM", "INITIA", "MOVEMENT", "SOLANA", "STARKNET", "STELLAR", "SUI", "TON",
+            "TRON",
+        ],
+        "destination families compared"
+    );
+    assert_eq!(compared.len(), 16, "compared pathways: {compared:?}");
     assert!(
         unsignable.is_empty(),
         "every compared pathway must reach a signer: {unsignable:?}"

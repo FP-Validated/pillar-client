@@ -12,6 +12,7 @@
 // Offline: no RPC, no signer, no network. Receipts come from the fixture, and every
 // family compared here leaves its provider untouched on the verify path - except TON,
 // excluded for the reason recorded in the output.
+import { Cell } from '@ton/core'
 import { ethers } from 'ethers'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -97,9 +98,25 @@ const PACKET_SENT_TOPIC =
 // `packages/contracts/lz-ton-contracts/src/index.ts:613-645`), which no argument
 // bypasses. Its payload builders are compared byte for byte through
 // `crates/pillar-layerzero/tests/gasolina_parity/ton_dvn_verify.json` instead.
-const OFFLINE_EXCLUDED: Record<string, string> = {
-    TON: 'verify path performs a quorum-backed storage read to resolve the DVN proxy implementation; covered by ton_dvn_verify.json',
+// A TON destination needs its DVN proxy's account state, because upstream resolves
+// the proxy's implementation before it can name the contract the DVN call targets.
+// The state is recorded in the pathway fixture, so the read is replayed rather than
+// performed: `getTonV2QuorumProvider` hands a non-multiprovider straight back
+// (`multiprovider/src/quorumProvider.ts:101-109`), so a plain object is enough.
+const tonProvidersFor = (pathway: Pathway): any => {
+    const recorded = pathway.dvnAccountState
+    const open = (contract: any) => ({
+        address: contract.address,
+        getState: async () => ({
+            state: { type: recorded ? recorded.state : 'uninit' },
+        }),
+        getCurrentStorageCell: async () =>
+            Cell.fromBoc(Buffer.from(recorded!.data, 'base64'))[0],
+    })
+    return { v2: { open }, v3: { open } }
 }
+
+const OFFLINE_EXCLUDED: Record<string, string> = {}
 
 interface FixtureLog {
     address: string
@@ -121,6 +138,7 @@ interface Pathway {
     dstEid: number
     txHash: string
     gate0Blocked: string | null
+    dvnAccountState?: { address: string; state: string; data: string }
     signingContext: {
         blockConfirmation: number
         expiration: number
@@ -293,7 +311,10 @@ const runPathway = async (pathway: Pathway) => {
         // Providers deliberately absent: nothing compared here reads one.
         const factory = new GasolinaSdkFactory({
             environment: pathway.environment,
-            providers: {},
+            providers:
+                pathway.family === 'TON'
+                    ? { [pathway.dstChainName]: tonProvidersFor(pathway) }
+                    : {},
         })
         const built = await factory
             .getSdk(pathway.dstChainName)

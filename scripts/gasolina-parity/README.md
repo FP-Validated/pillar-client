@@ -86,7 +86,8 @@ agreed almost everywhere: folding the V2 endpoint id matches the EndpointV1 id f
 `eth_getLogs` on the EndpointV2 address and captured with
 `eth_getTransactionReceipt`: one per destination chain family per environment. Both
 services are driven from those recorded receipts, so the comparison is offline even
-though the packets are real.
+though the packets are real. Ten destination families are compared: EVM, TRON,
+APTOS, INITIA, MOVEMENT, SUI, SOLANA, STARKNET, STELLAR and TON.
 
 `emit-historical-smoke.ts` drives upstream's **public** stages, in the order
 `app.ts:signRequestV2` drives them, rather than recomposing their internals:
@@ -113,13 +114,17 @@ arm is a comparison rather than an assumption about upstream's shape.
 
 Three things the fixture records rather than hides:
 
-- `mainnet-ton` is not compared *in this fixture*. Upstream's TON verify path resolves
-  the DVN proxy's implementation through a quorum-backed storage read
-  (`gasolinaSdk/ton/index.ts:144-159`), which no argument bypasses. TON is covered by
-  two other fixtures instead: `ton_dvn_verify.json` for the payload builders, and
-  `ton_proxy_target.json` for the decode that turns a proxy storage cell into the
-  address the DVN call targets - the half of `getImplementationContract` that decides
-  a signed value. The quorum fetch wrapping that decode is still uncompared.
+- `mainnet-ton` *is* compared, and needs one more recorded value than the others.
+  Upstream's TON verify path resolves the DVN proxy's implementation through a
+  quorum-backed storage read (`gasolinaSdk/ton/index.ts:144-159`) before it can name
+  the contract the call targets, so `historical_pathways.json` carries that account
+  state next to the receipt: the live LayerZero Labs DVN on TON mainnet
+  (`0:0d122dec...`, from `toncenter getAddressInformation`), which is a `pfProxy`.
+  Both services replay it rather than fetch it. `getTonV2QuorumProvider` returns a
+  non-multiprovider unchanged (`multiprovider/src/quorumProvider.ts:101-109`), so the
+  stub is a plain object. TON also keeps its two narrower fixtures:
+  `ton_dvn_verify.json` for the cell encoders and `ton_proxy_target.json` for the
+  decode branch a live Proxy cannot exercise - a cell that is *not* a proxy.
 - The two Stellar pathways are Gate 0 blocked. They are compared and they match, but
   per the plan they are not a rollout signal until the deployment addresses are
   confirmed on-chain.
@@ -146,9 +151,9 @@ Both were in the signer stage, and neither is visible from a hash comparison:
 
 ## What is still not compared
 
-- Upstream's TON quorum fetch (`fetchQuorumedStorageCell`). Its decode is compared;
-  the fetch would need a recorded toncenter account state and `getContractStorage`
-  response, which nothing in the tree records yet.
+- The TON quorum *fetch* machinery itself (`fetchQuorumedStorageCell`'s multiprovider
+  agreement). Both services are handed the same recorded account state, so what is
+  compared is everything downstream of the read, not the read's own agreement rule.
 - The already-signed rejection, which is an on-chain read rather than an offline
   decision, and is covered by its own criterion.
 - A testnet Move, IOTA or TON pathway. Not an omission: there is no such packet to
