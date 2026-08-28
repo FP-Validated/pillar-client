@@ -89,28 +89,46 @@ services are driven from those recorded receipts, so the comparison is offline e
 though the packets are real. Ten destination families are compared: EVM, TRON,
 APTOS, INITIA, MOVEMENT, SUI, SOLANA, STARKNET, STELLAR and TON.
 
-`emit-historical-smoke.ts` drives upstream's **public** stages, in the order
-`app.ts:signRequestV2` drives them, rather than recomposing their internals:
+`emit-historical-smoke.ts` calls upstream's service entrypoint - `App.signRequestV2`,
+the method the HTTP layer calls - and lets the whole orchestrator run: protocol-type
+checks, message hash, readiness, expiration, already-signed, build, sign. The Rust
+side calls its own entrypoint the same way, through the production composition
+(`core_api_app_from_runtime_parts`), so the two things being compared are two
+services rather than two libraries.
 
-| stage | upstream entrypoint | how it runs offline |
-|---|---|---|
-| resolve the sent event | `EndpointV2Sdk.getLZSentEvent` | the receipt provider is stubbed with the recorded receipt; nothing else is reached |
-| build the payload | `GasolinaSdkFactory.getSdk(dst).buildULNV3VerifyPayload` | providers are `{}`; no compared family reads one |
-| sign | `GasolinaSignerAdapterGetter.getSignerAdapter(dst, wallet).gasolinaSign` | a local mnemonic, same string and derivation path handed to both services |
+What each side is *given* rather than fetching, identically on both:
 
-Recomposition was the earlier mistake: `GasolinaEvmSdk.buildDvnCallData` derives the
-receive ULN version from the destination endpoint id, and a harness that pins V302
-skips that derivation entirely.
+| supplied | why | upstream | this service |
+|---|---|---|---|
+| the source receipt | the packet is real, the read is not | provider stub | `ParityTransport` |
+| the TON DVN proxy account state | recorded from toncenter, see below | provider stub | same bytes |
+| block confirmations | readiness gate, no node | `rpcSdkFactory` stub | `ParityChecks` |
+| block timestamp | expiration gate, no node | `rpcSdkFactory` stub | `ParityChecks` |
+| already-signed | an on-chain question this cannot ask | `ulnSdkFactory` stub | `ParityChecks` |
+
+Recomposing the stages was the earlier mistake, twice over.
+`GasolinaEvmSdk.buildDvnCallData` derives the receive ULN version from the
+destination endpoint id, which a harness that pins V302 skips; and a reject path only
+means something if the thing rejecting it is the same orchestrator that would
+otherwise have signed.
 
 Both event resolvers are exercised, because upstream has two: the factory picks the
 viem implementation for testnet and the ethers one for mainnet
 (`endpoint/factory.ts:33-55`), while this service has a single resolver that has to
 match both.
 
-Each pathway is also replayed with the `PacketSent` log re-emitted from an address
-that is not the endpoint. Upstream refuses it - `Packet does not match lzMessageId`,
-from its own address filter - and the fixture records that refusal, so the reject
-arm is a comparison rather than an assumption about upstream's shape.
+Each pathway is run four times: once normally, and once per reject scenario. Both
+services count their own signer invocations, so *refused* means the signer never ran
+rather than merely that an error came back.
+
+| scenario | what changes | upstream refuses with |
+|---|---|---|
+| `foreignEmitter` | the `PacketSent` log is re-emitted from an address that is not the endpoint | `cannot find packet event for srcTxHash ...` |
+| `alreadySigned` | the DVN has already verified this payload | `Payload already signed for message ...` |
+| `unavailableChain` | the destination is not in the provider config | `Unsupported dst chain ...` |
+
+Each is a different guard, and the fixture records upstream's own message and its own
+signer count, so the reject arm is a comparison rather than an assumption.
 
 Three things the fixture records rather than hides:
 
@@ -156,11 +174,13 @@ Both were in the signer stage, and neither is visible from a hash comparison:
   compared is everything downstream of the read, not the read's own agreement rule.
 - The already-signed rejection, which is an on-chain read rather than an offline
   decision, and is covered by its own criterion.
-- A testnet Move, IOTA or TON pathway. Not an omission: there is no such packet to
-  record. Sepolia carries none in 1,000,000 blocks, and base-sepolia, bsc-testnet,
-  amoy, arbitrum-sepolia, optimism-sepolia and avalanche-fuji carry none in 250,000
-  blocks each. What those testnets do carry - solana, sui, starknet, stellar - is in
-  the fixture.
+- A testnet Move, IOTA or TON pathway, and mainnet IOTA. Not an omission: there is no
+  such packet to record. Sepolia carries none in 1,000,000 blocks, and base-sepolia,
+  bsc-testnet, amoy, arbitrum-sepolia, optimism-sepolia and avalanche-fuji carry none
+  in 250,000 blocks each; `iotal1` has none in 275,000 mainnet blocks. What those
+  testnets do carry - solana, sui, starknet, stellar - is in the fixture. Every one of
+  these rows is written out in the test's `ACCEPTANCE` table with its reason, and the
+  test fails if a row appears or vanishes without that table being edited.
 
 Starknet's `ulnCallData` is compared as felt *values* rather than as a string:
 starknet.js renders some felts as decimal and strips leading zeros, this service

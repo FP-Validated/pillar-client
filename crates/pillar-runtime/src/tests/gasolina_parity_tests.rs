@@ -418,6 +418,231 @@ fn felts(rendered: &str) -> Vec<String> {
 /// TON verify path performs a quorum-backed storage read, and the two Stellar
 /// pathways are Gate 0 blocked and therefore reported rather than treated as a
 /// rollout signal.
+/// Answers by what was asked rather than by call order. The orchestrator reads the
+/// receipt more than once and a TON pathway also reads its DVN proxy state, so a FIFO
+/// queue would encode an ordering this comparison does not care about.
+#[derive(Clone)]
+struct ParityTransport {
+    receipt: Arc<Value>,
+    ton_state: Arc<Option<Value>>,
+}
+
+#[async_trait]
+impl JsonRpcTransport for ParityTransport {
+    async fn post_json(
+        &self,
+        _url: String,
+        _headers: HashMap<String, String>,
+        body: Value,
+    ) -> Result<Value, String> {
+        if body["method"] == "eth_getTransactionReceipt" {
+            return Ok(json!({ "jsonrpc": "2.0", "id": 1, "result": (*self.receipt).clone() }));
+        }
+        match self.ton_state.as_ref() {
+            Some(state) => Ok(json!({ "result": state.clone() })),
+            None => Err(format!("unexpected call: {body}")),
+        }
+    }
+
+    async fn get_json(
+        &self,
+        url: String,
+        _headers: HashMap<String, String>,
+    ) -> Result<Value, String> {
+        match self.ton_state.as_ref() {
+            Some(state) => Ok(json!({ "result": state.clone() })),
+            None => Err(format!("unexpected GET: {url}")),
+        }
+    }
+}
+
+/// The production service, assembled per pathway: the real packet resolver, the real
+/// validator, the real V302 builder and a real local-mnemonic signer, with only the
+/// chain answers supplied. `receipt`, `already_signed` and `available` are what the
+/// reject scenarios vary.
+#[allow(clippy::too_many_arguments)]
+async fn historical_service_app(
+    pathway: &Value,
+    environment: &str,
+    src_chain_name: &str,
+    dst_chain_name: &str,
+    receipt: Value,
+    already_signed: bool,
+    available: Vec<String>,
+    signer_calls: Arc<std::sync::atomic::AtomicUsize>,
+) -> Result<(CoreApiApp, Arc<dyn SentEventResolver>), String> {
+    let chain_names = [src_chain_name.to_string(), dst_chain_name.to_string()];
+    // A TON destination reads its DVN proxy's account state before it can name the
+    // contract the call targets, so that chain needs a provider and the read is
+    // replayed from the same recorded state upstream was given.
+    let dvn_state = pathway.get("dvnAccountState");
+    let mut provider_chains = vec![src_chain_name.to_string()];
+    let mut providers = IndexMap::from([(
+        src_chain_name.to_string(),
+        ProviderConfig {
+            uris: vec![ProviderUri::Uri("https://src.example/".to_string())],
+            quorum: Some(1),
+        },
+    )]);
+    if dvn_state.is_some() {
+        provider_chains.push(dst_chain_name.to_string());
+        providers.insert(
+            dst_chain_name.to_string(),
+            ProviderConfig {
+                uris: vec![ProviderUri::Uri("https://dst.example/".to_string())],
+                quorum: Some(1),
+            },
+        );
+    }
+    let getter = StaticProviderConfig::new(providers, Some(&provider_chains))
+        .map_err(|error| format!("{error:?}"))?;
+    let transport = ParityTransport {
+        receipt: Arc::new(receipt),
+        ton_state: Arc::new(dvn_state.map(
+            |state| json!({ "state": state["state"].clone(), "data": state["data"].clone() }),
+        )),
+    };
+    let recorder = Arc::new(RuntimeLayerZeroRecorder::default());
+    let expiration = pathway["signingContext"]["expiration"].as_i64().unwrap();
+    let parts = runtime_layerzero_parts_from_evm_config(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        transport,
+        environment,
+        &chain_names,
+        RuntimeLayerZeroDependencyInputs {
+            uln_v2_payload_builder: recorder.clone(),
+            read_payload_resolver: recorder.clone(),
+            validation_checks: Arc::new(ParityChecks {
+                current_timestamp: expiration - 100,
+                already_signed,
+            }),
+            legacy_chain_name_resolver: Arc::new(FixedChainResolver),
+            metrics: Arc::new(tokio::sync::Mutex::new(pillar_metrics::PillarMetrics::new())),
+        },
+    )
+    .map_err(|error| format!("{error:?}"))?;
+
+    let chain_type = pillar_config::static_chain_type_name(dst_chain_name)
+        .map_err(|error| format!("{error:?}"))?;
+    let wallet = format!("wallet-{chain_type}");
+    let assembly = historical_signer(dst_chain_name, chain_type).await?;
+    let resolver = parts.sent_event_resolver.clone();
+    let dependencies = runtime_core_dependencies_from_layerzero_parts(
+        parts,
+        runtime_v_id_by_chain_name(environment, &chain_names).map_err(|e| format!("{e:?}"))?,
+        &[ULN_VERSION_V302.to_string()],
+    );
+    let mut provider_health = ProviderHealthSnapshot::new();
+    provider_health.insert(src_chain_name.to_string(), true);
+    provider_health.insert(dst_chain_name.to_string(), true);
+    Ok((
+        core_api_app_from_runtime_parts(RuntimeCoreAppParts {
+            runtime_config: RuntimeConfig {
+                server_port: 0,
+                provider_config_type: pillar_config::ProviderConfigType::LOCAL,
+                environment: Some(environment.to_string()),
+                available_chain_names: Some(available.clone()),
+                supported_uln_versions: vec![ULN_VERSION_V302.to_string()],
+                debug_mode: true,
+                extra_context_request_url: None,
+                extra_context_request_auth_token: None,
+                extra_context_aws_lambda_name: None,
+                image_version: None,
+                api_auth_tokens: vec!["test-token-0123456789abcdef0123456789".to_string()],
+                max_connections: 16,
+                shutdown_grace_seconds: 5,
+            },
+            available_chain_names: Arc::new(available),
+            wallets_by_chain_name: HashMap::from([(
+                dst_chain_name.to_string(),
+                vec![WalletRef {
+                    wallet_name: wallet.clone(),
+                }],
+            )]),
+            signer_getter: Arc::new(CountingSigner {
+                inner: assembly.signer_getter,
+                calls: signer_calls,
+            }),
+            signer_info: BTreeMap::new(),
+            provider_health,
+            provider_health_report: json!({}),
+            dependencies,
+            metrics: Arc::new(tokio::sync::Mutex::new(pillar_metrics::PillarMetrics::new())),
+        }),
+        resolver,
+    ))
+}
+
+/// The four chain answers the orchestrator asks for, supplied rather than fetched -
+/// the same boundary the upstream harness draws, so both services run their real
+/// validator and neither reaches a node. `already_signed` is the one knob: it is the
+/// on-chain question this offline comparison cannot ask, and the reject row needs it.
+struct ParityChecks {
+    current_timestamp: i64,
+    already_signed: bool,
+}
+
+#[async_trait]
+impl RuntimeValidationChecks for ParityChecks {
+    async fn current_block_timestamp(
+        &self,
+        _dst_chain_name: &str,
+        _valid_range: ExpirationValidRange,
+    ) -> Result<i64, AppCoreError> {
+        Ok(self.current_timestamp)
+    }
+
+    async fn validate_readiness(
+        &self,
+        _sent_event: &LzSentEvent,
+        _signing_context: &SigningContext,
+    ) -> Result<(), AppCoreError> {
+        Ok(())
+    }
+
+    async fn validate_payload_not_signed(
+        &self,
+        sent_event: &LzSentEvent,
+        _verifier_address: &str,
+        dst_chain_name: &str,
+    ) -> Result<(), AppCoreError> {
+        if self.already_signed {
+            return Err(AppCoreError::BadRequest(format!(
+                "{} for message {:?} on chain {dst_chain_name}",
+                pillar_core::PAYLOAD_ALREADY_SIGNED_ERROR_PREFIX,
+                sent_event.lz_message_id
+            )));
+        }
+        Ok(())
+    }
+
+    async fn validate_extra_context(&self, _sent_event: &LzSentEvent) -> Result<(), AppCoreError> {
+        Ok(())
+    }
+}
+
+/// Wraps the real signer so a reject path can be shown to have signed nothing, rather
+/// than merely to have returned an error.
+struct CountingSigner {
+    inner: Arc<dyn SignerGetter>,
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+#[async_trait]
+impl SignerGetter for CountingSigner {
+    async fn pillar_sign(
+        &self,
+        dst_chain_name: &str,
+        wallet_name: &str,
+        data_hex: &str,
+    ) -> Result<pillar_core::Signature, AppCoreError> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner
+            .pillar_sign(dst_chain_name, wallet_name, data_hex)
+            .await
+    }
+}
+
 #[tokio::test]
 async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
     let pathways: Value =
@@ -459,74 +684,22 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
         let environment = pathway["environment"].as_str().unwrap();
         let src_chain_name = pathway["srcChainName"].as_str().unwrap();
         let dst_chain_name = pathway["dstChainName"].as_str().unwrap();
-        let chain_names = [src_chain_name.to_string(), dst_chain_name.to_string()];
-
-        // A TON destination reads its DVN proxy's account state before it can name
-        // the contract the call targets, so that chain needs a provider and the read
-        // is replayed from the same recorded state upstream was given.
-        let dvn_state = pathway.get("dvnAccountState");
-        let mut provider_chains = vec![src_chain_name.to_string()];
-        let mut providers = IndexMap::from([(
-            src_chain_name.to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://src.example/".to_string())],
-                quorum: Some(1),
-            },
-        )]);
-        if dvn_state.is_some() {
-            provider_chains.push(dst_chain_name.to_string());
-            providers.insert(
-                dst_chain_name.to_string(),
-                ProviderConfig {
-                    uris: vec![ProviderUri::Uri("https://dst.example/".to_string())],
-                    quorum: Some(1),
-                },
-            );
-        }
-        let getter = StaticProviderConfig::new(providers, Some(&provider_chains)).unwrap();
-        let mut responses = vec![Ok(json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "result": pathway["receipt"].clone(),
-        }))];
-        if let Some(state) = dvn_state {
-            // Repeated because the builder may read more than once; every copy is the
-            // same recorded bytes, so a second read cannot smuggle in a second answer.
-            responses.extend(std::iter::repeat_n(
-                Ok(json!({ "result": {
-                    "state": state["state"].clone(),
-                    "data": state["data"].clone(),
-                }})),
-                4,
-            ));
-        }
-        let transport = RecordingTransport {
-            calls: Arc::new(Mutex::new(Vec::new())),
-            responses: Arc::new(Mutex::new(responses)),
-        };
-        let recorder = Arc::new(RuntimeLayerZeroRecorder::default());
-        let parts = runtime_layerzero_parts_from_evm_config(
-            &ProviderSnapshotHandle::from_getter(&getter),
-            transport,
-            environment,
-            &chain_names,
-            RuntimeLayerZeroDependencyInputs {
-                uln_v2_payload_builder: recorder.clone(),
-                read_payload_resolver: recorder.clone(),
-                validation_checks: Arc::new(FixedValidationChecks {
-                    current_timestamp: 777,
-                    calls: Arc::new(Mutex::new(Vec::new())),
-                    ranges: Arc::new(Mutex::new(Vec::new())),
-                }),
-                legacy_chain_name_resolver: Arc::new(FixedChainResolver),
-                metrics: Arc::new(tokio::sync::Mutex::new(pillar_metrics::PillarMetrics::new())),
-            },
-        )
-        .unwrap_or_else(|error| panic!("{id}: wiring failed: {error:?}"));
 
         let normalized = &expected["normalizedEvent"];
-        let sent_event = parts
-            .sent_event_resolver
+        let signer_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (app, resolver) = historical_service_app(
+            pathway,
+            environment,
+            src_chain_name,
+            dst_chain_name,
+            pathway["receipt"].clone(),
+            false,
+            vec![src_chain_name.to_string(), dst_chain_name.to_string()],
+            signer_calls.clone(),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{id}: assembling the service failed: {error}"));
+        let sent_event = resolver
             .get_lz_sent_event(
                 pathway["txHash"].as_str().unwrap(),
                 &historical_pathway_request(normalized),
@@ -534,26 +707,41 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
             .await
             .unwrap_or_else(|error| panic!("{id}: resolving the packet failed: {error:?}"));
 
-        let hash_builders = build_hash_call_data_builders(
-            parts.uln_v2_payload_builder,
-            parts.uln_v3_payload_builder,
-            parts.uln_read_v1_payload_builder,
-            parts.read_payload_resolver,
-            runtime_v_id_by_chain_name(environment, &chain_names).unwrap(),
-        );
         let signing = &pathway["signingContext"];
-        let result = hash_builders[ULN_VERSION_V302]
-            .build_dvn_hash_call_data(
-                &sent_event,
-                &SigningContext::Message {
-                    expiration: signing["expiration"].as_i64().unwrap(),
-                    skip_v_id: None,
-                    dvn_address: Some(signing["dvnAddress"].as_str().unwrap().to_string()),
-                    block_confirmation: signing["blockConfirmation"].as_i64().unwrap(),
-                },
-            )
+        let request = PillarApiRequestV2 {
+            src_tx_hash: pathway["txHash"].as_str().unwrap().to_string(),
+            lz_message_id: historical_pathway_request(normalized),
+            signing_context: SigningContext::Message {
+                expiration: signing["expiration"].as_i64().unwrap(),
+                skip_v_id: None,
+                dvn_address: Some(signing["dvnAddress"].as_str().unwrap().to_string()),
+                block_confirmation: signing["blockConfirmation"].as_i64().unwrap(),
+            },
+            message_hash: pillar_core::hash_sent_event_message_for_pillar(&sent_event)
+                .unwrap_or_else(|error| panic!("{id}: hashing the message failed: {error:?}")),
+        };
+
+        // The service entrypoint, not the builder underneath it: protocol checks,
+        // message hash, readiness, expiration, already-signed, build, sign. A reject
+        // path only means anything if the thing rejecting it is what would otherwise
+        // have signed.
+        let response = app
+            .sign_request_v2(request.clone())
             .await
-            .unwrap_or_else(|error| panic!("{id}: building the payload failed: {error:?}"));
+            .unwrap_or_else(|error| panic!("{id}: the service refused a good request: {error:?}"));
+        let debug = response
+            .debug_info
+            .clone()
+            .unwrap_or_else(|| panic!("{id}: debug mode produced no details"));
+        let result = HashCallDataResult {
+            hash_call_data: debug.dvn_hash_call_data.clone(),
+            details: debug.details.clone(),
+        };
+        assert_eq!(
+            signer_calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "{id}: the normal path must reach the signer exactly once"
+        );
 
         let details = &result.details;
         let dvn = &details["dvnCallData"];
@@ -683,50 +871,69 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
             "{id}: upstream accepted a foreign emitter: {upstream_refusal}"
         );
 
-        // This service's own refusal of the same tampered receipt, before any
-        // payload exists.
+        // Every reject scenario runs the same entrypoint that just signed, and each
+        // one reports whether the signer was reached. Refused is only refused if
+        // nothing was signed.
         let mut foreign = pathway["receipt"].clone();
         for log in foreign["logs"].as_array_mut().unwrap() {
             log["address"] = Value::from("0x00000000000000000000000000000000deadbeef");
         }
-        let foreign_transport = RecordingTransport {
-            calls: Arc::new(Mutex::new(Vec::new())),
-            responses: Arc::new(Mutex::new(vec![Ok(json!({
-                "jsonrpc": "2.0", "id": 1, "result": foreign,
-            }))])),
-        };
-        let foreign_parts = runtime_layerzero_parts_from_evm_config(
-            &ProviderSnapshotHandle::from_getter(&getter),
-            foreign_transport,
-            environment,
-            &chain_names,
-            RuntimeLayerZeroDependencyInputs {
-                uln_v2_payload_builder: recorder.clone(),
-                read_payload_resolver: recorder.clone(),
-                validation_checks: Arc::new(FixedValidationChecks {
-                    current_timestamp: 777,
-                    calls: Arc::new(Mutex::new(Vec::new())),
-                    ranges: Arc::new(Mutex::new(Vec::new())),
-                }),
-                legacy_chain_name_resolver: Arc::new(FixedChainResolver),
-                metrics: Arc::new(tokio::sync::Mutex::new(pillar_metrics::PillarMetrics::new())),
-            },
-        )
-        .unwrap();
-        let refused = foreign_parts
-            .sent_event_resolver
-            .get_lz_sent_event(
-                pathway["txHash"].as_str().unwrap(),
-                &historical_pathway_request(normalized),
+        for (scenario, receipt, already_signed, available) in [
+            (
+                "foreignEmitter",
+                foreign,
+                false,
+                vec![src_chain_name.to_string(), dst_chain_name.to_string()],
+            ),
+            (
+                "alreadySigned",
+                pathway["receipt"].clone(),
+                true,
+                vec![src_chain_name.to_string(), dst_chain_name.to_string()],
+            ),
+            (
+                "unavailableChain",
+                pathway["receipt"].clone(),
+                false,
+                vec![src_chain_name.to_string()],
+            ),
+        ] {
+            let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let (reject_app, _) = historical_service_app(
+                pathway,
+                environment,
+                src_chain_name,
+                dst_chain_name,
+                receipt,
+                already_signed,
+                available,
+                calls.clone(),
             )
-            .await;
-        // Refused twice over: the log filter drops it, and if that filter is
-        // neutered a second gate still refuses by name. The mutation log removes
-        // both to show neither is decoration.
-        assert!(
-            refused.is_err(),
-            "{id}: an untrusted emitter produced an event"
-        );
+            .await
+            .unwrap_or_else(|error| panic!("{id}: assembling {scenario} failed: {error}"));
+            let outcome = reject_app.sign_request_v2(request.clone()).await;
+            assert!(
+                outcome.is_err(),
+                "{id}: {scenario} was accepted and produced a signature"
+            );
+            assert_eq!(
+                calls.load(std::sync::atomic::Ordering::SeqCst),
+                0,
+                "{id}: {scenario} was refused but the signer had already run"
+            );
+            // Upstream refuses the same scenario, from its own orchestrator, and the
+            // fixture records that rather than this test assuming it.
+            let theirs = expected[scenario].as_str().unwrap_or("(absent)");
+            assert!(
+                theirs.starts_with("refused:"),
+                "{id}: upstream accepted {scenario}: {theirs}"
+            );
+            assert_eq!(
+                expected[&format!("{scenario}SignerCalls")].as_u64(),
+                Some(0),
+                "{id}: upstream refused {scenario} but signed anyway"
+            );
+        }
         rejected.push(id.to_string());
 
         compared.push(id.to_string());
@@ -752,24 +959,79 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
         vec!["mainnet-stellar".to_string(), "testnet-stellar".to_string()],
         "Gate 0 blocked pathways must stay named"
     );
-    // Every destination family this service supports and that carries traffic, in
-    // both environments where such traffic exists. TON is here because its DVN proxy
-    // account state is recorded alongside the receipt, so upstream's implementation
-    // lookup is replayed rather than skipped.
-    let families: std::collections::BTreeSet<&str> = reference["pathways"]
+    // The acceptance matrix, written out rather than inferred, so a row that is not
+    // compared is a recorded decision instead of an oversight. `None` means compared;
+    // `Some(reason)` means it is not, and says why. A row that starts carrying traffic
+    // will fail here until someone records a receipt for it and edits this table.
+    const ACCEPTANCE: &[(&str, &str, Option<&str>)] = &[
+        ("mainnet", "EVM", None),
+        ("mainnet", "TRON", None),
+        ("mainnet", "APTOS", None),
+        ("mainnet", "INITIA", None),
+        ("mainnet", "MOVEMENT", None),
+        ("mainnet", "SUI", None),
+        ("mainnet", "SOLANA", None),
+        ("mainnet", "STARKNET", None),
+        ("mainnet", "STELLAR", None),
+        ("mainnet", "TON", None),
+        (
+            "mainnet",
+            "IOTAMOVE",
+            Some("no packet exists: 0 to iotal1 in 275,000 mainnet blocks"),
+        ),
+        ("testnet", "EVM", None),
+        ("testnet", "TRON", None),
+        ("testnet", "SUI", None),
+        ("testnet", "SOLANA", None),
+        ("testnet", "STARKNET", None),
+        ("testnet", "STELLAR", None),
+        (
+            "testnet",
+            "APTOS",
+            Some("no packet exists: 0 in 1,000,000 sepolia blocks and 250,000 each on six others"),
+        ),
+        (
+            "testnet",
+            "INITIA",
+            Some("no packet exists: same scan as testnet APTOS"),
+        ),
+        (
+            "testnet",
+            "MOVEMENT",
+            Some("no packet exists: same scan as testnet APTOS"),
+        ),
+        (
+            "testnet",
+            "IOTAMOVE",
+            Some("no packet exists: same scan as testnet APTOS"),
+        ),
+        (
+            "testnet",
+            "TON",
+            Some("no packet exists: same scan as testnet APTOS"),
+        ),
+    ];
+    let present: std::collections::BTreeSet<(&str, &str)> = reference["pathways"]
         .as_array()
         .expect("pathways")
         .iter()
         .filter(|pathway| pathway.get("hashCallData").is_some())
-        .map(|pathway| pathway["family"].as_str().expect("family"))
+        .map(|pathway| {
+            (
+                pathway["environment"].as_str().expect("environment"),
+                pathway["family"].as_str().expect("family"),
+            )
+        })
+        .collect();
+    let expected_present: std::collections::BTreeSet<(&str, &str)> = ACCEPTANCE
+        .iter()
+        .filter(|(_, _, absent)| absent.is_none())
+        .map(|(environment, family, _)| (*environment, *family))
         .collect();
     assert_eq!(
-        families.iter().copied().collect::<Vec<_>>(),
-        vec![
-            "APTOS", "EVM", "INITIA", "MOVEMENT", "SOLANA", "STARKNET", "STELLAR", "SUI", "TON",
-            "TRON",
-        ],
-        "destination families compared"
+        present, expected_present,
+        "the acceptance matrix and the compared rows disagree; \
+         a new row needs a recorded receipt, a vanished one needs a reason"
     );
     assert_eq!(compared.len(), 16, "compared pathways: {compared:?}");
     assert!(

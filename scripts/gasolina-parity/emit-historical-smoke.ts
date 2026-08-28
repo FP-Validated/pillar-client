@@ -1,17 +1,22 @@
-// Drives the real Gasolina **public** signing entrypoint over recorded historical
-// PacketSent receipts, one destination chain family per environment, and reports what
-// each pathway produces so the Rust port can be compared field by field.
+// Drives the real Gasolina service entrypoint - `App.signRequestV2`, the method the
+// HTTP layer calls - over recorded historical PacketSent receipts, one destination
+// chain family per environment, and reports what each pathway produces so the Rust
+// port can be compared field by field.
 //
-// Public path, not a recomposition of its steps: the event comes from upstream's own
-// `extractLZEventFromPacketSentEvent`, the SDK from upstream's own
-// `GasolinaSdkFactory`, the payload from that SDK's `buildULNV3VerifyPayload`. That
-// matters because `GasolinaEvmSdk.buildDvnCallData` derives the *receive* ULN version
-// from the destination endpoint id (`evm/index.ts:135-145`) - a step any hand-recomposed
-// harness silently skips.
+// The whole orchestrator runs, not a hand-picked subset of it: protocol-type checks,
+// message-hash validation, readiness, expiration, already-signed, then the builder and
+// then the signer. That matters twice over. `GasolinaEvmSdk.buildDvnCallData` derives
+// the *receive* ULN version from the destination endpoint id (`evm/index.ts:135-145`),
+// which a recomposed harness skips; and a reject path is only meaningfully rejected if
+// the thing rejecting it is the same orchestrator that would otherwise have signed.
 //
-// Offline: no RPC, no signer, no network. Receipts come from the fixture, and every
-// family compared here leaves its provider untouched on the verify path - except TON,
-// excluded for the reason recorded in the output.
+// Each pathway is run four times - once normally and once per reject scenario - and the
+// signer adapter counts its own invocations, so 'refused without signing' is observed
+// rather than assumed.
+//
+// Offline: no live RPC, no network. Receipts and the TON DVN account state come from
+// the fixture; chain reads the orchestrator performs (block confirmations, block
+// timestamp, already-signed) are answered by stubs that are named in the output.
 import { Cell } from '@ton/core'
 import { ethers } from 'ethers'
 import * as fs from 'fs'
@@ -23,6 +28,10 @@ import type { PacketSentEvent } from '@monorepo/lz-evm-sdk-v2-contracts'
 import { getVId } from '@monorepo/static-config'
 
 import { GasolinaSdkFactory } from '../src/app/sdks/gasolinaSdk/factory'
+import { App } from '../src/app/app'
+import { buildHashCallDataBuilder } from '../src/app/hashCallDataBuilder'
+import { hashSentEventMessageForGasolina } from '@monorepo/gasolina-client'
+import { ProtocolType, UlnVersion } from '@monorepo/common-model'
 import { GasolinaSignerAdapterGetter } from '@monorepo/gasolina-signer-adapter'
 import { SignerAdapterFactory } from '@monorepo/signer-adapter/src/factory'
 import { hexToBytes } from '@monorepo/common-utils'
@@ -258,6 +267,110 @@ const withForeignEmitter = (pathway: Pathway) => ({
     ),
 })
 
+// Everything the orchestrator reads from a chain, in one place, so the output can say
+// exactly what was answered rather than leaving it implicit. None of these values feed
+// a signed field: they gate the request, and the gate is what is being exercised.
+const stubReads = (pathway: Pathway, alreadySigned: boolean) => ({
+    // Readiness: report exactly the confirmations the request asks for.
+    getBlockConfirmations: async (_txHash: string, want: number) => want,
+    // Expiration: a timestamp inside the window the caller computed, so the request is
+    // neither expired nor too far in the future.
+    getBlockTimestamp: async () => pathway.signingContext.expiration - 100,
+    getFromAddress: async () => pathway.receipt.from ?? '0x' + '00'.repeat(20),
+    // Already-signed: the on-chain question this offline harness cannot ask.
+    hasPayloadSigned: async () => alreadySigned,
+    getDstUlnConfig: async () => ({}),
+    getUlnReceiveVersion: async () => UlnVersion.V302,
+})
+
+const buildApp = (
+    pathway: Pathway,
+    options: {
+        receipt: unknown
+        alreadySigned: boolean
+        availableChains?: string[]
+    },
+) => {
+    const reads = stubReads(pathway, options.alreadySigned)
+    const realEndpointFactory = {
+        getSdk: (chainName: string) =>
+            chainName === pathway.srcChainName
+                ? endpointSdkFor(pathway, options.receipt)
+                : ({ getUlnReceiveVersion: reads.getUlnReceiveVersion } as any),
+    }
+    const chains = options.availableChains ?? [
+        pathway.srcChainName,
+        pathway.dstChainName,
+    ]
+    const chainType = StaticChainConfigs.getChainType(pathway.dstChainName)
+    let signerCalls = 0
+    const countingSignerGetter = {
+        getSignerAdapter: async (chainName: string, walletName: string) => {
+            const adapter = await signerGetter.getSignerAdapter(
+                chainName,
+                walletName,
+            )
+            return {
+                gasolinaSign: async (args: { data: Uint8Array }) => {
+                    signerCalls += 1
+                    return adapter.gasolinaSign(args)
+                },
+            }
+        },
+    }
+
+    const app = new App({
+        signerAdapterGetter: countingSignerGetter as any,
+        walletsByChainName: {
+            [pathway.dstChainName]: [{ walletName: walletNameFor(chainType) }],
+        },
+        endpointV2SdkFactory: realEndpointFactory as any,
+        rpcSdkFactory: { getSdk: () => reads } as any,
+        ulnSdkFactory: { getSdk: () => reads } as any,
+        // READ-protocol only; every recorded pathway is a MESSAGE.
+        timeMarkerValidatorSdkFactory: {
+            getSdk: () => {
+                throw new Error('time markers are not part of a MESSAGE pathway')
+            },
+        } as any,
+        lzCmdResolverSdkFactory: {
+            getSdk: () => {
+                throw new Error('lz cmd resolution is not part of a MESSAGE pathway')
+            },
+        } as any,
+        providerConfigGetter: {
+            getProviderConfigs: () =>
+                Object.fromEntries(chains.map((name) => [name, {}])),
+        } as any,
+        environment: pathway.environment,
+        debugMode: true,
+        maximumExpiration: 60 * 60 * 24 * 7,
+        maximumExpirationGracePeriod: 30,
+        hashCallDataBuilders: buildHashCallDataBuilder({
+            gasolinaSdkFactory: new GasolinaSdkFactory({
+                environment: pathway.environment,
+                providers:
+                    pathway.family === 'TON'
+                        ? { [pathway.dstChainName]: tonProvidersFor(pathway) }
+                        : {},
+            }),
+            endpointV2SdkFactory: realEndpointFactory as any,
+            lzSdkFactory: {
+                getSdk: () => {
+                    throw new Error('the V1 LZ sdk is not part of a V3 pathway')
+                },
+            } as any,
+            lzCmdResolverSdkFactory: {
+                getSdk: () => {
+                    throw new Error('lz cmd resolution is not part of a MESSAGE pathway')
+                },
+            } as any,
+            environment: pathway.environment,
+        }),
+    })
+    return { app, signerCalls: () => signerCalls }
+}
+
 const runPathway = async (pathway: Pathway) => {
     const base = {
         id: pathway.id,
@@ -267,10 +380,6 @@ const runPathway = async (pathway: Pathway) => {
         dstChainName: pathway.dstChainName,
         txHash: pathway.txHash,
         gate0Blocked: pathway.gate0Blocked,
-    }
-    const excluded = OFFLINE_EXCLUDED[pathway.family]
-    if (excluded) {
-        return { ...base, skipped: excluded }
     }
 
     const raw = pathway.receipt.logs.find(
@@ -282,72 +391,103 @@ const runPathway = async (pathway: Pathway) => {
         return { ...base, error: 'no PacketSent log in the recorded receipt' }
     }
 
-    let normalizedEvent
-    let vId: string
+    // Only to obtain the lzMessageId and messageHash a caller would send. What is
+    // compared comes back out of the orchestrator.
+    let requested
     try {
-        // Decoded once by hand only to obtain the lzMessageId the caller would send;
-        // the event actually compared below is the one upstream's resolver returns.
-        const requested = extractLZEventFromPacketSentEvent(
+        requested = extractLZEventFromPacketSentEvent(
             pathway.srcChainName,
             pathway.environment,
             packetSentEventFrom(raw),
-        ).lzMessageId
-        normalizedEvent = await resolveStage(pathway, pathway.receipt, requested)
-        vId = getVId(pathway.dstChainName, pathway.environment)
+        )
     } catch (error) {
         return { ...base, decodeError: (error as Error).message.slice(0, 300) }
     }
+    const request = {
+        srcTxHash: pathway.txHash,
+        lzMessageId: requested.lzMessageId,
+        messageHash: hashSentEventMessageForGasolina(requested),
+        signingContext: {
+            expiration: pathway.signingContext.expiration,
+            blockConfirmation: pathway.signingContext.blockConfirmation,
+            dvnAddress: pathway.signingContext.dvnAddress,
+            protocolType: ProtocolType.MESSAGE,
+        },
+    } as any
 
-    let foreignEmitter: string
-    try {
-        const requested = normalizedEvent.lzMessageId
-        await resolveStage(pathway, withForeignEmitter(pathway), requested)
-        foreignEmitter = 'ACCEPTED'
-    } catch (error) {
-        foreignEmitter = `refused: ${(error as Error).message.slice(0, 120)}`
+    // Every reject scenario reports whether the signer was reached, which is the
+    // property that matters: refused is only refused if nothing got signed.
+    const reject = async (
+        label: string,
+        build: () => ReturnType<typeof buildApp>,
+    ) => {
+        const { app, signerCalls } = build()
+        try {
+            await app.signRequestV2(request)
+            return { [label]: 'ACCEPTED', [`${label}SignerCalls`]: signerCalls() }
+        } catch (error) {
+            return {
+                [label]: `refused: ${(error as Error).message.slice(0, 120)}`,
+                [`${label}SignerCalls`]: signerCalls(),
+            }
+        }
     }
 
+    const rejects = {
+        ...(await reject('foreignEmitter', () =>
+            buildApp(pathway, {
+                receipt: withForeignEmitter(pathway),
+                alreadySigned: false,
+            }),
+        )),
+        ...(await reject('alreadySigned', () =>
+            buildApp(pathway, { receipt: pathway.receipt, alreadySigned: true }),
+        )),
+        ...(await reject('unavailableChain', () =>
+            buildApp(pathway, {
+                receipt: pathway.receipt,
+                alreadySigned: false,
+                availableChains: [pathway.srcChainName],
+            }),
+        )),
+    }
+
+    const { app, signerCalls } = buildApp(pathway, {
+        receipt: pathway.receipt,
+        alreadySigned: false,
+    })
     try {
-        // Providers deliberately absent: nothing compared here reads one.
-        const factory = new GasolinaSdkFactory({
-            environment: pathway.environment,
-            providers:
-                pathway.family === 'TON'
-                    ? { [pathway.dstChainName]: tonProvidersFor(pathway) }
-                    : {},
-        })
-        const built = await factory
-            .getSdk(pathway.dstChainName)
-            .buildULNV3VerifyPayload(
-                normalizedEvent,
-                pathway.signingContext.blockConfirmation,
-                pathway.signingContext.expiration,
-                vId,
-                pathway.signingContext.dvnAddress,
-            )
+        const response = await app.signRequestV2(request)
+        const details = (response as any).debugInfo.details
         return {
             ...base,
-            vId,
+            ...rejects,
             resolver:
                 pathway.environment === 'mainnet'
                     ? 'EndpointV2EvmSdk'
                     : 'EndpointV2EvmSdkViem',
-            foreignEmitter,
-            normalizedEvent,
-            targetContract: built.details.dvnCallData?.targetContract,
-            ulnCallData: built.details.dvnCallData?.ulnCallData,
-            vid: built.details.dvnCallData?.vid,
-            expiration: built.details.dvnCallData?.expiration,
-            ulnCallDataDetails: built.details.ulnCallData,
-            hashCallData: built.hashCallData,
-            ...(await signStage(pathway.dstChainName, built.hashCallData)),
+            vId: getVId(pathway.dstChainName, pathway.environment),
+            normalizedEvent: requested,
+            targetContract: details.dvnCallData?.targetContract,
+            ulnCallData: details.dvnCallData?.ulnCallData,
+            vid: details.dvnCallData?.vid,
+            expiration: details.dvnCallData?.expiration,
+            ulnCallDataDetails: details.ulnCallData,
+            hashCallData: (response as any).debugInfo.dvnHashCallData,
+            payload: (response as any).payload,
+            signerChainType: StaticChainConfigs.getChainType(pathway.dstChainName),
+            derivationPath: mnemonicFor(
+                StaticChainConfigs.getChainType(pathway.dstChainName),
+            ).path,
+            signature: (response as any).signatures[0].signature,
+            signerAddress: (response as any).signatures[0].address,
+            signerCalls: signerCalls(),
         }
     } catch (error) {
         return {
             ...base,
-            vId,
-            normalizedEvent,
-            buildError: (error as Error).message.slice(0, 300),
+            ...rejects,
+            signRequestError: (error as Error).message.slice(0, 400),
         }
     }
 }
