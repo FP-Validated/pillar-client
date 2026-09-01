@@ -68,8 +68,9 @@ mod source_events_ton;
 pub(crate) use source_events_ton::{decode_ton_packet_sent_events, normalize_ton_address};
 mod packet_resolver;
 pub(crate) use source_events_move::{
-    decode_move_packet_sent_events, fetch_move_transaction, move_provider_uri_parts,
-    observe_move_block_confirmations, observe_move_block_time, MovePacketSentEvent,
+    decode_move_packet_sent_events, encode_path_segment, fetch_move_transaction,
+    move_provider_uri_parts, observe_move_block_confirmations, observe_move_block_time,
+    MovePacketSentEvent,
 };
 pub(crate) use source_events_starknet::{
     decode_starknet_packet_sent_events, starknet_packet_to_lz_sent_event,

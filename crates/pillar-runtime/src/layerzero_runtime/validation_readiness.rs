@@ -461,9 +461,27 @@ where
             current_confirmations: None,
         };
     }
+    // Fourth and last `/traces/` splice, encoded like its three siblings. This
+    // one's `tx_hash` is provider-controlled rather than caller-controlled - it
+    // comes from `transaction["hash"]` in a trace response - so the API boundary's
+    // shape gate does not cover it and the encoding is the only guard.
+    let Some(encoded_tx_hash) = encode_path_segment(tx_hash) else {
+        // Fail closed rather than build a URL this hash could re-target. This
+        // one's value is provider-controlled - it comes from
+        // `transaction["hash"]` in a trace response - so the API boundary's
+        // shape gate never saw it.
+        return BlockConfirmationObservation {
+            validity: BlockConfirmationValidity::Missing,
+            current_confirmations: None,
+        };
+    };
     let trace = transport
         .get_json(
-            format!("{}/traces/{tx_hash}", endpoint.trim_end_matches('/')),
+            format!(
+                "{}/traces/{}",
+                endpoint.trim_end_matches('/'),
+                encoded_tx_hash
+            ),
             headers.clone(),
         )
         .await

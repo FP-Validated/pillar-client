@@ -384,6 +384,11 @@ async fn observe_ton_transaction_from<T>(
 where
     T: JsonRpcTransport,
 {
+    // Same sink-side refusal as `move_tx_url`: the API boundary refuses a
+    // `srcTxHash` with a path metacharacter, and this splice cannot rely on that
+    // alone.
+    let tx_hash = encode_path_segment(tx_hash)
+        .ok_or_else(|| AppCoreError::Internal("Unusable TON transaction hash".to_string()))?;
     let response = transport
         .get_json(
             format!("{}/traces/{tx_hash}", endpoint.trim_end_matches('/')),

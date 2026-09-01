@@ -47,6 +47,13 @@ fn decode_packet_sent_event(
     }
     let _body_ext = reader.u32()?;
     let topic_count = reader.u32()? as usize;
+    // The count is provider-supplied. Every topic is an `sc_val`, which cannot
+    // be shorter than its 4-byte discriminant, so the remaining input is the
+    // ceiling; without this a u32 near its maximum sizes the allocation, and an
+    // allocation failure aborts the process rather than failing the request.
+    if topic_count > reader.remaining() / 4 {
+        return None;
+    }
     let mut topics = Vec::with_capacity(topic_count);
     for _ in 0..topic_count {
         topics.push(reader.sc_val()?);
@@ -382,6 +389,11 @@ impl<'a> XdrReader<'a> {
             }
             17 => {
                 let count = self.u32()? as usize;
+                // Each pair is two `sc_val`s of at least 4 bytes each, so the
+                // remaining input bounds the count. See the topic-count guard.
+                if count > self.remaining() / 8 {
+                    return None;
+                }
                 let mut values = Vec::with_capacity(count);
                 for _ in 0..count {
                     values.push((self.sc_val()?, self.sc_val()?));

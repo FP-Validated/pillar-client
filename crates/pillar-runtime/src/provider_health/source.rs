@@ -120,6 +120,20 @@ pub(crate) fn provider_health_snapshot_from_report(
         .collect()
 }
 
+/// Fallback for a chain type with no probe of its own.
+///
+/// Unreachable for every chain in the static table: `chain_type_for_provider_health`
+/// defaults an unknown chain name to `"EVM"` before the dispatch, and every chain
+/// type the table actually contains - EVM, APTOS, SOLANA, SUI, IOTAMOVE,
+/// STARKNET, STELLAR, TON, INITIA, TRON - has an explicit arm. It exists because
+/// the dispatch is on a `&str` and must be exhaustive.
+///
+/// It fails closed by construction: `normalize_provider_health_entry` sets
+/// `healthy` from whether the response parses as a number, and this response is
+/// not numeric, so a chain that ever did reach here reports unhealthy rather than
+/// inventing health for endpoints nobody probed. The message used to read "is not
+/// wired in Rust runtime yet", which described a porting roadmap rather than the
+/// state, in a branch no chain reaches.
 pub(crate) fn non_evm_provider_health_entries(
     chain_name: &str,
     config: &pillar_config::ProviderConfig,
@@ -132,7 +146,7 @@ pub(crate) fn non_evm_provider_health_entries(
             normalize_provider_health_entry(
                 url,
                 Value::String(format!(
-                    "Provider health for non-EVM chain {chain_name} is not wired in Rust runtime yet"
+                    "No provider health probe is registered for the chain type of {chain_name}"
                 )),
                 None,
             )

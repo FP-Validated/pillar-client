@@ -1460,3 +1460,92 @@ async fn no_non_evm_chain_falls_through_to_the_evm_receipt_decode() {
         }
     }
 }
+
+/// The property that matters is the path a URL parser produces, not the string
+/// the encoder returns. The first version of this test asserted
+/// `encode_path_segment("..") == "%2E%2E"` and passed while the fix was useless:
+/// WHATWG defines a double-dot segment to include its percent-encoded spellings,
+/// and `url` implements that, so `%2E%2E` still popped the preceding segment.
+/// Measured against url 2.5.8 - `https://rpc.example/a/b/%2E%2E` parses to path
+/// `/a/`. So the encoder refuses a dot instead, and this test checks the parsed
+/// path of the URL that would actually be requested.
+#[test]
+fn path_segment_encoding_cannot_shorten_the_request_path() {
+    use crate::layerzero_runtime::encode_path_segment;
+
+    const BASE: &str = "https://rpc.example/transactions/by_hash/";
+
+    // A literal dot in the input is what cannot be made safe, so it is refused
+    // outright and no URL is built at all.
+    for refused in [
+        "..",
+        ".",
+        "..%2F..",
+        "../../admin",
+        "a.b",
+        "0xdead.beef",
+        "",
+    ] {
+        assert!(
+            encode_path_segment(refused).is_none(),
+            "{refused:?} must be refused, got {:?}",
+            encode_path_segment(refused)
+        );
+    }
+
+    // An input that merely SPELLS a percent escape is not a dot: the `%` is
+    // itself encoded, so `%2E` becomes `%252E`, which a parser keeps as a
+    // literal segment rather than treating as `.`. Accepting these is correct,
+    // and asserting the parsed path is what proves it.
+    for spelled in ["%2E", "%2e", "%2E%2E", "%2e%2e"] {
+        let encoded = encode_path_segment(spelled).expect("a percent escape is not a dot");
+        let parsed = url::Url::parse(&format!("{BASE}{encoded}")).expect("parses");
+        assert_eq!(
+            parsed.path(),
+            format!("/transactions/by_hash/{encoded}"),
+            "{spelled:?} must survive as a literal segment"
+        );
+        assert_eq!(
+            parsed.path_segments().unwrap().count(),
+            3,
+            "{spelled:?} must stay one segment: path {}",
+            parsed.path()
+        );
+    }
+
+    // Path metacharacters that are not dots are encoded, and the parsed path
+    // keeps them inside the final segment.
+    for metacharacter in ["/", "?", "#", "%", ":", "@", " ", "\\", "..%00"] {
+        let Some(encoded) = encode_path_segment(metacharacter) else {
+            continue;
+        };
+        let parsed = url::Url::parse(&format!("{BASE}{encoded}")).expect("parses");
+        assert!(
+            parsed.path().starts_with("/transactions/by_hash/"),
+            "{metacharacter:?} escaped its segment: encoded {encoded}, path {}",
+            parsed.path()
+        );
+        assert_eq!(
+            parsed.path_segments().unwrap().count(),
+            3,
+            "{metacharacter:?} must stay one segment: path {}",
+            parsed.path()
+        );
+    }
+
+    // Real transaction ids round-trip byte-identically and stay one segment.
+    for id in [
+        "0xdeadbeef",
+        "5Kd3NBUAdUnhyzenEwVLy9pBKxSwXvE9FMPyR4UKZvpe",
+        "abc-DEF_123~",
+    ] {
+        let encoded = encode_path_segment(id).expect("a legitimate id is accepted");
+        assert_eq!(encoded, id, "a legitimate id must not be rewritten: {id}");
+        let parsed = url::Url::parse(&format!("{BASE}{encoded}")).expect("parses");
+        assert_eq!(
+            parsed.path(),
+            format!("/transactions/by_hash/{id}"),
+            "{id} must survive parsing unchanged"
+        );
+    }
+}

@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, env, fmt, fs, path::Path};
+use std::{collections::HashMap, env, fs, path::Path};
+use url::{Host, Url};
 
 mod generated_layerzero_environment;
 mod generated_layerzero_evm;
@@ -149,7 +150,7 @@ pub enum ConfigError {
     ConflictingExtraContext,
     #[error("{0} must be a valid absolute URL")]
     InvalidServiceUrl(&'static str),
-    #[error("{0} must use HTTPS outside exact loopback development")]
+    #[error("{0} must use HTTPS; plain HTTP is accepted only for a literal loopback address outside mainnet")]
     InsecureServiceUrl(&'static str),
     #[error("{0} must not contain URL userinfo")]
     ServiceUrlUserinfo(&'static str),
@@ -295,7 +296,9 @@ pub fn layerzero_rollout_block_reason(environment: &str, chain_name: &str) -> Op
         // pathway has ever been opened there and there is no delivered message
         // whose verdict could be read. It stays fail-closed until one exists.
         //
-        // Evidence: `local/smoke/ton-live/`, `local/smoke/sui-live/`.
+        // Established by a live read against testnet TON and Sui providers.
+        // That evidence lives outside this repository; the committed check is
+        // the fail-closed behaviour asserted by the tests below.
         ("testnet", "ton") => {
             Some("no UlnConnection exists on TON testnet, so no delivered packet can be observed")
         }
@@ -386,6 +389,9 @@ where
         return Err(ConfigError::ConflictingExtraContext);
     }
     let environment = required(&map, LZ_ENV)?.to_string();
+    if let Some(url) = extra_context_request_url.as_deref() {
+        validate_service_url(EXTRA_CONTEXT_REQUEST_URL, url, &environment)?;
+    }
     let requested_chain_names = optional(&map, LZ_AVAILABLE_CHAIN_NAMES)
         .map(|value| value.split(',').map(str::to_string).collect::<Vec<_>>());
     let available_chain_names =
@@ -426,6 +432,40 @@ fn required<'a>(
 
 fn optional(map: &HashMap<String, String>, key: &'static str) -> Option<String> {
     map.get(key).filter(|value| !value.is_empty()).cloned()
+}
+
+/// Refuse an outbound service URL that would ship a bearer token in cleartext.
+///
+/// `EXTRA_CONTEXT_REQUEST_URL` receives the sent-event payload this service is
+/// about to attest to, plus `EXTRA_CONTEXT_REQUEST_AUTH_TOKEN` as a bearer
+/// header. `InvalidServiceUrl`, `InsecureServiceUrl` and `ServiceUrlUserinfo`
+/// were declared with `ConfigError` and never constructed, so a plain `http://`
+/// value used to be accepted and sent both in the clear.
+///
+/// Loopback is admitted by literal address only, and only outside `mainnet`.
+/// `localhost` is rejected on purpose: it resolves through the host's name
+/// service, so it is not the literal loopback the error text promises. A
+/// mainnet deployment pointing this at its own host is a misconfiguration
+/// rather than a development convenience, so it is refused too.
+fn validate_service_url(
+    name: &'static str,
+    raw: &str,
+    environment: &str,
+) -> Result<(), ConfigError> {
+    let parsed = Url::parse(raw).map_err(|_| ConfigError::InvalidServiceUrl(name))?;
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err(ConfigError::ServiceUrlUserinfo(name));
+    }
+    let literal_loopback = match parsed.host() {
+        Some(Host::Ipv4(address)) => address.is_loopback(),
+        Some(Host::Ipv6(address)) => address.is_loopback(),
+        _ => false,
+    };
+    match parsed.scheme() {
+        "https" => Ok(()),
+        "http" if literal_loopback && environment != "mainnet" => Ok(()),
+        _ => Err(ConfigError::InsecureServiceUrl(name)),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -510,11 +550,28 @@ pub struct WalletDefinition {
     pub wallet_restrictions: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// `Deserialize` only, and `Debug` by hand.
+///
+/// This used to derive both `Debug` and `Serialize` over a plaintext BIP-39
+/// phrase, so a single `{:?}` or `tracing::debug!(?wallet)` added anywhere -
+/// including inside an error context - would have printed the signing key's
+/// seed phrase into the operational log. Nothing serialized it; the JSON in
+/// `LZ_WALLET_MNEMONIC_MAPPING` only ever needs to be read.
+#[derive(Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Mnemonic {
     pub mnemonic: String,
     pub path: String,
+}
+
+impl std::fmt::Debug for Mnemonic {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Mnemonic")
+            .field("mnemonic", &"<redacted>")
+            .field("path", &self.path)
+            .finish()
+    }
 }
 
 pub type WalletToMnemonicMap = HashMap<String, Mnemonic>;
@@ -1115,15 +1172,6 @@ pub struct ProviderConfig {
 
 pub type ProviderConfigs = IndexMap<String, ProviderConfig>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RedactedUrl<'a>(pub &'a str);
-
-impl fmt::Display for RedactedUrl<'_> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&redact_url(self.0))
-    }
-}
-
 pub fn redact_url(raw: &str) -> String {
     let (prefix, rest) = match raw.split_once("://") {
         Some((scheme, rest)) => (format!("{scheme}://"), rest),
@@ -1139,14 +1187,15 @@ pub fn redact_url(raw: &str) -> String {
     format!("{prefix}{authority}{}", redact_path_and_query(suffix))
 }
 
-pub fn redact_header_value(name: &str, value: &str) -> String {
-    if is_secret_name(name) {
-        "<redacted>".to_string()
-    } else {
-        value.to_string()
-    }
-}
-
+/// Redact a name/value pair whose name suggests it carries a secret.
+///
+/// This used to exist twice, as `redact_header_value` and `redact_secret_value`
+/// with byte-identical bodies and no production caller between them. The one
+/// place that actually redacts headers - `redact_provider_uri` in the startup
+/// report - maps over header *keys* and prints `<redacted>` for every value
+/// unconditionally, which is strictly stronger than this allow-list. Keep that
+/// in mind before reaching for this: it passes through any name that is not on
+/// the known-secret list.
 pub fn redact_secret_value(name: &str, value: &str) -> String {
     if is_secret_name(name) {
         "<redacted>".to_string()
@@ -1648,6 +1697,106 @@ mod tests {
         assert!(config.available_chain_names.unwrap().is_empty());
     }
 
+    fn extra_context_env(
+        url: &'static str,
+        environment: &'static str,
+    ) -> Vec<(&'static str, &'static str)> {
+        vec![
+            (SERVER_PORT, "3000"),
+            (PILLAR_API_AUTH_TOKENS, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            (LZ_PROVIDER_CONFIG_TYPE, "LOCAL"),
+            (LZ_ENV, environment),
+            (LZ_SUPPORTED_ULN_VERSIONS, r#"["V2","V301"]"#),
+            (EXTRA_CONTEXT_REQUEST_URL, url),
+            (EXTRA_CONTEXT_REQUEST_AUTH_TOKEN, "extra-context-token"),
+        ]
+    }
+
+    #[test]
+    fn rejects_an_extra_context_url_that_would_send_the_bearer_token_in_cleartext() {
+        // `localhost` resolves through the host's name service, so it is not a
+        // literal loopback address; the third case is a hostname that merely
+        // starts with one.
+        for environment in ["mainnet", "testnet", "sandbox"] {
+            for url in [
+                "http://extra-context.example/verify",
+                "http://localhost:3000/verify",
+                "http://127.0.0.1.attacker.example/verify",
+                "ftp://extra-context.example/verify",
+            ] {
+                assert_eq!(
+                    load_from_map(extra_context_env(url, environment)).unwrap_err(),
+                    ConfigError::InsecureServiceUrl(EXTRA_CONTEXT_REQUEST_URL),
+                    "{url} must not be accepted on {environment}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn rejects_loopback_http_extra_context_urls_on_mainnet() {
+        for url in ["http://127.0.0.1:3000/verify", "http://[::1]:3000/verify"] {
+            assert_eq!(
+                load_from_map(extra_context_env(url, "mainnet")).unwrap_err(),
+                ConfigError::InsecureServiceUrl(EXTRA_CONTEXT_REQUEST_URL),
+                "{url} must not be accepted on mainnet"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_an_extra_context_url_carrying_userinfo() {
+        for url in [
+            "https://user@extra-context.example/verify",
+            "https://user:pass@extra-context.example/verify",
+            "https://:pass@extra-context.example/verify",
+        ] {
+            assert_eq!(
+                load_from_map(extra_context_env(url, "mainnet")).unwrap_err(),
+                ConfigError::ServiceUrlUserinfo(EXTRA_CONTEXT_REQUEST_URL),
+                "{url} must not be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_an_extra_context_url_that_is_not_absolute() {
+        for url in ["/verify", "extra-context.example/verify", "", "not a url"] {
+            let error = load_from_map(extra_context_env(url, "mainnet")).unwrap_err();
+            assert!(
+                matches!(
+                    error,
+                    ConfigError::InvalidServiceUrl(EXTRA_CONTEXT_REQUEST_URL)
+                        | ConfigError::ExtraContextAuthWithoutUrl
+                ),
+                "{url} must not be accepted, got {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_https_extra_context_urls_in_every_environment() {
+        for environment in ["mainnet", "testnet", "sandbox"] {
+            let url = "https://extra-context.example/verify";
+            let config = load_from_map(extra_context_env(url, environment))
+                .unwrap_or_else(|error| panic!("{url} must be accepted, got {error:?}"));
+            assert_eq!(config.extra_context_request_url.as_deref(), Some(url));
+        }
+    }
+
+    #[test]
+    fn accepts_literal_loopback_http_extra_context_urls_outside_mainnet() {
+        for environment in ["testnet", "sandbox"] {
+            for url in ["http://127.0.0.1:3000/verify", "http://[::1]:3000/verify"] {
+                let config =
+                    load_from_map(extra_context_env(url, environment)).unwrap_or_else(|error| {
+                        panic!("{url} must be accepted on {environment}, got {error:?}")
+                    });
+                assert_eq!(config.extra_context_request_url.as_deref(), Some(url));
+            }
+        }
+    }
+
     #[test]
     fn runtime_config_filters_available_chain_csv_against_environment_union() {
         let config = load_from_map([
@@ -1784,10 +1933,10 @@ mod tests {
     #[test]
     fn redaction_masks_headers_mnemonics_private_keys_and_kms_ids() {
         assert_eq!(
-            redact_header_value("Authorization", "Bearer raw-token"),
+            redact_secret_value("Authorization", "Bearer raw-token"),
             "<redacted>"
         );
-        assert_eq!(redact_header_value("X-API-Key", "raw-key"), "<redacted>");
+        assert_eq!(redact_secret_value("X-API-Key", "raw-key"), "<redacted>");
         assert_eq!(
             redact_secret_value(
                 "mnemonic",
@@ -1811,7 +1960,7 @@ mod tests {
     #[test]
     fn redaction_handles_malformed_and_api_key_like_path_segments() {
         let malformed = "localhost/v2/redaction-test-key-0123456789abcdef";
-        let redacted = format!("{}", RedactedUrl(malformed));
+        let redacted = redact_url(malformed);
 
         assert_eq!(redacted, "<redacted>");
         assert!(!redacted.contains("redaction-test-key-0123456789abcdef"));

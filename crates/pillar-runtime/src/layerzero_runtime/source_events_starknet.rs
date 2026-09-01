@@ -109,6 +109,13 @@ pub(crate) fn starknet_packet_to_lz_sent_event(
 fn decode_byte_array(data: &[Value], cursor: &mut usize) -> Option<Vec<u8>> {
     let word_count = parse_small_felt(data.get(*cursor)?)?;
     *cursor = cursor.checked_add(1)?;
+    // The count is provider-supplied and each word consumes one array element,
+    // so the remaining elements are the ceiling. `checked_mul` alone rejects
+    // only the overflow: 0x0800000000000000 * 31 fits a usize and would request
+    // roughly 17 exabytes, and an allocation failure aborts the process.
+    if word_count > data.len().saturating_sub(*cursor) {
+        return None;
+    }
     let mut bytes = Vec::with_capacity(word_count.checked_mul(31)?);
     for _ in 0..word_count {
         let word = parse_felt_bytes(data.get(*cursor)?)?;

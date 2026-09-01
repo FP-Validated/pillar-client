@@ -10,6 +10,17 @@ where
         verifier_address: &str,
         dst_chain_name: &str,
     ) -> Result<(), AppCoreError> {
+        // No guid means a ULN V1 message, and the chain-native already-signed
+        // read is a V2 construct: there is no V2 payload to ask about, so there
+        // is nothing being skipped. This is a protocol distinction, NOT a check
+        // being dropped - a security review read it as fail-open. The two tests
+        // that pin it are `..._skips_legacy_payload_without_guid` and
+        // `..._skips_ton_payload_without_guid`, whose own assertion message says
+        // "V1 messages are skipped".
+        //
+        // Contrast the Stellar arm below, which refuses. That is a different
+        // condition - a V2 pathway whose check is genuinely unavailable - and it
+        // correctly fails closed.
         if !sent_event.extra.contains_key("guid") {
             return Ok(());
         }

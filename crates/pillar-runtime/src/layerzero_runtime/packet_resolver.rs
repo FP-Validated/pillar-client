@@ -313,12 +313,17 @@ where
     /// counter an operator alerts on stayed at zero.
     ///
     /// The counter follows the verdict, not the fact that the response loop
-    /// ended. Reaching this point does not imply failure: the TON path skips
-    /// URIs whose `v3-endpoint` will not parse, so it pushes fewer futures than
-    /// the accumulator's declared total, `remaining` never falls to zero,
-    /// `unambiguous_result` therefore never fires, and `finish` can still
-    /// succeed on the responses that did arrive. Recording before consulting the
-    /// result counted those successes as quorum failures.
+    /// ended, so it is recorded from `result.is_err()` rather than from reaching
+    /// this point. That ordering used to be load-bearing for a second reason:
+    /// the TON path skipped URIs whose `v3-endpoint` will not parse while still
+    /// declaring the full configured count, so `remaining` never fell to zero,
+    /// `unambiguous_result` never fired, and `finish` succeeded on a silently
+    /// smaller pool — successes that a record-then-consult order counted as
+    /// quorum failures. `get_ton_transaction_trace` now sizes the accumulator by
+    /// the number of URIs it actually dispatched to and refuses up front when
+    /// that is below quorum, so every path declares what it asked. Keep the
+    /// verdict-driven ordering regardless: it is what makes this counter mean
+    /// "quorum was not met" instead of "a response loop finished".
     async fn finish_quorum<V: Clone>(
         &self,
         chain_name: &str,
@@ -524,11 +529,26 @@ where
         let provider_config = snapshot.provider_config("ton")?;
         let quorum = required_provider_quorum(provider_config, "ton")?;
         let mut requests = FuturesUnordered::new();
+        let mut dispatched = 0usize;
+        let mut unusable = Vec::new();
         for (index, uri) in provider_config.uris.iter().enumerate() {
             let Some((endpoint, _, headers)) = ton_v3_provider_uri_parts(uri) else {
+                unusable.push(index);
                 continue;
             };
-            let url = format!("{}/traces/{src_tx_hash}", endpoint.trim_end_matches('/'));
+            dispatched += 1;
+            // Sink-side refusal, as in `move_tx_url`; the API boundary's
+            // `srcTxHash` shape check is the first gate, not the only one.
+            let Some(encoded_tx_hash) = encode_path_segment(src_tx_hash) else {
+                return Err(AppCoreError::BadRequest(format!(
+                    "srcTxHash {src_tx_hash} cannot be used as a TON trace path segment"
+                )));
+            };
+            let url = format!(
+                "{}/traces/{}",
+                endpoint.trim_end_matches('/'),
+                encoded_tx_hash
+            );
             let transport = self.transport.clone();
             requests.push(async move {
                 (
@@ -545,7 +565,29 @@ where
                 )
             });
         }
-        let mut accumulator = ExactQuorumAccumulator::new(provider_config.uris.len(), quorum);
+        // Size the accumulator by what was actually dispatched, not by the
+        // configured URI count. A URI whose `v3-endpoint` will not parse is
+        // never asked, so declaring it kept `processed` below `total` forever:
+        // `unambiguous_result` could never fire, and `finish` settled on
+        // whatever arrived from a pool that was silently smaller than the
+        // operator configured. Refusing up front mirrors `plan_dispatch`, and
+        // naming the unusable URIs makes the misconfiguration visible.
+        if !unusable.is_empty() {
+            tracing::warn!(
+                chain = "ton",
+                unusable_uri_indexes = ?unusable,
+                dispatched,
+                configured = provider_config.uris.len(),
+                "TON provider URIs without a parseable v3-endpoint are excluded from quorum"
+            );
+        }
+        if dispatched < quorum {
+            return Err(AppCoreError::Internal(format!(
+                "TON transaction trace for {src_tx_hash} needs quorum {quorum} but only {dispatched} of {} configured providers have a parseable v3-endpoint",
+                provider_config.uris.len()
+            )));
+        }
+        let mut accumulator = ExactQuorumAccumulator::new(dispatched, quorum);
         while let Some((index, observation)) = requests.next().await {
             accumulator.record(index, observation);
             if let Some(value) = accumulator.unambiguous_result() {
@@ -818,12 +860,22 @@ where
             let Ok(packet_sent) = decode_evm_packet_sent_log(&log.topics, &log.data) else {
                 continue;
             };
-            let sent_event = self.packet_sent_to_lz_sent_event(
+            // Non-fatal for the same reason the decode above is. A batching
+            // transaction can emit several PacketSent events, and this
+            // conversion fails for an unknown send library or an endpoint id
+            // this deployment does not map. Propagating that aborted the scan
+            // for every other event in the receipt, including the one the
+            // request asked for. The bookkeeping below still separates "a
+            // trusted event was present but no pathway matched" from "no
+            // trusted event at all".
+            let Ok(sent_event) = self.packet_sent_to_lz_sent_event(
                 &lz_message_id.pathway_id.src_chain_name,
                 src_tx_hash,
                 packet_sent,
                 &log.address,
-            )?;
+            ) else {
+                continue;
+            };
             found_trusted_decoded_event = true;
             if lz_message_id_matches(lz_message_id, &sent_event.lz_message_id) {
                 return Ok(sent_event);

@@ -282,11 +282,11 @@ where
     }
 }
 
-/// Fetches the destination chain's current time for Solana, which has no
-/// single-call analog to `eth_getBlockByNumber`: fetch the confirmed slot,
-/// then that slot's Unix timestamp. Returns `None` on any RPC error or
-/// unparseable response so the caller's quorum logic treats it the same as
-/// a missing EVM observation.
+/// Fetches TON's current time from `/masterchainInfo`, whose `last.gen_utime`
+/// is the generation time of the newest masterchain block. Returns `None` on any
+/// RPC error or unparseable response so the caller's quorum logic treats it the
+/// same as a missing EVM observation - a provider that could not answer must not
+/// be counted as agreeing.
 async fn observe_ton_block_time<T>(
     transport: T,
     endpoint: String,

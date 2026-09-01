@@ -150,13 +150,55 @@ pub(crate) fn decode_move_packet_sent_events(
     }
     decoded
 }
-fn move_tx_url(chain_name: &str, base: &str, tx_hash: &str) -> String {
+/// `None` when the hash cannot be made into one opaque path segment. The API
+/// boundary already refuses a `srcTxHash` carrying a path metacharacter, but
+/// this is the sink, so it refuses too: a spliced `..`, `?` or `#` would
+/// otherwise re-target the request to another path, query or fragment on the
+/// operator's own node, with the provider's configured headers attached.
+fn move_tx_url(chain_name: &str, base: &str, tx_hash: &str) -> Option<String> {
     let base = base.trim_end_matches('/');
-    if chain_name == "initia" {
+    let tx_hash = encode_path_segment(tx_hash)?;
+    Some(if chain_name == "initia" {
         format!("{base}/cosmos/tx/v1beta1/txs/{tx_hash}")
     } else {
         format!("{base}/transactions/by_hash/{tx_hash}")
+    })
+}
+
+/// Percent-encode a value so it can only ever be one opaque path segment, or
+/// refuse it.
+///
+/// Encoding alone cannot make a dot safe, which is the trap this function was
+/// written into twice. WHATWG defines a double-dot path segment to include the
+/// percent-encoded spellings, and `url` - which `reqwest` parses with -
+/// implements that: `%2E%2E`, `%2e%2e`, `%2E.` and `.%2e` all pop the preceding
+/// segment, and a lone `%2E` is removed like a bare `.`. Measured against
+/// url 2.5.8:
+///
+/// ```text
+/// https://rpc.example/transactions/by_hash/%2E%2E -> path "/transactions/"
+/// https://rpc.example/transactions/by_hash/%2e%2e -> path "/transactions/"
+/// https://rpc.example/transactions/by_hash/.%2e   -> path "/transactions/"
+/// ```
+///
+/// So a dot is refused rather than encoded. No supported chain's transaction id
+/// contains one - they are hex, base58 or base64url - so refusing costs nothing
+/// and is the only spelling-proof answer. Every other byte outside the RFC 3986
+/// unreserved set is percent-encoded, and none of those can decode back to a
+/// dot.
+pub(crate) fn encode_path_segment(value: &str) -> Option<String> {
+    if value.is_empty() || value.contains('.') {
+        return None;
     }
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'~') {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    Some(out)
 }
 
 fn move_latest_block_url(chain_name: &str, base: &str) -> String {
@@ -168,11 +210,22 @@ fn move_latest_block_url(chain_name: &str, base: &str) -> String {
     }
 }
 
-fn move_block_by_version_url(base: &str, version: &str) -> String {
-    format!(
-        "{}/blocks/by_version/{version}?with_transactions=false",
-        base.trim_end_matches('/')
-    )
+/// `None` when `version` cannot be made into one opaque path segment.
+///
+/// `version` is PROVIDER-controlled: it is read verbatim out of
+/// `transaction["version"]` in the Move node's own response, so the API
+/// boundary's `srcTxHash` shape gate never sees it and the encoding is the only
+/// guard - the same provenance and the same threat model as the `/traces/`
+/// splice in `validation_readiness.rs`. A provider returning
+/// `"version": "../../admin"` would otherwise produce a path that WHATWG
+/// dot-segment removal collapses onto a different endpoint of that provider,
+/// with its configured headers attached.
+fn move_block_by_version_url(base: &str, version: &str) -> Option<String> {
+    Some(format!(
+        "{}/blocks/by_version/{}?with_transactions=false",
+        base.trim_end_matches('/'),
+        encode_path_segment(version)?
+    ))
 }
 
 fn unwrap_initia_tx(mut response: Value) -> Value {
@@ -197,7 +250,11 @@ where
     T: JsonRpcTransport,
 {
     let response = transport
-        .get_json(move_tx_url(chain_name, &base, tx_hash), headers)
+        .get_json(
+            move_tx_url(chain_name, &base, tx_hash)
+                .ok_or_else(|| format!("Unusable transaction hash for {chain_name}"))?,
+            headers,
+        )
         .await?;
     Ok(if chain_name == "initia" {
         unwrap_initia_tx(response)
@@ -257,8 +314,18 @@ where
                     .or_else(|| value.as_u64().map(|value| value.to_string()))
             })
             .unwrap_or_default();
+        // Fail closed when the provider's `version` is not usable as a path
+        // segment: no URL is built, so the observation is simply absent and the
+        // caller's quorum logic treats it like any other provider that could not
+        // answer.
+        let Some(url) = move_block_by_version_url(&base, &version) else {
+            return BlockConfirmationObservation {
+                validity: BlockConfirmationValidity::Missing,
+                current_confirmations: None,
+            };
+        };
         transport
-            .get_json(move_block_by_version_url(&base, &version), headers.clone())
+            .get_json(url, headers.clone())
             .await
             .ok()
             .and_then(|block| {
@@ -647,6 +714,51 @@ mod tests {
             "https://aptos.example/blocks/by_version/7?with_transactions=false"
         );
         assert_eq!(calls[2].0, "https://aptos.example");
+    }
+
+    /// `version` is read verbatim out of the provider's own transaction
+    /// response, so the API boundary's `srcTxHash` shape gate never sees it and
+    /// this sink is the only guard. A provider answering `"../../admin"` must not
+    /// get a URL built at all: WHATWG dot-segment removal would collapse
+    /// `{base}/blocks/by_version/../../admin` onto a different endpoint of that
+    /// same provider, carrying its configured headers.
+    #[tokio::test]
+    async fn refuses_a_provider_version_that_would_retarget_the_block_request() {
+        for hostile in ["../../admin", "..", ".", "a.b", ""] {
+            let (transport, calls) = transport(vec![
+                Ok(json!({ "version": hostile })),
+                // Present but must never be consumed: no second request may go out.
+                Ok(json!({"block_height": "42"})),
+                Ok(json!({"block_height": "50"})),
+            ]);
+            let observation = observe_move_block_confirmations(
+                transport,
+                "aptos",
+                "https://aptos.example".to_string(),
+                HashMap::new(),
+                "0xtx",
+                8,
+            )
+            .await;
+
+            assert!(
+                matches!(observation.validity, BlockConfirmationValidity::Missing),
+                "{hostile:?} must fail closed, got {:?}",
+                observation.validity
+            );
+            assert_eq!(observation.current_confirmations, None);
+            let calls = calls.lock().unwrap();
+            assert_eq!(
+                calls.len(),
+                1,
+                "{hostile:?} must not produce a block-by-version request; calls: {:?}",
+                calls.iter().map(|call| call.0.clone()).collect::<Vec<_>>()
+            );
+            assert_eq!(
+                calls[0].0,
+                "https://aptos.example/transactions/by_hash/0xtx"
+            );
+        }
     }
 
     #[tokio::test]

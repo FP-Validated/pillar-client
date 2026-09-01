@@ -107,3 +107,6 @@ tracing = "0.1"
 ton_core = "0.1.3"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 url = "2.5"
+# Already compiled in the graph via aws-config and the elliptic-curve stack, so
+# depending on it directly adds no new supply-chain surface.
+zeroize = "1.9"

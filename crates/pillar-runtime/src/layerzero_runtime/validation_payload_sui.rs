@@ -520,10 +520,8 @@ where
         .get("parameters")?
         .as_array()?
         .get(parameter_index)?;
-    if parameter.get("Reference").is_some() {
-        return Some(false);
-    }
-    Some(true)
+    // A `Reference` parameter is an immutable borrow; anything else is mutable.
+    Some(parameter.get("Reference").is_none())
 }
 
 /// `multiGetObjects` with `showOwner: true` -> the shared object's
