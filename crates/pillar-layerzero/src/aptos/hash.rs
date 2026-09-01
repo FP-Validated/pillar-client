@@ -8,9 +8,21 @@ pub fn aptos_hash_propose(
     block_confirmation: u64,
     expiration: u64,
 ) -> Result<String, AppCoreError> {
+    // `lookup_hash` is the only variable-length member and it is not last, so an
+    // unpinned width makes the preimage ambiguous: a longer hash shifts
+    // `block_confirmation` and `expiration`, and two different triples can then
+    // keccak to the same signed value. Every other member is fixed-width, so
+    // pinning this one to a 32-byte digest makes the encoding injective.
+    let lookup_hash_bytes = decode_hex_bytes(lookup_hash)?;
+    if lookup_hash_bytes.len() != 32 {
+        return Err(AppCoreError::Internal(format!(
+            "lookupHash must be 32 bytes, got {}",
+            lookup_hash_bytes.len()
+        )));
+    }
     let mut out = Vec::new();
     out.extend_from_slice(&aptos_function_signature_hash("propose"));
-    out.extend_from_slice(&decode_hex_bytes(lookup_hash)?);
+    out.extend_from_slice(&lookup_hash_bytes);
     out.extend_from_slice(&block_confirmation.to_be_bytes());
     out.extend_from_slice(&expiration.to_be_bytes());
     Ok(keccak256_hex_unprefixed(&out))

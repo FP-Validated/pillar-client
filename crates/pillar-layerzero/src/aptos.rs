@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::abi::{bytes32_hex_string, u64_from_i64};
 use crate::evm::evm_receive_version_from_dst_eid;
 use crate::packet::EvmUlnProof;
-use crate::packet::{extra_string, extra_u64, proof_from_event, uln_send_version_string};
+use crate::packet::{extra_u64, proof_from_event, uln_send_version_string};
 use crate::types::{
     UlnReadV1PayloadBuilder, UlnV2HashInfo, UlnV2PayloadBuilder, UlnV3PayloadBuilder,
     ULN_VERSION_V301, ULN_VERSION_V302,
@@ -173,17 +173,37 @@ impl UlnV2PayloadBuilder for AptosUlnPayloadBuilder {
         expiration: i64,
         v_id: String,
     ) -> Result<HashCallDataResult, AppCoreError> {
-        let hash_info = UlnV2HashInfo {
-            lookup_hash: extra_string(sent_event, "lookupHash")?,
-            block_data: extra_string(sent_event, "blockData")?,
-        };
-        self.build_uln_v2_verify_payload_from_hash_info(
-            sent_event,
-            hash_info,
-            block_confirmation,
-            expiration,
-            &v_id,
-        )
+        // `lookupHash` and `blockData` used to be read straight out of
+        // `sent_event.extra`, a `#[serde(flatten)]` map with open keys, and fed
+        // into `aptos_hash_propose` — the same shape as the `extra.packetHeader`
+        // / `extra.payloadHash` defect that was removed from
+        // `compute_lz_packet_v1_proof_from_event`. It was harmless only because
+        // no resolver writes those two keys, so the branch always errored on the
+        // first lookup. Nothing here can derive them from the packet either: the
+        // V1 oracle `propose` hash covers a block lookup, not the packet. So the
+        // capability is refused rather than left trusting an open map, and a
+        // caller-influenced value can no longer reach the signing key.
+        //
+        // `BadRequest`, not `Internal`. Both selectors that land here -
+        // `dstChainName` and `ulnSendVersion` - are caller-supplied, so an
+        // `Internal` made every V2-to-Aptos request a deterministic 5xx that any
+        // client could trigger at will. That is the same defect this audit fixed
+        // in `PillarApp::check_chain_name_availability`: an unsupported
+        // caller-chosen combination is a malformed request, not a server fault,
+        // and misclassifying it lets a client drive the 5xx rate that
+        // availability alerting keys on.
+        //
+        // Note for the reader: `build_uln_v2_verify_payload_from_hash_info` and
+        // `aptos_hash_propose` now have no production caller. The runtime V2
+        // builder types its `payload_builder` as `EvmUlnPayloadBuilder`
+        // (`uln_v2_builder.rs`), so the derived Feather/MPT path goes to
+        // `evm_v2.rs`, never here. They are kept because they encode the upstream
+        // propose layout and are covered by the parity tests; the 32-byte pin on
+        // `lookupHash` guards them if anything ever routes to this builder again.
+        let _ = (sent_event, block_confirmation, expiration, v_id);
+        Err(AppCoreError::BadRequest(
+            "ULN V2 verification is not available on the Aptos family: the propose lookup hash is not derivable from the packet".to_string(),
+        ))
     }
 }
 
