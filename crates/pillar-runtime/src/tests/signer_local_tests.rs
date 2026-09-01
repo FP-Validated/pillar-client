@@ -198,3 +198,43 @@ async fn local_mnemonic_signer_getter_signs_with_runtime_config() {
         ))
     );
 }
+
+/// Every type that transitively owns a plaintext BIP-39 phrase must redact it in
+/// `Debug`, or one `{:?}` on an error path writes the signing key's seed phrase to
+/// the operational log. `AwsMnemonicSecret` holds its own `String`; the runtime
+/// material holds `pillar_config::Mnemonic`, and the signer adapter and factory
+/// hold `pillar_signer::LocalMnemonic` - so this covers the containing types too.
+#[test]
+fn debug_never_prints_a_mnemonic_phrase_anywhere_in_the_signer_wiring() {
+    const PHRASE: &str = "test test test test test test test test test test test junk";
+
+    let secret: AwsMnemonicSecret = serde_json::from_value(json!({
+        "LAYERZERO_WALLET_MNEMONIC": PHRASE,
+        "LAYERZERO_WALLET_PATH": "m/44'/60'/0'/0/0",
+    }))
+    .unwrap();
+    let rendered = format!("{secret:?}");
+    assert!(
+        !rendered.contains("junk") && !rendered.contains(PHRASE),
+        "AwsMnemonicSecret Debug leaked the phrase: {rendered}"
+    );
+    assert!(
+        rendered.contains("<redacted>") && rendered.contains("m/44'/60'/0'/0/0"),
+        "Debug must still identify the derivation path: {rendered}"
+    );
+
+    let material = RuntimeSignerMaterial::LocalMnemonic {
+        wallet_to_mnemonic_map: HashMap::from([(
+            "wallet-a-EVM".to_string(),
+            pillar_config::Mnemonic {
+                mnemonic: PHRASE.to_string(),
+                path: "m/44'/60'/0'/0/0".to_string(),
+            },
+        )]),
+    };
+    let rendered = format!("{material:?}");
+    assert!(
+        !rendered.contains("junk") && !rendered.contains(PHRASE),
+        "RuntimeSignerMaterial Debug leaked the phrase: {rendered}"
+    );
+}

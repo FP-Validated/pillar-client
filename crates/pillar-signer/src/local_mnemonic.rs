@@ -7,6 +7,7 @@ use k256::ecdsa::SigningKey as EcdsaSigningKey;
 use pbkdf2::pbkdf2_hmac;
 use sha2::Sha512;
 use std::{collections::HashMap, str::FromStr, sync::Arc};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::factory::RawSignerAdapterFactory;
 use crate::types::{
@@ -44,22 +45,28 @@ impl LocalMnemonicRawSignerAdapter {
             .to_vec())
     }
 
-    fn seed(&self, seed_kind: SeedKind) -> Result<Vec<u8>, SignerError> {
+    /// Returns `Zeroizing` so the BIP-39 or TON seed is wiped when the caller's
+    /// binding drops. These buffers used to be plain `Vec<u8>`/`[u8; N]` derived
+    /// once per signature and dropped unwiped, leaving the signing seed in freed
+    /// memory and in any core dump.
+    fn seed(&self, seed_kind: SeedKind) -> Result<Zeroizing<Vec<u8>>, SignerError> {
         let mnemonic = Mnemonic::parse_in_normalized(Language::English, &self.mnemonic.mnemonic)
             .map_err(|error| SignerError::Message(error.to_string()))?;
         match seed_kind {
-            SeedKind::Bip39 => Ok(mnemonic.to_seed("").to_vec()),
-            SeedKind::Ton => Ok(ton_hd_seed(&self.mnemonic.mnemonic, "")?.to_vec()),
+            SeedKind::Bip39 => Ok(Zeroizing::new(mnemonic.to_seed("").to_vec())),
+            SeedKind::Ton => Ok(Zeroizing::new(
+                ton_hd_seed(&self.mnemonic.mnemonic, "")?.to_vec(),
+            )),
         }
     }
 
-    fn ed25519_seed(&self, seed_kind: SeedKind) -> Result<[u8; 32], SignerError> {
+    fn ed25519_seed(&self, seed_kind: SeedKind) -> Result<Zeroizing<[u8; 32]>, SignerError> {
         derive_ed25519_seed(&self.seed(seed_kind)?, &self.mnemonic.path)
     }
 
     fn ed25519_signing_key(&self, seed_kind: SeedKind) -> Result<Ed25519SigningKey, SignerError> {
         Ok(Ed25519SigningKey::from_bytes(
-            &self.ed25519_seed(seed_kind)?,
+            &*self.ed25519_seed(seed_kind)?,
         ))
     }
 
@@ -75,7 +82,7 @@ impl LocalMnemonicRawSignerAdapter {
         &self,
         seed_kind: SeedKind,
     ) -> Result<EcdsaSigningKey, SignerError> {
-        EcdsaSigningKey::from_slice(&self.ed25519_seed(seed_kind)?)
+        EcdsaSigningKey::from_slice(self.ed25519_seed(seed_kind)?.as_slice())
             .map_err(|error| SignerError::Message(error.to_string()))
     }
 }
@@ -192,7 +199,7 @@ impl RawSignerAdapterFactory for LocalMnemonicRawSignerAdapterFactory {
     }
 }
 
-fn derive_ed25519_seed(seed: &[u8], path: &str) -> Result<[u8; 32], SignerError> {
+fn derive_ed25519_seed(seed: &[u8], path: &str) -> Result<Zeroizing<[u8; 32]>, SignerError> {
     let mut mac = HmacSha512::new_from_slice(b"ed25519 seed")
         .map_err(|error| SignerError::Message(error.to_string()))?;
     Mac::update(&mut mac, seed);
@@ -214,17 +221,23 @@ fn derive_ed25519_seed(seed: &[u8], path: &str) -> Result<[u8; 32], SignerError>
         chain_code = slice_to_32(&child[32..])?;
     }
 
-    Ok(key)
+    // The chain code is key-derivation material and does not leave this
+    // function, so wipe it rather than letting the stack copy persist.
+    chain_code.zeroize();
+    Ok(Zeroizing::new(key))
 }
 
-pub(crate) fn ton_hd_seed(mnemonic: &str, password: &str) -> Result<[u8; 64], SignerError> {
+pub(crate) fn ton_hd_seed(
+    mnemonic: &str,
+    password: &str,
+) -> Result<Zeroizing<[u8; 64]>, SignerError> {
     let mut mac = HmacSha512::new_from_slice(mnemonic.as_bytes())
         .map_err(|error| SignerError::Message(error.to_string()))?;
     Mac::update(&mut mac, password.as_bytes());
     let entropy = mac.finalize().into_bytes();
     let mut seed = [0u8; 64];
     pbkdf2_hmac::<Sha512>(&entropy, b"TON HD Keys seed", 100_000, &mut seed);
-    Ok(seed)
+    Ok(Zeroizing::new(seed))
 }
 
 fn parse_hardened_ed25519_path(path: &str) -> Result<Vec<u32>, SignerError> {

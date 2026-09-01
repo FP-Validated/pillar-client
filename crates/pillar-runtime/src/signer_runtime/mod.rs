@@ -39,6 +39,8 @@ pub use assembly::{
     production_kms_raw_signer_factory_from_options, runtime_signer_assembly_from_config,
     runtime_signer_assembly_from_config_with_metrics,
 };
+#[cfg(test)]
+pub(crate) use aws_secret::AwsMnemonicSecret;
 pub use aws_secret::{AwsMnemonicSecretClient, AwsSecretsManagerMnemonicClient};
 pub use chain_types::signer_chain_type_from_config;
 pub(crate) use chain_types::{

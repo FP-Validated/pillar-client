@@ -187,7 +187,11 @@ async fn local_mnemonic_ton_seed_public_key_matches_typescript_vector() {
     });
 
     assert_eq!(
-        bytes_to_hex(&ton_hd_seed(&signer.mnemonic.mnemonic, "").unwrap()),
+        bytes_to_hex(
+            ton_hd_seed(&signer.mnemonic.mnemonic, "")
+                .unwrap()
+                .as_slice()
+        ),
         concat!(
             "8c7d8863fc52b287b1399a2a77ecc8e71b21e578e9f33245d368b131db6ff3c",
             "d92b2f2854d573d7339aca5b71a71d578943721670013e01bbe6434ff6a308186"
@@ -232,5 +236,44 @@ async fn local_mnemonic_rejects_ecdsa_private_key_for_ed25519_signature_like_typ
     assert_eq!(
         err.to_string(),
         "Bad keypair generation: only mismatch allowed is Ed25519 pk -> ECDSA key pair"
+    );
+}
+
+/// The phrase used to be printed by a derived `Debug` on `LocalMnemonic` and on
+/// every type that owns it, so one `{:?}` added to an error path would have put
+/// the signing key's seed phrase in the operational log.
+#[test]
+fn debug_never_prints_the_mnemonic_phrase() {
+    const PHRASE: &str = "test test test test test test test test test test test junk";
+    let mnemonic = LocalMnemonic {
+        mnemonic: PHRASE.to_string(),
+        path: "m/44'/60'/0'/0/0".to_string(),
+    };
+
+    let rendered = format!("{mnemonic:?}");
+    assert!(
+        !rendered.contains("junk") && !rendered.contains(PHRASE),
+        "LocalMnemonic Debug leaked the phrase: {rendered}"
+    );
+    assert!(
+        rendered.contains("<redacted>") && rendered.contains("m/44'/60'/0'/0/0"),
+        "Debug must still identify the derivation path: {rendered}"
+    );
+
+    let adapter = LocalMnemonicRawSignerAdapter::new(mnemonic.clone());
+    let rendered = format!("{adapter:?}");
+    assert!(
+        !rendered.contains("junk"),
+        "adapter Debug leaked the phrase: {rendered}"
+    );
+
+    let factory = LocalMnemonicRawSignerAdapterFactory::new(HashMap::from([(
+        "wallet-a-EVM".to_string(),
+        mnemonic,
+    )]));
+    let rendered = format!("{factory:?}");
+    assert!(
+        !rendered.contains("junk"),
+        "factory Debug leaked the phrase: {rendered}"
     );
 }

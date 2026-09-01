@@ -45,8 +45,15 @@ fn recover_ecdsa_recovery_id(
     for recovery_id in 0..=3 {
         let recovery_id = EcdsaRecoveryId::try_from(recovery_id)
             .map_err(|error| SignerError::Message(error.to_string()))?;
-        let recovered = EcdsaVerifyingKey::recover_from_prehash(digest, signature, recovery_id)
-            .map_err(|error| SignerError::Message(error.to_string()))?;
+        // Ids 2 and 3 require r + n < p and are unrecoverable for essentially
+        // every signature. Propagating that failure ended the search on the
+        // first such candidate and reported a k256 signature-error string,
+        // making the "Could not find recoveryId" arm below unreachable and
+        // hiding the real cause: a KMS public key that matches no candidate.
+        let Ok(recovered) = EcdsaVerifyingKey::recover_from_prehash(digest, signature, recovery_id)
+        else {
+            continue;
+        };
         let recovered = recovered.to_encoded_point(false);
         if &recovered.as_bytes()[1..] == expected_public_key {
             return Ok(recovery_id.to_byte());

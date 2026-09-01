@@ -49,10 +49,23 @@ pub trait RawSignerAdapter: Send + Sync + 'static {
     async fn get_public_key(&self, request: PublicKeyRequest) -> Result<Vec<u8>, SignerError>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// `Debug` by hand: the derived one printed the plaintext BIP-39 phrase, so any
+/// `{:?}` reachable from this type - or from the adapters and factories that own
+/// it - would have written the signing key's seed phrase to the log.
+#[derive(Clone, PartialEq, Eq)]
 pub struct LocalMnemonic {
     pub mnemonic: String,
     pub path: String,
+}
+
+impl std::fmt::Debug for LocalMnemonic {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LocalMnemonic")
+            .field("mnemonic", &"<redacted>")
+            .field("path", &self.path)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

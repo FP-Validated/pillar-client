@@ -144,7 +144,24 @@ pub(crate) fn infer_chain_type_by_chain_name_from_wallet_definitions(
             chain_types.sort();
             chain_types.dedup();
             match chain_types.as_slice() {
-                [chain_type] => Ok((chain_name.clone(), chain_type.clone())),
+                // The wallet declares the chain type; the chain's actual family
+                // is what decides the curve, the seed derivation, the message
+                // prefix and the address. A wallet that declares only EVM and
+                // does not restrict `supportedChainNames` used to hand EVM
+                // semantics to every configured chain, so a Solana or TON
+                // destination got EIP-191 prefixing, a secp256k1 key over the
+                // BIP-39 seed and a +27 recovery id. Refuse the disagreement at
+                // assembly instead of signing with the wrong shape.
+                [chain_type] => {
+                    let expected = pillar_config::static_chain_type_name(chain_name)
+                        .map_err(|error| error.to_string())?;
+                    if chain_type != expected {
+                        return Err(format!(
+                            "Signer chain type for {chain_name} inferred as {chain_type} from the wallet definitions, but the static chain table says {expected}"
+                        ));
+                    }
+                    Ok((chain_name.clone(), chain_type.clone()))
+                }
                 [] => Err(format!(
                     "Cannot infer signer chain type for {chain_name}: no wallet definitions match"
                 )),
