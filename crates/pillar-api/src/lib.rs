@@ -406,6 +406,19 @@ fn parse_json_payload(payload: Result<Json<Value>, JsonRejection>) -> Result<Val
     }
 }
 
+/// Transaction ids across the supported families are hex (EVM, Move, TON),
+/// base58 (Solana) or base64url (TON trace ids). None of them contains a path
+/// separator, a dot, a query mark or a fragment mark, which is what makes this a
+/// usable gate on a value that ends up in an outbound URL path segment.
+fn is_transaction_id_shaped(value: &str) -> bool {
+    let body = value.strip_prefix("0x").unwrap_or(value);
+    !body.is_empty()
+        && body.len() <= 128
+        && body
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+}
+
 /// Presence and type checks for the protocol fields, at the same boundary
 /// upstream puts them: `apps/gasolina/src/bootstrap.ts:130-157` parses the body
 /// with a Zod schema (numeric EIDs, string addresses, a native `UlnVersion`
@@ -427,8 +440,23 @@ fn validate_v2_request_shape(value: &Value) -> Result<(), AppError> {
     }
     for field in ["srcTxHash", "messageHash"] {
         if let Some(present) = value.get(field).filter(|value| !value.is_null()) {
-            if !present.is_string() {
-                invalid_fields.push(format!("{field}: expected a string"));
+            match present.as_str() {
+                None => invalid_fields.push(format!("{field}: expected a string")),
+                // `srcTxHash` is spliced into the path of an outbound GET against
+                // the operator's own node (the Move transaction fetch and the TON
+                // trace fetch), so `..`, `?` and `#` used to re-target that request
+                // to another path, query or fragment on the same host, carrying the
+                // provider's configured API-key header. Being a string was the only
+                // check it had. The character set below is the union of what every
+                // supported chain's transaction id can be - hex with an optional
+                // `0x`, plus base58/base64url for the non-EVM families - and it
+                // excludes every path metacharacter.
+                Some(hash) if field == "srcTxHash" && !is_transaction_id_shaped(hash) => {
+                    invalid_fields.push(format!(
+                        "{field}: expected 1-128 characters of [0-9a-zA-Z_-] with an optional 0x prefix"
+                    ));
+                }
+                Some(_) => {}
             }
         }
     }
@@ -544,6 +572,19 @@ async fn sign_v1(
             return Err(AppError::BadRequest(format!(
                 "Missing required parameter {key}"
             )));
+        }
+    }
+    // The same gate the v2 route applies. `PillarApp::sign_request_v1` copies
+    // `srcTxHash` verbatim into a `PillarApiRequestV2` and delegates to
+    // `sign_request_v2`, so this route reaches the identical resolver, readiness
+    // and trace sinks - the ones that splice the value into an outbound URL path.
+    // Gating v2 alone left the control absent on one of the two routes carrying it.
+    if let Some(hash) = raw.get("srcTxHash").and_then(Value::as_str) {
+        if !is_transaction_id_shaped(hash) {
+            return Err(AppError::BadRequest(
+                "srcTxHash: expected 1-128 characters of [0-9a-zA-Z_-] with an optional 0x prefix"
+                    .to_string(),
+            ));
         }
     }
     let input: PillarApiRequestV1 =
@@ -763,7 +804,8 @@ impl CoreApiApp {
         }
     }
 
-    /// Sets the bearer tokens accepted on authenticated routes.
+    /// An empty list leaves the authenticated routes closed rather than open:
+    /// `authorized` refuses every request when no token is configured.
     pub fn with_auth_tokens(mut self, auth_tokens: Vec<String>) -> Self {
         self.auth_tokens = auth_tokens;
         self
@@ -826,7 +868,8 @@ impl StaticApp {
         }
     }
 
-    /// Sets the bearer tokens accepted on authenticated routes.
+    /// An empty list leaves the authenticated routes closed rather than open:
+    /// `authorized` refuses every request when no token is configured.
     pub fn with_auth_tokens(mut self, auth_tokens: Vec<String>) -> Self {
         self.auth_tokens = auth_tokens;
         self
@@ -1432,6 +1475,110 @@ mod tests {
             );
             previous_position = position;
         }
+    }
+
+    /// `srcTxHash` is spliced into the path of an outbound GET against the
+    /// operator's own node, so a path metacharacter has to be refused at the
+    /// boundary rather than reaching a transport.
+    #[test]
+    fn transaction_id_shape_refuses_path_metacharacters() {
+        for accepted in [
+            "0xdeadbeef",
+            "deadbeef",
+            "5Kd3NBUAdUnhyzenEwVLy9pBKxSwXvE9FMPyR4UKZvpe",
+            "abc-DEF_123",
+            &"a".repeat(128),
+        ] {
+            assert!(
+                is_transaction_id_shaped(accepted),
+                "{accepted} must be accepted"
+            );
+        }
+        for refused in [
+            "",
+            "0x",
+            "../../admin",
+            "abc/def",
+            "abc?query=1",
+            "abc#frag",
+            "abc def",
+            "abc%2fdef",
+            "abc.def",
+            "abc:def",
+            "abc@def",
+            &"a".repeat(129),
+        ] {
+            assert!(
+                !is_transaction_id_shaped(refused),
+                "{refused:?} must be refused"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn sign_v2_refuses_a_src_tx_hash_that_could_retarget_a_provider_request() {
+        let response = router(TestApp::new(), "test-version")
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/v2/resolve-and-sign")
+                    .header("authorization", format!("Bearer {TEST_AUTH_TOKEN}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "srcTxHash": "../../../admin/keys",
+                            "lzMessageId": {},
+                            "signingContext": {},
+                            "messageHash": "0xabc"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            body.contains("srcTxHash"),
+            "the rejection must name the field, got {body}"
+        );
+    }
+
+    /// `sign_request_v1` copies `srcTxHash` into a `PillarApiRequestV2` and
+    /// delegates, so the v1 route reaches the same URL-splicing sinks as v2.
+    /// Gating v2 alone left the control absent on one of the two routes.
+    #[tokio::test]
+    async fn sign_v1_refuses_a_src_tx_hash_that_could_retarget_a_provider_request() {
+        let response = router(TestApp::new(), "test-version")
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/")
+                    .header("authorization", format!("Bearer {TEST_AUTH_TOKEN}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "srcTxHash": "../../../admin/keys",
+                            "expiration": 1,
+                            "blockConfirmation": 1,
+                            "lzMessageId": {},
+                            "ulnVersion": "V2"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            body.contains("srcTxHash"),
+            "the rejection must name the field, got {body}"
+        );
     }
 
     async fn malformed_json_snapshot() -> Value {

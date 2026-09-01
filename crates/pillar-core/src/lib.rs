@@ -455,16 +455,23 @@ impl PillarApp {
             .uln_send_version
             .as_str()
             .unwrap_or("unknown");
+        // Validate before logging. These are arbitrary JSON strings until the
+        // roster check runs, and the fmt subscriber writes Display values
+        // verbatim, so a chain name carrying newlines could forge whole log
+        // records - including ones that impersonate a completed signing - in the
+        // record an incident responder reads. `message_hash` is never
+        // shape-checked at all, so it stays on the Debug sigil, which escapes
+        // control characters.
+        self.check_chain_name_availability("src", src_chain_name)?;
+        self.check_chain_name_availability("dst", dst_chain_name)?;
         tracing::info!(
             src_chain = %src_chain_name,
             dst_chain = %dst_chain_name,
             nonce,
             uln_send_version,
-            message_hash = %request.message_hash,
+            message_hash = ?request.message_hash,
             "sign workflow started"
         );
-        self.check_chain_name_availability(src_chain_name)?;
-        self.check_chain_name_availability(dst_chain_name)?;
 
         if request.lz_message_id.uln_send_version == "ReadV1002"
             && !matches!(request.signing_context, SigningContext::Read { .. })
@@ -746,10 +753,19 @@ impl PillarApp {
         Ok(response)
     }
 
-    fn check_chain_name_availability(&self, chain_name: &str) -> Result<(), AppCoreError> {
+    /// `BadRequest`, not `Internal`. A chain name the caller invented is a
+    /// malformed request, and classifying it as a server fault let any client
+    /// drive this service's 5xx rate - the signal availability alerting and SLO
+    /// burn-rate alarms key on - at will. The `role` argument fixes a second
+    /// defect in the same message: both call sites said "dst chain".
+    fn check_chain_name_availability(
+        &self,
+        role: &str,
+        chain_name: &str,
+    ) -> Result<(), AppCoreError> {
         if !self.available_chain_names.contains(chain_name) {
-            return Err(AppCoreError::Internal(format!(
-                "Unsupported dst chain {chain_name}. Available chains : {} ",
+            return Err(AppCoreError::BadRequest(format!(
+                "Unsupported {role} chain {chain_name}. Available chains : {} ",
                 self.available_chain_names.names().join(", ")
             )));
         }
@@ -1593,6 +1609,29 @@ mod tests {
                 r#"srcTxHash 0xtx not found on pathway {"srcEid":30111,"dstEid":30184,"sender":"0x1111111111111111111111111111111111111111","receiver":"0x2222222222222222222222222222222222222222","srcChainName":"ethereum","dstChainName":"bsc"}"#
                     .to_string()
             )
+        );
+    }
+
+    /// A chain name the caller invented is a malformed request, not a server
+    /// fault. Classifying it as `Internal` meant any client could drive the 5xx
+    /// rate that availability alerting keys on, and the message said "dst" for
+    /// both call sites.
+    #[tokio::test]
+    async fn unsupported_chain_names_are_caller_errors_and_name_their_own_role() {
+        let mut request = request_v2("V302");
+        request.lz_message_id.pathway_id.dst_chain_name = "not-a-chain".to_string();
+        let err = app().sign_request_v2(request).await.unwrap_err();
+        assert!(
+            matches!(&err, AppCoreError::BadRequest(message) if message.starts_with("Unsupported dst chain not-a-chain.")),
+            "expected a dst-labelled BadRequest, got {err:?}"
+        );
+
+        let mut request = request_v2("V302");
+        request.lz_message_id.pathway_id.src_chain_name = "not-a-chain".to_string();
+        let err = app().sign_request_v2(request).await.unwrap_err();
+        assert!(
+            matches!(&err, AppCoreError::BadRequest(message) if message.starts_with("Unsupported src chain not-a-chain.")),
+            "expected a src-labelled BadRequest, got {err:?}"
         );
     }
 
