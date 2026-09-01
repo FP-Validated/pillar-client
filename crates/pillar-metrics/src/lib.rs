@@ -37,10 +37,6 @@ impl PillarMetricsStageObserver {
     pub fn new(metrics: Arc<Mutex<PillarMetrics>>) -> Self {
         Self { metrics }
     }
-
-    pub fn metrics(&self) -> Arc<Mutex<PillarMetrics>> {
-        self.metrics.clone()
-    }
 }
 
 #[async_trait]
@@ -126,10 +122,9 @@ impl PillarMetrics {
         status_code: u16,
         duration_seconds: f64,
     ) {
-        let normalized_method = match method.to_ascii_uppercase().as_str() {
-            "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS" => {
-                method.to_ascii_uppercase()
-            }
+        let upper_method = method.to_ascii_uppercase();
+        let normalized_method = match upper_method.as_str() {
+            "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS" => upper_method,
             _ => "other".to_string(),
         };
         let labels = IndexMap::from([

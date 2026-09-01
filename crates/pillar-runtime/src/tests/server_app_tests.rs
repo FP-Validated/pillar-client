@@ -86,6 +86,55 @@ async fn runtime_server_app_provider_health_uses_cache() {
     assert_eq!(calls.lock().unwrap().len(), 1);
 }
 
+/// `/provider-health/report` used to probe every provider of every chain on
+/// every request while `/provider-health` was served from a cache, so an
+/// authenticated caller could aim a fan-out amplifier at the operator's own
+/// fleet and trip the rate limits the signing path shares.
+#[tokio::test]
+async fn runtime_server_app_provider_health_report_uses_cache() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let transport = RecordingTransport {
+        calls: calls.clone(),
+        responses: Arc::new(Mutex::new(vec![Ok(json!({"result": "0x38"}))])),
+    };
+    let app = RuntimeServerApp::from_env_map(
+        HashMap::from([
+            (SERVER_PORT.to_string(), "3000".to_string()),
+            (
+                pillar_config::PILLAR_API_AUTH_TOKENS.to_string(),
+                "test-token-0123456789abcdef0123456789".to_string(),
+            ),
+            (LZ_PROVIDER_CONFIG_TYPE.to_string(), "LOCAL".to_string()),
+            (LZ_ENV.to_string(), "mainnet".to_string()),
+            (
+                pillar_config::LZ_SUPPORTED_ULN_VERSIONS.to_string(),
+                r#"["V2","V301"]"#.to_string(),
+            ),
+            (
+                pillar_config::LZ_AVAILABLE_CHAIN_NAMES.to_string(),
+                "bsc".to_string(),
+            ),
+            (
+                LZ_PROVIDER_CONFIG.to_string(),
+                r#"{"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#.to_string(),
+            ),
+        ]),
+        transport,
+        || 777,
+    )
+    .await
+    .unwrap();
+
+    let first = app.get_provider_health_report().await.unwrap();
+    let second = app.get_provider_health_report().await.unwrap();
+    assert_eq!(first, second, "the cached report must be served verbatim");
+    assert_eq!(
+        calls.lock().unwrap().len(),
+        1,
+        "a second report request must not re-probe the providers"
+    );
+}
+
 #[tokio::test]
 async fn runtime_sign_request_v2_delegates_to_core_app_when_wired() {
     let response = runtime_app_with_core()

@@ -18,7 +18,7 @@ where
                 .await;
         }
         Err(AppError::Internal(
-            "signRequestV1 is not wired in the Rust runtime yet".to_string(),
+            "signRequestV1 is unavailable: this app was built without a signing core".to_string(),
         ))
     }
 
@@ -35,7 +35,7 @@ where
                 .await;
         }
         Err(AppError::Internal(
-            "signRequestV2 is not wired in the Rust runtime yet".to_string(),
+            "signRequestV2 is unavailable: this app was built without a signing core".to_string(),
         ))
     }
 
@@ -51,7 +51,7 @@ where
             .any(|available| available == &chain_name)
         {
             Err(AppError::Internal(
-                "signer-info is not wired in the Rust runtime yet".to_string(),
+                "signer-info is unavailable: this app was built without a signing core".to_string(),
             ))
         } else {
             Err(AppError::BadRequest(format!(
@@ -79,12 +79,37 @@ where
     }
 
     async fn get_provider_health_report(&self) -> Result<Value, AppError> {
-        serde_json::to_value(
+        let now = self.provider_health_source.now_unix_ms();
+        let generation = self.provider_health_source.configuration_generation();
+        if let Some(cached) = self
+            .provider_health_report_cache
+            .fresh(now(), generation)
+            .await
+        {
+            return Ok(cached);
+        }
+        // One probe round at a time. Whoever holds the lock does the fan-out;
+        // everyone else re-checks the cache once it is released, so N concurrent
+        // authenticated callers cost one round rather than N.
+        let _single_flight = self.provider_health_report_cache.single_flight().await;
+        let generation = self.provider_health_source.configuration_generation();
+        if let Some(cached) = self
+            .provider_health_report_cache
+            .fresh(now(), generation)
+            .await
+        {
+            return Ok(cached);
+        }
+        let report = serde_json::to_value(
             self.provider_health_source
                 .get_provider_health_report()
                 .await,
         )
-        .map_err(|error| AppError::Internal(error.to_string()))
+        .map_err(|error| AppError::Internal(error.to_string()))?;
+        self.provider_health_report_cache
+            .store(report.clone(), now(), generation)
+            .await;
+        Ok(report)
     }
     fn auth_tokens(&self) -> Vec<String> {
         self.runtime_config.api_auth_tokens.clone()

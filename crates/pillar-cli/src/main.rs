@@ -1,6 +1,6 @@
 use axum::{body::Body, Router};
 use hyper::{server::conn::http1, service::service_fn, Request};
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioIo, TokioTimer};
 use pillar_api::{router_with_shutdown, ShutdownSignal};
 use pillar_config::load_from_env;
 use pillar_runtime::RuntimeServerApp;
@@ -25,6 +25,13 @@ use tracing_subscriber::{fmt, EnvFilter};
 
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(58);
 const KEEP_ALIVE_TIMEOUT: Duration = Duration::from_secs(60);
+/// Deadline for the request line and headers, which the socket timeout cannot
+/// cover because it only wraps the service call.
+const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(10);
+/// Absolute ceiling on one connection. It has to exceed `SOCKET_TIMEOUT` so a
+/// legitimate slow request is not cut off mid-flight, while still bounding a
+/// client that keeps renewing the sliding idle window.
+const MAX_CONNECTION_LIFETIME: Duration = Duration::from_secs(300);
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     init_tracing();
@@ -105,15 +112,35 @@ async fn serve_until(
                 continue;
             }
         };
-        let Ok(permit) = semaphore.clone().acquire_owned().await else {
+        // The acquire has to be inside the select too. Parked on a saturated
+        // semaphore, the loop could not reach `break signalled?`, so a SIGTERM
+        // went unobserved until a permit freed - up to the keep-alive timeout -
+        // and `shutdown_signal.trigger()`, which is what takes this pod out of
+        // the load-balancer pool, ran only after that. A client holding every
+        // permit therefore chose when the drain started.
+        let permit = tokio::select! {
+            permit = semaphore.clone().acquire_owned() => permit,
+            signalled = &mut shutdown => {
+                drop(stream);
+                break signalled?;
+            }
+        };
+        let Ok(permit) = permit else {
             tracing::error!("connection semaphore closed; stopping accept loop");
             return Ok(());
         };
         let app = app.clone();
         tokio::spawn(async move {
             let _permit = permit;
-            if let Err(error) =
-                serve_connection(stream, app, SOCKET_TIMEOUT, KEEP_ALIVE_TIMEOUT).await
+            if let Err(error) = serve_connection(
+                stream,
+                app,
+                SOCKET_TIMEOUT,
+                KEEP_ALIVE_TIMEOUT,
+                HEADER_READ_TIMEOUT,
+                MAX_CONNECTION_LIFETIME,
+            )
+            .await
             {
                 tracing::debug!(%error, "HTTP connection closed");
             }
@@ -148,6 +175,8 @@ async fn serve_connection<I>(
     app: Router,
     request_timeout: Duration,
     keep_alive_timeout: Duration,
+    header_read_timeout: Duration,
+    max_connection_lifetime: Duration,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
 where
     I: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -176,9 +205,23 @@ where
     // connection would then multiplex 200 concurrent streams behind one permit.
     // `auto::Builder::http1_only` cannot express this: hyper-util documents it
     // as a no-op under `serve_connection_with_upgrades`.
+    // `header_read_timeout` bounds the phase the request timeout cannot see.
+    // That timeout wraps `app.oneshot`, which hyper only calls once it has a
+    // complete `Request`, so header parsing sat outside every deadline: a client
+    // trickling one byte per idle window held a permit forever and never entered
+    // the timed region. The sliding idle window alone could not stop it, because
+    // any successful read pushed the deadline out again.
+    // `header_read_timeout` panics at runtime unless the builder also has a
+    // timer, so the two are set together.
     http1::Builder::new()
+        .timer(TokioTimer::new())
+        .header_read_timeout(header_read_timeout)
         .serve_connection(
-            TokioIo::new(IdleTimeoutIo::new(io, keep_alive_timeout)),
+            TokioIo::new(IdleTimeoutIo::new(
+                io,
+                keep_alive_timeout,
+                max_connection_lifetime,
+            )),
             service,
         )
         .with_upgrades()
@@ -190,14 +233,19 @@ struct IdleTimeoutIo<I> {
     inner: I,
     timeout: Duration,
     deadline: Pin<Box<Sleep>>,
+    /// Absolute ceiling for the whole connection. The sliding idle window is
+    /// refreshed by every successful read, so on its own it bounds silence but
+    /// not lifetime, and a trickling client renews it indefinitely.
+    hard_deadline: Pin<Box<Sleep>>,
 }
 
 impl<I> IdleTimeoutIo<I> {
-    fn new(inner: I, timeout: Duration) -> Self {
+    fn new(inner: I, timeout: Duration, max_lifetime: Duration) -> Self {
         Self {
             inner,
             timeout,
             deadline: Box::pin(tokio::time::sleep(timeout)),
+            hard_deadline: Box::pin(tokio::time::sleep(max_lifetime)),
         }
     }
 
@@ -206,6 +254,12 @@ impl<I> IdleTimeoutIo<I> {
     }
 
     fn poll_deadline(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        if self.hard_deadline.as_mut().poll(cx).is_ready() {
+            return Poll::Ready(Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "HTTP connection exceeded its maximum lifetime",
+            )));
+        }
         match self.deadline.as_mut().poll(cx) {
             Poll::Ready(()) => Poll::Ready(Err(io::Error::new(
                 io::ErrorKind::TimedOut,
@@ -295,13 +349,121 @@ mod tests {
         SocketAddr,
         tokio::task::JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
     ) {
+        open_one_connection_with_deadlines(
+            app,
+            request_timeout,
+            keep_alive_timeout,
+            HEADER_READ_TIMEOUT,
+            MAX_CONNECTION_LIFETIME,
+        )
+        .await
+    }
+
+    async fn open_one_connection_with_deadlines(
+        app: Router,
+        request_timeout: Duration,
+        keep_alive_timeout: Duration,
+        header_read_timeout: Duration,
+        max_connection_lifetime: Duration,
+    ) -> (
+        SocketAddr,
+        tokio::task::JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
+    ) {
         let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
-            serve_connection(stream, app, request_timeout, keep_alive_timeout).await
+            serve_connection(
+                stream,
+                app,
+                request_timeout,
+                keep_alive_timeout,
+                header_read_timeout,
+                max_connection_lifetime,
+            )
+            .await
         });
         (address, server)
+    }
+
+    /// The request timeout wraps the service call, which hyper only makes once
+    /// it has parsed a complete request, so a client that never finishes its
+    /// headers stayed outside every deadline and held its connection - and one
+    /// of the `PILLAR_MAX_CONNECTIONS` permits - for as long as it kept the
+    /// socket readable. The sliding idle window cannot close that, because each
+    /// trickled byte renews it.
+    #[tokio::test]
+    async fn header_phase_deadline_closes_a_trickling_client() {
+        let app = Router::new().route("/", get(|| async { "ok" }));
+        // Only the header deadline is short. The idle window and the lifetime
+        // ceiling are far longer than the assertion window, and the trickle
+        // outlives it, so nothing else can end this connection: without
+        // `header_read_timeout` the server never returns and the wait below
+        // fails.
+        let (address, server) = open_one_connection_with_deadlines(
+            app,
+            Duration::from_secs(30),
+            Duration::from_secs(20),
+            Duration::from_millis(150),
+            Duration::from_secs(20),
+        )
+        .await;
+        let mut client = TcpStream::connect(address).await.unwrap();
+        client.write_all(b"GET / HTTP/1.1\r\n").await.unwrap();
+        let trickle = tokio::spawn(async move {
+            for _ in 0..200 {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                if client.write_all(b"X-Pad: 1\r\n").await.is_err() {
+                    return;
+                }
+            }
+        });
+        let served = tokio::time::timeout(Duration::from_secs(2), server)
+            .await
+            .expect("header deadline must close the connection while the client is still writing")
+            .unwrap();
+        assert!(
+            served.is_err(),
+            "an unfinished header phase must end in an error, got {served:?}"
+        );
+        trickle.abort();
+    }
+
+    /// The idle window is refreshed by every successful read, so it bounds
+    /// silence rather than lifetime. The absolute ceiling is what bounds a
+    /// client that keeps talking without ever completing a request.
+    #[tokio::test]
+    async fn connection_lifetime_ceiling_closes_a_persistently_busy_client() {
+        let app = Router::new().route("/", get(|| async { "ok" }));
+        // Only the ceiling is short here, and it is the one deadline a client
+        // that keeps writing cannot renew.
+        let (address, server) = open_one_connection_with_deadlines(
+            app,
+            Duration::from_secs(30),
+            Duration::from_secs(20),
+            Duration::from_secs(20),
+            Duration::from_millis(300),
+        )
+        .await;
+        let mut client = TcpStream::connect(address).await.unwrap();
+        client.write_all(b"GET / HTTP/1.1\r\n").await.unwrap();
+        let trickle = tokio::spawn(async move {
+            for _ in 0..400 {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+                if client.write_all(b"X-Pad: 1\r\n").await.is_err() {
+                    return;
+                }
+            }
+        });
+        let served = tokio::time::timeout(Duration::from_secs(2), server)
+            .await
+            .expect("lifetime ceiling must close the connection while the client is still writing")
+            .unwrap();
+        assert!(
+            served.is_err(),
+            "a connection past its lifetime ceiling must end in an error, got {served:?}"
+        );
+        trickle.abort();
     }
 
     #[tokio::test]
