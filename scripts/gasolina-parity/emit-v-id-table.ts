@@ -7,10 +7,31 @@ import * as path from 'path'
 
 import { getVId } from '@monorepo/static-config'
 
-// Produced from `pillar_config::layerzero_available_chain_names`, so both sides are
-// asked about exactly the same chains. See scripts/gasolina-parity/README.md.
-const roster: Record<string, string[]> = JSON.parse(
-    fs.readFileSync(path.join(__dirname, 'roster.json'), 'utf8'),
+// The roster is read back from the committed fixture this emitter regenerates, so
+// both sides are asked about exactly the same chains and the script runs from a
+// plain checkout. It previously read a `roster.json` beside itself that was never
+// committed, which made this emitter unrunnable from the published tree.
+//
+// The chain set itself originates in `pillar_config::layerzero_available_chain_names`;
+// to widen it, add the chains to the fixture's `vIdByChainName` and rerun - the
+// Rust side asserts the table exhaustively in both directions, so a chain that
+// upstream cannot resolve fails there rather than silently disappearing here.
+// This script is run after being copied into the upstream pnpm workspace, so the
+// in-tree relative path is only the default: set `PILLAR_V_ID_FIXTURE` to the
+// absolute path when running from anywhere else.
+const FIXTURE =
+    process.env.PILLAR_V_ID_FIXTURE ??
+    path.join(
+        __dirname,
+        '../../crates/pillar-runtime/tests/gasolina_parity/v_id_by_chain_name.json',
+    )
+const fixture: { vIdByChainName: Record<string, Record<string, string>> } =
+    JSON.parse(fs.readFileSync(FIXTURE, 'utf8'))
+const roster: Record<string, string[]> = Object.fromEntries(
+    Object.entries(fixture.vIdByChainName).map(([environment, byChainName]) => [
+        environment,
+        Object.keys(byChainName),
+    ]),
 )
 
 const out: Record<string, Record<string, string>> = {}

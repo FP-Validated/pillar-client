@@ -125,8 +125,6 @@ const tonProvidersFor = (pathway: Pathway): any => {
     return { v2: { open }, v3: { open } }
 }
 
-const OFFLINE_EXCLUDED: Record<string, string> = {}
-
 interface FixtureLog {
     address: string
     topics: string[]

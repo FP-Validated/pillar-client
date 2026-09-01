@@ -222,8 +222,10 @@ pub fn derive_uln_addresses(
 mod tests {
     use super::*;
 
-    // Reference addresses from the @ton/core oracle (local/ton-oracle), which
-    // uses the real compiled LayerZero TON encoders + contractAddress.
+    // Reference addresses produced by the real compiled LayerZero TON encoders
+    // and `contractAddress` from `@ton/core`. The reproducible form of this is
+    // `scripts/gasolina-parity/emit-ton-dvn-verify.ts`, whose committed output
+    // (`tests/gasolina_parity/ton_dvn_verify.json`) drives the parity tests.
     fn code_cells() -> TonContractCodeCells {
         TonContractCodeCells {
             uln: pillar_config::ton_code_cell("Uln").unwrap().to_string(),

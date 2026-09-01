@@ -46,17 +46,24 @@ $RUN parity/emit-historical-smoke.ts > historical_smoke.json
 `emit-ton-dvn-verify.ts` writes a `bigint: Failed to load bindings` line to
 **stderr**; redirect stdout separately or the JSON will not parse.
 
-`emit-v-id-table.ts` additionally reads `roster.json` from its own directory: a
-`{ environment: [chainName, ...] }` object. Produce it from this repository so both
-sides are asked about the same chains:
+`emit-v-id-table.ts` needs no extra input. It reads its chain roster back out of the
+committed `v_id_by_chain_name.json` it regenerates, so both sides are asked about
+the same chains and the script runs from a plain checkout. It used to read a
+`roster.json` beside itself that was never committed, which made it the one emitter
+nobody could run from this tree.
 
-```rust
-pillar_config::layerzero_available_chain_names(environment)
-```
+Because the script runs from the upstream workspace rather than this repository,
+point it at the fixture explicitly:
 
 ```bash
-$RUN parity/emit-v-id-table.ts > v_id_by_chain_name.json
+PILLAR_V_ID_FIXTURE=/path/to/pillar-client/crates/pillar-runtime/tests/gasolina_parity/v_id_by_chain_name.json \
+  $RUN parity/emit-v-id-table.ts > v_id_by_chain_name.json
 ```
+
+The chain set itself originates in `pillar_config::layerzero_available_chain_names`.
+To widen it, add the chains to the fixture and rerun: the Rust side asserts the table
+exhaustively in both directions, so a chain upstream cannot resolve fails there
+rather than vanishing from the comparison.
 
 Copy each emitted JSON to the path in the table above, keeping its `_provenance`
 block, then run:
