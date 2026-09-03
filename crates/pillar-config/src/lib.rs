@@ -39,6 +39,15 @@ pub const GCP_KEY_RING_ID: &str = "GCP_KEY_RING_ID";
 pub const SERVER_PORT: &str = "SERVER_PORT";
 pub const PILLAR_IMAGE_VERSION: &str = "PILLAR_IMAGE_VERSION";
 pub const PILLAR_API_AUTH_TOKENS: &str = "PILLAR_API_AUTH_TOKENS";
+/// Serve the two signing routes without a bearer token.
+///
+/// LayerZero calls a registered DVN endpoint with no credential of ours, so a
+/// deployment that is meant to receive that traffic cannot require one. This is
+/// opt-in and narrow: it drops the requirement from `POST /` and
+/// `POST /v2/resolve-and-sign` only. `/signer-info`, `/provider-health/report`
+/// and `/metrics` keep it, and `PILLAR_API_AUTH_TOKENS` stays required, so an
+/// operator cannot reach this state by forgetting to configure tokens.
+pub const PILLAR_PUBLIC_SIGN_ROUTES: &str = "PILLAR_PUBLIC_SIGN_ROUTES";
 pub const PILLAR_MAX_CONNECTIONS: &str = "PILLAR_MAX_CONNECTIONS";
 pub const PILLAR_SHUTDOWN_GRACE_SECONDS: &str = "PILLAR_SHUTDOWN_GRACE_SECONDS";
 
@@ -76,6 +85,7 @@ pub const ENV_VAR_NAMES: &[(&str, &str)] = &[
     ("GCP_KEY_RING_ID", GCP_KEY_RING_ID),
     ("PILLAR_IMAGE_VERSION", PILLAR_IMAGE_VERSION),
     ("PILLAR_API_AUTH_TOKENS", PILLAR_API_AUTH_TOKENS),
+    ("PILLAR_PUBLIC_SIGN_ROUTES", PILLAR_PUBLIC_SIGN_ROUTES),
     ("PILLAR_MAX_CONNECTIONS", PILLAR_MAX_CONNECTIONS),
     (
         "PILLAR_SHUTDOWN_GRACE_SECONDS",
@@ -114,6 +124,7 @@ pub struct RuntimeConfig {
     pub extra_context_aws_lambda_name: Option<String>,
     pub image_version: Option<String>,
     pub api_auth_tokens: Vec<String>,
+    pub public_sign_routes: bool,
     pub max_connections: usize,
     pub shutdown_grace_seconds: u64,
 }
@@ -415,6 +426,7 @@ where
         extra_context_aws_lambda_name,
         image_version: optional(&map, PILLAR_IMAGE_VERSION),
         api_auth_tokens,
+        public_sign_routes: optional(&map, PILLAR_PUBLIC_SIGN_ROUTES).as_deref() == Some("true"),
         max_connections,
         shutdown_grace_seconds,
     })
@@ -2582,6 +2594,27 @@ mod auth_config_tests {
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
                 "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string()
             ]
+        );
+    }
+
+    #[test]
+    fn public_sign_routes_defaults_off_and_needs_the_exact_string() {
+        // Opening a signer's write path must take a deliberate value. Anything
+        // other than "true" - unset, empty, "1", "TRUE", "yes" - leaves the
+        // bearer requirement in place, so a typo cannot silently expose it.
+        assert!(!load_from_map(base(&[])).unwrap().public_sign_routes);
+        for value in ["", "1", "TRUE", "yes", "false"] {
+            assert!(
+                !load_from_map(base(&[(PILLAR_PUBLIC_SIGN_ROUTES, value)]))
+                    .unwrap()
+                    .public_sign_routes,
+                "{value:?} must not open the sign routes"
+            );
+        }
+        assert!(
+            load_from_map(base(&[(PILLAR_PUBLIC_SIGN_ROUTES, "true")]))
+                .unwrap()
+                .public_sign_routes
         );
     }
 

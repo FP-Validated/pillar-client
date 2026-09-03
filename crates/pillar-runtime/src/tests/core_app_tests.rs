@@ -133,6 +133,7 @@ fn runtime_core_app_parts(metrics: Arc<tokio::sync::Mutex<PillarMetrics>>) -> Ru
             extra_context_aws_lambda_name: None,
             image_version: None,
             api_auth_tokens: vec!["test-token-0123456789abcdef0123456789".to_string()],
+            public_sign_routes: false,
             max_connections: 1024,
             shutdown_grace_seconds: 25,
         },

@@ -85,6 +85,13 @@ pub trait ServerApp: Send + Sync + 'static {
     fn auth_tokens(&self) -> Vec<String> {
         Vec::new()
     }
+    /// Whether the signing routes accept unauthenticated callers.
+    ///
+    /// Defaults to false so an embedder has to say so explicitly; forgetting to
+    /// wire this can only make the surface tighter, never looser.
+    fn public_sign_routes(&self) -> bool {
+        false
+    }
     async fn readiness(&self) -> ReadinessStatus {
         ReadinessStatus::NotReady
     }
@@ -229,7 +236,7 @@ pub fn router_with_shutdown(
         },
     )
 }
-fn authenticated_route(method: &str, path: &str) -> bool {
+fn authenticated_route(method: &str, path: &str, public_sign_routes: bool) -> bool {
     // axum dispatches HEAD to the GET handler when no HEAD route is registered,
     // so HEAD has to inherit the GET route's credential requirement. Matching
     // the raw method string alone let `HEAD /metrics` run the authenticated
@@ -238,6 +245,18 @@ fn authenticated_route(method: &str, path: &str) -> bool {
     // and the handler's side effects still ran — `HEAD /provider-health/report`
     // probed every provider of every chain, bypassing the cache.
     let method = if method == "HEAD" { "GET" } else { method };
+    // The signing routes are the only ones this switch can open. Identity
+    // (`/signer-info`), the probing health report and metrics stay behind the
+    // token in every mode: LayerZero never calls those, so opening them would
+    // widen the surface without buying reachability.
+    if public_sign_routes
+        && matches!(
+            (method, path),
+            ("POST", ROOT_ROUTE) | ("POST", SIGN_V2_ROUTE)
+        )
+    {
+        return false;
+    }
     matches!(
         (method, path),
         ("POST", ROOT_ROUTE)
@@ -306,7 +325,9 @@ async fn request_middleware(
     );
 
     let mut response =
-        if authenticated_route(&method, req.uri().path()) && !authorized(&state, &req) {
+        if authenticated_route(&method, req.uri().path(), state.app.public_sign_routes())
+            && !authorized(&state, &req)
+        {
             AppError::Http {
                 status: StatusCode::UNAUTHORIZED,
                 message: "Unauthorized".to_string(),
@@ -763,6 +784,8 @@ pub struct CoreApiApp {
     /// Bearer tokens accepted on authenticated routes. Empty means "deny every
     /// authenticated route" — credentials are always injected, never defaulted.
     auth_tokens: Vec<String>,
+    /// Drops the bearer requirement from the two signing routes only.
+    public_sign_routes: bool,
 }
 impl CoreApiApp {
     pub fn new(
@@ -801,6 +824,7 @@ impl CoreApiApp {
             provider_health_report,
             metrics,
             auth_tokens: Vec::new(),
+            public_sign_routes: false,
         }
     }
 
@@ -810,11 +834,19 @@ impl CoreApiApp {
         self.auth_tokens = auth_tokens;
         self
     }
+
+    /// Serves `POST /` and `POST /v2/resolve-and-sign` without a bearer.
+    /// Everything else keeps its credential requirement.
+    pub fn with_public_sign_routes(mut self, public_sign_routes: bool) -> Self {
+        self.public_sign_routes = public_sign_routes;
+        self
+    }
 }
 
 #[derive(Clone)]
 pub struct StaticApp {
     chains: Vec<String>,
+    public_sign_routes: bool,
     environment: String,
     signer_info: BTreeMap<String, Vec<SignerInfo>>,
     provider_health: ProviderHealthSnapshot,
@@ -865,6 +897,7 @@ impl StaticApp {
             signer_info,
             provider_health,
             auth_tokens: Vec::new(),
+            public_sign_routes: false,
         }
     }
 
@@ -872,6 +905,13 @@ impl StaticApp {
     /// `authorized` refuses every request when no token is configured.
     pub fn with_auth_tokens(mut self, auth_tokens: Vec<String>) -> Self {
         self.auth_tokens = auth_tokens;
+        self
+    }
+
+    /// Serves `POST /` and `POST /v2/resolve-and-sign` without a bearer.
+    /// Everything else keeps its credential requirement.
+    pub fn with_public_sign_routes(mut self, public_sign_routes: bool) -> Self {
+        self.public_sign_routes = public_sign_routes;
         self
     }
 }
@@ -912,6 +952,10 @@ impl ServerApp for CoreApiApp {
 
     fn auth_tokens(&self) -> Vec<String> {
         self.auth_tokens.clone()
+    }
+
+    fn public_sign_routes(&self) -> bool {
+        self.public_sign_routes
     }
 
     async fn readiness(&self) -> ReadinessStatus {
@@ -975,6 +1019,10 @@ impl ServerApp for StaticApp {
         self.auth_tokens.clone()
     }
 
+    fn public_sign_routes(&self) -> bool {
+        self.public_sign_routes
+    }
+
     async fn readiness(&self) -> ReadinessStatus {
         if self.provider_health.values().any(|healthy| *healthy) {
             ReadinessStatus::Ready
@@ -1035,6 +1083,65 @@ mod tests {
                     "{method} {path} with {credential:?}"
                 );
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn public_sign_routes_serve_signing_without_a_credential() {
+        // LayerZero calls a registered DVN endpoint with no credential of ours,
+        // so the deployment that receives that traffic cannot demand one. The
+        // assertion is "not 401": the handler is free to reject the body on its
+        // own terms, what matters is that the request reached it.
+        let app = static_app_with_auth().with_public_sign_routes(true);
+        for path in ["/", "/v2/resolve-and-sign"] {
+            let response = router(app.clone(), "test-version")
+                .oneshot(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri(path)
+                        .header("content-type", "application/json")
+                        .body(Body::from("{}"))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_ne!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "POST {path} must not require a bearer when sign routes are public"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn public_sign_routes_keep_identity_and_metrics_authenticated() {
+        // The switch is scoped to signing. If it ever widens, `/signer-info`,
+        // the probing health report and `/metrics` would leak identity and
+        // internal state to anyone, which no LayerZero caller needs.
+        let app = static_app_with_auth().with_public_sign_routes(true);
+        for (method, path) in [
+            (Method::GET, "/signer-info?chainName=ethereum"),
+            (Method::GET, "/provider-health/report"),
+            (Method::GET, "/metrics"),
+            (Method::HEAD, "/signer-info?chainName=ethereum"),
+            (Method::HEAD, "/provider-health/report"),
+            (Method::HEAD, "/metrics"),
+        ] {
+            let response = router(app.clone(), "test-version")
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(path)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{method} {path} must stay authenticated"
+            );
         }
     }
 

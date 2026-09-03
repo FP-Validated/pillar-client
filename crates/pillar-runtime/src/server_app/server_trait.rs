@@ -115,6 +115,10 @@ where
         self.runtime_config.api_auth_tokens.clone()
     }
 
+    fn public_sign_routes(&self) -> bool {
+        self.runtime_config.public_sign_routes
+    }
+
     async fn readiness(&self) -> pillar_api::ReadinessStatus {
         // Readiness combines two reads of provider state - is any advertised
         // chain healthy - so it has to pin a generation like a sign request

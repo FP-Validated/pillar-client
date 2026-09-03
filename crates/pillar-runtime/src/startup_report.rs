@@ -38,6 +38,10 @@ pub struct StartupReport {
     pub signer_provider_type: String,
     pub kms_key_ids: Vec<String>,
     pub auth_token_count: usize,
+    /// Whether `POST /` and `POST /v2/resolve-and-sign` serve unauthenticated
+    /// callers. Printed on every boot: a signer that stopped requiring a
+    /// credential must not be able to do so silently.
+    pub public_sign_routes: bool,
     pub metrics_state: String,
     pub mode: RuntimeMode,
 }
@@ -91,6 +95,7 @@ impl StartupReport {
             signer_provider_type,
             kms_key_ids,
             auth_token_count: runtime_config.api_auth_tokens.len(),
+            public_sign_routes: runtime_config.public_sign_routes,
             metrics_state: "enabled".to_string(),
             mode,
         })
@@ -105,6 +110,15 @@ impl fmt::Display for StartupReport {
         writeln!(formatter, "mode: {}", self.mode)?;
         writeln!(formatter, "metrics: {}", self.metrics_state)?;
         writeln!(formatter, "auth_tokens: {}", self.auth_token_count)?;
+        writeln!(
+            formatter,
+            "sign_routes: {}",
+            if self.public_sign_routes {
+                "public (no bearer required)"
+            } else {
+                "authenticated"
+            }
+        )?;
         writeln!(formatter, "signer: {}", self.signer_provider_type)?;
         if !self.kms_key_ids.is_empty() {
             writeln!(formatter, "kms_keys: [{}]", self.kms_key_ids.join(", "))?;

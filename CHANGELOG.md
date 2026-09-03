@@ -6,6 +6,18 @@ the Prometheus metric names.
 
 ## Unreleased
 
+### Added
+- `PILLAR_PUBLIC_SIGN_ROUTES=true` serves `POST /` and `POST /v2/resolve-and-sign`
+  without a bearer token. LayerZero calls a registered DVN endpoint with no
+  credential of ours, so a deployment meant to receive that traffic could not
+  demand one and answered every call with 401. The switch is opt-in, takes the
+  exact string `true`, and is scoped to those two routes: `/signer-info`,
+  `/provider-health/report` and `/metrics` stay authenticated in every mode, and
+  `PILLAR_API_AUTH_TOKENS` stays required, so forgetting to configure tokens
+  still fails the boot rather than silently opening the service. The startup
+  report prints `sign_routes:` on every boot so the posture cannot change
+  unobserved.
+
 ### Fixed
 - `pillar_sign_stage_duration_seconds` now records. The production composition
   injected `NoopSignStageObserver`, so the family rendered its `HELP` and `TYPE`
