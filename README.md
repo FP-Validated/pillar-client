@@ -129,6 +129,7 @@ All configuration is environment based. Required:
 | `PROVIDER_CONFIG_TYPE` | `LOCAL`, `S3`, or `GCS`. |
 | `SIGNER_TYPE` | `KMS`, `MNEMONIC`, or `LOCAL_MNEMONIC`. |
 | `PILLAR_API_AUTH_TOKENS` | Comma-separated bearer tokens accepted on authenticated routes. Each must be at least 32 characters. |
+| `PILLAR_PUBLIC_SIGN_ROUTES` | `true` serves `POST /` and `POST /v2/resolve-and-sign` without a bearer. Anything else, including unset, keeps them authenticated. Required for deployments that receive LayerZero DVN traffic, since LayerZero calls a registered endpoint with no credential of yours. Scoped to those two routes; the tokens above stay required either way. |
 
 Provider configuration, by `PROVIDER_CONFIG_TYPE`:
 
@@ -199,8 +200,8 @@ unmatched routes are not enveloped either.
 | --- | --- | --- | --- |
 | `GET` | `/` | public | Liveness; always `HEALTHY` while the process runs. |
 | `GET` | `/ready` | public | Readiness: 200 `READY`, or 503 `NOT_READY` while draining or when no configured chain is healthy. |
-| `POST` | `/v2/resolve-and-sign` | **bearer** | Resolve the source event and return DVN signatures. |
-| `POST` | `/` | **bearer** | Legacy V1 sign entrypoint. |
+| `POST` | `/v2/resolve-and-sign` | **bearer**, or public with `PILLAR_PUBLIC_SIGN_ROUTES=true` | Resolve the source event and return DVN signatures. |
+| `POST` | `/` | **bearer**, or public with `PILLAR_PUBLIC_SIGN_ROUTES=true` | Legacy V1 sign entrypoint. |
 | `GET` | `/signer-info?chainName=<chain>` | **bearer** | Signer addresses and public keys for a chain. |
 | `GET` | `/available-chains` | public | Chain names this instance serves. Fixed for the process lifetime; a refresh changes only the URIs and quorums behind them. |
 | `GET` | `/environment` | public | Configured LayerZero environment. |
@@ -213,6 +214,12 @@ Authenticated routes require `Authorization: Bearer <token>` where the token is
 one of `PILLAR_API_AUTH_TOKENS`; tokens are compared in constant time and every
 rejection returns the same `401 Unauthorized` envelope regardless of cause.
 Configure the token in your Prometheus scrape job as well.
+
+`PILLAR_PUBLIC_SIGN_ROUTES=true` drops that requirement from the two signing
+routes and nothing else: `/signer-info`, `/provider-health/report` and
+`/metrics` stay authenticated, so the tokens remain required to boot. The
+startup report prints `sign_routes:` on every boot, so an instance cannot end up
+serving signatures without a credential unobserved.
 
 Readiness is service-level, not per-chain: the instance is ready while **at
 least one** configured chain is healthy, so read `/provider-health` for per-chain

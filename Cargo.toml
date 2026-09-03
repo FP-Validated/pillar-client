@@ -29,7 +29,7 @@ edition = "2021"
 license = "MIT"
 repository = "https://github.com/FP-Validated/pillar-client"
 rust-version = "1.94.1"
-version = "2.1.0"
+version = "2.2.0"
 
 # Arithmetic on attacker-influenced on-chain payloads must never wrap silently:
 # a panic is recoverable per request, a wrapped offset is a wrong signature.

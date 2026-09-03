@@ -4,7 +4,7 @@ All notable changes to this project are documented here. This project follows
 semantic versioning for the HTTP surface, the environment-variable contract and
 the Prometheus metric names.
 
-## Unreleased
+## 2.2.0 - 2026-09-03
 
 ### Added
 - `PILLAR_PUBLIC_SIGN_ROUTES=true` serves `POST /` and `POST /v2/resolve-and-sign`

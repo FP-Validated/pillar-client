@@ -2897,7 +2897,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "pillar-api"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -2915,7 +2915,7 @@ dependencies = [
 
 [[package]]
 name = "pillar-bench"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "async-trait",
  "criterion",
@@ -2929,7 +2929,7 @@ dependencies = [
 
 [[package]]
 name = "pillar-cli"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -2946,7 +2946,7 @@ dependencies = [
 
 [[package]]
 name = "pillar-client"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "async-trait",
  "futures",
@@ -2961,7 +2961,7 @@ dependencies = [
 
 [[package]]
 name = "pillar-config"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "async-trait",
  "indexmap 2.14.0",
@@ -2975,7 +2975,7 @@ dependencies = [
 
 [[package]]
 name = "pillar-core"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "async-trait",
  "futures",
@@ -2991,7 +2991,7 @@ dependencies = [
 
 [[package]]
 name = "pillar-layerzero"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "async-trait",
  "bs58",
@@ -3010,7 +3010,7 @@ dependencies = [
 
 [[package]]
 name = "pillar-metrics"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "async-trait",
  "indexmap 2.14.0",
@@ -3020,7 +3020,7 @@ dependencies = [
 
 [[package]]
 name = "pillar-runtime"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "async-trait",
  "aws-config",
@@ -3058,7 +3058,7 @@ dependencies = [
 
 [[package]]
 name = "pillar-signer"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "async-trait",
  "aws-sdk-kms",

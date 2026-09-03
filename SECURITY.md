@@ -43,7 +43,12 @@ the first line of the report so it can be escalated before analysis.
 The following are deployment-side controls the software cannot enforce for you:
 
 - Keep `PILLAR_API_AUTH_TOKENS` secret and rotate it on staff changes. The
-  signing endpoints authorise on that token alone.
+  signing endpoints authorise on that token alone, unless you set
+  `PILLAR_PUBLIC_SIGN_ROUTES=true`, in which case they authorise no caller at
+  all: anyone who can reach the port can spend your signer. Set it only where
+  LayerZero DVN traffic must land, and keep the rate limiting and network
+  controls in front of it accordingly. `/signer-info`,
+  `/provider-health/report` and `/metrics` stay behind the token in both modes.
 - Never expose the service directly to the public internet. Terminate TLS in
   front of it; the process speaks plain HTTP by design.
 - Use `SIGNER_TYPE=KMS` in production and scope the KMS key policy to this
