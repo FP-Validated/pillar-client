@@ -549,6 +549,7 @@ async fn historical_service_app(
                 extra_context_aws_lambda_name: None,
                 image_version: None,
                 api_auth_tokens: vec!["test-token-0123456789abcdef0123456789".to_string()],
+                api_auth_enabled: true,
                 public_sign_routes: false,
                 max_connections: 16,
                 shutdown_grace_seconds: 5,

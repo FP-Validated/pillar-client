@@ -14,6 +14,7 @@ fn runtime_extra_context_config_builds_from_runtime_config() {
         extra_context_aws_lambda_name: None,
         image_version: None,
         api_auth_tokens: vec!["test-token-0123456789abcdef0123456789".to_string()],
+        api_auth_enabled: true,
         public_sign_routes: false,
         max_connections: 1024,
         shutdown_grace_seconds: 25,

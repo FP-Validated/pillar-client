@@ -48,6 +48,18 @@ pub const PILLAR_API_AUTH_TOKENS: &str = "PILLAR_API_AUTH_TOKENS";
 /// and `/metrics` keep it, and `PILLAR_API_AUTH_TOKENS` stays required, so an
 /// operator cannot reach this state by forgetting to configure tokens.
 pub const PILLAR_PUBLIC_SIGN_ROUTES: &str = "PILLAR_PUBLIC_SIGN_ROUTES";
+/// Serve every route without a bearer token.
+///
+/// Only the exact string `false` disables authentication, and the default is
+/// enabled, so a missing or misspelled value keeps the tokens required. Use it
+/// where the endpoint is already restricted at the network edge — the mainnet
+/// deployment gates callers with an ingress source-IP allowlist, so a second
+/// shared secret buys nothing there. Deployments without that edge restriction
+/// must leave this unset: it opens `/signer-info`, `/provider-health/report`
+/// and `/metrics` too, which `PILLAR_PUBLIC_SIGN_ROUTES` deliberately does not.
+///
+/// `PILLAR_API_AUTH_TOKENS` becomes optional in this mode and is ignored.
+pub const PILLAR_API_AUTH_ENABLED: &str = "PILLAR_API_AUTH_ENABLED";
 pub const PILLAR_MAX_CONNECTIONS: &str = "PILLAR_MAX_CONNECTIONS";
 pub const PILLAR_SHUTDOWN_GRACE_SECONDS: &str = "PILLAR_SHUTDOWN_GRACE_SECONDS";
 
@@ -86,6 +98,7 @@ pub const ENV_VAR_NAMES: &[(&str, &str)] = &[
     ("PILLAR_IMAGE_VERSION", PILLAR_IMAGE_VERSION),
     ("PILLAR_API_AUTH_TOKENS", PILLAR_API_AUTH_TOKENS),
     ("PILLAR_PUBLIC_SIGN_ROUTES", PILLAR_PUBLIC_SIGN_ROUTES),
+    ("PILLAR_API_AUTH_ENABLED", PILLAR_API_AUTH_ENABLED),
     ("PILLAR_MAX_CONNECTIONS", PILLAR_MAX_CONNECTIONS),
     (
         "PILLAR_SHUTDOWN_GRACE_SECONDS",
@@ -124,6 +137,7 @@ pub struct RuntimeConfig {
     pub extra_context_aws_lambda_name: Option<String>,
     pub image_version: Option<String>,
     pub api_auth_tokens: Vec<String>,
+    pub api_auth_enabled: bool,
     pub public_sign_routes: bool,
     pub max_connections: usize,
     pub shutdown_grace_seconds: u64,
@@ -351,22 +365,29 @@ where
     let server_port = server_port_raw
         .parse::<u16>()
         .map_err(|_| ConfigError::InvalidPort(server_port_raw.to_string()))?;
-    let auth_raw = required(&map, PILLAR_API_AUTH_TOKENS)?;
-    let api_auth_tokens = auth_raw
-        .split(',')
-        .map(str::trim)
-        .filter(|token| !token.is_empty())
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    if api_auth_tokens.is_empty() {
-        return Err(ConfigError::MissingAuthTokens);
-    }
-    if api_auth_tokens
-        .iter()
-        .any(|token| token.chars().count() < 32)
-    {
-        return Err(ConfigError::InvalidAuthToken);
-    }
+    // Only the exact string turns authentication off, so a typo leaves the
+    // tokens required rather than silently opening every route.
+    let api_auth_enabled = optional(&map, PILLAR_API_AUTH_ENABLED).as_deref() != Some("false");
+    let api_auth_tokens = if api_auth_enabled {
+        let auth_raw = required(&map, PILLAR_API_AUTH_TOKENS)?;
+        let tokens = auth_raw
+            .split(',')
+            .map(str::trim)
+            .filter(|token| !token.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        if tokens.is_empty() {
+            return Err(ConfigError::MissingAuthTokens);
+        }
+        if tokens.iter().any(|token| token.chars().count() < 32) {
+            return Err(ConfigError::InvalidAuthToken);
+        }
+        tokens
+    } else {
+        // Nothing consults the tokens in this mode; keeping a copy would only
+        // hand the process a secret it cannot use.
+        Vec::new()
+    };
     let max_connections = optional(&map, PILLAR_MAX_CONNECTIONS)
         .unwrap_or_else(|| "1024".to_string())
         .parse::<usize>()
@@ -426,6 +447,7 @@ where
         extra_context_aws_lambda_name,
         image_version: optional(&map, PILLAR_IMAGE_VERSION),
         api_auth_tokens,
+        api_auth_enabled,
         public_sign_routes: optional(&map, PILLAR_PUBLIC_SIGN_ROUTES).as_deref() == Some("true"),
         max_connections,
         shutdown_grace_seconds,
@@ -2615,6 +2637,53 @@ mod auth_config_tests {
             load_from_map(base(&[(PILLAR_PUBLIC_SIGN_ROUTES, "true")]))
                 .unwrap()
                 .public_sign_routes
+        );
+    }
+
+    #[test]
+    fn api_auth_defaults_on_and_only_the_exact_string_disables_it() {
+        // Same shape as the sign-route switch, and stricter in consequence:
+        // this one opens identity, the health report and metrics too. Anything
+        // other than "false" must leave authentication in place.
+        assert!(load_from_map(base(&[])).unwrap().api_auth_enabled);
+        for value in ["", "0", "FALSE", "no", "true"] {
+            assert!(
+                load_from_map(base(&[(PILLAR_API_AUTH_ENABLED, value)]))
+                    .unwrap()
+                    .api_auth_enabled,
+                "{value:?} must not disable api auth"
+            );
+        }
+        assert!(
+            !load_from_map(base(&[(PILLAR_API_AUTH_ENABLED, "false")]))
+                .unwrap()
+                .api_auth_enabled
+        );
+    }
+
+    #[test]
+    fn disabling_api_auth_makes_tokens_optional_and_drops_them() {
+        // A deployment that authenticates nobody should not have to carry a
+        // shared secret, and must not keep one in memory if it is supplied.
+        let mut without_tokens = base(&[(PILLAR_API_AUTH_ENABLED, "false")]);
+        without_tokens.remove(PILLAR_API_AUTH_TOKENS);
+        let config = load_from_map(without_tokens).unwrap();
+        assert!(!config.api_auth_enabled);
+        assert!(config.api_auth_tokens.is_empty());
+
+        let with_tokens = load_from_map(base(&[
+            (PILLAR_API_AUTH_ENABLED, "false"),
+            (PILLAR_API_AUTH_TOKENS, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        ]))
+        .unwrap();
+        assert!(with_tokens.api_auth_tokens.is_empty());
+
+        // Removing the token while auth stays on is still a boot failure.
+        let mut enabled_without_tokens = base(&[]);
+        enabled_without_tokens.remove(PILLAR_API_AUTH_TOKENS);
+        assert_eq!(
+            load_from_map(enabled_without_tokens).unwrap_err(),
+            ConfigError::MissingEnv(PILLAR_API_AUTH_TOKENS)
         );
     }
 

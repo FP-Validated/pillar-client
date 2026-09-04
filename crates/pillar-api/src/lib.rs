@@ -92,6 +92,15 @@ pub trait ServerApp: Send + Sync + 'static {
     fn public_sign_routes(&self) -> bool {
         false
     }
+    /// Whether any route requires a bearer token at all.
+    ///
+    /// Defaults to true for the same reason as `public_sign_routes`: an
+    /// embedder that forgets to wire it keeps the credential requirement.
+    /// Disabling it opens identity, the health report and metrics as well, so
+    /// it belongs only where the network edge already restricts callers.
+    fn api_auth_enabled(&self) -> bool {
+        true
+    }
     async fn readiness(&self) -> ReadinessStatus {
         ReadinessStatus::NotReady
     }
@@ -324,18 +333,18 @@ async fn request_middleware(
         http_route = %route,
     );
 
-    let mut response =
-        if authenticated_route(&method, req.uri().path(), state.app.public_sign_routes())
-            && !authorized(&state, &req)
-        {
-            AppError::Http {
-                status: StatusCode::UNAUTHORIZED,
-                message: "Unauthorized".to_string(),
-            }
-            .into_response()
-        } else {
-            next.run(req).instrument(span.clone()).await
-        };
+    let mut response = if state.app.api_auth_enabled()
+        && authenticated_route(&method, req.uri().path(), state.app.public_sign_routes())
+        && !authorized(&state, &req)
+    {
+        AppError::Http {
+            status: StatusCode::UNAUTHORIZED,
+            message: "Unauthorized".to_string(),
+        }
+        .into_response()
+    } else {
+        next.run(req).instrument(span.clone()).await
+    };
     align_json_content_type(&mut response);
     let status_code = response.status().as_u16();
     if response.status().is_client_error() || response.status().is_server_error() {
@@ -786,6 +795,8 @@ pub struct CoreApiApp {
     auth_tokens: Vec<String>,
     /// Drops the bearer requirement from the two signing routes only.
     public_sign_routes: bool,
+    /// Drops the bearer requirement from every route.
+    api_auth_enabled: bool,
 }
 impl CoreApiApp {
     pub fn new(
@@ -825,6 +836,7 @@ impl CoreApiApp {
             metrics,
             auth_tokens: Vec::new(),
             public_sign_routes: false,
+            api_auth_enabled: true,
         }
     }
 
@@ -841,6 +853,13 @@ impl CoreApiApp {
         self.public_sign_routes = public_sign_routes;
         self
     }
+
+    /// Serves every route without a bearer. Intended for deployments whose
+    /// callers are already restricted at the network edge.
+    pub fn with_api_auth_enabled(mut self, api_auth_enabled: bool) -> Self {
+        self.api_auth_enabled = api_auth_enabled;
+        self
+    }
 }
 
 #[derive(Clone)]
@@ -851,6 +870,7 @@ pub struct StaticApp {
     signer_info: BTreeMap<String, Vec<SignerInfo>>,
     provider_health: ProviderHealthSnapshot,
     auth_tokens: Vec<String>,
+    api_auth_enabled: bool,
 }
 
 impl StaticApp {
@@ -898,6 +918,7 @@ impl StaticApp {
             provider_health,
             auth_tokens: Vec::new(),
             public_sign_routes: false,
+            api_auth_enabled: true,
         }
     }
 
@@ -912,6 +933,12 @@ impl StaticApp {
     /// Everything else keeps its credential requirement.
     pub fn with_public_sign_routes(mut self, public_sign_routes: bool) -> Self {
         self.public_sign_routes = public_sign_routes;
+        self
+    }
+
+    /// Serves every route without a bearer.
+    pub fn with_api_auth_enabled(mut self, api_auth_enabled: bool) -> Self {
+        self.api_auth_enabled = api_auth_enabled;
         self
     }
 }
@@ -956,6 +983,10 @@ impl ServerApp for CoreApiApp {
 
     fn public_sign_routes(&self) -> bool {
         self.public_sign_routes
+    }
+
+    fn api_auth_enabled(&self) -> bool {
+        self.api_auth_enabled
     }
 
     async fn readiness(&self) -> ReadinessStatus {
@@ -1021,6 +1052,10 @@ impl ServerApp for StaticApp {
 
     fn public_sign_routes(&self) -> bool {
         self.public_sign_routes
+    }
+
+    fn api_auth_enabled(&self) -> bool {
+        self.api_auth_enabled
     }
 
     async fn readiness(&self) -> ReadinessStatus {
@@ -1111,6 +1146,66 @@ mod tests {
                 "POST {path} must not require a bearer when sign routes are public"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn disabled_api_auth_serves_every_route_without_a_credential() {
+        // The mainnet deployment restricts callers with an ingress source-IP
+        // allowlist, so the bearer buys nothing there. Unlike
+        // `public_sign_routes` this covers identity, the probing health report
+        // and metrics, including their HEAD forms, and it must hold even with
+        // tokens still configured — the flag decides, not the token list.
+        for app in [
+            static_app_with_auth().with_api_auth_enabled(false),
+            StaticApp::observed_mainnet().with_api_auth_enabled(false),
+        ] {
+            for (method, path) in [
+                (Method::POST, "/"),
+                (Method::POST, "/v2/resolve-and-sign"),
+                (Method::GET, "/signer-info?chainName=ethereum"),
+                (Method::GET, "/provider-health/report"),
+                (Method::GET, "/metrics"),
+                (Method::HEAD, "/signer-info?chainName=ethereum"),
+                (Method::HEAD, "/provider-health/report"),
+                (Method::HEAD, "/metrics"),
+            ] {
+                let response = router(app.clone(), "test-version")
+                    .oneshot(
+                        Request::builder()
+                            .method(method.clone())
+                            .uri(path)
+                            .header("content-type", "application/json")
+                            .body(Body::from("{}"))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_ne!(
+                    response.status(),
+                    StatusCode::UNAUTHORIZED,
+                    "{method} {path} must not require a bearer when api auth is disabled"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn api_auth_defaults_to_required_for_embedders() {
+        // Both concrete apps in this crate must fail closed: an embedder that
+        // never calls the builder keeps every authenticated route behind the
+        // token, so forgetting the flag can only tighten the surface.
+        assert!(StaticApp::observed_mainnet().api_auth_enabled());
+        let response = router(static_app_with_auth(), "test-version")
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/metrics")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]

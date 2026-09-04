@@ -4,6 +4,19 @@ All notable changes to this project are documented here. This project follows
 semantic versioning for the HTTP surface, the environment-variable contract and
 the Prometheus metric names.
 
+## Unreleased
+
+### Added
+- `PILLAR_API_AUTH_ENABLED=false` serves every route without a bearer token and
+  makes `PILLAR_API_AUTH_TOKENS` optional. The mainnet deployment restricts
+  callers with an ingress source-IP allowlist, so a second shared secret bought
+  nothing there while still having to be distributed and rotated. Unlike
+  `PILLAR_PUBLIC_SIGN_ROUTES` this also opens `/signer-info`,
+  `/provider-health/report` and `/metrics`, so it belongs only where such an
+  edge restriction exists — a deployment reachable from the internet must leave
+  it unset. It takes the exact string `false`, defaults to enabled, and the
+  startup report prints `api_auth:` on every boot next to `sign_routes:`.
+
 ## 2.2.0 - 2026-09-03
 
 ### Added

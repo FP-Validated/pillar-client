@@ -42,6 +42,11 @@ pub struct StartupReport {
     /// callers. Printed on every boot: a signer that stopped requiring a
     /// credential must not be able to do so silently.
     pub public_sign_routes: bool,
+    /// Whether any route still requires a bearer token. Printed on every boot
+    /// for the same reason as `public_sign_routes`, and it subsumes it: with
+    /// authentication off, identity, the health report and metrics are open
+    /// too, so an operator must be able to see that from the log alone.
+    pub api_auth_enabled: bool,
     pub metrics_state: String,
     pub mode: RuntimeMode,
 }
@@ -96,6 +101,7 @@ impl StartupReport {
             kms_key_ids,
             auth_token_count: runtime_config.api_auth_tokens.len(),
             public_sign_routes: runtime_config.public_sign_routes,
+            api_auth_enabled: runtime_config.api_auth_enabled,
             metrics_state: "enabled".to_string(),
             mode,
         })
@@ -112,8 +118,17 @@ impl fmt::Display for StartupReport {
         writeln!(formatter, "auth_tokens: {}", self.auth_token_count)?;
         writeln!(
             formatter,
+            "api_auth: {}",
+            if self.api_auth_enabled {
+                "required"
+            } else {
+                "disabled (every route public)"
+            }
+        )?;
+        writeln!(
+            formatter,
             "sign_routes: {}",
-            if self.public_sign_routes {
+            if !self.api_auth_enabled || self.public_sign_routes {
                 "public (no bearer required)"
             } else {
                 "authenticated"

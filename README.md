@@ -130,6 +130,7 @@ All configuration is environment based. Required:
 | `SIGNER_TYPE` | `KMS`, `MNEMONIC`, or `LOCAL_MNEMONIC`. |
 | `PILLAR_API_AUTH_TOKENS` | Comma-separated bearer tokens accepted on authenticated routes. Each must be at least 32 characters. |
 | `PILLAR_PUBLIC_SIGN_ROUTES` | `true` serves `POST /` and `POST /v2/resolve-and-sign` without a bearer. Anything else, including unset, keeps them authenticated. Required for deployments that receive LayerZero DVN traffic, since LayerZero calls a registered endpoint with no credential of yours. Scoped to those two routes; the tokens above stay required either way. |
+| `PILLAR_API_AUTH_ENABLED` | `false` serves **every** route without a bearer, including `/signer-info`, `/provider-health/report` and `/metrics`, and makes `PILLAR_API_AUTH_TOKENS` optional. Anything else, including unset, keeps authentication on. Only for deployments already restricted at the network edge — e.g. an ingress source-IP allowlist — because it exposes signer identity and internal state to any caller that reaches the port. |
 
 Provider configuration, by `PROVIDER_CONFIG_TYPE`:
 
@@ -202,12 +203,12 @@ unmatched routes are not enveloped either.
 | `GET` | `/ready` | public | Readiness: 200 `READY`, or 503 `NOT_READY` while draining or when no configured chain is healthy. |
 | `POST` | `/v2/resolve-and-sign` | **bearer**, or public with `PILLAR_PUBLIC_SIGN_ROUTES=true` | Resolve the source event and return DVN signatures. |
 | `POST` | `/` | **bearer**, or public with `PILLAR_PUBLIC_SIGN_ROUTES=true` | Legacy V1 sign entrypoint. |
-| `GET` | `/signer-info?chainName=<chain>` | **bearer** | Signer addresses and public keys for a chain. |
+| `GET` | `/signer-info?chainName=<chain>` | **bearer**, or public with `PILLAR_API_AUTH_ENABLED=false` | Signer addresses and public keys for a chain. |
 | `GET` | `/available-chains` | public | Chain names this instance serves. Fixed for the process lifetime; a refresh changes only the URIs and quorums behind them. |
 | `GET` | `/environment` | public | Configured LayerZero environment. |
 | `GET` | `/provider-health` | public | Per-chain boolean health. |
-| `GET` | `/provider-health/report` | **bearer** | Per-provider detail with a check timestamp. |
-| `GET` | `/metrics` | **bearer** | Prometheus text format. |
+| `GET` | `/provider-health/report` | **bearer**, or public with `PILLAR_API_AUTH_ENABLED=false` | Per-provider detail with a check timestamp. |
+| `GET` | `/metrics` | **bearer**, or public with `PILLAR_API_AUTH_ENABLED=false` | Prometheus text format. |
 | `GET` | `/version` | public | Configured image version. |
 
 Authenticated routes require `Authorization: Bearer <token>` where the token is
@@ -220,6 +221,14 @@ routes and nothing else: `/signer-info`, `/provider-health/report` and
 `/metrics` stay authenticated, so the tokens remain required to boot. The
 startup report prints `sign_routes:` on every boot, so an instance cannot end up
 serving signatures without a credential unobserved.
+
+`PILLAR_API_AUTH_ENABLED=false` drops it from every route and makes the tokens
+optional. Use it only where callers are already restricted before the port —
+the mainnet deployment gates them with an ingress source-IP allowlist, which a
+shared bearer token does not improve on. Without such an edge restriction this
+publishes signer identity and internal provider state, so it must stay unset.
+Both switches take one exact string and default to the closed state, and the
+startup report prints `api_auth:` next to `sign_routes:` on every boot.
 
 Readiness is service-level, not per-chain: the instance is ready while **at
 least one** configured chain is healthy, so read `/provider-health` for per-chain
