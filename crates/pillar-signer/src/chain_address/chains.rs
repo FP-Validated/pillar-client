@@ -87,14 +87,22 @@ impl ChainAddress for AptosChain {
 pub struct SolanaChain;
 
 impl ChainAddress for SolanaChain {
-    // Upstream takes the first 32 bytes of whatever public key it was handed, with no
-    // prefix handling at all (`gasolina-signer-adapter/src/solana/index.ts:9-11`).
-    // That matters because the two sources have different shapes: Azure KMS returns a
-    // bare 64-byte `X||Y` (`azureKmsSignerAdapter.ts:170-172`), so the first 32 bytes
-    // are X, while a local mnemonic key is SEC1-uncompressed, so the first 32 bytes
-    // are `04` followed by 31 bytes of X. Stripping the `04` here produced a different
-    // Solana address than the running service for every locally signed request.
+    // The address is the X coordinate, and it has to be X whatever shape the provider
+    // returned the key in. Upstream reads the first 32 bytes with no prefix handling
+    // (`gasolina-signer-adapter/src/solana/index.ts:9-11`), which is only correct
+    // because its Azure adapter hands back a bare 64-byte `X||Y`
+    // (`azureKmsSignerAdapter.ts:185-187`). This crate's Azure adapter returns
+    // SEC1-uncompressed `04||X||Y` instead (`azure/adapter.rs:163-166`), so copying
+    // upstream's slice published `04 || X[..31]` — a real, different Solana address
+    // (`KhLrwX6F…` instead of the registered `EboBSUoo…`), which is the same class of
+    // defect LayerZero reported on 2026-07-10 for the TypeScript service. The
+    // registered key is the authority, not upstream's slice: it sits at offset 17 of
+    // the mainnet DVN config account `EqkXVEeapm7JqrS1W3AGeN5ZwCRLDUHtr1XY9TuVr4rD`
+    // and is pinned by `solana_address_matches_the_registered_mainnet_dvn_key`.
     fn signer_address(&self, public_key: &[u8]) -> Result<String, SignerError> {
+        // Derive from the same canonical bytes `/signer-info` advertises, so the
+        // address and the published public key can never disagree again.
+        let public_key = solana_signer_info_public_key(public_key);
         if public_key.len() < 32 {
             return Err(SignerError::Message(format!(
                 "Solana public key must be at least 32 bytes, got {}",

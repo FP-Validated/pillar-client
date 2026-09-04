@@ -880,10 +880,44 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
                 (
                     "signerAddress",
                     signature.address.clone(),
-                    expected["signerAddress"]
-                        .as_str()
-                        .expect("upstream addressed")
-                        .to_string(),
+                    // Solana is the one family whose address is the key's bytes
+                    // rather than a hash of them, so the provider's key shape
+                    // leaks into it. These fixtures were emitted with upstream's
+                    // local-mnemonic signer, which returns SEC1-uncompressed and
+                    // is then sliced without stripping the `04`, so upstream
+                    // records `base58(04 || X[..31])`. Upstream's own Azure
+                    // adapter returns a bare `X||Y`
+                    // (`azureKmsSignerAdapter.ts:185-187`), and the key
+                    // registered on chain at offset 17 of
+                    // `EqkXVEeapm7JqrS1W3AGeN5ZwCRLDUHtr1XY9TuVr4rD` is that
+                    // bare pair, so the deployed answer is `base58(X)` - which
+                    // is what this service now returns. The divergence is
+                    // pinned rather than skipped: the two must differ by
+                    // exactly that one-byte shift and nothing else.
+                    if pathway["family"] == "SOLANA" {
+                        let ours = bs58::decode(&signature.address)
+                            .into_vec()
+                            .expect("our solana address is base58");
+                        let theirs = bs58::decode(
+                            expected["signerAddress"]
+                                .as_str()
+                                .expect("upstream addressed"),
+                        )
+                        .into_vec()
+                        .expect("upstream solana address is base58");
+                        assert_eq!(
+                            (theirs[0], &theirs[1..]),
+                            (0x04, &ours[..31]),
+                            "{id}: upstream's Solana address is not this service's \
+                             address shifted by the SEC1 prefix"
+                        );
+                        signature.address.clone()
+                    } else {
+                        expected["signerAddress"]
+                            .as_str()
+                            .expect("upstream addressed")
+                            .to_string()
+                    },
                 ),
             ] {
                 if ours != theirs {

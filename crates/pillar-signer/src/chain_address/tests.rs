@@ -299,19 +299,77 @@ fn solana_address_is_base58_first_32_public_key_bytes() {
     );
 }
 
-/// Upstream applies no prefix handling whatsoever: the address is the first 32
-/// bytes of whatever the provider returned
-/// (`gasolina-signer-adapter/src/solana/index.ts:9-11`). The two providers return
-/// different shapes, so the same key material legitimately yields two addresses,
-/// and normalizing them together is what diverged from the running service.
+/// The provider's key shape must not change the address. This crate's Azure
+/// adapter returns SEC1-uncompressed `04||X||Y` while upstream's returns a bare
+/// `X||Y`, and reading the first 32 bytes of the former published
+/// `04 || X[..31]` — a different address than the one registered on chain.
 #[test]
-fn solana_address_keeps_the_sec1_prefix_like_upstream() {
-    // A local-mnemonic key is SEC1-uncompressed, so the leading `04` is part of the
-    // first 32 bytes upstream hands to `new web3.PublicKey(...)`.
+fn solana_address_ignores_the_provider_key_shape() {
+    let sec1 = ecdsa_public_key_a();
+    let bare = &sec1[1..];
     assert_eq!(
-        SolanaChain.signer_address(&ecdsa_public_key_a()).unwrap(),
-        "JcaArBtuPANRW1jYJo6vLTo6nPrLwiBnozFuN7PgvzQ"
+        SolanaChain.signer_address(&sec1).unwrap(),
+        SolanaChain.signer_address(bare).unwrap(),
+        "SEC1-uncompressed and bare X||Y must yield the same Solana address"
     );
+    assert_eq!(
+        SolanaChain.signer_address(&sec1).unwrap(),
+        "9pjvUx5h2dQUrj76Gqmwe24PXPHW3eWFGBuUgVW5BVPS"
+    );
+}
+
+/// The registered mainnet DVN key, read from chain rather than assumed: the
+/// 64 bytes at offset 17 of the Solana DVN config account
+/// `EqkXVEeapm7JqrS1W3AGeN5ZwCRLDUHtr1XY9TuVr4rD` (owner
+/// `9U6MUTuH9XZFoP993kq3We6gu95NbJhNM82cdpbpyF9n`), captured 2026-09-04. This is
+/// the value LayerZero verifies against, so the address this service advertises
+/// has to match it byte for byte.
+#[test]
+fn solana_address_matches_the_registered_mainnet_dvn_key() {
+    let registered = hex::decode(concat!(
+        "ca11e4b7d37870aca2ace4d5dee1dd296e6d76c7ff757c648d41f1e65d495d74",
+        "0897f8edc07fea309c99494ab3f2115c27f1f8aca0d0843ce485e6266ed351f1"
+    ))
+    .unwrap();
+    let expected = "EboBSUoobiqt7JYcH46ro7TGBjtE2vczKnUmsiWy6Ffy";
+    assert_eq!(SolanaChain.signer_address(&registered).unwrap(), expected);
+
+    // The same key as this crate's Azure adapter hands it over.
+    let mut sec1 = vec![0x04];
+    sec1.extend_from_slice(&registered);
+    assert_eq!(SolanaChain.signer_address(&sec1).unwrap(), expected);
+}
+
+/// The defect was invisible from the response alone: `publicKey` went through
+/// the prefix stripper while `address` did not, so the advertised key looked
+/// correct next to a wrong address. Assert the two agree at the adapter, which
+/// is the surface `/signer-info` actually serves.
+#[tokio::test]
+async fn solana_signer_info_address_is_the_advertised_public_key() {
+    let mut sec1 = vec![0x04];
+    sec1.extend_from_slice(
+        &hex::decode(concat!(
+            "ca11e4b7d37870aca2ace4d5dee1dd296e6d76c7ff757c648d41f1e65d495d74",
+            "0897f8edc07fea309c99494ab3f2115c27f1f8aca0d0843ce485e6266ed351f1"
+        ))
+        .unwrap(),
+    );
+    let raw = Arc::new(EvmPublicKeySigner {
+        sign_requests: Mutex::new(Vec::new()),
+        public_key: sec1,
+    });
+    let info = PillarSignerAdapter::new(raw, SolanaChain, true)
+        .get_signer_info()
+        .await
+        .unwrap();
+    let advertised = hex::decode(info.public_key.trim_start_matches("0x")).unwrap();
+    assert_eq!(advertised.len(), 64, "advertised key must be bare X||Y");
+    assert_eq!(
+        info.address,
+        bs58::encode(&advertised[..32]).into_string(),
+        "the address must be base58 of the advertised key's X coordinate"
+    );
+    assert_eq!(info.address, "EboBSUoobiqt7JYcH46ro7TGBjtE2vczKnUmsiWy6Ffy");
 }
 
 #[test]
@@ -383,12 +441,15 @@ async fn solana_signer_info_preserves_all_64_azure_coordinate_bytes() {
 
     let signer_info = signer.get_signer_info().await.unwrap();
 
-    // The address differs from the bare-coordinate case above by exactly the SEC1
-    // prefix, because upstream never removes it before taking 32 bytes. Only the
-    // reported public key is normalized, which is a separate surface.
+    // Must equal the bare-coordinate case above: the provider's key shape cannot
+    // move the address. This assertion previously expected
+    // `KhLrwX6FuKJfNtoxn2meHYBxKjvazGPHbfMdmx78HZ6`, which is
+    // `base58(04 || X[..31])` and not the key registered at offset 17 of the
+    // mainnet DVN config account - the live service advertised it until
+    // 2026-09-04.
     assert_eq!(
         signer_info.address,
-        "KhLrwX6FuKJfNtoxn2meHYBxKjvazGPHbfMdmx78HZ6"
+        "EboBSUoobiqt7JYcH46ro7TGBjtE2vczKnUmsiWy6Ffy"
     );
     assert_eq!(
         signer_info.public_key,
