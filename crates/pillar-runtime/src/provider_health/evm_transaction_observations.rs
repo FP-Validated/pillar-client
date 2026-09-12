@@ -44,7 +44,7 @@ where
                     signature,
                     {
                         "encoding": "jsonParsed",
-                        "maxSupportedTransactionVersion": 0,
+                        "maxSupportedTransactionVersion": crate::SOLANA_MAX_SUPPORTED_TRANSACTION_VERSION,
                     },
                 ],
                 "id": 1,

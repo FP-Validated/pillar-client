@@ -77,6 +77,7 @@ mod signer_config_tests;
 mod signer_kms_config_tests;
 mod signer_kms_wallet_policy_tests;
 mod signer_local_tests;
+mod solana_v1_tests;
 mod startup_report_tests;
 mod validation_app_tests;
 mod validation_payload_receive_library_tests;

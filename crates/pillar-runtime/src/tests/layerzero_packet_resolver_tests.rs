@@ -782,7 +782,7 @@ async fn packet_sent_resolver_decodes_solana_program_return_packet() {
                 {
                     "encoding": "jsonParsed",
                     "commitment": "finalized",
-                    "maxSupportedTransactionVersion": 0,
+                    "maxSupportedTransactionVersion": 1,
                 },
             ],
             "id": 1,

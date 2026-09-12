@@ -7,6 +7,18 @@ mod signer_runtime;
 mod startup_report;
 mod validation;
 
+/// Highest Solana transaction version the JSON-RPC read paths opt into.
+///
+/// `getTransaction` fails with `-32015` for any transaction newer than this, so
+/// reading v1 (SIMD-0385, feature `txv1aq4pp281K9um3tnPgkfX8UqtFT6wcVW3hNezGLL`)
+/// requires the integer `1`; a string would fail request validation with `-32602`
+/// on every call. Older nodes only compare `version <= max`, so raising the
+/// ceiling stays compatible with providers that cannot serve v1 yet. This is a
+/// deliberate divergence from upstream TypeScript, which still pins `0`
+/// (`packages/sdks/rpc-sdk/src/solana/index.ts:58,167`).
+/// Reading v1 is not signing or building it: no payload, hash or signer change.
+pub(crate) const SOLANA_MAX_SUPPORTED_TRANSACTION_VERSION: u8 = 1;
+
 pub use layerzero_runtime::{
     core_api_app_from_runtime_parts, runtime_aptos_layerzero_config,
     runtime_core_dependencies_from_layerzero_parts, runtime_evm_layerzero_config,

@@ -728,8 +728,9 @@ async fn runtime_rpc_validation_checks_resolves_solana_transaction_from_address(
         Some(&["solana".to_string()]),
     )
     .unwrap();
+    let calls = Arc::new(Mutex::new(Vec::new()));
     let transport = RecordingTransport {
-        calls: Arc::new(Mutex::new(Vec::new())),
+        calls: calls.clone(),
         responses: Arc::new(Mutex::new(vec![solana_transaction_result(
             "6td1W4vFnQsKKunmKprARgpMEtYdVBnZ2FVcpqxKxaoA",
         )])),
@@ -750,6 +751,26 @@ async fn runtime_rpc_validation_checks_resolves_solana_transaction_from_address(
     // so a successful extraction proves the branch dispatched on chain type.
     // Matches TS RpcSolanaSdk.getFromAddress.
     assert_eq!(from, "6td1W4vFnQsKKunmKprARgpMEtYdVBnZ2FVcpqxKxaoA");
+    // This path keeps its default commitment, but it must opt into v1 like the
+    // resolver and readiness reads: `getTransaction` answers -32015 for a newer
+    // transaction than the requested ceiling, so a 0 here blinds fee-payer
+    // observation to every v1 source transaction.
+    let calls = calls.lock().unwrap();
+    assert_eq!(
+        calls[0].2,
+        json!({
+            "method": "getTransaction",
+            "params": [
+                "5signaturebase58",
+                {
+                    "encoding": "jsonParsed",
+                    "maxSupportedTransactionVersion": 1,
+                },
+            ],
+            "id": 1,
+            "jsonrpc": "2.0",
+        })
+    );
 }
 
 #[tokio::test]

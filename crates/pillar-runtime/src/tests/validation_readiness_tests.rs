@@ -359,7 +359,7 @@ async fn runtime_rpc_validation_checks_validates_solana_message_readiness_with_s
                 {
                     "encoding": "json",
                     "commitment": "finalized",
-                    "maxSupportedTransactionVersion": 0,
+                    "maxSupportedTransactionVersion": 1,
                 },
             ],
             "id": 1,

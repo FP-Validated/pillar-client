@@ -572,7 +572,7 @@ where
                 {
                     "encoding": "json",
                     "commitment": "finalized",
-                    "maxSupportedTransactionVersion": 0,
+                    "maxSupportedTransactionVersion": crate::SOLANA_MAX_SUPPORTED_TRANSACTION_VERSION,
                 },
             ],
             "id": 1,
