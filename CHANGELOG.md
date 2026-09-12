@@ -4,7 +4,23 @@ All notable changes to this project are documented here. This project follows
 semantic versioning for the HTTP surface, the environment-variable contract and
 the Prometheus metric names.
 
-## Unreleased
+## 2.3.0 - 2026-09-12
+
+### Changed
+- Every Solana JSON-RPC read now asks for `maxSupportedTransactionVersion: 1`
+  instead of `0`, so transaction v1 (SIMD-0385/0296) is readable. `getTransaction`
+  answers `-32015` for any transaction newer than the requested ceiling rather
+  than downgrading the response, so the previous `0` would have failed packet
+  resolution, readiness and fee-payer observation on every v1 source transaction
+  — devnet and testnet already have the feature gate active, and mainnet
+  activates it at epoch 1035. The value is one `u8` constant shared by the three
+  call sites; it must stay a JSON integer, since a string fails request
+  validation with `-32602` on every call, v1 or not. Raising the ceiling is safe
+  for providers that cannot serve v1 yet: nodes only compare `version <= max`,
+  and a provider that refuses costs one quorum vote instead of corrupting a read.
+  Nothing about signing, payload construction or the provider quorum fields
+  changes, and v1's new `transactionConfig` deliberately stays out of the
+  fee-payer quorum fingerprint so two honest providers cannot disagree over it.
 
 ### Added
 - `PILLAR_API_AUTH_ENABLED=false` serves every route without a bearer token and
