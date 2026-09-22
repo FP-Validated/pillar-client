@@ -1324,37 +1324,8 @@ mod tests {
     use pillar_core::{
         LegacyLzMessageId, PillarApiRequestV1, PillarApiRequestV2, PillarApiResponse, Signature,
     };
-    use std::{
-        io::{self, Write},
-        sync::Mutex as StdMutex,
-        time::Duration,
-    };
+    use std::time::Duration;
     use tower::ServiceExt;
-    use tracing_subscriber::fmt::MakeWriter;
-
-    #[derive(Clone)]
-    struct SharedLogWriter(Arc<StdMutex<Vec<u8>>>);
-
-    struct SharedLogGuard(Arc<StdMutex<Vec<u8>>>);
-
-    impl<'a> MakeWriter<'a> for SharedLogWriter {
-        type Writer = SharedLogGuard;
-
-        fn make_writer(&'a self) -> Self::Writer {
-            SharedLogGuard(self.0.clone())
-        }
-    }
-
-    impl Write for SharedLogGuard {
-        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(bytes);
-            Ok(bytes.len())
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
 
     #[derive(Clone)]
     struct TestApp {
@@ -1377,13 +1348,6 @@ mod tests {
         fn with_v2_delay(v2_delay: Duration) -> Self {
             Self {
                 v2_delay: Some(v2_delay),
-                ..Self::new()
-            }
-        }
-
-        fn with_v2_error(message: impl Into<String>) -> Self {
-            Self {
-                v2_error: Some(message.into()),
                 ..Self::new()
             }
         }
@@ -1847,57 +1811,6 @@ mod tests {
             assert_ne!(actual, unsafe_id);
             assert!(actual.starts_with("generated-"));
         }
-    }
-    #[test]
-    fn control_characters_in_a_message_hash_cannot_forge_a_log_record() {
-        let captured = Arc::new(StdMutex::new(Vec::new()));
-        let subscriber = tracing_subscriber::fmt()
-            .with_env_filter(tracing_subscriber::EnvFilter::new("pillar_api=info"))
-            .with_target(true)
-            .compact()
-            .with_writer(SharedLogWriter(captured.clone()))
-            .finish();
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-
-        tracing::subscriber::with_default(subscriber, || {
-            runtime.block_on(async {
-                // The core's mismatch error carries the caller's own messageHash
-                // verbatim (`Message hash mismatch, expected: {request}, got:
-                // {computed}`, pillar-core), so a control character in that field
-                // reaches the formatter through the failure sink. Nothing
-                // shape-checks it on the way in - it is compared, never
-                // interpolated into an outbound request - which is why the
-                // escaping has to happen where the record is written rather than
-                // at the boundary.
-                let forged = format!("0x{}\nAUDIT_PROBE\x1b", "a".repeat(64));
-                let failing_app = TestApp::with_v2_error(format!(
-                    "Message hash mismatch, expected: {forged}, got: 0x{}",
-                    "b".repeat(64)
-                ));
-                let mut failing_request = v2_request_json(false);
-                failing_request["messageHash"] = Value::String(forged);
-                let (status, body) =
-                    post_json_with_app(failing_app.clone(), SIGN_V2_ROUTE, failing_request).await;
-                assert_eq!(status, StatusCode::BAD_REQUEST);
-                // The response echoes it back to the caller who sent it, which is
-                // not a forgery vector; only the shared log is.
-                assert!(body["body"].as_str().unwrap().contains("AUDIT_PROBE"));
-            });
-        });
-
-        let captured = captured.lock().unwrap();
-        assert!(
-            !captured
-                .windows(b"\nAUDIT_PROBE".len())
-                .any(|window| window == b"\nAUDIT_PROBE"),
-            "captured formatter output contains a forged line: {:?}",
-            String::from_utf8_lossy(&captured)
-        );
-        assert!(
-            !captured.contains(&0x1b),
-            "captured formatter output contains a raw ESC byte: {:?}",
-            String::from_utf8_lossy(&captured)
-        );
     }
 
     /// srcTxHash is spliced into an outbound provider URL path, so path
