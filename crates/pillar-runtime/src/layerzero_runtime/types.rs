@@ -60,11 +60,29 @@ pub struct RuntimeRpcValidationChecks<T> {
     pub(super) rank_tracker: Arc<ProviderRankTracker>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// `Debug` by hand, for the same reason as `pillar_config::RuntimeConfig`, from
+/// which this is copied: `request_auth_token` is the bearer credential this
+/// service presents to the operator's extra-context endpoint, and the derived
+/// `Debug` printed it.
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct RuntimeExtraContextConfig {
     pub request_url: Option<String>,
     pub request_auth_token: Option<String>,
     pub aws_lambda_name: Option<String>,
+}
+
+impl std::fmt::Debug for RuntimeExtraContextConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RuntimeExtraContextConfig")
+            .field("request_url", &self.request_url)
+            .field(
+                "request_auth_token",
+                &self.request_auth_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field("aws_lambda_name", &self.aws_lambda_name)
+            .finish()
+    }
 }
 
 impl RuntimeExtraContextConfig {

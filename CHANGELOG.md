@@ -100,6 +100,25 @@ the Prometheus metric names.
   outbound client stacks - the server speaks plain HTTP - so the practical
   exposure was a peer we dial sending handshake messages in plaintext that
   should have been encrypted, with the transcript still authenticated.
+- Bearer credentials no longer reach a derived `Debug`. `RuntimeConfig` held
+  both `PILLAR_API_AUTH_TOKENS` and `EXTRA_CONTEXT_REQUEST_AUTH_TOKEN` as plain
+  strings behind `#[derive(Debug)]`, and `RuntimeExtraContextConfig` held a copy
+  of the latter, so one `{:?}` on a startup or validation error path would have
+  written them to the log. Both now write `Debug` by hand and print
+  `<redacted>`, keeping presence, token count and the endpoint URL - the
+  question an operator actually debugs. Nothing was found printing them today;
+  this closes the route rather than a leak. Two tests assert the redaction and
+  were proven to fail when only the hand-written `Debug` is reverted.
+- The BIP-39 phrase is held in `Zeroizing<String>` in all three types that own
+  one - `pillar_config::Mnemonic`, `pillar_signer::LocalMnemonic` and the AWS
+  Secrets Manager payload - so it is wiped on drop instead of staying resident
+  for the process lifetime behind a long-lived signer adapter. This is a partial
+  mitigation and worth stating as one: `serde_json` allocates its own
+  intermediate while parsing the wallet JSON, and the process environment block
+  that carried it is outside these types' control. `Zeroizing`'s own `Debug` is
+  derived and prints the inner value, so the hand-written `Debug` impls remain
+  what redacts. A compile-time guard in the signer's redaction test fails to
+  build if the field reverts to a plain `String`.
 
 ## 2.3.0 - 2026-09-12
 

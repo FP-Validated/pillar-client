@@ -1,4 +1,5 @@
 use super::*;
+use zeroize::Zeroizing;
 
 pub(super) fn config_wallet_json(name: &str, chain_type: &str, secret_name: &str) -> String {
     format!(
@@ -89,8 +90,9 @@ async fn aws_mnemonic_signer_assembly_loads_wallet_secrets_like_typescript() {
             secrets: HashMap::from([(
                 "secret-a".to_string(),
                 SignerLocalMnemonic {
-                    mnemonic: "test test test test test test test test test test test junk"
-                        .to_string(),
+                    mnemonic: Zeroizing::new(
+                        "test test test test test test test test test test test junk".to_string(),
+                    ),
                     path: "m/44'/60'/0'/0/0".to_string(),
                 },
             )]),

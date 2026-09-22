@@ -109,4 +109,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 url = "2.5"
 # Already compiled in the graph via aws-config and the elliptic-curve stack, so
 # depending on it directly adds no new supply-chain surface.
-zeroize = "1.9"
+# `serde` is enabled so a `Zeroizing<String>` secret can be deserialized
+# directly: serde is already in the graph, so this adds impls, not crates.
+zeroize = { version = "1.9", features = ["serde"] }

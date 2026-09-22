@@ -17,7 +17,7 @@ pub struct AwsSecretsManagerMnemonicClient {
 #[derive(Deserialize)]
 pub(crate) struct AwsMnemonicSecret {
     #[serde(rename = "LAYERZERO_WALLET_MNEMONIC")]
-    mnemonic: String,
+    mnemonic: zeroize::Zeroizing<String>,
     #[serde(rename = "LAYERZERO_WALLET_PATH")]
     path: String,
 }

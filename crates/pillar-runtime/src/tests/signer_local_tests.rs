@@ -1,4 +1,5 @@
 use super::*;
+use zeroize::Zeroizing;
 
 #[test]
 fn runtime_signer_config_loads_local_mnemonic_files_before_inline_env() {
@@ -65,7 +66,7 @@ fn runtime_signer_config_loads_local_mnemonic_files_before_inline_env() {
     assert!(!wallet_to_mnemonic_map.contains_key("wallet-inline-EVM"));
     let signer_mnemonics = signer_local_mnemonic_map_from_config(&wallet_to_mnemonic_map);
     assert_eq!(
-        signer_mnemonics["wallet-file-SOLANA"].mnemonic,
+        signer_mnemonics["wallet-file-SOLANA"].mnemonic.as_str(),
         "file mnemonic"
     );
     assert_eq!(
@@ -227,7 +228,7 @@ fn debug_never_prints_a_mnemonic_phrase_anywhere_in_the_signer_wiring() {
         wallet_to_mnemonic_map: HashMap::from([(
             "wallet-a-EVM".to_string(),
             pillar_config::Mnemonic {
-                mnemonic: PHRASE.to_string(),
+                mnemonic: Zeroizing::new(PHRASE.to_string()),
                 path: "m/44'/60'/0'/0/0".to_string(),
             },
         )]),

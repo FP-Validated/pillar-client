@@ -5,7 +5,9 @@ use crate::{PublicKeyRequest, RawSignerAdapter, SeedKind, SignRequest, Signature
 #[tokio::test]
 async fn local_mnemonic_ecdsa_public_key_matches_typescript_vector() {
     let signer = LocalMnemonicRawSignerAdapter::new(LocalMnemonic {
-        mnemonic: "test test test test test test test test test test test junk".to_string(),
+        mnemonic: Zeroizing::new(
+            "test test test test test test test test test test test junk".to_string(),
+        ),
         path: "m/44'/60'/0'/0/0".to_string(),
     });
 
@@ -31,7 +33,9 @@ async fn local_mnemonic_ecdsa_public_key_matches_typescript_vector() {
 #[tokio::test]
 async fn local_mnemonic_ecdsa_signature_matches_typescript_vector() {
     let signer = LocalMnemonicRawSignerAdapter::new(LocalMnemonic {
-        mnemonic: "test test test test test test test test test test test junk".to_string(),
+        mnemonic: Zeroizing::new(
+            "test test test test test test test test test test test junk".to_string(),
+        ),
         path: "m/44'/60'/0'/0/0".to_string(),
     });
     let data =
@@ -61,7 +65,9 @@ async fn local_mnemonic_ecdsa_signature_matches_typescript_vector() {
 #[tokio::test]
 async fn local_mnemonic_ecdsa_can_apply_recovery_id_transform() {
     let signer = LocalMnemonicRawSignerAdapter::new(LocalMnemonic {
-        mnemonic: "test test test test test test test test test test test junk".to_string(),
+        mnemonic: Zeroizing::new(
+            "test test test test test test test test test test test junk".to_string(),
+        ),
         path: "m/44'/60'/0'/0/0".to_string(),
     });
     let data =
@@ -84,7 +90,9 @@ async fn local_mnemonic_ecdsa_can_apply_recovery_id_transform() {
 #[tokio::test]
 async fn local_mnemonic_ed25519_public_key_matches_typescript_vector() {
     let signer = LocalMnemonicRawSignerAdapter::new(LocalMnemonic {
-        mnemonic: "test test test test test test test test test test test junk".to_string(),
+        mnemonic: Zeroizing::new(
+            "test test test test test test test test test test test junk".to_string(),
+        ),
         path: "m/44'/501'/0'/0'".to_string(),
     });
 
@@ -106,7 +114,9 @@ async fn local_mnemonic_ed25519_public_key_matches_typescript_vector() {
 #[tokio::test]
 async fn local_mnemonic_ed25519_signature_matches_typescript_vector() {
     let signer = LocalMnemonicRawSignerAdapter::new(LocalMnemonic {
-        mnemonic: "test test test test test test test test test test test junk".to_string(),
+        mnemonic: Zeroizing::new(
+            "test test test test test test test test test test test junk".to_string(),
+        ),
         path: "m/44'/501'/0'/0'".to_string(),
     });
     let data =
@@ -135,7 +145,9 @@ async fn local_mnemonic_ed25519_signature_matches_typescript_vector() {
 #[tokio::test]
 async fn local_mnemonic_ed25519_private_key_can_feed_legacy_ecdsa_mode() {
     let signer = LocalMnemonicRawSignerAdapter::new(LocalMnemonic {
-        mnemonic: "test test test test test test test test test test test junk".to_string(),
+        mnemonic: Zeroizing::new(
+            "test test test test test test test test test test test junk".to_string(),
+        ),
         path: "m/44'/501'/0'/0'".to_string(),
     });
     let public_key = signer
@@ -182,7 +194,9 @@ async fn local_mnemonic_ed25519_private_key_can_feed_legacy_ecdsa_mode() {
 #[tokio::test]
 async fn local_mnemonic_ton_seed_public_key_matches_typescript_vector() {
     let signer = LocalMnemonicRawSignerAdapter::new(LocalMnemonic {
-        mnemonic: "test test test test test test test test test test test junk".to_string(),
+        mnemonic: Zeroizing::new(
+            "test test test test test test test test test test test junk".to_string(),
+        ),
         path: "m/44'/607'/0'".to_string(),
     });
 
@@ -220,7 +234,9 @@ async fn local_mnemonic_ton_seed_public_key_matches_typescript_vector() {
 #[tokio::test]
 async fn local_mnemonic_rejects_ecdsa_private_key_for_ed25519_signature_like_typescript() {
     let signer = LocalMnemonicRawSignerAdapter::new(LocalMnemonic {
-        mnemonic: "test test test test test test test test test test test junk".to_string(),
+        mnemonic: Zeroizing::new(
+            "test test test test test test test test test test test junk".to_string(),
+        ),
         path: "m/44'/60'/0'/0/0".to_string(),
     });
 
@@ -246,7 +262,7 @@ async fn local_mnemonic_rejects_ecdsa_private_key_for_ed25519_signature_like_typ
 fn debug_never_prints_the_mnemonic_phrase() {
     const PHRASE: &str = "test test test test test test test test test test test junk";
     let mnemonic = LocalMnemonic {
-        mnemonic: PHRASE.to_string(),
+        mnemonic: Zeroizing::new(PHRASE.to_string()),
         path: "m/44'/60'/0'/0/0".to_string(),
     };
 
@@ -276,4 +292,15 @@ fn debug_never_prints_the_mnemonic_phrase() {
         !rendered.contains("junk"),
         "factory Debug leaked the phrase: {rendered}"
     );
+
+    // The phrase must also not outlive the struct in freed heap memory. Wiping
+    // cannot be observed safely once the allocation is gone, so what is checked
+    // is the property that guarantees it: reverting the field to a plain
+    // `String` fails to compile here.
+    fn assert_wiped_on_drop<T: zeroize::ZeroizeOnDrop>(_: &T) {}
+    let mnemonic = LocalMnemonic {
+        mnemonic: Zeroizing::new(PHRASE.to_string()),
+        path: "m/44'/60'/0'/0/0".to_string(),
+    };
+    assert_wiped_on_drop(&mnemonic.mnemonic);
 }

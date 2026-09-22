@@ -3,6 +3,7 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, env, fs, path::Path};
 use url::{Host, Url};
+use zeroize::Zeroizing;
 
 mod generated_layerzero_environment;
 mod generated_layerzero_evm;
@@ -124,7 +125,14 @@ impl ProviderConfigType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// `Debug` by hand, for the same reason as [`Mnemonic`]: this type carries two
+/// bearer credentials - `EXTRA_CONTEXT_REQUEST_AUTH_TOKEN`, which authenticates
+/// this service to the operator's policy endpoint, and `PILLAR_API_AUTH_TOKENS`,
+/// which authenticates callers to it. The derived `Debug` printed both, so one
+/// `{:?}` on a startup error path would have written them to the log. Presence
+/// and count are kept, because "is a token configured" is the question an
+/// operator actually debugs.
+#[derive(Clone, PartialEq, Eq)]
 pub struct RuntimeConfig {
     pub server_port: u16,
     pub provider_config_type: ProviderConfigType,
@@ -141,6 +149,49 @@ pub struct RuntimeConfig {
     pub public_sign_routes: bool,
     pub max_connections: usize,
     pub shutdown_grace_seconds: u64,
+}
+
+/// Rendered in place of a secret. Shared so a reader can grep one spelling.
+pub(crate) const REDACTED: &str = "<redacted>";
+
+fn redacted_option(value: Option<&String>) -> &'static str {
+    if value.is_some() {
+        REDACTED
+    } else {
+        "None"
+    }
+}
+
+impl std::fmt::Debug for RuntimeConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RuntimeConfig")
+            .field("server_port", &self.server_port)
+            .field("provider_config_type", &self.provider_config_type)
+            .field("environment", &self.environment)
+            .field("available_chain_names", &self.available_chain_names)
+            .field("supported_uln_versions", &self.supported_uln_versions)
+            .field("debug_mode", &self.debug_mode)
+            .field("extra_context_request_url", &self.extra_context_request_url)
+            .field(
+                "extra_context_request_auth_token",
+                &redacted_option(self.extra_context_request_auth_token.as_ref()),
+            )
+            .field(
+                "extra_context_aws_lambda_name",
+                &self.extra_context_aws_lambda_name,
+            )
+            .field("image_version", &self.image_version)
+            .field(
+                "api_auth_tokens",
+                &format_args!("{REDACTED} x{}", self.api_auth_tokens.len()),
+            )
+            .field("api_auth_enabled", &self.api_auth_enabled)
+            .field("public_sign_routes", &self.public_sign_routes)
+            .field("max_connections", &self.max_connections)
+            .field("shutdown_grace_seconds", &self.shutdown_grace_seconds)
+            .finish()
+    }
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -584,17 +635,24 @@ pub struct WalletDefinition {
     pub wallet_restrictions: Option<serde_json::Value>,
 }
 
-/// `Deserialize` only, and `Debug` by hand.
+/// `Deserialize` only, `Debug` by hand, and the phrase held in `Zeroizing`.
 ///
 /// This used to derive both `Debug` and `Serialize` over a plaintext BIP-39
 /// phrase, so a single `{:?}` or `tracing::debug!(?wallet)` added anywhere -
 /// including inside an error context - would have printed the signing key's
 /// seed phrase into the operational log. Nothing serialized it; the JSON in
 /// `LZ_WALLET_MNEMONIC_MAPPING` only ever needs to be read.
+///
+/// `Zeroizing` wipes this copy on drop, so the phrase stops being resident for
+/// the process lifetime. It is a partial mitigation and worth stating as one:
+/// `serde_json` allocates its own intermediate while parsing, and the process
+/// environment block that carried the JSON is outside this type's control.
+/// Note also that `Zeroizing`'s own `Debug` is derived and prints the inner
+/// value, so the hand-written `Debug` below is still what redacts.
 #[derive(Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Mnemonic {
-    pub mnemonic: String,
+    pub mnemonic: Zeroizing<String>,
     pub path: String,
 }
 
@@ -602,7 +660,7 @@ impl std::fmt::Debug for Mnemonic {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("Mnemonic")
-            .field("mnemonic", &"<redacted>")
+            .field("mnemonic", &REDACTED)
             .field("path", &self.path)
             .finish()
     }
@@ -2394,7 +2452,7 @@ mod tests {
             r#"{"wallet-a-EVM":{"mnemonic":"test","path":"m/44'/60'/0'/0/0"}}"#.to_string(),
         )]))
         .unwrap();
-        assert_eq!(map["wallet-a-EVM"].mnemonic, "test");
+        assert_eq!(map["wallet-a-EVM"].mnemonic.as_str(), "test");
         assert_eq!(map["wallet-a-EVM"].path, "m/44'/60'/0'/0/0");
 
         let err = wallet_to_mnemonic_map_from_env_map(&HashMap::from([(
@@ -2700,5 +2758,40 @@ mod auth_config_tests {
             load_from_map(base(&[(PILLAR_SHUTDOWN_GRACE_SECONDS, "bad")])),
             Err(ConfigError::InvalidShutdownGraceSeconds(_))
         ));
+    }
+
+    #[test]
+    fn runtime_config_debug_redacts_both_bearer_credentials() {
+        const API_TOKEN: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        const EXTRA_TOKEN: &str = "extra-context-bearer-secret";
+        let config = load_from_map(base(&[
+            (PILLAR_API_AUTH_TOKENS, API_TOKEN),
+            (EXTRA_CONTEXT_REQUEST_URL, "https://policy.example.com"),
+            (EXTRA_CONTEXT_REQUEST_AUTH_TOKEN, EXTRA_TOKEN),
+        ]))
+        .unwrap();
+        // Sanity: the values really are in the struct, so the assertions below
+        // are about the rendering and not about a config that never loaded.
+        assert_eq!(config.api_auth_tokens, vec![API_TOKEN.to_string()]);
+        assert_eq!(
+            config.extra_context_request_auth_token.as_deref(),
+            Some(EXTRA_TOKEN)
+        );
+
+        let rendered = format!("{config:?}");
+        assert!(
+            !rendered.contains(API_TOKEN),
+            "RuntimeConfig Debug leaked a caller bearer token: {rendered}"
+        );
+        assert!(
+            !rendered.contains(EXTRA_TOKEN),
+            "RuntimeConfig Debug leaked the extra-context bearer token: {rendered}"
+        );
+        // Still usable for the question an operator debugs.
+        assert!(
+            rendered.contains("api_auth_tokens: <redacted> x1")
+                && rendered.contains("https://policy.example.com"),
+            "Debug must still report token presence and the endpoint: {rendered}"
+        );
     }
 }

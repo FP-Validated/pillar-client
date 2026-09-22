@@ -12,7 +12,9 @@ async fn local_mnemonic_factory_uses_typescript_wallet_chain_key() {
     let factory = LocalMnemonicRawSignerAdapterFactory::new(HashMap::from([(
         "wallet-a-EVM".to_string(),
         LocalMnemonic {
-            mnemonic: "test test test test test test test test test test test junk".to_string(),
+            mnemonic: Zeroizing::new(
+                "test test test test test test test test test test test junk".to_string(),
+            ),
             path: "m/44'/60'/0'/0/0".to_string(),
         },
     )]));

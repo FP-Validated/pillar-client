@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use std::{collections::HashMap, sync::Arc};
+use zeroize::Zeroizing;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SignatureType {
@@ -52,9 +53,12 @@ pub trait RawSignerAdapter: Send + Sync + 'static {
 /// `Debug` by hand: the derived one printed the plaintext BIP-39 phrase, so any
 /// `{:?}` reachable from this type - or from the adapters and factories that own
 /// it - would have written the signing key's seed phrase to the log.
+/// `Zeroizing`'s own `Debug` is derived and prints the inner value, so it does
+/// not replace that; what it adds is wiping this copy on drop, so the phrase is
+/// not resident for the process lifetime behind a long-lived adapter.
 #[derive(Clone, PartialEq, Eq)]
 pub struct LocalMnemonic {
-    pub mnemonic: String,
+    pub mnemonic: Zeroizing<String>,
     pub path: String,
 }
 

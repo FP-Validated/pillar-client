@@ -28,6 +28,21 @@ fn runtime_extra_context_config_builds_from_runtime_config() {
             aws_lambda_name: None,
         }
     );
+
+    // The token is copied verbatim into the struct, so it is exactly the value
+    // a `{:?}` would have printed before the hand-written `Debug`.
+    let rendered = format!(
+        "{:?}",
+        RuntimeExtraContextConfig::from_runtime_config(&runtime_config)
+    );
+    assert!(
+        !rendered.contains("secret-token"),
+        "RuntimeExtraContextConfig Debug leaked the bearer token: {rendered}"
+    );
+    assert!(
+        rendered.contains("<redacted>") && rendered.contains("https://policy.example/extra"),
+        "Debug must still report token presence and the endpoint: {rendered}"
+    );
 }
 
 #[tokio::test]
