@@ -488,6 +488,93 @@ async fn payload_signed_refuses_a_receiver_that_is_not_a_padded_evm_address() {
     );
 }
 
+/// A chain-native V2 message has no duplicate-signature subject until the caller
+/// supplies its DVN address. The missing-address path therefore skips all Move
+/// RPCs, matching the upstream gate at apps/gasolina/src/app/app.ts:494.
+#[tokio::test]
+async fn payload_signed_skips_move_validation_without_a_dvn_address() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let checks = aptos_payload_checks(Vec::new(), calls.clone());
+    let mut event = payload_signed_sent_event();
+    event.lz_message_id.pathway_id.dst_chain_name = "aptos".to_string();
+
+    checks
+        .validate_payload_not_signed(&event, None, "aptos")
+        .await
+        .expect("a Move V2 payload without a verifier address is not a refusal");
+
+    assert!(
+        calls.lock().unwrap().is_empty(),
+        "missing verifier address must skip every chain-native RPC call"
+    );
+}
+
+/// Supplying the address restores the chain-native duplicate-signature query;
+/// the skip above must not turn into a blanket bypass for Move destinations.
+#[tokio::test]
+async fn payload_signed_queries_move_validation_with_a_dvn_address() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let checks = aptos_payload_checks(
+        vec![
+            Ok(json!(["0x0000000000000002"])),
+            Ok(json!([0])),
+            Ok(json!([1])),
+        ],
+        calls.clone(),
+    );
+    let mut event = payload_signed_sent_event();
+    event.lz_message_id.pathway_id.dst_chain_name = "aptos".to_string();
+
+    checks
+        .validate_payload_not_signed(&event, Some("0xdvn"), "aptos")
+        .await
+        .expect("an unsigned Move V2 payload must pass validation");
+
+    let calls = calls.lock().unwrap();
+    assert_eq!(
+        calls.len(),
+        3,
+        "the Move validation query must run: {calls:?}"
+    );
+    assert_eq!(calls[0].2["function"], "0xendpoint::endpoint::get_config");
+    assert_eq!(calls[1].2["function"], "0xviews::uln_302::verifiable");
+    assert_eq!(
+        calls[2].2["function"],
+        "0xuln302::msglib::get_verification_confirmations"
+    );
+}
+
+fn aptos_payload_checks(
+    responses: Vec<Result<Value, String>>,
+    calls: RecordedJsonCalls,
+) -> RuntimeRpcValidationChecks<RecordingTransport> {
+    let getter = pillar_config::StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "aptos".to_string(),
+            pillar_config::ProviderConfig {
+                uris: vec![pillar_config::ProviderUri::Uri(
+                    "https://aptos-rpc.example/".to_string(),
+                )],
+                quorum: Some(1),
+            },
+        )]),
+        Some(&["aptos".to_string()]),
+    )
+    .unwrap();
+    RuntimeRpcValidationChecks::from_getter(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        RecordingTransport {
+            calls,
+            responses: Arc::new(Mutex::new(responses)),
+        },
+    )
+    .with_move_payload_contracts(
+        HashMap::from([("aptos".to_string(), "0xendpoint".to_string())]),
+        HashMap::from([("aptos".to_string(), "0xuln302".to_string())]),
+        HashMap::from([("aptos".to_string(), "0xviews".to_string())]),
+    )
+}
+
 type QueuedEthCallsByUrl = Arc<Mutex<HashMap<String, Vec<Result<Value, String>>>>>;
 
 #[derive(Clone)]

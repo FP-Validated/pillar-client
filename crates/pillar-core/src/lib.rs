@@ -896,7 +896,7 @@ fn validate_destination_prerequisites(
             }
         )
     {
-        return Err(AppCoreError::Internal(
+        return Err(AppCoreError::BadRequest(
             "Solana: DVN Address is required for verify payload".to_string(),
         ));
     }
@@ -1663,7 +1663,7 @@ mod tests {
         let err = app.sign_request_v2(request).await.unwrap_err();
         assert_eq!(
             err,
-            AppCoreError::Internal(
+            AppCoreError::BadRequest(
                 "Solana: DVN Address is required for verify payload".to_string()
             )
         );

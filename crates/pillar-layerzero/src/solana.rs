@@ -30,7 +30,9 @@ impl SolanaUlnPayloadBuilder {
         dvn_address: Option<&str>,
     ) -> Result<HashCallDataResult, AppCoreError> {
         let dvn_address = dvn_address.ok_or_else(|| {
-            AppCoreError::Internal("Solana: DVN Address is required for verify payload".to_string())
+            AppCoreError::BadRequest(
+                "Solana: DVN Address is required for verify payload".to_string(),
+            )
         })?;
         let dst_eid = extra_u64(sent_event, "dstEid")?;
         let uln_send_version = uln_send_version_string(&sent_event.lz_message_id.uln_send_version)?;

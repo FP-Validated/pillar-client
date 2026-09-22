@@ -158,7 +158,7 @@ where
         dvn_address: Option<&str>,
     ) -> Result<pillar_core::HashCallDataResult, AppCoreError> {
         let dvn_address = dvn_address.ok_or_else(|| {
-            AppCoreError::Internal("TON DVN verify requires a dvnAddress".to_string())
+            AppCoreError::BadRequest("TON DVN verify requires a dvnAddress".to_string())
         })?;
         let dst_chain_name = sent_event.lz_message_id.pathway_id.dst_chain_name.clone();
         let target = self.resolve_target(&dst_chain_name, dvn_address).await?;

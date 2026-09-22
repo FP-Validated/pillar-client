@@ -489,27 +489,34 @@ fn validate_v2_request_shape(value: &Value) -> Result<(), AppError> {
             missing_fields.push(field.to_string());
         }
     }
-    for field in ["srcTxHash", "messageHash"] {
-        if let Some(present) = value.get(field).filter(|value| !value.is_null()) {
-            match present.as_str() {
-                None => invalid_fields.push(format!("{field}: expected a string")),
-                // `srcTxHash` is spliced into the path of an outbound GET against
-                // the operator's own node (the Move transaction fetch and the TON
-                // trace fetch), so `..`, `?` and `#` used to re-target that request
-                // to another path, query or fragment on the same host, carrying the
-                // provider's configured API-key header. Being a string was the only
-                // check it had. The character set below is the union of what every
-                // supported chain's transaction id can be - hex with an optional
-                // `0x`, plus base58/base64url for the non-EVM families - and it
-                // excludes every path metacharacter.
-                Some(hash) if field == "srcTxHash" && !is_transaction_id_shaped(hash) => {
-                    invalid_fields.push(format!(
-                        "{field}: expected 1-128 characters of [0-9a-zA-Z_-] with an optional 0x prefix"
-                    ));
-                }
-                Some(_) => {}
+    // `srcTxHash` is spliced into the path of an outbound GET against the
+    // operator's own node (the Move transaction fetch and the TON trace fetch),
+    // so `..`, `?` and `#` used to re-target that request to another path, query
+    // or fragment on the same host, carrying the provider's configured API-key
+    // header. Being a string was the only check it had. The character set below
+    // is the union of what every supported chain's transaction id can be - hex
+    // with an optional `0x`, plus base58/base64url for the non-EVM families -
+    // and it excludes every path metacharacter. `messageHash` deliberately has
+    // no such gate: it is compared, never interpolated into a request, and the
+    // log-forgery route it once offered is closed where the record is written.
+    if let Some(present) = value.get("srcTxHash").filter(|value| !value.is_null()) {
+        match present.as_str() {
+            None => invalid_fields.push("srcTxHash: expected a string".to_string()),
+            Some(hash) if !is_transaction_id_shaped(hash) => {
+                invalid_fields.push(
+                    "srcTxHash: expected 1-128 characters of [0-9a-zA-Z_-] with an optional 0x prefix"
+                        .to_string(),
+                );
             }
+            Some(_) => {}
         }
+    }
+    if value
+        .get("messageHash")
+        .filter(|value| !value.is_null())
+        .is_some_and(|present| !present.is_string())
+    {
+        invalid_fields.push("messageHash: expected a string".to_string());
     }
 
     if let Some(message_id) = value.get("lzMessageId") {
@@ -710,12 +717,13 @@ async fn sign_v2(
             body
         }
         Err(error) => {
+            let safe_error = obfuscate_urls(&error.to_string());
             tracing::warn!(
                 src_chain = %src_chain,
                 dst_chain = %dst_chain,
                 nonce,
                 uln_send_version = %uln_send_version,
-                error = %error,
+                error = ?safe_error,
                 "sign request failed"
             );
             return Err(error);
@@ -1316,14 +1324,44 @@ mod tests {
     use pillar_core::{
         LegacyLzMessageId, PillarApiRequestV1, PillarApiRequestV2, PillarApiResponse, Signature,
     };
-    use std::time::Duration;
+    use std::{
+        io::{self, Write},
+        sync::Mutex as StdMutex,
+        time::Duration,
+    };
     use tower::ServiceExt;
+    use tracing_subscriber::fmt::MakeWriter;
+
+    #[derive(Clone)]
+    struct SharedLogWriter(Arc<StdMutex<Vec<u8>>>);
+
+    struct SharedLogGuard(Arc<StdMutex<Vec<u8>>>);
+
+    impl<'a> MakeWriter<'a> for SharedLogWriter {
+        type Writer = SharedLogGuard;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            SharedLogGuard(self.0.clone())
+        }
+    }
+
+    impl Write for SharedLogGuard {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
 
     #[derive(Clone)]
     struct TestApp {
         v1_requests: Arc<Mutex<Vec<PillarApiRequestV1>>>,
         v2_requests: Arc<Mutex<Vec<PillarApiRequestV2>>>,
         v2_delay: Option<Duration>,
+        v2_error: Option<String>,
     }
 
     impl TestApp {
@@ -1332,12 +1370,20 @@ mod tests {
                 v1_requests: Arc::new(Mutex::new(Vec::new())),
                 v2_requests: Arc::new(Mutex::new(Vec::new())),
                 v2_delay: None,
+                v2_error: None,
             }
         }
 
         fn with_v2_delay(v2_delay: Duration) -> Self {
             Self {
                 v2_delay: Some(v2_delay),
+                ..Self::new()
+            }
+        }
+
+        fn with_v2_error(message: impl Into<String>) -> Self {
+            Self {
+                v2_error: Some(message.into()),
                 ..Self::new()
             }
         }
@@ -1359,6 +1405,9 @@ mod tests {
         ) -> Result<PillarApiResponse, AppError> {
             if let Some(delay) = self.v2_delay {
                 tokio::time::sleep(delay).await;
+            }
+            if let Some(error) = &self.v2_error {
+                return Err(AppError::BadRequest(error.clone()));
             }
             self.v2_requests.lock().await.push(input);
             Ok(response_body())
@@ -1799,6 +1848,58 @@ mod tests {
             assert!(actual.starts_with("generated-"));
         }
     }
+    #[test]
+    fn control_characters_in_a_message_hash_cannot_forge_a_log_record() {
+        let captured = Arc::new(StdMutex::new(Vec::new()));
+        let subscriber = tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::new("pillar_api=info"))
+            .with_target(true)
+            .compact()
+            .with_writer(SharedLogWriter(captured.clone()))
+            .finish();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+
+        tracing::subscriber::with_default(subscriber, || {
+            runtime.block_on(async {
+                // The core's mismatch error carries the caller's own messageHash
+                // verbatim (`Message hash mismatch, expected: {request}, got:
+                // {computed}`, pillar-core), so a control character in that field
+                // reaches the formatter through the failure sink. Nothing
+                // shape-checks it on the way in - it is compared, never
+                // interpolated into an outbound request - which is why the
+                // escaping has to happen where the record is written rather than
+                // at the boundary.
+                let forged = format!("0x{}\nAUDIT_PROBE\x1b", "a".repeat(64));
+                let failing_app = TestApp::with_v2_error(format!(
+                    "Message hash mismatch, expected: {forged}, got: 0x{}",
+                    "b".repeat(64)
+                ));
+                let mut failing_request = v2_request_json(false);
+                failing_request["messageHash"] = Value::String(forged);
+                let (status, body) =
+                    post_json_with_app(failing_app.clone(), SIGN_V2_ROUTE, failing_request).await;
+                assert_eq!(status, StatusCode::BAD_REQUEST);
+                // The response echoes it back to the caller who sent it, which is
+                // not a forgery vector; only the shared log is.
+                assert!(body["body"].as_str().unwrap().contains("AUDIT_PROBE"));
+            });
+        });
+
+        let captured = captured.lock().unwrap();
+        assert!(
+            !captured
+                .windows(b"\nAUDIT_PROBE".len())
+                .any(|window| window == b"\nAUDIT_PROBE"),
+            "captured formatter output contains a forged line: {:?}",
+            String::from_utf8_lossy(&captured)
+        );
+        assert!(
+            !captured.contains(&0x1b),
+            "captured formatter output contains a raw ESC byte: {:?}",
+            String::from_utf8_lossy(&captured)
+        );
+    }
+
     /// srcTxHash is spliced into an outbound provider URL path, so path
     /// metacharacters must be refused at the boundary rather than reaching a transport.
     #[test]

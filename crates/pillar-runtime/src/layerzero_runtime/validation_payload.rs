@@ -24,63 +24,22 @@ where
         if !sent_event.extra.contains_key("guid") {
             return Ok(());
         }
-        let required_verifier_address = || {
-            verifier_address.ok_or_else(|| {
-                AppCoreError::BadRequest(
-                    "dvnAddress is required for chain-native payload validation".to_string(),
-                )
-            })
-        };
-
-        if dst_chain_name == "solana" {
+        if is_chain_native_payload_signed_destination(dst_chain_name) {
+            // Without an address the question "has this DVN already signed?" has no
+            // subject, so skip the caller-selected duplicate query rather than refuse
+            // the request. Upstream gates the same call at apps/gasolina/src/app/app.ts:494.
+            // The EVM arm below is different: its receive-library resolution needs no
+            // address, so it remains unconditional.
+            let Some(verifier_address) = verifier_address else {
+                return Ok(());
+            };
             return self
-                .validate_solana_payload_not_signed_with_quorum(
+                .validate_chain_native_payload_not_signed_with_quorum(
                     sent_event,
-                    required_verifier_address()?,
+                    verifier_address,
                     dst_chain_name,
                 )
                 .await;
-        }
-        if matches!(dst_chain_name, "aptos" | "initia" | "movement") {
-            return self
-                .validate_move_payload_not_signed_with_quorum(
-                    sent_event,
-                    required_verifier_address()?,
-                    dst_chain_name,
-                )
-                .await;
-        }
-        if dst_chain_name == "starknet" {
-            return self
-                .validate_starknet_payload_not_signed_with_quorum(
-                    sent_event,
-                    required_verifier_address()?,
-                    dst_chain_name,
-                )
-                .await;
-        }
-        if dst_chain_name == "ton" {
-            return self
-                .validate_ton_payload_not_signed_with_quorum(
-                    sent_event,
-                    required_verifier_address()?,
-                    dst_chain_name,
-                )
-                .await;
-        }
-        if matches!(dst_chain_name, "sui" | "iotal1") {
-            return self
-                .validate_sui_payload_not_signed_with_quorum(
-                    sent_event,
-                    required_verifier_address()?,
-                    dst_chain_name,
-                )
-                .await;
-        }
-        if dst_chain_name == "stellar" {
-            return Err(AppCoreError::Internal(format!(
-                "Chain-native payload-signed validation is unavailable for {dst_chain_name}"
-            )));
         }
 
         let snapshot = self.providers.load();
@@ -145,6 +104,65 @@ where
             resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context).await?;
 
         payload_signed_validation_result(agreed_validity, sent_event, dst_chain_name)
+    }
+
+    async fn validate_chain_native_payload_not_signed_with_quorum(
+        &self,
+        sent_event: &LzSentEvent,
+        verifier_address: &str,
+        dst_chain_name: &str,
+    ) -> Result<(), AppCoreError> {
+        if dst_chain_name == "solana" {
+            return self
+                .validate_solana_payload_not_signed_with_quorum(
+                    sent_event,
+                    verifier_address,
+                    dst_chain_name,
+                )
+                .await;
+        }
+        if matches!(dst_chain_name, "aptos" | "initia" | "movement") {
+            return self
+                .validate_move_payload_not_signed_with_quorum(
+                    sent_event,
+                    verifier_address,
+                    dst_chain_name,
+                )
+                .await;
+        }
+        if dst_chain_name == "starknet" {
+            return self
+                .validate_starknet_payload_not_signed_with_quorum(
+                    sent_event,
+                    verifier_address,
+                    dst_chain_name,
+                )
+                .await;
+        }
+        if dst_chain_name == "ton" {
+            return self
+                .validate_ton_payload_not_signed_with_quorum(
+                    sent_event,
+                    verifier_address,
+                    dst_chain_name,
+                )
+                .await;
+        }
+        if matches!(dst_chain_name, "sui" | "iotal1") {
+            return self
+                .validate_sui_payload_not_signed_with_quorum(
+                    sent_event,
+                    verifier_address,
+                    dst_chain_name,
+                )
+                .await;
+        }
+        if dst_chain_name == "stellar" {
+            return Err(AppCoreError::Internal(format!(
+                "Chain-native payload-signed validation is unavailable for {dst_chain_name}"
+            )));
+        }
+        unreachable!("chain-native destination was not dispatched: {dst_chain_name}");
     }
 
     async fn validate_move_payload_not_signed_with_quorum(
@@ -295,6 +313,21 @@ where
             resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context).await?;
         payload_signed_validation_result(validity, sent_event, dst_chain_name)
     }
+}
+
+fn is_chain_native_payload_signed_destination(dst_chain_name: &str) -> bool {
+    matches!(
+        dst_chain_name,
+        "solana"
+            | "aptos"
+            | "initia"
+            | "movement"
+            | "starknet"
+            | "ton"
+            | "sui"
+            | "iotal1"
+            | "stellar"
+    )
 }
 
 pub(crate) fn payload_signed_validation_result(

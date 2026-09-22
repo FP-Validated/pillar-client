@@ -235,12 +235,43 @@ async fn production_composition_records_every_sign_stage() {
     );
 }
 
+/// One receipt per resolution round. Resolution and readiness each read the
+/// same transaction hash, and every round asks both providers, so the round
+/// only advances after two answers. Running past the last round yields `None`
+/// rather than reusing the final receipt: a test that grew a third read should
+/// fail loudly instead of quietly re-serving round two.
+struct ReceiptRounds {
+    per_round: Vec<Value>,
+    answered: usize,
+}
+
+impl ReceiptRounds {
+    const PROVIDERS_PER_ROUND: usize = 2;
+
+    fn new(per_round: Vec<Value>) -> Self {
+        Self {
+            per_round,
+            answered: 0,
+        }
+    }
+
+    fn answer(&mut self) -> Option<Value> {
+        let receipt = self
+            .per_round
+            .get(self.answered / Self::PROVIDERS_PER_ROUND)
+            .cloned();
+        self.answered += 1;
+        receipt
+    }
+}
+
 /// Answers by JSON-RPC method rather than by call order, so these tests do not
 /// silently encode the sequence the runtime happens to use today. An unstubbed method
 /// is an error naming itself, which is how this fixture set was discovered.
 #[derive(Clone)]
 struct VerticalTransport {
     calls: RecordedJsonCalls,
+    receipt_rounds: Arc<Mutex<Option<ReceiptRounds>>>,
     receipt: Arc<Mutex<Option<Value>>>,
     dst_endpoint_v2: &'static str,
     dst_receive_uln_302: &'static str,
@@ -270,12 +301,14 @@ impl JsonRpcTransport for VerticalTransport {
             };
         }
         match body["method"].as_str().unwrap_or_default() {
-            "eth_getTransactionReceipt" => self
-                .receipt
-                .lock()
-                .unwrap()
-                .clone()
-                .ok_or_else(|| "receipt unavailable".to_string()),
+            "eth_getTransactionReceipt" => {
+                let receipt = if let Some(rounds) = self.receipt_rounds.lock().unwrap().as_mut() {
+                    rounds.answer()
+                } else {
+                    self.receipt.lock().unwrap().clone()
+                };
+                receipt.ok_or_else(|| "receipt unavailable".to_string())
+            }
             "eth_blockNumber" => Ok(json!({"result": "0x64"})),
             "eth_chainId" => Ok(json!({"result": "0x1"})),
             // URL-aware on purpose. Readiness asks the source for "latest" and the
@@ -530,26 +563,57 @@ async fn vertical_app_with_extra_context(
     receipt: Option<Value>,
     extra_context_verdict: bool,
 ) -> (RuntimeServerApp<VerticalTransport>, RecordedJsonCalls) {
+    vertical_app_with_transport(
+        env,
+        vertical_env_map(env),
+        receipt,
+        None,
+        extra_context_verdict,
+    )
+    .await
+}
+
+async fn vertical_app_with_receipt_rounds(
+    env: &VerticalEnvironment,
+    receipts: Vec<Value>,
+) -> (RuntimeServerApp<VerticalTransport>, RecordedJsonCalls) {
+    let mut vars = vertical_env_map(env);
+    vars.insert(
+        LZ_PROVIDER_CONFIG.to_string(),
+        format!(
+            r#"{{"{}":{{"uris":["https://src-rpc-a.example","https://src-rpc-b.example"],"quorum":2}},"{}":{{"uris":["https://dst-rpc.example"],"quorum":1}}}}"#,
+            env.src_chain, env.dst_chain
+        ),
+    );
+    vertical_app_with_transport(env, vars, None, Some(receipts), true).await
+}
+
+async fn vertical_app_with_transport(
+    env: &VerticalEnvironment,
+    vars: HashMap<String, String>,
+    receipt: Option<Value>,
+    receipt_rounds: Option<Vec<Value>>,
+    extra_context_verdict: bool,
+) -> (RuntimeServerApp<VerticalTransport>, RecordedJsonCalls) {
     let calls: RecordedJsonCalls = Arc::new(Mutex::new(Vec::new()));
     let transport = VerticalTransport {
         calls: calls.clone(),
         receipt: Arc::new(Mutex::new(receipt)),
+        receipt_rounds: Arc::new(Mutex::new(receipt_rounds.map(ReceiptRounds::new))),
         dst_endpoint_v2: env.dst_endpoint_v2,
         dst_receive_uln_302: env.dst_receive_uln_302,
         dst_receive_uln_302_view: env.dst_receive_uln_302_view,
         extra_context_verdict: Arc::new(Mutex::new(extra_context_verdict)),
     };
     let app =
-        RuntimeServerApp::from_env_map_with_runtime_core(vertical_env_map(env), transport, || {
-            1_767_323_045_000
-        })
-        .await
-        .unwrap_or_else(|error| {
-            panic!(
-                "the production wiring did not assemble for {}: {error}",
-                env.environment
-            )
-        });
+        RuntimeServerApp::from_env_map_with_runtime_core(vars, transport, || 1_767_323_045_000)
+            .await
+            .unwrap_or_else(|error| {
+                panic!(
+                    "the production wiring did not assemble for {}: {error}",
+                    env.environment
+                )
+            });
     (app, calls)
 }
 
@@ -843,5 +907,50 @@ async fn production_vertical_never_signs_when_extra_context_rejects_the_request(
     assert!(
         stages.iter().all(|stage| stage != "sign"),
         "a rejected extra-context verdict reached the key; stages={stages:?}"
+    );
+}
+
+/// The resolver and validator must share the source receipt identity across the
+/// two production rounds. This uses two agreeing providers in each round so the
+/// refusal is the binding check, not a quorum failure
+/// (apps/gasolina/src/app/app.ts:494 gates the duplicate-signature lookup on
+/// caller input, while this source receipt binding is unconditional readiness).
+#[tokio::test]
+async fn production_vertical_never_signs_when_the_source_receipt_moved_between_rounds() {
+    let receipt_a = vertical_receipt(&MAINNET_VERTICAL);
+    let mut receipt_b = receipt_a.clone();
+    receipt_b["result"]["blockNumber"] = Value::from("0x61");
+    receipt_b["result"]["blockHash"] =
+        Value::from("0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd");
+    let (app, calls) =
+        vertical_app_with_receipt_rounds(&MAINNET_VERTICAL, vec![receipt_a, receipt_b]).await;
+
+    let outcome = app
+        .sign_request_v2(vertical_request(&MAINNET_VERTICAL))
+        .await;
+    let error = outcome.expect_err("a moved source receipt must reject the request");
+    let error_text = error.to_string();
+    assert!(
+        error_text.contains("source receipt binding changed: source receipt block hash changed"),
+        "the request failed for a reason other than source binding: {error_text}"
+    );
+
+    let stages = stages_of(&app).await;
+    let sign_stage_entries = stages
+        .iter()
+        .filter(|stage| stage.as_str() == "sign")
+        .count();
+    assert_eq!(
+        sign_stage_entries, 0,
+        "the signer stage was entered after source binding rejection; stages={stages:?}"
+    );
+    let methods = observed_methods(&calls);
+    assert_eq!(
+        methods
+            .iter()
+            .filter(|method| method.as_str() == "src:eth_getTransactionReceipt")
+            .count(),
+        4,
+        "the transport did not exercise two providers in each receipt round: {methods:?}"
     );
 }

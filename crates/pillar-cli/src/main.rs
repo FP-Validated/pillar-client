@@ -108,7 +108,7 @@ async fn serve_until(
         let (stream, _) = match accepted {
             Ok(connection) => connection,
             Err(error) => {
-                tracing::error!(%error, "TCP accept failed; continuing");
+                tracing::error!(?error, "TCP accept failed; continuing");
                 continue;
             }
         };
@@ -142,7 +142,7 @@ async fn serve_until(
             )
             .await
             {
-                tracing::debug!(%error, "HTTP connection closed");
+                tracing::debug!(?error, "HTTP connection closed");
             }
         });
     };

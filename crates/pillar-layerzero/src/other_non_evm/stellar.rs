@@ -129,7 +129,7 @@ impl UlnV3PayloadBuilder for StellarUlnPayloadBuilder {
         dvn_address: Option<&str>,
     ) -> Result<HashCallDataResult, AppCoreError> {
         let dvn_address = dvn_address.ok_or_else(|| {
-            AppCoreError::Internal(
+            AppCoreError::BadRequest(
                 "Stellar: DVN Address is required for verify payload".to_string(),
             )
         })?;

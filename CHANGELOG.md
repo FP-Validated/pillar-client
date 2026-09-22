@@ -8,20 +8,25 @@ the Prometheus metric names.
 
 ### Breaking
 
-- **An external extra-context policy must now answer with the JSON boolean
-  `true`.** Every other shape is a refusal: the strings `"true"` and `"false"`,
-  `{}`, `[]`, `{"allow":false}`, numbers, and `null`. On the Lambda path an SDK
-  function error, a non-success SDK status code, and a non-success `statusCode`
-  inside the returned payload are refusals as well. The verdict was previously
-  decided by generic JSON truthiness, so a policy service that answered
-  `{"statusCode":403,"body":"false"}` - or any object at all - approved the
-  request. Upstream decides this with JavaScript truthiness
-  (`apps/gasolina/src/app/app.ts:707`, `:721-726`), so this is a deliberate
+- **An external extra-context policy's verdict must now be the JSON boolean
+  `true`.** The two transports wrap it differently and the shapes are not
+  interchangeable. Over `EXTRA_CONTEXT_REQUEST_URL` the response body itself is
+  the verdict, so the body must be `true`. Over `EXTRA_CONTEXT_AWS_LAMBDA_NAME`
+  the function must return a JSON object carrying it under `body` -
+  `{"body":true}` or `{"statusCode":200,"body":true}` - and a bare `true` is
+  refused; that envelope requirement is upstream's (`parsedResponse.body`,
+  `apps/gasolina/src/app/app.ts:724`) and is not new. What is new is the type:
+  the strings `"true"` and `"false"`, `{}`, `[]`, `{"allow":false}`, numbers and
+  `null` are all refusals, on both paths. A Lambda that returns `body` as a
+  JSON-encoded string - the common shape - is therefore refused, so confirm the
+  returned type and not just the value before rolling this out. On the Lambda
+  path an SDK function error, a non-success SDK status code, and a non-success
+  `statusCode` inside the payload are refusals as well. The verdict was
+  previously generic JSON truthiness, so `{"statusCode":403,"body":"false"}` -
+  or any object at all - approved the request. Upstream decides both paths with
+  JavaScript truthiness (`app.ts:707`, `:724`), so this is a deliberate
   fail-closed divergence rather than a parity fix. A deployment that sets
-  `EXTRA_CONTEXT_REQUEST_URL` or `EXTRA_CONTEXT_AWS_LAMBDA_NAME` must confirm
-  its policy service returns a bare boolean before rolling this out; a
-  deployment that sets neither is unaffected, and that path is still an
-  immediate no-op.
+  neither variable is unaffected, and that path is still an immediate no-op.
 
 ### Security
 
@@ -43,12 +48,27 @@ the Prometheus metric names.
   so omitting that field skipped the refusal of an unsupported or invalid
   receive library along with the duplicate-signature query that genuinely needs
   the address. `AppValidator::validate_payload_signed` now takes
-  `Option<&str>`, `pillar-core` calls it unconditionally, and only the
-  `hashLookup` query is conditional - so a caller can no longer choose which
-  validations run by leaving a field out. Omitting `dvnAddress` still skips the
-  payload-already-signed refusal itself; supply it if you rely on that. Solana,
-  Stellar and TON destinations require the address in their builders and fail
-  closed without it.
+  `Option<&str>` and `pillar-core` calls it unconditionally, so on an EVM
+  destination the library is resolved and refused whatever the caller sends,
+  and only the `hashLookup` duplicate query is conditional on an address.
+
+  The duplicate query itself stays caller-selected, deliberately. It asks "has
+  *this* DVN already signed?", which has no subject without an address, and
+  this service holds no per-chain DVN *contract* identity of its own to
+  substitute - the signer's public-key address is a different thing. Making it
+  unconditional would therefore need new configuration and its own review, so
+  upstream's gate (`apps/gasolina/src/app/app.ts:494`) is kept: on a chain-native
+  destination with no address the check is skipped rather than refused. Supply
+  `dvnAddress` if you rely on the payload-already-signed refusal.
+- A missing `dvnAddress` on a destination that cannot build without one is now
+  a 400 rather than a 500. Solana, Stellar and TON hash the address into what
+  they sign, so they fail closed either way, but the combination is chosen by
+  the caller and a caller-chosen combination is not a server fault
+  (`crates/pillar-layerzero/src/solana.rs`,
+  `crates/pillar-layerzero/src/other_non_evm/stellar.rs`,
+  `crates/pillar-runtime/src/layerzero_runtime/ton_v3_builder.rs`, and the
+  Solana prerequisite in `pillar-core`). The message text is unchanged, so
+  existing operator greps still match.
 - The maximum connection lifetime is consulted before each read and write
   instead of only when the socket returns `Pending`. A client that kept the
   socket continuously readable renewed the sliding idle window indefinitely and
@@ -64,6 +84,18 @@ the Prometheus metric names.
   newline could forge a log record. All 272 chain names in the generated roster
   satisfy the rule; roster membership is still decided by the core, which
   reports an unknown chain as a caller error.
+- Caller-controlled text can no longer forge a log record through an error
+  message. Shape-checking the two chain names closed the field that was logged
+  directly, but `messageHash` reached the same formatter by a second route: the
+  core interpolates it verbatim into the mismatch error (`Message hash
+  mismatch, expected: ...`) and `sign_v2` logged that error with `Display`. The
+  fix is at the sink - the failure is logged as `?obfuscated`, whose `Debug`
+  escapes control characters - so every error path is covered rather than one
+  more input. The two `%error` sinks in the CLI accept and connection loops got
+  the same treatment. `messageHash` deliberately did **not** get a shape gate
+  like `srcTxHash`: that field is spliced into an outbound URL path and so
+  needs one, while `messageHash` is only ever compared, and adding a hex gate
+  would have introduced a 400 the upstream HTTP surface does not produce.
 - Bumped `rustls` to 0.23.45 for RUSTSEC-2026-0285. It arrives only through the
   outbound client stacks - the server speaks plain HTTP - so the practical
   exposure was a peer we dial sending handshake messages in plaintext that

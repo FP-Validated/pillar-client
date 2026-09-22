@@ -212,6 +212,22 @@ Addresses live in `stellar_uln_302_for_environment` and
   error rather than a signature
   (`crates/pillar-layerzero/src/other_non_evm/ton/mod.rs`,
   `crates/pillar-layerzero/src/other_non_evm/starknet.rs`).
+- A `ReadV1002` request's block identity is agreed on, but not pinned into the
+  read itself. `validation_read_markers.rs` resolves each time marker through a
+  provider quorum whose fingerprint covers the block number, hash and
+  timestamp, so the providers demonstrably agreed on one block; the payload is
+  then fetched by `eth_call` against `0x{number}` alone
+  (`call_evm_view_at_marker`, `crates/pillar-runtime/src/layerzero_runtime/read_payload.rs`).
+  A reorg between the two phases therefore yields a read answered from a
+  different block at the same height, and the exact-value quorum over the
+  returned bytes does not detect it because every honest provider has followed
+  the reorg. This is the READ counterpart of the EVM source-event binding
+  described under "Other hardening" below, and unlike that one it is **not**
+  closed: closing it means carrying the agreed block hash into the call and
+  using EIP-1898 `requireCanonical` where the provider supports it, which must
+  not silently fall back to a number-tagged call while claiming the same
+  guarantee. Weigh it against your finality policy before enabling READ
+  pathways.
 - On EVM the *signing target* is derived from the destination endpoint id -
   below `30000` means ULN301, otherwise ULN302
   (`evm_receive_version_from_dst_eid`, `crates/pillar-layerzero/src/evm.rs`).
@@ -267,18 +283,30 @@ Addresses live in `stellar_uln_302_for_environment` and
   round-two confirmation count. A receipt whose execution status is not success
   is refused at resolution. This is a deliberate fail-closed divergence from
   upstream, which performs the same two-phase read without binding it.
-- An external extra-context policy must answer with the JSON boolean `true`.
-  Every other shape is a refusal, including the strings `"true"` and `"false"`,
-  `{}`, `[]`, `{"allow":false}`, numbers and `null`; on the Lambda path an SDK
-  function error, a non-success SDK status and a non-success `statusCode` in the
-  returned payload are refusals too
-  (`crates/pillar-runtime/src/layerzero_runtime/validation_extra_context.rs`,
-  `crates/pillar-runtime/src/provider_health/transport.rs`). This diverges from
-  upstream deliberately: upstream decides with JavaScript truthiness
-  (`apps/gasolina/src/app/app.ts:707` and `:721-726`), so a policy service that
-  answered `{"statusCode":403,"body":"false"}` approved the request there. If
-  your policy service returns anything other than a bare boolean, it must be
-  changed before this version is deployed.
+- An external extra-context policy must answer `true`, and the two transports
+  wrap that verdict differently. **The shapes are not interchangeable** - a
+  policy service migrated from one form to the other will be refused.
+  - `EXTRA_CONTEXT_REQUEST_URL`: the HTTP response body *is* the verdict and
+    must be the JSON literal `true`.
+  - `EXTRA_CONTEXT_AWS_LAMBDA_NAME`: the function must return a JSON **object**
+    carrying the verdict under `body`, so `{"body":true}` or
+    `{"statusCode":200,"body":true}`. A bare `true` is refused because the
+    envelope is what upstream reads (`parsedResponse.body`,
+    `apps/gasolina/src/app/app.ts:724`); that requirement is not new. When
+    `statusCode` is present it must be 2xx, and an SDK function error or a
+    non-success SDK status is a refusal before the payload is examined
+    (`crates/pillar-runtime/src/provider_health/transport.rs`).
+
+  What changed is the verdict's type, on both paths: it must be the JSON
+  boolean `true` and nothing else. The strings `"true"` and `"false"`, `{}`,
+  `[]`, `{"allow":false}`, numbers and `null` are all refusals
+  (`crates/pillar-runtime/src/layerzero_runtime/validation_extra_context.rs`).
+  Upstream decides both paths with JavaScript truthiness (`app.ts:707`,
+  `:724`), where `{"statusCode":403,"body":"false"}` approved the request and a
+  string body of any content approved it too - this is a deliberate
+  fail-closed divergence. **A Lambda that returns `body` as a JSON-encoded
+  string is the common shape and is now refused**; confirm the returned type,
+  not just the value, before deploying this version.
 - The receiver's receive-library check no longer depends on caller input. It
   used to run only when the request supplied `dvnAddress`, which is
   caller-controlled JSON, so omitting that field skipped both the
@@ -288,10 +316,29 @@ Addresses live in `stellar_uln_302_for_environment` and
   address being supplied
   (`crates/pillar-runtime/src/layerzero_runtime/validation_payload.rs`). A
   request that omits `dvnAddress` therefore still cannot reach a receiver on a
-  library this service does not support, but its payload-already-signed check
-  is not performed - supply `dvnAddress` if you rely on that refusal. Solana,
-  Stellar and TON destinations require the address in their builders and fail
-  closed without it.
+  library this service does not support.
+
+  **The duplicate-signature refusal itself remains caller-selected, and that is
+  an accepted operational assumption rather than an oversight.** The query asks
+  whether *this* DVN has already attested the payload, which has no subject
+  without an address; a caller may also name a different DVN's address and so
+  read a different verification slot. This service holds no per-chain DVN
+  contract identity to substitute - the signer's public-key address is a
+  different object from the DVN contract the ULN records against - so enforcing
+  it server-side means new configuration and a new trust model, not a bug fix.
+  Upstream gates the same call the same way
+  (`signingContext.dvnAddress && this.validatePayloadSigned(...)`,
+  `apps/gasolina/src/app/app.ts:494`). Note that a global verification state of
+  `Verified` can still refuse the request, so omitting the address does not
+  remove every duplicate defence. If your requirement is "never sign a message
+  this DVN already attested, whatever the caller sends", that is a change
+  request against the configuration surface - file it rather than assuming the
+  current behaviour covers it.
+
+  On a chain-native destination with no address the check is skipped, matching
+  upstream. Solana, Stellar and TON hash the address into what they sign and
+  so refuse the request in their builders regardless; that refusal is a `400`,
+  because the combination is one the caller chose.
 - The connection lifetime ceiling is checked before each read and write rather
   than only when the underlying socket returns `Pending`
   (`IdleTimeoutIo`, `crates/pillar-cli/src/main.rs`). A client that keeps the
