@@ -160,8 +160,12 @@ async fn evm_signing_path_matches_gasolina_for_the_same_packet_sent_log() {
 
         let receipt = json!({
             "result": {
+                "blockHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "blockNumber": "0x64",
+                "status": "0x1",
                 "logs": [{
                     "address": arm["input"]["log"]["address"].clone(),
+                    "logIndex": "0x0",
                     "topics": arm["input"]["log"]["topics"].clone(),
                     "data": arm["input"]["log"]["data"].clone(),
                 }]
@@ -605,7 +609,7 @@ impl RuntimeValidationChecks for ParityChecks {
     async fn validate_payload_not_signed(
         &self,
         sent_event: &LzSentEvent,
-        _verifier_address: &str,
+        _verifier_address: Option<&str>,
         dst_chain_name: &str,
     ) -> Result<(), AppCoreError> {
         if self.already_signed {

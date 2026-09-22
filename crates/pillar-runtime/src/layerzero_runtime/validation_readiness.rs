@@ -95,6 +95,9 @@ where
                 BlockConfirmationValidity::InvalidRange => Err(AppCoreError::BadRequest(
                     "block confirmation range overflow".to_string(),
                 )),
+                BlockConfirmationValidity::SourceChanged(reason) => Err(AppCoreError::BadRequest(
+                    format!("source receipt binding changed: {reason}"),
+                )),
             };
         }
         if matches!(src_chain_name.as_str(), "aptos" | "initia" | "movement") {
@@ -149,6 +152,9 @@ where
                 ))),
                 BlockConfirmationValidity::InvalidRange => Err(AppCoreError::BadRequest(
                     "block confirmation range overflow".to_string(),
+                )),
+                BlockConfirmationValidity::SourceChanged(reason) => Err(AppCoreError::BadRequest(
+                    format!("source receipt binding changed: {reason}"),
                 )),
             };
         }
@@ -227,6 +233,9 @@ where
                 BlockConfirmationValidity::InvalidRange => Err(AppCoreError::BadRequest(
                     "block confirmation range overflow".to_string(),
                 )),
+                BlockConfirmationValidity::SourceChanged(reason) => Err(AppCoreError::BadRequest(
+                    format!("source receipt binding changed: {reason}"),
+                )),
             };
         }
         if src_chain_name == "starknet" {
@@ -279,6 +288,9 @@ where
                 ))),
                 BlockConfirmationValidity::InvalidRange => Err(AppCoreError::BadRequest(
                     "block confirmation range overflow".to_string(),
+                )),
+                BlockConfirmationValidity::SourceChanged(reason) => Err(AppCoreError::BadRequest(
+                    format!("source receipt binding changed: {reason}"),
                 )),
             };
         }
@@ -333,6 +345,9 @@ where
                 BlockConfirmationValidity::InvalidRange => Err(AppCoreError::BadRequest(
                     "block confirmation range overflow".to_string(),
                 )),
+                BlockConfirmationValidity::SourceChanged(reason) => Err(AppCoreError::BadRequest(
+                    format!("source receipt binding changed: {reason}"),
+                )),
             };
         }
         let quorum = required_provider_quorum(provider_config, src_chain_name)?;
@@ -348,6 +363,7 @@ where
             let (url, headers) = provider_uri_parts(uri);
             let transport = self.transport.clone();
             let tx_hash = sent_event.tx_hash.clone();
+            let source_evidence = sent_event.source_evidence.clone();
             let block_confirmation = *block_confirmation;
             requests.push(async move {
                 if !delay.is_zero() {
@@ -358,6 +374,7 @@ where
                     url,
                     headers,
                     &tx_hash,
+                    source_evidence.as_ref(),
                     block_confirmation,
                 )
                 .await;
@@ -383,6 +400,9 @@ where
             ))),
             BlockConfirmationValidity::InvalidRange => Err(AppCoreError::BadRequest(
                 "block confirmation range overflow".to_string(),
+            )),
+            BlockConfirmationValidity::SourceChanged(reason) => Err(AppCoreError::BadRequest(
+                format!("source receipt binding changed: {reason}"),
             )),
         }
     }
@@ -440,6 +460,9 @@ where
             ))),
             BlockConfirmationValidity::InvalidRange => Err(AppCoreError::BadRequest(
                 "block confirmation range overflow".to_string(),
+            )),
+            BlockConfirmationValidity::SourceChanged(reason) => Err(AppCoreError::BadRequest(
+                format!("source receipt binding changed: {reason}"),
             )),
         }
     }

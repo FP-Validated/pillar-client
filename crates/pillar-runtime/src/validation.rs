@@ -31,7 +31,7 @@ pub trait RuntimeValidationChecks: Send + Sync + 'static {
     async fn validate_payload_not_signed(
         &self,
         sent_event: &LzSentEvent,
-        verifier_address: &str,
+        verifier_address: Option<&str>,
         dst_chain_name: &str,
     ) -> Result<(), AppCoreError>;
 
@@ -128,7 +128,7 @@ where
     async fn validate_payload_signed(
         &self,
         sent_event: &LzSentEvent,
-        verifier_address: &str,
+        verifier_address: Option<&str>,
         dst_chain_name: &str,
     ) -> Result<(), AppCoreError> {
         self.checks

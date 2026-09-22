@@ -1,10 +1,12 @@
 use super::*;
+use pillar_core::EvmSourceEvidence;
 
 pub(crate) async fn observe_block_confirmations<T>(
     transport: T,
     url: String,
     headers: HashMap<String, String>,
     tx_hash: &str,
+    source_evidence: Option<&EvmSourceEvidence>,
     required_confirmations: i64,
 ) -> BlockConfirmationObservation
 where
@@ -32,7 +34,24 @@ where
         }),
     );
     let (receipt_response, latest_block_response) = tokio::join!(receipt, latest_block);
-
+    let source_binding_error = source_evidence.and_then(|evidence| {
+        receipt_response
+            .as_ref()
+            .err()
+            .map(ToString::to_string)
+            .or_else(|| {
+                receipt_response
+                    .as_ref()
+                    .ok()
+                    .and_then(|receipt| validate_receipt_binding(receipt, evidence).err())
+            })
+    });
+    if let Some(reason) = source_binding_error {
+        return BlockConfirmationObservation {
+            validity: BlockConfirmationValidity::SourceChanged(reason),
+            current_confirmations: None,
+        };
+    }
     let observation = receipt_response
         .ok()
         .and_then(|receipt| parse_receipt_block_placement(&receipt).ok())
@@ -128,6 +147,63 @@ pub(crate) fn parse_receipt_block_placement(response: &Value) -> Result<(String,
     Ok((block_hash, block_number))
 }
 
+fn validate_receipt_binding(response: &Value, evidence: &EvmSourceEvidence) -> Result<(), String> {
+    let result = response
+        .get("result")
+        .filter(|result| !result.is_null())
+        .ok_or_else(|| "source receipt disappeared".to_string())?;
+    let block_hash = result
+        .get("blockHash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "source receipt block hash is missing".to_string())?
+        .to_ascii_lowercase();
+    if block_hash != evidence.block_hash.to_ascii_lowercase() {
+        return Err(format!(
+            "source receipt block hash changed from {} to {}",
+            evidence.block_hash, block_hash
+        ));
+    }
+    let block_number = numeric_response(
+        result
+            .get("blockNumber")
+            .ok_or_else(|| "source receipt block number is missing".to_string())?,
+    )
+    .ok_or_else(|| "source receipt block number is invalid".to_string())?
+    .parse::<i64>()
+    .map_err(|error| error.to_string())?;
+    if block_number != evidence.block_number {
+        return Err(format!(
+            "source receipt block number changed from {} to {}",
+            evidence.block_number, block_number
+        ));
+    }
+    let status = result
+        .get("status")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "source receipt execution status is missing".to_string())?;
+    if !matches!(status, "0x1" | "0X1" | "1") {
+        return Err(format!(
+            "source receipt execution status is not successful: {status}"
+        ));
+    }
+    let logs = result
+        .get("logs")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "source receipt logs are missing".to_string())?;
+    let present = logs.iter().any(|log| {
+        log.get("logIndex")
+            .and_then(numeric_response)
+            .and_then(|index| index.parse::<u64>().ok())
+            == Some(evidence.packet_log_index)
+    });
+    if !present {
+        return Err(format!(
+            "source PacketSent log index {} is no longer present",
+            evidence.packet_log_index
+        ));
+    }
+    Ok(())
+}
 pub(crate) fn parse_block_number(response: &Value) -> Result<i64, String> {
     let result = response
         .get("result")

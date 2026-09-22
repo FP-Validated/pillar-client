@@ -253,12 +253,24 @@ impl<I> IdleTimeoutIo<I> {
         self.deadline.as_mut().reset(Instant::now() + self.timeout);
     }
 
-    fn poll_deadline(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+    fn poll_hard_deadline(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         if self.hard_deadline.as_mut().poll(cx).is_ready() {
             return Poll::Ready(Err(io::Error::new(
                 io::ErrorKind::TimedOut,
                 "HTTP connection exceeded its maximum lifetime",
             )));
+        }
+        Poll::Pending
+    }
+
+    /// poll_read and poll_write call poll_hard_deadline before touching inner
+    /// I/O. The hard ceiling wins over an operation that could otherwise
+    /// complete, because it exists to bound a client that keeps renewing the
+    /// sliding window. The existing 58-second request timeout means a
+    /// legitimate request cannot straddle this ceiling by much.
+    fn poll_deadline(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        if let Poll::Ready(result) = self.poll_hard_deadline(cx) {
+            return Poll::Ready(result);
         }
         match self.deadline.as_mut().poll(cx) {
             Poll::Ready(()) => Poll::Ready(Err(io::Error::new(
@@ -277,6 +289,9 @@ impl<I: AsyncRead + Unpin> AsyncRead for IdleTimeoutIo<I> {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
         let this = self.get_mut();
+        if let Poll::Ready(Err(error)) = this.poll_hard_deadline(cx) {
+            return Poll::Ready(Err(error));
+        }
         match Pin::new(&mut this.inner).poll_read(cx, buf) {
             Poll::Ready(result) => {
                 if result.is_ok() {
@@ -296,6 +311,9 @@ impl<I: AsyncWrite + Unpin> AsyncWrite for IdleTimeoutIo<I> {
         buf: &[u8],
     ) -> Poll<Result<usize, io::Error>> {
         let this = self.get_mut();
+        if let Poll::Ready(Err(error)) = this.poll_hard_deadline(cx) {
+            return Poll::Ready(Err(error));
+        }
         match Pin::new(&mut this.inner).poll_write(cx, buf) {
             Poll::Ready(result) => {
                 if result.is_ok() {
@@ -338,6 +356,10 @@ fn init_tracing() {
 mod tests {
     use super::*;
     use axum::{routing::get, Router};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
@@ -464,6 +486,83 @@ mod tests {
             "a connection past its lifetime ceiling must end in an error, got {served:?}"
         );
         trickle.abort();
+    }
+    #[derive(Clone)]
+    struct AlwaysReadyIo {
+        reads: Arc<AtomicUsize>,
+        writes: Arc<AtomicUsize>,
+    }
+
+    impl AsyncRead for AlwaysReadyIo {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            buf.put_slice(b"ready");
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    impl AsyncWrite for AlwaysReadyIo {
+        fn poll_write(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            self.writes.fetch_add(1, Ordering::SeqCst);
+            Poll::Ready(Ok(buf.len()))
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    #[tokio::test]
+    async fn hard_deadline_rejects_always_ready_io() {
+        tokio::time::pause();
+        let reads = Arc::new(AtomicUsize::new(0));
+        let writes = Arc::new(AtomicUsize::new(0));
+        let io = AlwaysReadyIo {
+            reads: Arc::clone(&reads),
+            writes: Arc::clone(&writes),
+        };
+        let mut timed = IdleTimeoutIo::new(io, Duration::from_secs(60), Duration::from_secs(5));
+        let waker = std::task::Waker::noop();
+        let mut cx = Context::from_waker(waker);
+        let mut initial = [0; 8];
+        let mut initial_buf = ReadBuf::new(&mut initial);
+        assert!(matches!(
+            Pin::new(&mut timed).poll_read(&mut cx, &mut initial_buf),
+            Poll::Ready(Ok(()))
+        ));
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+
+        // Past the ceiling, not exactly at it: a timer whose deadline equals
+        // the paused clock's new value is not guaranteed to have fired.
+        tokio::time::advance(Duration::from_secs(6)).await;
+
+        let mut after_deadline = [0; 8];
+        let mut after_deadline_buf = ReadBuf::new(&mut after_deadline);
+        let read_result = Pin::new(&mut timed).poll_read(&mut cx, &mut after_deadline_buf);
+        assert!(matches!(
+            read_result,
+            Poll::Ready(Err(ref error)) if error.kind() == io::ErrorKind::TimedOut
+        ));
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+
+        let write_result = Pin::new(&mut timed).poll_write(&mut cx, b"still ready");
+        assert!(matches!(
+            write_result,
+            Poll::Ready(Err(ref error)) if error.kind() == io::ErrorKind::TimedOut
+        ));
+        assert_eq!(writes.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]

@@ -13,6 +13,7 @@ pub(super) fn readiness_sent_event() -> LzSentEvent {
         },
         message: "0xdeadbeef".to_string(),
         tx_hash: "0xtx".to_string(),
+        source_evidence: None,
         extra: IndexMap::new(),
     }
 }
@@ -47,6 +48,7 @@ fn solana_readiness_sent_event() -> LzSentEvent {
         },
         message: "0xdeadbeef".to_string(),
         tx_hash: "solana-signature".to_string(),
+        source_evidence: None,
         extra: IndexMap::new(),
     }
 }
@@ -74,6 +76,7 @@ fn move_readiness_sent_event(chain_name: &str, tx_hash: &str) -> LzSentEvent {
         },
         message: "0xdeadbeef".to_string(),
         tx_hash: tx_hash.to_string(),
+        source_evidence: None,
         extra: IndexMap::new(),
     }
 }
@@ -296,6 +299,156 @@ async fn runtime_rpc_validation_checks_validates_message_readiness_with_quorum()
     assert_eq!(calls[0].2["params"], json!(["0xtx"]));
     assert_eq!(calls[1].2["method"], "eth_getBlockByNumber");
     assert_eq!(calls[1].2["params"], json!(["latest", false]));
+}
+
+fn bound_receipt(block_hash: &str, block_number: &str, status: &str, log_index: &str) -> Value {
+    json!({
+        "result": {
+            "blockHash": block_hash,
+            "blockNumber": block_number,
+            "status": status,
+            "logs": [{
+                "address": "0x1a44076050125825900e736c501f859c50fe728c",
+                "topics": ["0x1ab700d4ced0c005b164c0f789fd09fcbb0156d4c2041b8a3bfbcd961cd1567f"],
+                "data": "0x00",
+                "logIndex": log_index
+            }]
+        }
+    })
+}
+
+fn reverted_receipt(block_hash: &str, block_number: &str) -> Value {
+    json!({
+        "result": {
+            "blockHash": block_hash,
+            "blockNumber": block_number,
+            "status": "0x0",
+            "logs": []
+        }
+    })
+}
+
+fn readiness_sent_event_bound_to(
+    block_hash: &str,
+    block_number: i64,
+    log_index: u64,
+) -> LzSentEvent {
+    LzSentEvent {
+        source_evidence: Some(pillar_core::EvmSourceEvidence {
+            block_hash: block_hash.to_string(),
+            block_number,
+            status: "0x1".to_string(),
+            packet_log_index: log_index,
+        }),
+        ..readiness_sent_event()
+    }
+}
+
+async fn readiness_against(receipt: Value, sent_event: &LzSentEvent) -> Result<(), AppCoreError> {
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "ethereum".to_string(),
+            ProviderConfig {
+                uris: vec![
+                    ProviderUri::Uri("https://eth-a.example".to_string()),
+                    ProviderUri::Uri("https://eth-b.example".to_string()),
+                ],
+                quorum: Some(2),
+            },
+        )]),
+        Some(&["ethereum".to_string()]),
+    )
+    .unwrap();
+    let transport = RecordingTransport {
+        calls: Arc::new(Mutex::new(Vec::new())),
+        responses: Arc::new(Mutex::new(vec![
+            Ok(receipt.clone()),
+            Ok(latest_block("0x67")),
+            Ok(receipt),
+            Ok(latest_block("0x67")),
+        ])),
+    };
+    RuntimeRpcValidationChecks::from_getter(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        transport,
+    )
+    .validate_readiness(
+        sent_event,
+        &SigningContext::Message {
+            expiration: 1,
+            skip_v_id: None,
+            dvn_address: None,
+            block_confirmation: 2,
+        },
+    )
+    .await
+}
+
+/// The resolver reads the source receipt once to extract `PacketSent`, and
+/// readiness reads it again to count confirmations. Provider quorum proves the
+/// providers agreed *within* each round, never that the two rounds saw the same
+/// chain state, so a reorg that re-included the same transaction hash with
+/// different logs - or reverted it - used to leave the service signing the
+/// packet captured in round one while readiness passed on the round-two
+/// receipt. The resolved event now carries the receipt's block hash, block
+/// number, status and the `PacketSent` log index, and readiness refuses when
+/// the second read disagrees.
+///
+/// This asserts the refusal at the point the binding is enforced. That a
+/// readiness error reaches no signer is already pinned end to end by
+/// `gasolina_parity_tests`'s rejection matrix, which asserts `signer_calls == 0`
+/// for a validator refusal.
+#[tokio::test]
+async fn runtime_rpc_validation_checks_refuses_a_source_receipt_that_changed_after_resolution() {
+    let sent_event = readiness_sent_event_bound_to("0xaaa", 100, 0);
+
+    // The control: the same receipt the event was resolved from still signs.
+    readiness_against(bound_receipt("0xaaa", "0x64", "0x1", "0x0"), &sent_event)
+        .await
+        .expect("an unchanged successful receipt stays eligible");
+
+    let cases = [
+        (
+            bound_receipt("0xbbb", "0x64", "0x1", "0x0"),
+            "block hash changed",
+            "re-included in a different block",
+        ),
+        (
+            bound_receipt("0xaaa", "0xc8", "0x1", "0x0"),
+            "block number changed",
+            "re-included at a different height",
+        ),
+        (
+            reverted_receipt("0xaaa", "0x64"),
+            "execution status is not successful",
+            "re-executed as a revert",
+        ),
+        (
+            bound_receipt("0xaaa", "0x64", "0x1", "0x5"),
+            "log index 0 is no longer present",
+            "the PacketSent log it attested to is gone",
+        ),
+        (
+            json!({ "result": Value::Null }),
+            "source receipt disappeared",
+            "the transaction is no longer mined",
+        ),
+    ];
+
+    for (receipt, expected, scenario) in cases {
+        let error = readiness_against(receipt, &sent_event)
+            .await
+            .expect_err(&format!("{scenario} must not be signed"));
+        let message = error.to_string();
+        assert!(
+            matches!(error, AppCoreError::BadRequest(_)),
+            "{scenario}: a changed source chain is a caller-visible refusal, got {message}"
+        );
+        assert!(
+            message.contains(expected),
+            "{scenario}: expected {expected:?}, got {message:?}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -556,6 +709,7 @@ pub(super) fn read_command_sent_event(message: String) -> LzSentEvent {
         },
         message,
         tx_hash: "0xtx".to_string(),
+        source_evidence: None,
         extra: IndexMap::new(),
     }
 }

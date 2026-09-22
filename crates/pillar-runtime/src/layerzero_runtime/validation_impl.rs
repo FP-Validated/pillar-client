@@ -26,7 +26,7 @@ where
     async fn validate_payload_not_signed(
         &self,
         sent_event: &LzSentEvent,
-        verifier_address: &str,
+        verifier_address: Option<&str>,
         dst_chain_name: &str,
     ) -> Result<(), AppCoreError> {
         self.validate_payload_not_signed_with_quorum(sent_event, verifier_address, dst_chain_name)

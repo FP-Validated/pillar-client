@@ -52,6 +52,7 @@ async fn runtime_app_validator_matches_core_checks_and_delegates_external_checks
         },
         message: "0x68656c6c6f".to_string(),
         tx_hash: "0xtx".to_string(),
+        source_evidence: None,
         extra: IndexMap::new(),
     };
     let mut request = request_v2();
@@ -68,7 +69,7 @@ async fn runtime_app_validator_matches_core_checks_and_delegates_external_checks
         .unwrap();
     validator.validate_expiration("bsc", 604900).await.unwrap();
     validator
-        .validate_payload_signed(&sent_event, "0xdvn", "bsc")
+        .validate_payload_signed(&sent_event, Some("0xdvn"), "bsc")
         .await
         .unwrap();
     validator.validate_extra_context(&sent_event).await.unwrap();

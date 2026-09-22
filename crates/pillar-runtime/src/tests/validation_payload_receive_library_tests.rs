@@ -35,7 +35,7 @@ async fn payload_signed_reads_the_receive_library_the_endpoint_reports() {
     let error = checks
         .validate_payload_not_signed(
             &payload_signed_sent_event(),
-            "0x3333333333333333333333333333333333333333",
+            Some("0x3333333333333333333333333333333333333333"),
             "bsc",
         )
         .await
@@ -80,7 +80,7 @@ async fn payload_signed_trusts_a_default_library_without_revalidating_it() {
     checks
         .validate_payload_not_signed(
             &payload_signed_sent_event(),
-            "0x3333333333333333333333333333333333333333",
+            Some("0x3333333333333333333333333333333333333333"),
             "bsc",
         )
         .await
@@ -118,7 +118,7 @@ async fn payload_signed_refuses_an_unrecognised_receive_library() {
     let error = checks
         .validate_payload_not_signed(
             &payload_signed_sent_event(),
-            "0x3333333333333333333333333333333333333333",
+            Some("0x3333333333333333333333333333333333333333"),
             "bsc",
         )
         .await
@@ -135,6 +135,84 @@ async fn payload_signed_refuses_an_unrecognised_receive_library() {
         1,
         "no library was resolved, so no library may be read"
     );
+}
+
+/// The library refusal above used to sit underneath a caller-controlled branch:
+/// `pillar-core` invoked this validator only when the request carried
+/// `dvnAddress`, which is caller-supplied JSON, so omitting the field skipped
+/// the refusal of an unsupported receive library along with the
+/// duplicate-signature query that genuinely needs the address. The library
+/// resolution now runs whether or not an address was supplied; only the
+/// `hashLookup` query is conditional.
+#[tokio::test]
+async fn payload_signed_refuses_an_unrecognised_receive_library_without_a_dvn_address() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let checks = runtime_rpc_payload_checks(
+        vec![
+            eth_call_result(&abi_address_bool(
+                "0x00000000000000000000000000000000deadbeef",
+                true,
+            )),
+            // Present only to prove they are never reached.
+            eth_call_result(&abi_word(64)),
+            eth_call_result(&abi_bool_uint64(false, 0)),
+            eth_call_result(&abi_word(0)),
+        ],
+        calls.clone(),
+    );
+
+    let error = checks
+        .validate_payload_not_signed(&payload_signed_sent_event(), None, "bsc")
+        .await
+        .expect_err("omitting dvnAddress must not buy a pass on the library check");
+    assert!(matches!(error, AppCoreError::BadRequest(_)), "{error}");
+    assert!(
+        error.to_string().contains("cannot validate"),
+        "the refusal has to name the cause: {error}"
+    );
+
+    let calls = calls.lock().unwrap();
+    assert_eq!(
+        calls.len(),
+        1,
+        "the endpoint was asked for the library, and nothing beyond it"
+    );
+}
+
+/// The complement: a supported library with no `dvnAddress` still resolves, and
+/// the `hashLookup` duplicate query - the one round trip that genuinely needs
+/// the caller's address - is the only thing left out. The same scenario with an
+/// address issues four calls
+/// (`payload_signed_trusts_a_default_library_without_revalidating_it`), so a
+/// future change that substituted a placeholder verifier instead of skipping
+/// the query would show up here as a fourth call, and would be worse than
+/// skipping: it would read some other verifier's slot and conclude the payload
+/// is unsigned.
+#[tokio::test]
+async fn payload_signed_skips_only_the_duplicate_query_without_a_dvn_address() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let checks = runtime_rpc_payload_checks(
+        vec![
+            eth_call_result(&abi_address_bool(TEST_RECEIVE_ULN_302, true)),
+            eth_call_result(&abi_word(64)),
+            eth_call_result(&abi_word(0)),
+        ],
+        calls.clone(),
+    );
+
+    checks
+        .validate_payload_not_signed(&payload_signed_sent_event(), None, "bsc")
+        .await
+        .expect("a supported library with no duplicate query to run is not a refusal");
+
+    let calls = calls.lock().unwrap();
+    assert_eq!(
+        calls.len(),
+        3,
+        "library, ULN config and verifiable - and no hashLookup: {calls:?}"
+    );
+    assert_eq!(calls[0].2["params"][0]["to"], TEST_ENDPOINT_V2);
+    assert_eq!(calls[1].2["params"][0]["to"], TEST_RECEIVE_ULN_302);
 }
 
 /// A non-default library the endpoint itself rejects.
@@ -160,7 +238,7 @@ async fn payload_signed_refuses_a_library_the_endpoint_calls_invalid() {
     let error = checks
         .validate_payload_not_signed(
             &payload_signed_sent_event(),
-            "0x3333333333333333333333333333333333333333",
+            Some("0x3333333333333333333333333333333333333333"),
             "bsc",
         )
         .await
@@ -204,7 +282,11 @@ async fn payload_signed_resolves_a_v1_endpoint_destination_on_chain() {
         .insert("dstEid".to_string(), Value::from(102));
 
     let error = checks
-        .validate_payload_not_signed(&event, "0x3333333333333333333333333333333333333333", "bsc")
+        .validate_payload_not_signed(
+            &event,
+            Some("0x3333333333333333333333333333333333333333"),
+            "bsc",
+        )
         .await
         .expect_err("the DVN has already attested on the resolved library");
     assert!(matches!(error, AppCoreError::BadRequest(_)), "{error}");
@@ -282,7 +364,7 @@ async fn payload_signed_requires_providers_to_agree_on_the_receive_library() {
     let error = checks
         .validate_payload_not_signed(
             &payload_signed_sent_event(),
-            "0x3333333333333333333333333333333333333333",
+            Some("0x3333333333333333333333333333333333333333"),
             "bsc",
         )
         .await
@@ -338,7 +420,11 @@ async fn payload_signed_accepts_the_bytes32_receiver_the_resolver_produces() {
     );
 
     checks
-        .validate_payload_not_signed(&event, "0x3333333333333333333333333333333333333333", "bsc")
+        .validate_payload_not_signed(
+            &event,
+            Some("0x3333333333333333333333333333333333333333"),
+            "bsc",
+        )
         .await
         .expect("a bytes32 receiver is what the resolver hands over");
 
@@ -387,7 +473,11 @@ async fn payload_signed_refuses_a_receiver_that_is_not_a_padded_evm_address() {
     );
 
     let error = checks
-        .validate_payload_not_signed(&event, "0x3333333333333333333333333333333333333333", "bsc")
+        .validate_payload_not_signed(
+            &event,
+            Some("0x3333333333333333333333333333333333333333"),
+            "bsc",
+        )
         .await
         .expect_err("truncating this would attest for a different OApp");
     assert!(matches!(error, AppCoreError::BadRequest(_)), "{error}");

@@ -203,6 +203,16 @@ pub struct ResponseEnvelope<T> {
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
 pub struct BadRequestError(pub String);
+/// Evidence captured from the quorum'd EVM receipt that produced a sent event.
+/// Kept out of the serialized event so readiness can bind its second read to
+/// the exact receipt used for resolution without changing the public shape.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EvmSourceEvidence {
+    pub block_hash: String,
+    pub block_number: i64,
+    pub status: String,
+    pub packet_log_index: u64,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -210,6 +220,8 @@ pub struct LzSentEvent {
     pub lz_message_id: LzMessageId,
     pub message: String,
     pub tx_hash: String,
+    #[serde(skip)]
+    pub source_evidence: Option<EvmSourceEvidence>,
     #[serde(flatten)]
     pub extra: IndexMap<String, Value>,
 }
@@ -262,7 +274,7 @@ pub trait AppValidator: Send + Sync + 'static {
     async fn validate_payload_signed(
         &self,
         sent_event: &LzSentEvent,
-        verifier_address: &str,
+        verifier_address: Option<&str>,
         dst_chain_name: &str,
     ) -> Result<(), AppCoreError>;
 
@@ -605,16 +617,11 @@ impl PillarApp {
                     .validate_readiness(&sent_event, &request.signing_context),
                 self.validator
                     .validate_expiration(dst_chain_name, request.signing_context.expiration()),
-                async {
-                    match request.signing_context.dvn_address() {
-                        Some(dvn_address) => {
-                            self.validator
-                                .validate_payload_signed(&sent_event, dvn_address, dst_chain_name)
-                                .await
-                        }
-                        None => Ok(()),
-                    }
-                },
+                self.validator.validate_payload_signed(
+                    &sent_event,
+                    request.signing_context.dvn_address(),
+                    dst_chain_name,
+                ),
             );
             message_hash?;
             validate_destination_prerequisites(dst_chain_name, &request.signing_context)?;
@@ -965,6 +972,7 @@ mod tests {
                 lz_message_id: lz_message_id.clone(),
                 message: "0xabc".to_string(),
                 tx_hash: src_tx_hash.to_string(),
+                source_evidence: None,
                 extra: IndexMap::new(),
             })
         }
@@ -1052,7 +1060,7 @@ mod tests {
         async fn validate_payload_signed(
             &self,
             _sent_event: &LzSentEvent,
-            _verifier_address: &str,
+            _verifier_address: Option<&str>,
             _dst_chain_name: &str,
         ) -> Result<(), AppCoreError> {
             Ok(())
@@ -1099,7 +1107,7 @@ mod tests {
         async fn validate_payload_signed(
             &self,
             _sent_event: &LzSentEvent,
-            _verifier_address: &str,
+            _verifier_address: Option<&str>,
             _dst_chain_name: &str,
         ) -> Result<(), AppCoreError> {
             Ok(())
@@ -1411,7 +1419,7 @@ mod tests {
         async fn validate_payload_signed(
             &self,
             _sent_event: &LzSentEvent,
-            _verifier_address: &str,
+            _verifier_address: Option<&str>,
             _dst_chain_name: &str,
         ) -> Result<(), AppCoreError> {
             self.observe().await;
@@ -1442,15 +1450,13 @@ mod tests {
         let mut app = app();
         app.validator = validator.clone();
 
-        // A dvn address is what brings the payload-signed check into play, so
-        // without one only three of the four would run.
-        let mut request = request_v2("V302");
-        request.signing_context = SigningContext::Message {
-            expiration: 123,
-            skip_v_id: None,
-            dvn_address: Some("0xdvn".to_string()),
-            block_confirmation: 1,
-        };
+        // No dvn address on purpose. The payload-signed check used to run only
+        // when the caller supplied one, so this request would have issued three
+        // of the four validations and a caller could decide which checks ran by
+        // omitting a field. All four now run regardless; the address only
+        // decides whether the duplicate-signature query inside the check is
+        // issued.
+        let request = request_v2("V302");
 
         let started_at = Instant::now();
         app.sign_request_v2(request).await.unwrap();
@@ -1504,7 +1510,7 @@ mod tests {
             async fn validate_payload_signed(
                 &self,
                 _sent_event: &LzSentEvent,
-                _verifier_address: &str,
+                _verifier_address: Option<&str>,
                 _dst_chain_name: &str,
             ) -> Result<(), AppCoreError> {
                 Err(AppCoreError::BadRequest("payload signed".to_string()))
@@ -1693,6 +1699,7 @@ mod tests {
             lz_message_id: lz_message_id("V302"),
             message: "0x68656c6c6f".to_string(),
             tx_hash: "0xtx".to_string(),
+            source_evidence: None,
             extra: IndexMap::new(),
         };
         assert_eq!(
@@ -1707,6 +1714,7 @@ mod tests {
             lz_message_id: lz_message_id("V302"),
             message: "0x68656c6c6f".to_string(),
             tx_hash: "0xtx".to_string(),
+            source_evidence: None,
             extra: IndexMap::new(),
         };
         let mut request = request_v2("V302");
@@ -1721,6 +1729,7 @@ mod tests {
             lz_message_id: lz_message_id("V302"),
             message: "0x68656c6c6f".to_string(),
             tx_hash: "0xtx".to_string(),
+            source_evidence: None,
             extra: IndexMap::new(),
         };
         let mut request = request_v2("V302");

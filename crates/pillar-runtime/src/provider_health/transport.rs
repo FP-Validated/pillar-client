@@ -54,6 +54,12 @@ impl AwsLambdaInvokeClient for AwsSdkLambdaInvokeClient {
             .send()
             .await
             .map_err(|error| error.to_string())?;
+        if response.function_error().is_some() {
+            return Err("Lambda invocation reported a function error".to_string());
+        }
+        if !(200..300).contains(&response.status_code()) {
+            return Err("Lambda invocation returned a non-success status".to_string());
+        }
         let Some(payload) = response.payload else {
             return Ok(Value::Null);
         };

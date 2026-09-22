@@ -84,18 +84,14 @@ pub(crate) fn extra_context_sent_event_payload(sent_event: &LzSentEvent) -> Valu
     value
 }
 
-pub(crate) fn json_value_is_truthy(value: &Value) -> bool {
-    match value {
-        Value::Null => false,
-        Value::Bool(value) => *value,
-        Value::Number(value) => value.as_f64() != Some(0.0),
-        Value::String(value) => !value.is_empty(),
-        Value::Array(_) | Value::Object(_) => true,
-    }
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct EvmTransactionReceipt {
+    #[serde(rename = "blockHash")]
+    pub(crate) block_hash: String,
+    #[serde(rename = "blockNumber")]
+    pub(crate) block_number: String,
+    // Missing execution status cannot prove success, so receipt decoding fails closed.
+    pub(crate) status: String,
     pub(crate) logs: Vec<EvmReceiptLog>,
 }
 
@@ -104,6 +100,8 @@ pub(crate) struct EvmReceiptLog {
     pub(crate) address: String,
     pub(crate) topics: Vec<String>,
     pub(crate) data: String,
+    #[serde(rename = "logIndex")]
+    pub(crate) log_index: String,
 }
 
 pub(crate) fn normalize_address_map(map: HashMap<String, String>) -> HashMap<String, String> {

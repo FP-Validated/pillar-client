@@ -151,7 +151,7 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_sui_payload() {
     let checks = sui_checks("sui", responses, calls.clone());
 
     checks
-        .validate_payload_not_signed(&sui_sent_event("sui", 30_350), VERIFIER, "sui")
+        .validate_payload_not_signed(&sui_sent_event("sui", 30_350), Some(VERIFIER), "sui")
         .await
         .expect("an unverified Sui packet must pass without an EVM contract lookup");
 
@@ -187,7 +187,7 @@ async fn runtime_rpc_validation_checks_rejects_verified_sui_payload() {
     );
 
     let error = checks
-        .validate_payload_not_signed(&sui_sent_event("sui", 30_350), VERIFIER, "sui")
+        .validate_payload_not_signed(&sui_sent_event("sui", 30_350), Some(VERIFIER), "sui")
         .await
         .unwrap_err();
     assert!(matches!(error, AppCoreError::BadRequest(_)), "{error}");
@@ -206,7 +206,7 @@ async fn runtime_rpc_validation_checks_accepts_verifiable_sui_payload() {
     );
 
     checks
-        .validate_payload_not_signed(&sui_sent_event("sui", 30_350), VERIFIER, "sui")
+        .validate_payload_not_signed(&sui_sent_event("sui", 30_350), Some(VERIFIER), "sui")
         .await
         .expect("VERIFIABLE is not VERIFIED on Sui");
 }
@@ -218,7 +218,7 @@ async fn runtime_rpc_validation_checks_rejects_sui_payload_at_required_confirmat
     let checks = sui_checks("sui", responses, Arc::new(Mutex::new(Vec::new())));
 
     let error = checks
-        .validate_payload_not_signed(&sui_sent_event("sui", 30_350), VERIFIER, "sui")
+        .validate_payload_not_signed(&sui_sent_event("sui", 30_350), Some(VERIFIER), "sui")
         .await
         .unwrap_err();
     assert!(
@@ -235,7 +235,7 @@ async fn runtime_rpc_validation_checks_treat_missing_sui_confirmations_as_zero()
     let checks = sui_checks("sui", responses, Arc::new(Mutex::new(Vec::new())));
 
     checks
-        .validate_payload_not_signed(&sui_sent_event("sui", 30_350), VERIFIER, "sui")
+        .validate_payload_not_signed(&sui_sent_event("sui", 30_350), Some(VERIFIER), "sui")
         .await
         .expect("an EConfirmationsNotFound abort means zero confirmations");
 }
@@ -248,7 +248,7 @@ async fn runtime_rpc_validation_checks_fail_closed_on_other_sui_aborts() {
     let checks = sui_checks("sui", responses, Arc::new(Mutex::new(Vec::new())));
 
     let error = checks
-        .validate_payload_not_signed(&sui_sent_event("sui", 30_350), VERIFIER, "sui")
+        .validate_payload_not_signed(&sui_sent_event("sui", 30_350), Some(VERIFIER), "sui")
         .await
         .unwrap_err();
     assert!(matches!(error, AppCoreError::Internal(_)), "{error}");
@@ -263,7 +263,7 @@ async fn runtime_rpc_validation_checks_fail_closed_when_sui_confirmations_are_ze
     let checks = sui_checks("sui", responses, Arc::new(Mutex::new(Vec::new())));
 
     let error = checks
-        .validate_payload_not_signed(&sui_sent_event("sui", 30_350), VERIFIER, "sui")
+        .validate_payload_not_signed(&sui_sent_event("sui", 30_350), Some(VERIFIER), "sui")
         .await
         .unwrap_err();
     assert!(matches!(error, AppCoreError::BadRequest(_)), "{error}");
@@ -279,7 +279,7 @@ async fn runtime_rpc_validation_checks_use_iota_rpc_namespace() {
     );
 
     checks
-        .validate_payload_not_signed(&sui_sent_event("iotal1", 30_423), VERIFIER, "iotal1")
+        .validate_payload_not_signed(&sui_sent_event("iotal1", 30_423), Some(VERIFIER), "iotal1")
         .await
         .unwrap();
 
@@ -301,7 +301,7 @@ async fn runtime_rpc_validation_checks_reject_non_v302_sui_payload() {
     let checks = sui_checks("sui", Vec::new(), calls.clone());
 
     let error = checks
-        .validate_payload_not_signed(&event, VERIFIER, "sui")
+        .validate_payload_not_signed(&event, Some(VERIFIER), "sui")
         .await
         .unwrap_err();
     assert!(matches!(error, AppCoreError::BadRequest(_)), "{error}");
@@ -320,7 +320,7 @@ async fn runtime_rpc_validation_checks_fail_closed_on_non_shared_sui_object() {
     let checks = sui_checks("sui", responses, Arc::new(Mutex::new(Vec::new())));
 
     let error = checks
-        .validate_payload_not_signed(&sui_sent_event("sui", 30_350), VERIFIER, "sui")
+        .validate_payload_not_signed(&sui_sent_event("sui", 30_350), Some(VERIFIER), "sui")
         .await
         .unwrap_err();
     assert!(matches!(error, AppCoreError::Internal(_)), "{error}");
@@ -335,7 +335,7 @@ async fn runtime_rpc_validation_checks_fail_closed_on_sui_transport_failure() {
     );
 
     let error = checks
-        .validate_payload_not_signed(&sui_sent_event("sui", 30_350), VERIFIER, "sui")
+        .validate_payload_not_signed(&sui_sent_event("sui", 30_350), Some(VERIFIER), "sui")
         .await
         .unwrap_err();
     assert!(matches!(error, AppCoreError::Internal(_)), "{error}");
@@ -382,7 +382,7 @@ async fn runtime_rpc_validation_checks_send_the_live_sui_header_and_reject_its_v
     );
 
     let error = checks
-        .validate_payload_not_signed(&live_sui_sent_event(), VERIFIER, "sui")
+        .validate_payload_not_signed(&live_sui_sent_event(), Some(VERIFIER), "sui")
         .await
         .unwrap_err();
     assert!(matches!(error, AppCoreError::BadRequest(_)), "{error}");

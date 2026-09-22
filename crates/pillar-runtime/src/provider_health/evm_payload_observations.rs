@@ -12,7 +12,7 @@ pub(crate) struct EvmPayloadSignedObservation<'a> {
     /// lives on a V1 endpoint, which answers a different function.
     pub(crate) dst_eid: u64,
     pub(crate) proof: &'a EvmUlnProof,
-    pub(crate) verifier_address: &'a str,
+    pub(crate) verifier_address: Option<&'a str>,
 }
 
 /// `EndpointV2IdBase` (TS: `packages/common-model/src/utils/index.ts:60`).
@@ -136,10 +136,7 @@ where
             evm_receive_contract_pair(observation.contracts, receive_version)?;
         let config_call_data =
             build_evm_get_uln_config_call_data(observation.oapp, observation.remote_eid)?;
-        let hash_lookup_call_data =
-            build_evm_hash_lookup_call_data(observation.proof, observation.verifier_address)?;
         let verifiable_call_data = build_evm_verifiable_call_data(observation.proof)?;
-
         let config_result = eth_call(
             transport.clone(),
             url.clone(),
@@ -149,18 +146,24 @@ where
         )
         .await?;
         let inbound_confirmations = decode_evm_uln_config_confirmations(&config_result)?;
-
-        let hash_lookup_result = eth_call(
-            transport.clone(),
-            url.clone(),
-            headers.clone(),
-            receive_contract,
-            &hash_lookup_call_data,
-        )
-        .await?;
-        let hash_lookup = decode_evm_hash_lookup_result(receive_version, &hash_lookup_result)?;
-        let dvn_confirmed = evm_hash_lookup_is_confirmed(inbound_confirmations, &hash_lookup);
-
+        let dvn_confirmed = if let Some(verifier_address) = observation.verifier_address {
+            let hash_lookup_call_data =
+                build_evm_hash_lookup_call_data(observation.proof, verifier_address)?;
+            let hash_lookup_result = eth_call(
+                transport.clone(),
+                url.clone(),
+                headers.clone(),
+                receive_contract,
+                &hash_lookup_call_data,
+            )
+            .await?;
+            let hash_lookup = decode_evm_hash_lookup_result(receive_version, &hash_lookup_result)?;
+            evm_hash_lookup_is_confirmed(inbound_confirmations, &hash_lookup)
+        } else {
+            // Library resolution above is mandatory without a DVN address; only
+            // this duplicate-signature lookup needs the caller-supplied address.
+            false
+        };
         let verifiable_result = eth_call(
             transport,
             url,
@@ -171,7 +174,6 @@ where
         .await?;
         let verification_state =
             decode_evm_verification_state(receive_version, &verifiable_result)?;
-
         Ok::<(bool, u64, EvmVerificationState), AppCoreError>((
             dvn_confirmed,
             inbound_confirmations,

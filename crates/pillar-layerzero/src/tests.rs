@@ -115,6 +115,7 @@ fn sent_event() -> LzSentEvent {
         message: "0xabc".to_string(),
         tx_hash: "0xtx".to_string(),
         extra: IndexMap::new(),
+        source_evidence: None,
     }
 }
 
@@ -148,6 +149,7 @@ fn evm_sent_event() -> LzSentEvent {
         message: "0xdeadbeef".to_string(),
         tx_hash: "0xtx".to_string(),
         extra: event_extra,
+        source_evidence: None,
     }
 }
 
@@ -240,6 +242,7 @@ fn evm_sent_event_from_fixture(fixture: &EvmFixture) -> LzSentEvent {
         message: fixture.message.to_string(),
         tx_hash: "0xtx".to_string(),
         extra: event_extra,
+        source_evidence: None,
     }
 }
 

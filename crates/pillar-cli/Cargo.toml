@@ -23,6 +23,12 @@ tower.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
+[dev-dependencies]
+# The connection-ceiling test drives tokio's clock directly. Without this the
+# test only compiles when another crate in the graph happens to enable the
+# feature, so `cargo test -p pillar-cli` alone would fail.
+tokio = { workspace = true, features = ["test-util"] }
+
 [[bin]]
 name = "pillar"
 path = "src/main.rs"

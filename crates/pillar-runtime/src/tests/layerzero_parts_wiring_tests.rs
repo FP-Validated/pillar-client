@@ -192,6 +192,7 @@ async fn runtime_layerzero_parts_match_upstream_base_route_hashes() {
             },
             message: message.to_string(),
             tx_hash: "0xtx".to_string(),
+            source_evidence: None,
             extra: IndexMap::from([("guid".to_string(), Value::from(guid))]),
         };
 
@@ -287,6 +288,7 @@ async fn runtime_layerzero_parts_routes_aptos_destination_to_aptos_builder() {
         },
         message: "0xdeadbeef".to_string(),
         tx_hash: "0xtx".to_string(),
+        source_evidence: None,
         extra: IndexMap::from([(
             "guid".to_string(),
             Value::from("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),

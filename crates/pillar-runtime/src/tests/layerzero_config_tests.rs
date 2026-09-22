@@ -347,6 +347,7 @@ fn runtime_evm_uln_payload_builder_uses_static_receive_contracts() {
         },
         message: "0xdeadbeef".to_string(),
         tx_hash: "0xtx".to_string(),
+        source_evidence: None,
         extra: IndexMap::new(),
     };
     let result = builder

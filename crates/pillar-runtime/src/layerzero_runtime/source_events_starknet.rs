@@ -100,6 +100,7 @@ pub(crate) fn starknet_packet_to_lz_sent_event(
         message: packet.message,
         tx_hash: src_tx_hash.to_string(),
         extra,
+        source_evidence: None,
     })
 }
 

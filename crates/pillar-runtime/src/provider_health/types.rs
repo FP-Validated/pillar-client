@@ -19,6 +19,7 @@ pub(crate) enum BlockConfirmationValidity {
         receipt_block_number: i64,
     },
     InvalidRange,
+    SourceChanged(String),
     Missing,
 }
 

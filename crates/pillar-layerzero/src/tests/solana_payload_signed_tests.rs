@@ -297,6 +297,7 @@ fn solana_payload_signed_request_accepts_hex_receiver_from_real_resolver() {
             "guid".to_string(),
             Value::from("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
         )]),
+        source_evidence: None,
     };
 
     let request =

@@ -320,12 +320,11 @@ async fn request_middleware(
     let started_at = Instant::now();
     let method = req.method().as_str().to_string();
     let route = route_template(req.uri().path()).to_string();
-    let request_id = req
-        .headers()
-        .get(REQUEST_ID_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string)
-        .unwrap_or_else(next_generated_request_id);
+    let request_id = request_id_or_generated(
+        req.headers()
+            .get(REQUEST_ID_HEADER)
+            .and_then(|value| value.to_str().ok()),
+    );
     let span = tracing::info_span!(
         "http_request",
         request_id = %request_id,
@@ -405,6 +404,16 @@ fn next_generated_request_id() -> String {
     format!("generated-{next}")
 }
 
+fn request_id_or_generated(request_id: Option<&str>) -> String {
+    // Header values are caller-controlled and are interpolated into the request
+    // span. Reject control characters as a unit rather than trying to repair a
+    // partially trusted identifier; malformed identifiers get a fresh local id.
+    request_id
+        .filter(|value| !value.chars().any(char::is_control))
+        .map(str::to_owned)
+        .unwrap_or_else(next_generated_request_id)
+}
+
 async fn root() -> Html<&'static str> {
     Html("HEALTHY")
 }
@@ -445,6 +454,18 @@ fn is_transaction_id_shaped(value: &str) -> bool {
     !body.is_empty()
         && body.len() <= 128
         && body
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+}
+
+/// Configured LayerZero chain names use the same conservative ASCII alphabet
+/// throughout the generated roster (letters, digits, _ and -). This is a
+/// shape gate only, not roster membership: unknown but well-formed names still
+/// reach the core, which owns the caller-error classification for unknown chains.
+fn is_chain_name_shaped(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
 }
@@ -515,6 +536,21 @@ fn validate_v2_request_shape(value: &Value) -> Result<(), AppError> {
         .get("lzMessageId")
         .and_then(|message_id| message_id.get("pathwayId"))
     {
+        for field in ["srcChainName", "dstChainName"] {
+            let Some(present) = pathway_id.get(field).filter(|value| !value.is_null()) else {
+                missing_fields.push(format!("lzMessageId.pathwayId.{field}"));
+                continue;
+            };
+            match present.as_str() {
+                None => {
+                    invalid_fields.push(format!("lzMessageId.pathwayId.{field}: expected a string"))
+                }
+                Some(name) if !is_chain_name_shaped(name) => invalid_fields.push(format!(
+                    "lzMessageId.pathwayId.{field}: expected 1-128 characters of [0-9a-zA-Z_-]"
+                )),
+                Some(_) => {}
+            }
+        }
         for field in ["srcEid", "dstEid", "sender", "receiver"] {
             let Some(present) = pathway_id.get(field).filter(|value| !value.is_null()) else {
                 missing_fields.push(format!("lzMessageId.pathwayId.{field}"));
@@ -537,7 +573,7 @@ fn validate_v2_request_shape(value: &Value) -> Result<(), AppError> {
         }
     }
 
-    if missing_fields.is_empty() && !invalid_fields.is_empty() {
+    if !invalid_fields.is_empty() {
         return Err(AppError::BadRequest(format!(
             "Invalid request: {}",
             invalid_fields.join("; ")
@@ -1679,9 +1715,92 @@ mod tests {
         }
     }
 
-    /// `srcTxHash` is spliced into the path of an outbound GET against the
-    /// operator's own node, so a path metacharacter has to be refused at the
-    /// boundary rather than reaching a transport.
+    /// Configured chain names are shape-validated before deserialisation and
+    /// before the v2 handler interpolates them into tracing fields.
+    #[test]
+    fn chain_name_shape_accepts_configured_names_and_rejects_controls() {
+        for accepted in ["ethereum", "bsc", "basesep", "iotal1", "moninet"] {
+            assert!(
+                is_chain_name_shaped(accepted),
+                "{accepted} must be accepted"
+            );
+        }
+        for refused in [
+            "", "bad name", "bad/name", "bad.name", "bad:name", "bad@name",
+        ] {
+            assert!(
+                !is_chain_name_shaped(refused),
+                "{refused:?} must be refused"
+            );
+        }
+        for refused in ["bad\nname", "bad\rname", "bad\x1b[2J", "bad\0name"] {
+            assert!(
+                !is_chain_name_shaped(refused),
+                "{refused:?} must be refused"
+            );
+        }
+        assert!(!is_chain_name_shaped(&"a".repeat(129)));
+    }
+
+    #[tokio::test]
+    async fn sign_v2_rejects_unsafe_chain_names_before_signing() {
+        let invalid_names = vec![
+            "bad\nname".to_string(),
+            "bad\rname".to_string(),
+            "bad\x1b[2J".to_string(),
+            "bad\0name".to_string(),
+            "a".repeat(129),
+        ];
+        for field in ["srcChainName", "dstChainName"] {
+            for name in &invalid_names {
+                let app = TestApp::new();
+                let mut request = v2_request_json(false);
+                request["lzMessageId"]["pathwayId"][field] = Value::String(name.clone());
+                let (status, json) =
+                    post_json_with_app(app.clone(), "/v2/resolve-and-sign", request).await;
+                assert_eq!(status, StatusCode::BAD_REQUEST, "{field}={name:?}");
+                assert_eq!(
+                    json["body"],
+                    format!(
+                        "Invalid request: lzMessageId.pathwayId.{field}: expected 1-128 characters of [0-9a-zA-Z_-]"
+                    )
+                );
+                assert!(app.v2_requests.lock().await.is_empty());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn sign_v2_accepts_configured_chain_name_shapes() {
+        for (src, dst) in [
+            ("ethereum", "bsc"),
+            ("basesep", "iotal1"),
+            ("moninet", "ethereum"),
+        ] {
+            let app = TestApp::new();
+            let mut request = v2_request_json(false);
+            request["lzMessageId"]["pathwayId"]["srcChainName"] = Value::String(src.into());
+            request["lzMessageId"]["pathwayId"]["dstChainName"] = Value::String(dst.into());
+            let (status, _) =
+                post_json_with_app(app.clone(), "/v2/resolve-and-sign", request).await;
+            assert_eq!(status, StatusCode::OK, "{src}->{dst}");
+        }
+    }
+
+    #[test]
+    fn request_id_controls_fall_back_to_a_generated_id() {
+        assert_eq!(
+            request_id_or_generated(Some("safe-request-id")),
+            "safe-request-id"
+        );
+        for unsafe_id in ["bad\nid", "bad\rid", "bad\x1b[2J", "bad\0id"] {
+            let actual = request_id_or_generated(Some(unsafe_id));
+            assert_ne!(actual, unsafe_id);
+            assert!(actual.starts_with("generated-"));
+        }
+    }
+    /// srcTxHash is spliced into an outbound provider URL path, so path
+    /// metacharacters must be refused at the boundary rather than reaching a transport.
     #[test]
     fn transaction_id_shape_refuses_path_metacharacters() {
         for accepted in [

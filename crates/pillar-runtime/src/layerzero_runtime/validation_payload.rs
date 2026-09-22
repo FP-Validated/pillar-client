@@ -7,7 +7,7 @@ where
     pub(crate) async fn validate_payload_not_signed_with_quorum(
         &self,
         sent_event: &LzSentEvent,
-        verifier_address: &str,
+        verifier_address: Option<&str>,
         dst_chain_name: &str,
     ) -> Result<(), AppCoreError> {
         // No guid means a ULN V1 message, and the chain-native already-signed
@@ -24,12 +24,19 @@ where
         if !sent_event.extra.contains_key("guid") {
             return Ok(());
         }
+        let required_verifier_address = || {
+            verifier_address.ok_or_else(|| {
+                AppCoreError::BadRequest(
+                    "dvnAddress is required for chain-native payload validation".to_string(),
+                )
+            })
+        };
 
         if dst_chain_name == "solana" {
             return self
                 .validate_solana_payload_not_signed_with_quorum(
                     sent_event,
-                    verifier_address,
+                    required_verifier_address()?,
                     dst_chain_name,
                 )
                 .await;
@@ -38,7 +45,7 @@ where
             return self
                 .validate_move_payload_not_signed_with_quorum(
                     sent_event,
-                    verifier_address,
+                    required_verifier_address()?,
                     dst_chain_name,
                 )
                 .await;
@@ -47,7 +54,7 @@ where
             return self
                 .validate_starknet_payload_not_signed_with_quorum(
                     sent_event,
-                    verifier_address,
+                    required_verifier_address()?,
                     dst_chain_name,
                 )
                 .await;
@@ -56,7 +63,7 @@ where
             return self
                 .validate_ton_payload_not_signed_with_quorum(
                     sent_event,
-                    verifier_address,
+                    required_verifier_address()?,
                     dst_chain_name,
                 )
                 .await;
@@ -65,7 +72,7 @@ where
             return self
                 .validate_sui_payload_not_signed_with_quorum(
                     sent_event,
-                    verifier_address,
+                    required_verifier_address()?,
                     dst_chain_name,
                 )
                 .await;
@@ -110,7 +117,7 @@ where
             let transport = self.transport.clone();
             let oapp = oapp.clone();
             let proof = proof.clone();
-            let verifier_address = verifier_address.to_string();
+            let verifier_address = verifier_address.map(ToOwned::to_owned);
             let contracts = contracts.clone();
             requests.push(async move {
                 if !delay.is_zero() {
@@ -126,7 +133,7 @@ where
                         remote_eid: src_eid,
                         dst_eid,
                         proof: &proof,
-                        verifier_address: &verifier_address,
+                        verifier_address: verifier_address.as_deref(),
                     },
                 )
                 .await;

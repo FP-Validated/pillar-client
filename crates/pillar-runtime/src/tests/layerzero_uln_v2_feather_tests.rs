@@ -66,6 +66,7 @@ async fn runtime_evm_uln_v2_payload_builder_discovers_feather_proof_type_from_de
         },
         message: "0xdeadbeef".to_string(),
         tx_hash: "0xtx".to_string(),
+        source_evidence: None,
         extra,
     };
 

@@ -36,13 +36,13 @@ impl RuntimeValidationChecks for FixedValidationChecks {
     async fn validate_payload_not_signed(
         &self,
         _sent_event: &LzSentEvent,
-        verifier_address: &str,
+        verifier_address: Option<&str>,
         dst_chain_name: &str,
     ) -> Result<(), AppCoreError> {
-        self.calls
-            .lock()
-            .unwrap()
-            .push(format!("payload:{verifier_address}:{dst_chain_name}"));
+        self.calls.lock().unwrap().push(format!(
+            "payload:{}:{dst_chain_name}",
+            verifier_address.unwrap_or("none")
+        ));
         Ok(())
     }
 

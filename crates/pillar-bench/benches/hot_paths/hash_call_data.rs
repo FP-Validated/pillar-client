@@ -77,5 +77,6 @@ fn evm_sent_event() -> LzSentEvent {
         message: "0xdeadbeef".to_string(),
         tx_hash: "0xtx".to_string(),
         extra: event_extra,
+        source_evidence: None,
     }
 }

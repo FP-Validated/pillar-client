@@ -147,7 +147,7 @@ async fn runtime_rpc_validation_checks_send_the_live_packet_and_reject_its_verif
     );
 
     let error = checks
-        .validate_payload_not_signed(&live_ton_sent_event(), CONFIGURED_VERIFIER, "ton")
+        .validate_payload_not_signed(&live_ton_sent_event(), Some(CONFIGURED_VERIFIER), "ton")
         .await
         .unwrap_err();
     assert!(matches!(error, AppCoreError::BadRequest(_)), "{error}");
@@ -215,7 +215,7 @@ async fn runtime_rpc_validation_checks_reject_live_executed_ton_state() {
     );
 
     let error = checks
-        .validate_payload_not_signed(&ton_sent_event(), CONFIGURED_VERIFIER, "ton")
+        .validate_payload_not_signed(&ton_sent_event(), Some(CONFIGURED_VERIFIER), "ton")
         .await
         .unwrap_err();
     assert!(matches!(error, AppCoreError::BadRequest(_)), "{error}");
@@ -233,7 +233,7 @@ async fn runtime_rpc_validation_checks_fail_closed_on_live_uninitialized_connect
     );
 
     let error = checks
-        .validate_payload_not_signed(&ton_sent_event(), CONFIGURED_VERIFIER, "ton")
+        .validate_payload_not_signed(&ton_sent_event(), Some(CONFIGURED_VERIFIER), "ton")
         .await
         .unwrap_err();
     assert!(
@@ -255,7 +255,7 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_ton_payload() {
     );
 
     checks
-        .validate_payload_not_signed(&ton_sent_event(), CONFIGURED_VERIFIER, "ton")
+        .validate_payload_not_signed(&ton_sent_event(), Some(CONFIGURED_VERIFIER), "ton")
         .await
         .expect("an unverified TON packet must pass without an EVM contract lookup");
 
@@ -298,7 +298,7 @@ async fn runtime_rpc_validation_checks_rejects_committable_ton_payload() {
     );
 
     let error = checks
-        .validate_payload_not_signed(&ton_sent_event(), CONFIGURED_VERIFIER, "ton")
+        .validate_payload_not_signed(&ton_sent_event(), Some(CONFIGURED_VERIFIER), "ton")
         .await
         .unwrap_err();
 
@@ -322,7 +322,7 @@ async fn runtime_rpc_validation_checks_rejects_executed_ton_payload() {
     );
 
     let error = checks
-        .validate_payload_not_signed(&ton_sent_event(), CONFIGURED_VERIFIER, "ton")
+        .validate_payload_not_signed(&ton_sent_event(), Some(CONFIGURED_VERIFIER), "ton")
         .await
         .unwrap_err();
     assert!(matches!(error, AppCoreError::BadRequest(_)));
@@ -341,7 +341,7 @@ async fn runtime_rpc_validation_checks_accepts_ton_config_error_state() {
     );
 
     checks
-        .validate_payload_not_signed(&ton_sent_event(), CONFIGURED_VERIFIER, "ton")
+        .validate_payload_not_signed(&ton_sent_event(), Some(CONFIGURED_VERIFIER), "ton")
         .await
         .expect("a config-error state is VERIFYING, not signed");
 }
@@ -361,7 +361,7 @@ async fn runtime_rpc_validation_checks_rejects_ton_payload_for_an_unconfigured_d
     );
 
     let error = checks
-        .validate_payload_not_signed(&ton_sent_event(), CONFIGURED_VERIFIER, "ton")
+        .validate_payload_not_signed(&ton_sent_event(), Some(CONFIGURED_VERIFIER), "ton")
         .await
         .unwrap_err();
     assert!(matches!(error, AppCoreError::BadRequest(_)));
@@ -381,7 +381,7 @@ async fn runtime_rpc_validation_checks_accepts_ton_payload_attested_for_another_
     );
 
     checks
-        .validate_payload_not_signed(&ton_sent_event(), CONFIGURED_VERIFIER, "ton")
+        .validate_payload_not_signed(&ton_sent_event(), Some(CONFIGURED_VERIFIER), "ton")
         .await
         .expect("an attestation for a different packet hash is not this packet's signature");
 }
@@ -394,7 +394,7 @@ async fn runtime_rpc_validation_checks_fails_closed_on_unreadable_ton_storage() 
     );
 
     let error = checks
-        .validate_payload_not_signed(&ton_sent_event(), CONFIGURED_VERIFIER, "ton")
+        .validate_payload_not_signed(&ton_sent_event(), Some(CONFIGURED_VERIFIER), "ton")
         .await
         .unwrap_err();
     assert!(
@@ -415,7 +415,7 @@ async fn runtime_rpc_validation_checks_fails_closed_on_aborted_committable_view(
     );
 
     let error = checks
-        .validate_payload_not_signed(&ton_sent_event(), CONFIGURED_VERIFIER, "ton")
+        .validate_payload_not_signed(&ton_sent_event(), Some(CONFIGURED_VERIFIER), "ton")
         .await
         .unwrap_err();
     assert!(matches!(error, AppCoreError::Internal(_)));
@@ -504,7 +504,7 @@ async fn runtime_rpc_validation_checks_require_ton_providers_to_agree_on_storage
     .unwrap();
 
     let error = checks
-        .validate_payload_not_signed(&ton_sent_event(), CONFIGURED_VERIFIER, "ton")
+        .validate_payload_not_signed(&ton_sent_event(), Some(CONFIGURED_VERIFIER), "ton")
         .await
         .unwrap_err();
     assert!(
@@ -521,7 +521,7 @@ async fn runtime_rpc_validation_checks_skips_ton_payload_without_guid() {
     let checks = ton_checks(Vec::new(), calls.clone());
 
     checks
-        .validate_payload_not_signed(&event, CONFIGURED_VERIFIER, "ton")
+        .validate_payload_not_signed(&event, Some(CONFIGURED_VERIFIER), "ton")
         .await
         .unwrap();
     assert!(calls.lock().unwrap().is_empty(), "V1 messages are skipped");
@@ -590,7 +590,7 @@ async fn ton_quorum_lets_providers_agree_that_the_contract_is_not_active() {
     );
 
     let error = checks
-        .validate_payload_not_signed(&ton_sent_event(), CONFIGURED_VERIFIER, "ton")
+        .validate_payload_not_signed(&ton_sent_event(), Some(CONFIGURED_VERIFIER), "ton")
         .await
         .unwrap_err();
 
@@ -624,7 +624,7 @@ async fn ton_quorum_refuses_to_let_dead_providers_agree() {
     );
 
     let error = checks
-        .validate_payload_not_signed(&ton_sent_event(), CONFIGURED_VERIFIER, "ton")
+        .validate_payload_not_signed(&ton_sent_event(), Some(CONFIGURED_VERIFIER), "ton")
         .await
         .unwrap_err();
 
@@ -661,7 +661,7 @@ async fn ton_quorum_lets_one_healthy_provider_outweigh_a_dead_one() {
     );
 
     checks
-        .validate_payload_not_signed(&ton_sent_event(), CONFIGURED_VERIFIER, "ton")
+        .validate_payload_not_signed(&ton_sent_event(), Some(CONFIGURED_VERIFIER), "ton")
         .await
         .expect("the one provider that answered says the payload is unsigned");
 }
@@ -694,7 +694,7 @@ async fn ton_quorum_does_not_mix_a_read_contract_with_providers_that_never_answe
     );
 
     let error = checks
-        .validate_payload_not_signed(&ton_sent_event(), CONFIGURED_VERIFIER, "ton")
+        .validate_payload_not_signed(&ton_sent_event(), Some(CONFIGURED_VERIFIER), "ton")
         .await
         .unwrap_err();
 
@@ -733,7 +733,7 @@ async fn ton_quorum_reaches_a_verdict_when_the_readers_outnumber_the_failures() 
     );
 
     let error = checks
-        .validate_payload_not_signed(&ton_sent_event(), CONFIGURED_VERIFIER, "ton")
+        .validate_payload_not_signed(&ton_sent_event(), Some(CONFIGURED_VERIFIER), "ton")
         .await
         .unwrap_err();
 

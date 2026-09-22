@@ -73,6 +73,7 @@ async fn runtime_evm_read_payload_resolver_caps_process_wide_rpc_concurrency() {
                 },
                 message: evm_read_command_with_repeated_block_markers(8),
                 tx_hash: "0xtx".to_string(),
+                source_evidence: None,
                 extra: IndexMap::new(),
             },
             &SigningContext::Read {
@@ -106,6 +107,7 @@ async fn runtime_evm_read_payload_resolver_calls_request_block_marker() {
         },
         message: evm_read_command_with_block_marker(),
         tx_hash: "0xtx".to_string(),
+        source_evidence: None,
         extra: IndexMap::new(),
     };
     let resolved = resolver
@@ -162,6 +164,7 @@ async fn runtime_evm_read_payload_resolver_requires_exact_result_quorum() {
         },
         message: evm_read_command_with_block_marker(),
         tx_hash: "0xtx".to_string(),
+        source_evidence: None,
         extra: IndexMap::new(),
     };
 
@@ -205,6 +208,7 @@ async fn runtime_evm_read_payload_resolver_fails_without_exact_result_quorum() {
         },
         message: evm_read_command_with_block_marker(),
         tx_hash: "0xtx".to_string(),
+        source_evidence: None,
         extra: IndexMap::new(),
     };
 
@@ -241,6 +245,7 @@ async fn runtime_evm_read_payload_resolver_uses_resolved_timestamp_marker() {
         },
         message: evm_read_command_with_timestamp_marker(),
         tx_hash: "0xtx".to_string(),
+        source_evidence: None,
         extra: IndexMap::new(),
     };
     let resolved = resolver
@@ -288,6 +293,7 @@ async fn runtime_evm_read_payload_resolver_applies_only_map_compute() {
                 },
                 message: evm_read_command_with_compute_setting(0),
                 tx_hash: "0xtx".to_string(),
+                source_evidence: None,
                 extra: IndexMap::new(),
             },
             &SigningContext::Read {
@@ -332,6 +338,7 @@ async fn runtime_evm_read_payload_resolver_applies_only_reduce_compute() {
                 },
                 message: evm_read_command_with_compute_setting(1),
                 tx_hash: "0xtx".to_string(),
+                source_evidence: None,
                 extra: IndexMap::new(),
             },
             &SigningContext::Read {
@@ -379,6 +386,7 @@ async fn runtime_evm_read_payload_resolver_applies_map_reduce_compute() {
                 },
                 message: evm_read_command_with_compute_setting(2),
                 tx_hash: "0xtx".to_string(),
+                source_evidence: None,
                 extra: IndexMap::new(),
             },
             &SigningContext::Read {

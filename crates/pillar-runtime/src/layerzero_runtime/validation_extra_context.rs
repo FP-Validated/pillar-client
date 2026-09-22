@@ -34,12 +34,7 @@ where
                 .post_json(url.to_string(), headers, payload.clone())
                 .await
                 .map_err(AppCoreError::Internal)?;
-            if json_value_is_truthy(&response) {
-                return Ok(());
-            }
-            return Err(AppCoreError::BadRequest(
-                "Extra context validation failed".to_string(),
-            ));
+            return strict_policy_verdict(&response);
         }
 
         if let Some(function_name) = self.extra_context.aws_lambda_name.as_deref() {
@@ -52,17 +47,62 @@ where
                 .invoke_json(function_name, payload)
                 .await
                 .map_err(AppCoreError::Internal)?;
-            if json_value_is_truthy(response.get("body").unwrap_or(&Value::Null)) {
-                return Ok(());
-            }
-            return Err(AppCoreError::BadRequest(
-                "Extra context validation failed".to_string(),
-            ));
+            return validate_lambda_response(&response);
         }
 
         Err(AppCoreError::Internal(
             "Extra context request URL is not configured".to_string(),
         ))
+    }
+}
+/// Extra-context policy is a security verdict, not a generic JSON truthiness
+/// check. The upstream TypeScript service uses JavaScript truthiness here
+/// (apps/gasolina/src/app/app.ts:707 and :724-726), but accepting objects,
+/// arrays, or strings would let a malformed policy response approve signing.
+/// Keep this deliberately fail-closed and local rather than changing the
+/// provider-health helper, whose other callers use truthiness for observations.
+fn strict_policy_verdict(value: &Value) -> Result<(), AppCoreError> {
+    if value == &Value::Bool(true) {
+        return Ok(());
+    }
+
+    Err(AppCoreError::BadRequest(format!(
+        "Extra context validation failed: expected JSON boolean true, received {}",
+        json_value_type(value),
+    )))
+}
+
+fn validate_lambda_response(response: &Value) -> Result<(), AppCoreError> {
+    let Some(object) = response.as_object() else {
+        return Err(AppCoreError::BadRequest(format!(
+            "Extra context validation failed: Lambda response must be a JSON object, received {}",
+            json_value_type(response),
+        )));
+    };
+
+    if let Some(status_code) = object.get("statusCode") {
+        let is_success = status_code
+            .as_u64()
+            .is_some_and(|status| (200..300).contains(&status));
+        if !is_success {
+            return Err(AppCoreError::BadRequest(
+                "Extra context validation failed: Lambda response statusCode is not successful"
+                    .to_string(),
+            ));
+        }
+    }
+
+    strict_policy_verdict(object.get("body").unwrap_or(&Value::Null))
+}
+
+fn json_value_type(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
     }
 }
 

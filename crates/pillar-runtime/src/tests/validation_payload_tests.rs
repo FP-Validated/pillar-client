@@ -18,7 +18,7 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_payload() {
     checks
         .validate_payload_not_signed(
             &payload_signed_sent_event(),
-            "0x3333333333333333333333333333333333333333",
+            Some("0x3333333333333333333333333333333333333333"),
             "bsc",
         )
         .await
@@ -59,7 +59,7 @@ async fn runtime_rpc_validation_checks_rejects_hash_lookup_signed_payload() {
     let err = checks
         .validate_payload_not_signed(
             &payload_signed_sent_event(),
-            "0x3333333333333333333333333333333333333333",
+            Some("0x3333333333333333333333333333333333333333"),
             "bsc",
         )
         .await
@@ -86,7 +86,7 @@ async fn runtime_rpc_validation_checks_rejects_verifiable_verified_payload() {
     let err = checks
         .validate_payload_not_signed(
             &payload_signed_sent_event(),
-            "0x3333333333333333333333333333333333333333",
+            Some("0x3333333333333333333333333333333333333333"),
             "bsc",
         )
         .await
@@ -128,7 +128,7 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_starknet_payload() {
     checks
         .validate_payload_not_signed(
             &event,
-            "0x3333333333333333333333333333333333333333",
+            Some("0x3333333333333333333333333333333333333333"),
             "starknet",
         )
         .await
@@ -175,7 +175,7 @@ async fn runtime_rpc_validation_checks_rejects_signed_starknet_payload() {
     let error = checks
         .validate_payload_not_signed(
             &event,
-            "0x3333333333333333333333333333333333333333",
+            Some("0x3333333333333333333333333333333333333333"),
             "starknet",
         )
         .await
@@ -219,7 +219,7 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_move_payloads() {
         event.lz_message_id.pathway_id.dst_chain_name = chain_name.to_string();
 
         checks
-            .validate_payload_not_signed(&event, "0xdvn", chain_name)
+            .validate_payload_not_signed(&event, Some("0xdvn"), chain_name)
             .await
             .unwrap();
         let calls = calls.lock().unwrap();
@@ -268,7 +268,7 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_initia_payload() {
     event.lz_message_id.pathway_id.dst_chain_name = "initia".to_string();
 
     checks
-        .validate_payload_not_signed(&event, "0x3333", "initia")
+        .validate_payload_not_signed(&event, Some("0x3333"), "initia")
         .await
         .unwrap();
     let calls = calls.lock().unwrap();
@@ -324,7 +324,7 @@ async fn runtime_rpc_validation_checks_rejects_confirmed_move_payload() {
     event.lz_message_id.pathway_id.dst_chain_name = "movement".to_string();
 
     let error = checks
-        .validate_payload_not_signed(&event, "0xdvn", "movement")
+        .validate_payload_not_signed(&event, Some("0xdvn"), "movement")
         .await
         .unwrap_err();
     assert!(matches!(error, AppCoreError::BadRequest(_)));
@@ -356,7 +356,7 @@ async fn runtime_rpc_validation_checks_never_falls_back_to_evm_for_native_payloa
         event.lz_message_id.pathway_id.dst_chain_name = chain_name.to_string();
 
         let error = checks
-            .validate_payload_not_signed(&event, "0x3333", chain_name)
+            .validate_payload_not_signed(&event, Some("0x3333"), chain_name)
             .await
             .unwrap_err();
         assert!(
@@ -397,7 +397,7 @@ async fn runtime_rpc_validation_checks_never_falls_back_to_evm_for_unconfigured_
         event.lz_message_id.pathway_id.dst_chain_name = chain_name.to_string();
 
         let error = checks
-            .validate_payload_not_signed(&event, "0x3333", chain_name)
+            .validate_payload_not_signed(&event, Some("0x3333"), chain_name)
             .await
             .unwrap_err();
         assert!(
@@ -437,7 +437,7 @@ async fn runtime_rpc_validation_checks_never_falls_back_to_evm_for_unconfigured_
     event.lz_message_id.pathway_id.dst_chain_name = "ton".to_string();
 
     let error = checks
-        .validate_payload_not_signed(&event, "0x3333", "ton")
+        .validate_payload_not_signed(&event, Some("0x3333"), "ton")
         .await
         .unwrap_err();
     assert!(
@@ -459,7 +459,7 @@ async fn runtime_rpc_validation_checks_skips_legacy_payload_without_guid() {
     checks
         .validate_payload_not_signed(
             &sent_event,
-            "0x3333333333333333333333333333333333333333",
+            Some("0x3333333333333333333333333333333333333333"),
             "bsc",
         )
         .await
@@ -556,8 +556,50 @@ async fn runtime_rpc_validation_checks_rejects_false_extra_context_response() {
         .await
         .unwrap_err();
 
-    assert_eq!(err.to_string(), "Extra context validation failed");
+    assert!(err
+        .to_string()
+        .starts_with("Extra context validation failed:"));
     assert!(matches!(err, AppCoreError::BadRequest(_)));
+}
+#[tokio::test]
+async fn runtime_rpc_validation_checks_rejects_non_boolean_extra_context_responses() {
+    let responses = [
+        (json!("false"), "string"),
+        (json!("true"), "string"),
+        (json!({}), "object"),
+        (json!([]), "array"),
+        (json!({ "allow": false }), "object"),
+        (json!(0), "number"),
+        (json!(1), "number"),
+        (Value::Null, "null"),
+    ];
+
+    for (policy_response, received_type) in responses {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let checks = runtime_rpc_extra_context_checks(
+            RuntimeExtraContextConfig {
+                request_url: Some("https://policy.example/extra".to_string()),
+                request_auth_token: None,
+                aws_lambda_name: None,
+            },
+            vec![
+                transaction_result("0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"),
+                Ok(policy_response),
+            ],
+            calls.clone(),
+        );
+
+        let err = checks
+            .validate_extra_context(&payload_signed_sent_event())
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, AppCoreError::BadRequest(_)));
+        assert!(err.to_string().contains(received_type));
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 2, "policy response was not requested");
+        assert_eq!(calls[1].0, "https://policy.example/extra");
+    }
 }
 
 #[tokio::test]
@@ -623,8 +665,54 @@ async fn runtime_rpc_validation_checks_rejects_false_lambda_body() {
         .await
         .unwrap_err();
 
-    assert_eq!(err.to_string(), "Extra context validation failed");
+    assert!(err
+        .to_string()
+        .starts_with("Extra context validation failed:"));
     assert!(matches!(err, AppCoreError::BadRequest(_)));
+}
+#[tokio::test]
+async fn runtime_rpc_validation_checks_rejects_unsafe_lambda_responses() {
+    let responses = [
+        (Ok(json!({ "statusCode": 403, "body": "false" })), false),
+        (
+            Err("Lambda invocation reported a function error".to_string()),
+            true,
+        ),
+    ];
+
+    for (lambda_response, is_invocation_error) in responses {
+        let rpc_calls = Arc::new(Mutex::new(Vec::new()));
+        let lambda_calls = Arc::new(Mutex::new(Vec::new()));
+        let checks = runtime_rpc_extra_context_checks(
+            RuntimeExtraContextConfig {
+                request_url: None,
+                request_auth_token: None,
+                aws_lambda_name: Some("policy-lambda".to_string()),
+            },
+            vec![transaction_result(
+                "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+            )],
+            rpc_calls.clone(),
+        )
+        .with_extra_context_lambda_client(Arc::new(RecordingLambdaClient {
+            calls: lambda_calls.clone(),
+            responses: Arc::new(Mutex::new(vec![lambda_response])),
+        }));
+
+        let err = checks
+            .validate_extra_context(&payload_signed_sent_event())
+            .await
+            .unwrap_err();
+
+        if is_invocation_error {
+            assert!(matches!(&err, AppCoreError::Internal(_)));
+        } else {
+            assert!(matches!(&err, AppCoreError::BadRequest(_)));
+            assert!(err.to_string().contains("statusCode"));
+        }
+        assert_eq!(rpc_calls.lock().unwrap().len(), 1);
+        assert_eq!(lambda_calls.lock().unwrap().len(), 1);
+    }
 }
 
 #[tokio::test]
@@ -644,7 +732,7 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_solana_payload() {
     checks
         .validate_payload_not_signed(
             &payload_signed_solana_sent_event(),
-            "4gnov6q1KFcjtwBjepBmQtuf5R4ho4XVkrytY8hk4CTF",
+            Some("4gnov6q1KFcjtwBjepBmQtuf5R4ho4XVkrytY8hk4CTF"),
             "solana",
         )
         .await
@@ -674,7 +762,7 @@ async fn runtime_rpc_validation_checks_rejects_already_signed_solana_payload() {
     let err = checks
         .validate_payload_not_signed(
             &payload_signed_solana_sent_event(),
-            "4gnov6q1KFcjtwBjepBmQtuf5R4ho4XVkrytY8hk4CTF",
+            Some("4gnov6q1KFcjtwBjepBmQtuf5R4ho4XVkrytY8hk4CTF"),
             "solana",
         )
         .await
@@ -702,7 +790,7 @@ async fn runtime_rpc_validation_checks_accepts_already_delivered_solana_payload(
     let err = checks
         .validate_payload_not_signed(
             &payload_signed_solana_sent_event(),
-            "4gnov6q1KFcjtwBjepBmQtuf5R4ho4XVkrytY8hk4CTF",
+            Some("4gnov6q1KFcjtwBjepBmQtuf5R4ho4XVkrytY8hk4CTF"),
             "solana",
         )
         .await
@@ -1171,7 +1259,7 @@ async fn no_non_evm_chain_falls_through_to_the_evm_payload_check() {
         let outcome = checks
             .validate_payload_not_signed(
                 &event,
-                "0x3333333333333333333333333333333333333333",
+                Some("0x3333333333333333333333333333333333333333"),
                 chain_name,
             )
             .await;

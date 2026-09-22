@@ -99,7 +99,7 @@ where
         &self,
         src_chain_name: &str,
         src_tx_hash: &str,
-    ) -> Result<Vec<EvmReceiptLog>, AppCoreError> {
+    ) -> Result<EvmTransactionReceipt, AppCoreError> {
         let result = self
             .get_quorum_rpc_result(
                 src_chain_name,
@@ -119,7 +119,12 @@ where
         }
         let receipt: EvmTransactionReceipt = serde_json::from_value(result)
             .map_err(|error| AppCoreError::Internal(error.to_string()))?;
-        Ok(receipt.logs)
+        if !matches!(receipt.status.as_str(), "0x1" | "0X1" | "1") {
+            return Err(AppCoreError::BadRequest(
+                "Transaction receipt execution status is not successful".to_string(),
+            ));
+        }
+        Ok(receipt)
     }
 
     async fn get_solana_transaction(
@@ -265,6 +270,7 @@ where
             },
             message: event.packet.message,
             tx_hash: src_tx_hash.to_string(),
+            source_evidence: None,
             extra,
         })
     }
@@ -421,6 +427,7 @@ where
             },
             message: packet.message,
             tx_hash: src_tx_hash.to_string(),
+            source_evidence: None,
             extra,
         })
     }
@@ -431,6 +438,7 @@ where
         src_tx_hash: &str,
         packet_sent: EvmPacketSent,
         log_address: &str,
+        source_evidence: EvmSourceEvidence,
     ) -> Result<LzSentEvent, AppCoreError> {
         if !self
             .config
@@ -520,6 +528,7 @@ where
             },
             message: packet.message,
             tx_hash: src_tx_hash.to_string(),
+            source_evidence: Some(source_evidence),
             extra,
         })
     }
@@ -825,6 +834,7 @@ where
                     message: event.packet.message,
                     tx_hash: event.tx_hash,
                     extra,
+                    source_evidence: None,
                 };
                 if lz_message_id_matches(lz_message_id, &sent_event.lz_message_id) {
                     return Ok(sent_event);
@@ -844,9 +854,16 @@ where
                 lz_message_id.pathway_id.src_chain_name
             )));
         }
-        let logs = self
+        let receipt = self
             .get_receipt_logs(&lz_message_id.pathway_id.src_chain_name, src_tx_hash)
             .await?;
+        let block_hash = receipt.block_hash.to_ascii_lowercase();
+        let status = receipt.status.clone();
+        let block_number = numeric_response(&Value::String(receipt.block_number.clone()))
+            .ok_or_else(|| AppCoreError::Internal("Invalid receipt block number".to_string()))?
+            .parse::<i64>()
+            .map_err(|error| AppCoreError::Internal(error.to_string()))?;
+        let logs = receipt.logs;
         let mut found_trusted_decoded_event = false;
         for log in logs {
             if !self
@@ -859,6 +876,17 @@ where
             }
             let Ok(packet_sent) = decode_evm_packet_sent_log(&log.topics, &log.data) else {
                 continue;
+            };
+            let Some(packet_log_index) = numeric_response(&Value::String(log.log_index.clone()))
+                .and_then(|value| value.parse::<u64>().ok())
+            else {
+                continue;
+            };
+            let source_evidence = EvmSourceEvidence {
+                block_hash: block_hash.clone(),
+                block_number,
+                status: status.clone(),
+                packet_log_index,
             };
             // Non-fatal for the same reason the decode above is. A batching
             // transaction can emit several PacketSent events, and this
@@ -873,6 +901,7 @@ where
                 src_tx_hash,
                 packet_sent,
                 &log.address,
+                source_evidence,
             ) else {
                 continue;
             };

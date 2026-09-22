@@ -2,8 +2,12 @@ use super::*;
 
 pub(super) fn packet_sent_endpoint_v2_data() -> Value {
     json!({
+        "blockHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "blockNumber": "0x64",
+        "status": "0x1",
         "logs": [{
             "address": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "logIndex": "0x0",
             "topics": [pillar_layerzero::ENDPOINT_V2_PACKET_SENT_TOPIC],
             "data": concat!(
                 "0x",
@@ -29,8 +33,12 @@ pub(super) fn packet_sent_endpoint_v2_data() -> Value {
 /// read arms of `formatPathwayId` and `computeLZMessageV2Proof` fire.
 pub(super) fn packet_sent_read_v1002_data() -> Value {
     json!({
+        "blockHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "blockNumber": "0x64",
+        "status": "0x1",
         "logs": [{
             "address": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "logIndex": "0x0",
             "topics": [pillar_layerzero::ENDPOINT_V2_PACKET_SENT_TOPIC],
             "data": concat!(
                 "0x",
@@ -80,8 +88,12 @@ pub(super) fn evm_read_packet_sent_request() -> LzMessageId {
 
 pub(super) fn packet_sent_uln301_data() -> Value {
     json!({
+        "blockHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "blockNumber": "0x64",
+        "status": "0x1",
         "logs": [{
             "address": "0x4444444444444444444444444444444444444444",
+            "logIndex": "0x0",
             "topics": [pillar_layerzero::ULN_301_PACKET_SENT_TOPIC],
             "data": concat!(
                 "0x",
@@ -101,8 +113,12 @@ pub(super) fn packet_sent_uln301_data() -> Value {
 
 pub(super) fn legacy_uln_v2_packet_data() -> Value {
     json!({
+        "blockHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "blockNumber": "0x64",
+        "status": "0x1",
         "logs": [{
             "address": "0x4444444444444444444444444444444444444444",
+            "logIndex": "0x0",
             "topics": [pillar_layerzero::LEGACY_ULN_V2_PACKET_TOPIC],
             "data": concat!(
                 "0x",
@@ -312,6 +328,7 @@ pub(super) fn payload_signed_sent_event() -> LzSentEvent {
         },
         message: "0xdeadbeef".to_string(),
         tx_hash: "0xtx".to_string(),
+        source_evidence: None,
         extra: IndexMap::from([(
             "guid".to_string(),
             Value::from("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
@@ -343,6 +360,7 @@ pub(super) fn payload_signed_solana_sent_event() -> LzSentEvent {
         },
         message: "0xdeadbeef".to_string(),
         tx_hash: "0xtx".to_string(),
+        source_evidence: None,
         extra: IndexMap::from([(
             "guid".to_string(),
             Value::from("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),

@@ -13,6 +13,7 @@ impl pillar_core::SentEventResolver for FixedResolver {
             lz_message_id: lz_message_id.clone(),
             message: "0xabc".to_string(),
             tx_hash: src_tx_hash.to_string(),
+            source_evidence: None,
             extra: IndexMap::new(),
         })
     }
@@ -70,7 +71,7 @@ impl AppValidator for NoopValidator {
     async fn validate_payload_signed(
         &self,
         _sent_event: &LzSentEvent,
-        _verifier_address: &str,
+        _verifier_address: Option<&str>,
         _dst_chain_name: &str,
     ) -> Result<(), AppCoreError> {
         Ok(())

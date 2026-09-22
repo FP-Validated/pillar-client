@@ -205,7 +205,11 @@ async fn payload_signed_family_table_covers_every_destination_the_dispatch_reach
         // Every read here is refused by the transport, so no row can pass by
         // accident: the only thing observable is which read was attempted.
         let outcome = checks
-            .validate_payload_not_signed(&family_sent_event(row), row.verifier, row.chain_name)
+            .validate_payload_not_signed(
+                &family_sent_event(row),
+                Some(row.verifier),
+                row.chain_name,
+            )
             .await;
         let calls = recorder.calls.lock().unwrap().clone();
 
@@ -312,7 +316,11 @@ async fn payload_signed_reads_never_let_failed_providers_form_a_majority() {
         .unwrap();
 
         let error = checks
-            .validate_payload_not_signed(&family_sent_event(row), row.verifier, row.chain_name)
+            .validate_payload_not_signed(
+                &family_sent_event(row),
+                Some(row.verifier),
+                row.chain_name,
+            )
             .await
             .expect_err("two providers that never answered cannot clear a payload for signing");
 
