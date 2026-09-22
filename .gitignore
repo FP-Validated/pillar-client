@@ -4,6 +4,8 @@
 
 # Local agent/tooling state
 /.codegraph/
+/.lazy-intel/
+/.zvec-grep/
 /.omp/
 /.justsend/
 AGENTS.md
