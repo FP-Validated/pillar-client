@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use pillar_core::{
     validate_expiration_bounds, validate_message_hash_for_pillar, AppCoreError, AppValidator,
-    LzSentEvent, PillarApiRequestV2, SigningContext,
+    LzSentEvent, PillarApiRequestV2, ReadBlockPin, SigningContext,
 };
 use std::sync::Arc;
 
@@ -26,7 +26,7 @@ pub trait RuntimeValidationChecks: Send + Sync + 'static {
         &self,
         sent_event: &LzSentEvent,
         signing_context: &SigningContext,
-    ) -> Result<(), AppCoreError>;
+    ) -> Result<Vec<ReadBlockPin>, AppCoreError>;
 
     async fn validate_payload_not_signed(
         &self,
@@ -86,7 +86,7 @@ where
         &self,
         sent_event: &LzSentEvent,
         signing_context: &SigningContext,
-    ) -> Result<(), AppCoreError> {
+    ) -> Result<Vec<ReadBlockPin>, AppCoreError> {
         self.checks
             .validate_readiness(sent_event, signing_context)
             .await

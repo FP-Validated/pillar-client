@@ -63,6 +63,7 @@ async fn runtime_evm_uln_v2_payload_builder_derives_mpt_hash_info_with_quorum() 
         message: "0xdeadbeef".to_string(),
         tx_hash: "0xtx".to_string(),
         source_evidence: None,
+        read_block_pins: Vec::new(),
         extra,
     };
 
@@ -146,6 +147,7 @@ async fn runtime_evm_uln_v2_payload_builder_derives_feather_hash_info_without_rp
         message: "0xdeadbeef".to_string(),
         tx_hash: "0xtx".to_string(),
         source_evidence: None,
+        read_block_pins: Vec::new(),
         extra,
     };
 

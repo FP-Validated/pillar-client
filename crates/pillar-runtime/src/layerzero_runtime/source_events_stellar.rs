@@ -133,6 +133,7 @@ pub(crate) fn stellar_packet_to_lz_sent_event(
         tx_hash: src_tx_hash.to_string(),
         extra,
         source_evidence: None,
+        read_block_pins: Vec::new(),
     })
 }
 

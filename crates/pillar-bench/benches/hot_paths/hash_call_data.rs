@@ -78,5 +78,6 @@ fn evm_sent_event() -> LzSentEvent {
         tx_hash: "0xtx".to_string(),
         extra: event_extra,
         source_evidence: None,
+        read_block_pins: Vec::new(),
     }
 }

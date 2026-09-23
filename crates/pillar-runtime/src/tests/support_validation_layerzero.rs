@@ -25,12 +25,12 @@ impl RuntimeValidationChecks for FixedValidationChecks {
         &self,
         _sent_event: &LzSentEvent,
         signing_context: &SigningContext,
-    ) -> Result<(), AppCoreError> {
+    ) -> Result<Vec<pillar_core::ReadBlockPin>, AppCoreError> {
         self.calls
             .lock()
             .unwrap()
             .push(format!("readiness:{:?}", signing_context.skip_v_id()));
-        Ok(())
+        Ok(Vec::new())
     }
 
     async fn validate_payload_not_signed(

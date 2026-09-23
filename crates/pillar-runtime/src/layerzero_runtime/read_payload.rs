@@ -16,6 +16,15 @@ pub(crate) struct RuntimeReadResolvedResponse {
     response: String,
 }
 
+/// What the payload resolver needs to turn a command marker into the block it
+/// must read: the caller's timestamp resolutions, and the hashes readiness
+/// agreed on for them.
+#[derive(Clone, Copy)]
+struct ReadBlocks<'a> {
+    resolved_markers: &'a [ResolvedTimestampTimeMarker],
+    pins: &'a [ReadBlockPin],
+}
+
 impl<T> RuntimeEvmReadPayloadResolver<T>
 where
     T: JsonRpcTransport,
@@ -97,33 +106,48 @@ where
         }
     }
 
+    /// The call is issued against the exact block readiness validated, as an
+    /// EIP-1898 `{blockHash, requireCanonical: true}` parameter. A provider
+    /// whose canonical chain no longer contains that block, or that does not
+    /// understand the object form, errors and loses its vote; there is
+    /// deliberately no number-tagged fallback, because that is the read that
+    /// could come from a sibling block the validator never saw.
     async fn call_evm_view_at_marker(
         &self,
         target_eid: u32,
         marker: ReadTimeMarker,
         to: &str,
         call_data: &str,
-        resolved_markers: &[ResolvedTimestampTimeMarker],
+        blocks: ReadBlocks<'_>,
     ) -> Result<String, AppCoreError> {
         let chain_name = self.chain_name_for_eid(target_eid)?;
-        let block_number = self.block_number_for_marker(chain_name, marker, resolved_markers)?;
+        let block_number =
+            self.block_number_for_marker(chain_name, marker, blocks.resolved_markers)?;
+        let pin = blocks
+            .pins
+            .iter()
+            .find(|pin| pin.chain_name == chain_name && pin.block_number == block_number)
+            .ok_or_else(|| {
+                AppCoreError::Internal(format!(
+                    "No validated block identity for chainName {chain_name} block {block_number}; refusing an unpinned read"
+                ))
+            })?;
         let snapshot = self.providers.load();
         let provider_config = snapshot.provider_config(chain_name)?;
         let quorum = required_provider_quorum(provider_config, chain_name)?;
-        let block_tag = format!("0x{block_number:x}");
+        let block = json!({ "blockHash": pin.block_hash, "requireCanonical": true });
         let mut requests = FuturesUnordered::new();
         for (index, uri) in provider_config.uris.iter().enumerate() {
             let transport = self.transport.clone();
             let (url, headers) = provider_uri_parts(uri);
             let to = to.to_string();
             let call_data = call_data.to_string();
-            let block_tag = block_tag.clone();
+            let block = block.clone();
             let rpc_permits = self.rpc_permits.clone();
             requests.push(async move {
                 let observation = match rpc_permits.acquire_owned().await {
                     Ok(_permit) => {
-                        eth_call_at_block(transport, url, headers, &to, &call_data, &block_tag)
-                            .await
+                        eth_call_at_block(transport, url, headers, &to, &call_data, block).await
                     }
                     Err(_) => Err(AppCoreError::Internal(
                         "ReadV1002 RPC admission closed".to_string(),
@@ -145,7 +169,7 @@ where
     async fn resolve_request_payload(
         &self,
         request: EvmReadRequest,
-        resolved_markers: &[ResolvedTimestampTimeMarker],
+        blocks: ReadBlocks<'_>,
     ) -> Result<RuntimeReadResolvedResponse, AppCoreError> {
         let response = self
             .call_evm_view_at_marker(
@@ -153,7 +177,7 @@ where
                 request.marker,
                 &request.to,
                 &request.calldata,
-                resolved_markers,
+                blocks,
             )
             .await?;
         Ok(RuntimeReadResolvedResponse {
@@ -167,7 +191,7 @@ where
         cmd: &str,
         compute: EvmReadCompute,
         responses: Vec<RuntimeReadResolvedResponse>,
-        resolved_markers: &[ResolvedTimestampTimeMarker],
+        blocks: ReadBlocks<'_>,
     ) -> Result<String, AppCoreError> {
         let mapped_responses = if compute.setting == EvmReadComputeSetting::OnlyReduce {
             responses
@@ -183,7 +207,7 @@ where
                         compute.marker,
                         &compute.to,
                         &call_data,
-                        resolved_markers,
+                        blocks,
                     )
                     .await?;
                 Ok::<String, AppCoreError>(
@@ -204,7 +228,7 @@ where
                 compute.marker,
                 &compute.to,
                 &call_data,
-                resolved_markers,
+                blocks,
             )
             .await?;
         decode_evm_bytes_result(&raw)
@@ -230,20 +254,21 @@ where
                 "Invalid protocol type for read payload resolver".to_string(),
             ));
         };
+        let blocks = ReadBlocks {
+            resolved_markers: resolved_timestamp_time_markers,
+            pins: &sent_event.read_block_pins,
+        };
         let command = decode_evm_read_command(&sent_event.message)?;
-        let responses =
-            try_join_all(command.requests.into_iter().map(|request| {
-                self.resolve_request_payload(request, resolved_timestamp_time_markers)
-            }))
-            .await?;
+        let responses = try_join_all(
+            command
+                .requests
+                .into_iter()
+                .map(|request| self.resolve_request_payload(request, blocks)),
+        )
+        .await?;
         if let Some(compute) = command.compute {
-            self.resolve_compute_payload(
-                &sent_event.message,
-                compute,
-                responses,
-                resolved_timestamp_time_markers,
-            )
-            .await
+            self.resolve_compute_payload(&sent_event.message, compute, responses, blocks)
+                .await
         } else {
             let mut resolved_payload = String::from("0x");
             for response in responses {

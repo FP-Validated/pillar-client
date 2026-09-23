@@ -271,6 +271,7 @@ where
             message: event.packet.message,
             tx_hash: src_tx_hash.to_string(),
             source_evidence: None,
+            read_block_pins: Vec::new(),
             extra,
         })
     }
@@ -428,6 +429,7 @@ where
             message: packet.message,
             tx_hash: src_tx_hash.to_string(),
             source_evidence: None,
+            read_block_pins: Vec::new(),
             extra,
         })
     }
@@ -529,6 +531,7 @@ where
             message: packet.message,
             tx_hash: src_tx_hash.to_string(),
             source_evidence: Some(source_evidence),
+            read_block_pins: Vec::new(),
             extra,
         })
     }
@@ -835,6 +838,7 @@ where
                     tx_hash: event.tx_hash,
                     extra,
                     source_evidence: None,
+                    read_block_pins: Vec::new(),
                 };
                 if lz_message_id_matches(lz_message_id, &sent_event.lz_message_id) {
                     return Ok(sent_event);

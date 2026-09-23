@@ -74,6 +74,7 @@ async fn runtime_evm_read_payload_resolver_caps_process_wide_rpc_concurrency() {
                 message: evm_read_command_with_repeated_block_markers(8),
                 tx_hash: "0xtx".to_string(),
                 source_evidence: None,
+                read_block_pins: bsc_read_block_pins(),
                 extra: IndexMap::new(),
             },
             &SigningContext::Read {
@@ -108,6 +109,7 @@ async fn runtime_evm_read_payload_resolver_calls_request_block_marker() {
         message: evm_read_command_with_block_marker(),
         tx_hash: "0xtx".to_string(),
         source_evidence: None,
+        read_block_pins: bsc_read_block_pins(),
         extra: IndexMap::new(),
     };
     let resolved = resolver
@@ -132,7 +134,42 @@ async fn runtime_evm_read_payload_resolver_calls_request_block_marker() {
         "0x1111111111111111111111111111111111111111"
     );
     assert_eq!(calls[0].2["params"][0]["data"], "0xdeadbeef");
-    assert_eq!(calls[0].2["params"][1], "0x40");
+    assert_eq!(calls[0].2["params"][1], pinned_block(BSC_BLOCK_64_HASH));
+}
+
+/// Without a pin for the marker's block the resolver refuses outright. A
+/// number-tagged fallback here is exactly the read that can come from a block
+/// readiness never looked at, so not even one RPC may be issued.
+#[tokio::test]
+async fn runtime_evm_read_payload_resolver_refuses_a_block_readiness_did_not_pin() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let resolver =
+        runtime_evm_read_payload_resolver(vec![eth_call_result("0x1234")], calls.clone());
+    let mut pins = bsc_read_block_pins();
+    pins.retain(|pin| pin.block_number != 64);
+    let sent_event = LzSentEvent {
+        read_block_pins: pins,
+        ..read_command_sent_event(evm_read_command_with_block_marker())
+    };
+
+    let error = resolver
+        .resolve_payload(
+            &sent_event,
+            &SigningContext::Read {
+                expiration: 123,
+                skip_v_id: None,
+                dvn_address: None,
+                resolved_timestamp_time_markers: Vec::new(),
+            },
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "No validated block identity for chainName bsc block 64; refusing an unpinned read"
+    );
+    assert!(calls.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -165,6 +202,7 @@ async fn runtime_evm_read_payload_resolver_requires_exact_result_quorum() {
         message: evm_read_command_with_block_marker(),
         tx_hash: "0xtx".to_string(),
         source_evidence: None,
+        read_block_pins: bsc_read_block_pins(),
         extra: IndexMap::new(),
     };
 
@@ -209,6 +247,7 @@ async fn runtime_evm_read_payload_resolver_fails_without_exact_result_quorum() {
         message: evm_read_command_with_block_marker(),
         tx_hash: "0xtx".to_string(),
         source_evidence: None,
+        read_block_pins: bsc_read_block_pins(),
         extra: IndexMap::new(),
     };
 
@@ -246,6 +285,7 @@ async fn runtime_evm_read_payload_resolver_uses_resolved_timestamp_marker() {
         message: evm_read_command_with_timestamp_marker(),
         tx_hash: "0xtx".to_string(),
         source_evidence: None,
+        read_block_pins: bsc_read_block_pins(),
         extra: IndexMap::new(),
     };
     let resolved = resolver
@@ -269,7 +309,7 @@ async fn runtime_evm_read_payload_resolver_uses_resolved_timestamp_marker() {
 
     assert_eq!(resolved, "0xabcd");
     let calls = calls.lock().unwrap();
-    assert_eq!(calls[0].2["params"][1], "0x40");
+    assert_eq!(calls[0].2["params"][1], pinned_block(BSC_BLOCK_64_HASH));
 }
 
 #[tokio::test]
@@ -294,6 +334,7 @@ async fn runtime_evm_read_payload_resolver_applies_only_map_compute() {
                 message: evm_read_command_with_compute_setting(0),
                 tx_hash: "0xtx".to_string(),
                 source_evidence: None,
+                read_block_pins: bsc_read_block_pins(),
                 extra: IndexMap::new(),
             },
             &SigningContext::Read {
@@ -309,12 +350,12 @@ async fn runtime_evm_read_payload_resolver_applies_only_map_compute() {
     assert_eq!(resolved, "0xbbcc");
     let calls = calls.lock().unwrap();
     assert_eq!(calls.len(), 2);
-    assert_eq!(calls[0].2["params"][1], "0x40");
+    assert_eq!(calls[0].2["params"][1], pinned_block(BSC_BLOCK_64_HASH));
     assert_eq!(
         calls[1].2["params"][0]["to"],
         "0x2222222222222222222222222222222222222222"
     );
-    assert_eq!(calls[1].2["params"][1], "0x41");
+    assert_eq!(calls[1].2["params"][1], pinned_block(BSC_BLOCK_65_HASH));
 }
 
 #[tokio::test]
@@ -339,6 +380,7 @@ async fn runtime_evm_read_payload_resolver_applies_only_reduce_compute() {
                 message: evm_read_command_with_compute_setting(1),
                 tx_hash: "0xtx".to_string(),
                 source_evidence: None,
+                read_block_pins: bsc_read_block_pins(),
                 extra: IndexMap::new(),
             },
             &SigningContext::Read {
@@ -358,7 +400,7 @@ async fn runtime_evm_read_payload_resolver_applies_only_reduce_compute() {
         calls[1].2["params"][0]["to"],
         "0x2222222222222222222222222222222222222222"
     );
-    assert_eq!(calls[1].2["params"][1], "0x41");
+    assert_eq!(calls[1].2["params"][1], pinned_block(BSC_BLOCK_65_HASH));
 }
 
 #[tokio::test]
@@ -387,6 +429,7 @@ async fn runtime_evm_read_payload_resolver_applies_map_reduce_compute() {
                 message: evm_read_command_with_compute_setting(2),
                 tx_hash: "0xtx".to_string(),
                 source_evidence: None,
+                read_block_pins: bsc_read_block_pins(),
                 extra: IndexMap::new(),
             },
             &SigningContext::Read {
@@ -402,6 +445,6 @@ async fn runtime_evm_read_payload_resolver_applies_map_reduce_compute() {
     assert_eq!(resolved, "0xddee");
     let calls = calls.lock().unwrap();
     assert_eq!(calls.len(), 3);
-    assert_eq!(calls[1].2["params"][1], "0x41");
-    assert_eq!(calls[2].2["params"][1], "0x41");
+    assert_eq!(calls[1].2["params"][1], pinned_block(BSC_BLOCK_65_HASH));
+    assert_eq!(calls[2].2["params"][1], pinned_block(BSC_BLOCK_65_HASH));
 }

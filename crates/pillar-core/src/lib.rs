@@ -214,6 +214,18 @@ pub struct EvmSourceEvidence {
     pub packet_log_index: u64,
 }
 
+/// The block a READ time marker was validated against, agreed on by provider
+/// quorum during readiness. The payload resolver issues every `eth_call` for
+/// that marker against this exact hash (EIP-1898, `requireCanonical`), so a
+/// reorg at the same height between validation and the read fails the request
+/// instead of reading state the validator never looked at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadBlockPin {
+    pub chain_name: String,
+    pub block_number: u64,
+    pub block_hash: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct LzSentEvent {
@@ -222,6 +234,9 @@ pub struct LzSentEvent {
     pub tx_hash: String,
     #[serde(skip)]
     pub source_evidence: Option<EvmSourceEvidence>,
+    /// Filled from readiness before the hash builder runs; never caller input.
+    #[serde(skip)]
+    pub read_block_pins: Vec<ReadBlockPin>,
     #[serde(flatten)]
     pub extra: IndexMap<String, Value>,
 }
@@ -259,11 +274,14 @@ pub trait AppValidator: Send + Sync + 'static {
         sent_event: &LzSentEvent,
     ) -> Result<(), AppCoreError>;
 
+    /// Returns the READ block identities readiness agreed on, empty for
+    /// MESSAGE requests. The caller attaches them to the sent event so the
+    /// read payload is fetched from the block that was validated.
     async fn validate_readiness(
         &self,
         sent_event: &LzSentEvent,
         signing_context: &SigningContext,
-    ) -> Result<(), AppCoreError>;
+    ) -> Result<Vec<ReadBlockPin>, AppCoreError>;
 
     async fn validate_expiration(
         &self,
@@ -588,7 +606,7 @@ impl PillarApp {
                 resolver_started_at.elapsed().as_secs_f64(),
             )
             .await;
-        let sent_event = sent_event_result?;
+        let mut sent_event = sent_event_result?;
         tracing::info!(
             src_chain = %src_chain_name,
             dst_chain = %dst_chain_name,
@@ -625,10 +643,11 @@ impl PillarApp {
             );
             message_hash?;
             validate_destination_prerequisites(dst_chain_name, &request.signing_context)?;
-            readiness?;
+            let read_block_pins = readiness?;
             expiration?;
             payload_signed?;
-            self.validator.validate_extra_context(&sent_event).await
+            self.validator.validate_extra_context(&sent_event).await?;
+            Ok::<_, AppCoreError>(read_block_pins)
         }
         .await;
         self.stage_observer
@@ -644,7 +663,7 @@ impl PillarApp {
                 validation_started_at.elapsed().as_secs_f64(),
             )
             .await;
-        validation_result?;
+        sent_event.read_block_pins = validation_result?;
         tracing::info!(
             src_chain = %src_chain_name,
             dst_chain = %dst_chain_name,
@@ -973,6 +992,7 @@ mod tests {
                 message: "0xabc".to_string(),
                 tx_hash: src_tx_hash.to_string(),
                 source_evidence: None,
+                read_block_pins: Vec::new(),
                 extra: IndexMap::new(),
             })
         }
@@ -1045,8 +1065,8 @@ mod tests {
             &self,
             _sent_event: &LzSentEvent,
             _signing_context: &SigningContext,
-        ) -> Result<(), AppCoreError> {
-            Ok(())
+        ) -> Result<Vec<ReadBlockPin>, AppCoreError> {
+            Ok(Vec::new())
         }
 
         async fn validate_expiration(
@@ -1090,7 +1110,7 @@ mod tests {
             &self,
             _sent_event: &LzSentEvent,
             _signing_context: &SigningContext,
-        ) -> Result<(), AppCoreError> {
+        ) -> Result<Vec<ReadBlockPin>, AppCoreError> {
             Err(AppCoreError::Internal(
                 "No block timestamp quorum for chain solana: {Missing: 1}".to_string(),
             ))
@@ -1402,9 +1422,9 @@ mod tests {
             &self,
             _sent_event: &LzSentEvent,
             _signing_context: &SigningContext,
-        ) -> Result<(), AppCoreError> {
+        ) -> Result<Vec<ReadBlockPin>, AppCoreError> {
             self.observe().await;
-            Ok(())
+            Ok(Vec::new())
         }
 
         async fn validate_expiration(
@@ -1495,7 +1515,7 @@ mod tests {
                 &self,
                 _sent_event: &LzSentEvent,
                 _signing_context: &SigningContext,
-            ) -> Result<(), AppCoreError> {
+            ) -> Result<Vec<ReadBlockPin>, AppCoreError> {
                 Err(AppCoreError::BadRequest("readiness".to_string()))
             }
 
@@ -1700,6 +1720,7 @@ mod tests {
             message: "0x68656c6c6f".to_string(),
             tx_hash: "0xtx".to_string(),
             source_evidence: None,
+            read_block_pins: Vec::new(),
             extra: IndexMap::new(),
         };
         assert_eq!(
@@ -1715,6 +1736,7 @@ mod tests {
             message: "0x68656c6c6f".to_string(),
             tx_hash: "0xtx".to_string(),
             source_evidence: None,
+            read_block_pins: Vec::new(),
             extra: IndexMap::new(),
         };
         let mut request = request_v2("V302");
@@ -1730,6 +1752,7 @@ mod tests {
             message: "0x68656c6c6f".to_string(),
             tx_hash: "0xtx".to_string(),
             source_evidence: None,
+            read_block_pins: Vec::new(),
             extra: IndexMap::new(),
         };
         let mut request = request_v2("V302");

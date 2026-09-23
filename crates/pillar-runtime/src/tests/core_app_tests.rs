@@ -50,6 +50,7 @@ async fn runtime_core_dependencies_from_layerzero_parts_uses_layerzero_builder_f
         message: "0xabc".to_string(),
         tx_hash: "0xtx".to_string(),
         source_evidence: None,
+        read_block_pins: Vec::new(),
         extra: IndexMap::new(),
     };
     let result = dependencies.hash_call_data_builders["V302"]
@@ -617,7 +618,7 @@ async fn vertical_app_with_transport(
     (app, calls)
 }
 
-async fn stages_of(app: &RuntimeServerApp<VerticalTransport>) -> Vec<String> {
+pub(super) async fn stages_of<T: JsonRpcTransport>(app: &RuntimeServerApp<T>) -> Vec<String> {
     let rendered = app
         .metrics()
         .expect("the production app exposes its registry")

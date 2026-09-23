@@ -10,7 +10,7 @@ use pillar_config::{
 };
 use pillar_core::{
     AppCoreError, AppValidator, EvmSourceEvidence, HashCallDataBuilder, LegacyChainNameResolver,
-    LzMessageId, LzSentEvent, PathwayId, PillarApp, ProviderHealthSnapshot,
+    LzMessageId, LzSentEvent, PathwayId, PillarApp, ProviderHealthSnapshot, ReadBlockPin,
     ResolvedTimestampTimeMarker, SentEventResolver, SignerGetter, SigningContext, WalletRef,
     PAYLOAD_ALREADY_SIGNED_ERROR_PREFIX,
 };

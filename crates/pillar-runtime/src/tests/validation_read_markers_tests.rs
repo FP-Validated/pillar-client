@@ -39,10 +39,19 @@ async fn runtime_rpc_validation_checks_validates_read_resolved_time_markers() {
         transport,
     );
 
-    checks
+    let pins = checks
         .validate_readiness(&readiness_sent_event(), &read_signing_context(10, 95, 2))
         .await
         .unwrap();
+
+    assert_eq!(
+        pins,
+        vec![read_pin(
+            10,
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        )],
+        "the pin must be the hash of the marker's own block, not its predecessor's"
+    );
 
     let calls = calls.lock().unwrap();
     assert_eq!(calls.len(), 3);
@@ -76,13 +85,21 @@ async fn runtime_rpc_validation_checks_cross_checks_read_command_timestamp_marke
         calls.clone(),
     );
 
-    checks
+    let pins = checks
         .validate_readiness(
             &read_command_sent_event(evm_read_command_with_timestamp_marker()),
             &read_command_signing_context(10, 1_700_000_000, 12),
         )
         .await
         .unwrap();
+
+    assert_eq!(
+        pins,
+        vec![read_pin(
+            10,
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        )]
+    );
 
     let calls = calls.lock().unwrap();
     assert_eq!(calls.len(), 3);
@@ -116,11 +133,14 @@ async fn runtime_rpc_validation_checks_rejects_read_command_marker_confirmation_
 async fn runtime_rpc_validation_checks_validates_read_command_block_number_markers() {
     let calls = Arc::new(Mutex::new(Vec::new()));
     let checks = runtime_rpc_read_command_checks(
-        vec![Ok(block_time(
-            75,
-            "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-            1_700_000_100,
-        ))],
+        vec![
+            Ok(block_time(64, BSC_BLOCK_64_HASH, 1_700_000_000)),
+            Ok(block_time(
+                75,
+                "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                1_700_000_100,
+            )),
+        ],
         calls.clone(),
     );
 
@@ -143,8 +163,94 @@ async fn runtime_rpc_validation_checks_validates_read_command_block_number_marke
         );
     assert!(matches!(err, AppCoreError::BadRequest(_)));
     let calls = calls.lock().unwrap();
-    assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].2["params"], json!(["latest", false]));
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].2["params"], json!(["0x40", false]));
+    assert_eq!(calls[1].2["params"], json!(["latest", false]));
+}
+
+/// Upstream checks a command's block-number marker only for depth and never
+/// looks the block up. The read that follows needs its hash, so readiness now
+/// fetches it by quorum and returns it as the pin.
+#[tokio::test]
+async fn runtime_rpc_validation_checks_pins_read_command_block_number_markers() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let checks = runtime_rpc_read_command_checks(
+        vec![
+            Ok(block_time(64, BSC_BLOCK_64_HASH, 1_700_000_000)),
+            Ok(block_time(
+                80,
+                "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                1_700_000_100,
+            )),
+        ],
+        calls.clone(),
+    );
+
+    let pins = checks
+        .validate_readiness(
+            &read_command_sent_event(evm_read_command_with_block_marker()),
+            &SigningContext::Read {
+                expiration: 1,
+                skip_v_id: None,
+                dvn_address: None,
+                resolved_timestamp_time_markers: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(pins, vec![read_pin(64, BSC_BLOCK_64_HASH)]);
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].2["params"], json!(["0x40", false]));
+    assert_eq!(calls[1].2["params"], json!(["latest", false]));
+}
+
+/// Two quorum reads of one height that disagree mean the chain reorganised
+/// while readiness was running. Keeping either hash would pin the read to a
+/// block only half the validation looked at, so the request is refused.
+#[tokio::test]
+async fn runtime_rpc_validation_checks_rejects_a_block_that_changed_hash_during_validation() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let checks = runtime_rpc_read_command_checks(
+        vec![
+            // Command block marker 0x40: the block itself, then depth.
+            Ok(block_time(64, BSC_BLOCK_64_HASH, 1_700_000_000)),
+            Ok(block_time(
+                80,
+                "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                1_700_000_100,
+            )),
+            // A resolved timestamp marker on the same height, answered after a reorg.
+            Ok(block_time(64, BSC_BLOCK_65_HASH, 1_700_000_000)),
+        ],
+        calls.clone(),
+    );
+
+    let err = checks
+        .validate_readiness(
+            &read_command_sent_event(evm_read_command_with_block_marker()),
+            &read_command_signing_context(64, 1_700_000_000, 0),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, AppCoreError::BadRequest(_)), "{err}");
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "Block 64 on chain bsc changed hash during read validation: {BSC_BLOCK_64_HASH} != {BSC_BLOCK_65_HASH}"
+        )
+    );
+    assert_eq!(calls.lock().unwrap().len(), 3);
+}
+
+fn read_pin(block_number: u64, block_hash: &str) -> pillar_core::ReadBlockPin {
+    pillar_core::ReadBlockPin {
+        chain_name: "bsc".to_string(),
+        block_number,
+        block_hash: block_hash.to_string(),
+    }
 }
 
 #[tokio::test]

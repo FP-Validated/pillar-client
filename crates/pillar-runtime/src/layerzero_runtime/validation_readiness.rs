@@ -8,21 +8,29 @@ where
         &self,
         sent_event: &LzSentEvent,
         signing_context: &SigningContext,
-    ) -> Result<(), AppCoreError> {
-        let block_confirmation = match signing_context {
+    ) -> Result<Vec<ReadBlockPin>, AppCoreError> {
+        match signing_context {
             SigningContext::Message {
                 block_confirmation, ..
-            } => block_confirmation,
+            } => self
+                .validate_message_readiness_with_quorum(sent_event, *block_confirmation)
+                .await
+                .map(|()| Vec::new()),
             SigningContext::Read {
                 resolved_timestamp_time_markers,
                 ..
             } => {
-                return self
-                    .validate_read_time_markers(sent_event, resolved_timestamp_time_markers)
-                    .await;
+                self.validate_read_time_markers(sent_event, resolved_timestamp_time_markers)
+                    .await
             }
-        };
+        }
+    }
 
+    async fn validate_message_readiness_with_quorum(
+        &self,
+        sent_event: &LzSentEvent,
+        block_confirmation: i64,
+    ) -> Result<(), AppCoreError> {
         let src_chain_name = &sent_event.lz_message_id.pathway_id.src_chain_name;
         let snapshot = self.providers.load();
         let provider_config = snapshot.provider_config(src_chain_name)?;
@@ -36,7 +44,7 @@ where
                 .validate_solana_readiness_with_quorum(
                     src_chain_name,
                     &sent_event.tx_hash,
-                    *block_confirmation,
+                    block_confirmation,
                     provider_config,
                 )
                 .await;
@@ -54,7 +62,7 @@ where
             for DispatchEntry { index, uri, delay } in plan {
                 let transport = self.transport.clone();
                 let tx_hash = sent_event.tx_hash.clone();
-                let required = *block_confirmation;
+                let required = block_confirmation;
                 let parts = ton_v3_provider_uri_parts(uri);
                 requests.push(async move {
                     if !delay.is_zero() {
@@ -115,7 +123,7 @@ where
                 let transport = self.transport.clone();
                 let chain_name = src_chain_name.to_string();
                 let tx_hash = sent_event.tx_hash.clone();
-                let required_confirmations = *block_confirmation;
+                let required_confirmations = block_confirmation;
                 requests.push(async move {
                     if !delay.is_zero() {
                         tokio::time::sleep(delay).await;
@@ -173,7 +181,7 @@ where
                 let transport = self.transport.clone();
                 let chain_name = src_chain_name.to_string();
                 let tx_hash = sent_event.tx_hash.clone();
-                let required_confirmations = *block_confirmation;
+                let required_confirmations = block_confirmation;
                 requests.push(async move {
                     if !delay.is_zero() {
                         tokio::time::sleep(delay).await;
@@ -252,7 +260,7 @@ where
                 let (url, headers) = provider_uri_parts(uri);
                 let transport = self.transport.clone();
                 let tx_hash = sent_event.tx_hash.clone();
-                let required_confirmations = *block_confirmation;
+                let required_confirmations = block_confirmation;
                 requests.push(async move {
                     if !delay.is_zero() {
                         tokio::time::sleep(delay).await;
@@ -308,7 +316,7 @@ where
                 let (url, headers) = provider_uri_parts(uri);
                 let transport = self.transport.clone();
                 let tx_hash = sent_event.tx_hash.clone();
-                let required_confirmations = *block_confirmation;
+                let required_confirmations = block_confirmation;
                 requests.push(async move {
                     if !delay.is_zero() {
                         tokio::time::sleep(delay).await;
@@ -364,7 +372,6 @@ where
             let transport = self.transport.clone();
             let tx_hash = sent_event.tx_hash.clone();
             let source_evidence = sent_event.source_evidence.clone();
-            let block_confirmation = *block_confirmation;
             requests.push(async move {
                 if !delay.is_zero() {
                     tokio::time::sleep(delay).await;

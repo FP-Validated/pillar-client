@@ -72,6 +72,7 @@ mod provider_health_sui_starknet_tests;
 mod provider_health_ton_tests;
 mod provider_health_tron_tests;
 mod read_time_marker_resolver_tests;
+mod read_vertical_tests;
 mod server_app_tests;
 mod signer_config_tests;
 mod signer_kms_config_tests;
@@ -88,6 +89,7 @@ mod validation_read_markers_tests;
 mod validation_readiness_tests;
 mod validation_timestamp_tests;
 
+use core_app_tests::stages_of;
 use signer_config_tests::*;
 use validation_readiness_tests::*;
 

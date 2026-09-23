@@ -68,6 +68,7 @@ async fn runtime_app_validator_matches_core_checks_and_delegates_external_checks
         message: "0x68656c6c6f".to_string(),
         tx_hash: "0xtx".to_string(),
         source_evidence: None,
+        read_block_pins: Vec::new(),
         extra: IndexMap::new(),
     };
     let mut request = request_v2();

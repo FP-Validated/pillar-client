@@ -51,6 +51,29 @@ pub(super) fn eth_call_result(result: &str) -> Result<Value, String> {
     }))
 }
 
+pub(super) const BSC_BLOCK_64_HASH: &str =
+    "0x4040404040404040404040404040404040404040404040404040404040404040";
+pub(super) const BSC_BLOCK_65_HASH: &str =
+    "0x4141414141414141414141414141414141414141414141414141414141414141";
+
+/// The identities readiness would have agreed on for the bsc blocks the read
+/// command fixtures address (0x40 for requests, 0x41 for compute).
+pub(super) fn bsc_read_block_pins() -> Vec<pillar_core::ReadBlockPin> {
+    [(64, BSC_BLOCK_64_HASH), (65, BSC_BLOCK_65_HASH)]
+        .into_iter()
+        .map(|(block_number, block_hash)| pillar_core::ReadBlockPin {
+            chain_name: "bsc".to_string(),
+            block_number,
+            block_hash: block_hash.to_string(),
+        })
+        .collect()
+}
+
+/// The EIP-1898 block parameter a pinned ReadV1002 `eth_call` must carry.
+pub(super) fn pinned_block(block_hash: &str) -> Value {
+    json!({ "blockHash": block_hash, "requireCanonical": true })
+}
+
 pub(super) fn abi_word(value: u64) -> String {
     format!("0x{value:064x}")
 }

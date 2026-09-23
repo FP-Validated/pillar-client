@@ -4,6 +4,37 @@ All notable changes to this project are documented here. This project follows
 semantic versioning for the HTTP surface, the environment-variable contract and
 the Prometheus metric names.
 
+## Unreleased
+
+### Security
+
+- A `ReadV1002` read is pinned to the block readiness validated. Readiness
+  agreed on each time marker's block through a provider quorum, but the payload
+  was then fetched by `eth_call` against the block number alone, so a reorg
+  between the two phases answered the read - and the signed attestation - from
+  a different block at that height, with every honest provider agreeing on the
+  new bytes. Readiness now returns the hash it agreed on for every marker,
+  including the command's own block-number markers, which it previously checked
+  only for depth; `pillar-core` attaches those hashes to the sent event before
+  the builder runs, and every READ `eth_call` is issued as EIP-1898
+  `{"blockHash": ..., "requireCanonical": true}`. There is no number-tagged
+  fallback: a provider whose canonical chain no longer holds the block, or that
+  rejects the object form, loses its vote. A marker without a validated hash is
+  refused before any RPC, and two readiness reads of one height that disagree
+  are refused. Upstream fetches by number
+  (`packages/sdks/lz-v2-sdk/src/read/cmdResolver/chain/evm/base.ts:22-28`), so
+  this is a deliberate divergence.
+
+  **Operator action:** READ targets need providers, and any proxy in front of
+  them, that accept EIP-1898 block parameters with `requireCanonical`;
+  `SECURITY.md` gives the probe. MESSAGE pathways are unaffected.
+
+### Internal
+
+- `AppValidator::validate_readiness` returns `Vec<ReadBlockPin>` (empty for
+  MESSAGE requests), and `LzSentEvent` carries them as the non-serialized
+  `read_block_pins`.
+
 ## 2.4.0 - 2026-09-23
 
 ### Breaking

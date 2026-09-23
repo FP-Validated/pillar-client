@@ -14,6 +14,7 @@ impl pillar_core::SentEventResolver for FixedResolver {
             message: "0xabc".to_string(),
             tx_hash: src_tx_hash.to_string(),
             source_evidence: None,
+            read_block_pins: Vec::new(),
             extra: IndexMap::new(),
         })
     }
@@ -56,8 +57,8 @@ impl AppValidator for NoopValidator {
         &self,
         _sent_event: &LzSentEvent,
         _signing_context: &SigningContext,
-    ) -> Result<(), AppCoreError> {
-        Ok(())
+    ) -> Result<Vec<pillar_core::ReadBlockPin>, AppCoreError> {
+        Ok(Vec::new())
     }
 
     async fn validate_expiration(

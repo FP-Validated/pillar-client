@@ -215,16 +215,18 @@ pub(crate) async fn eth_call<T>(
 where
     T: JsonRpcTransport,
 {
-    eth_call_at_block(transport, url, headers, to, data, "latest").await
+    eth_call_at_block(transport, url, headers, to, data, json!("latest")).await
 }
 
+/// `block` is a JSON-RPC block parameter: a tag string, or an EIP-1898 object
+/// such as `{"blockHash": ..., "requireCanonical": true}`.
 pub(crate) async fn eth_call_at_block<T>(
     transport: T,
     url: String,
     headers: HashMap<String, String>,
     to: &str,
     data: &str,
-    block_tag: &str,
+    block: Value,
 ) -> Result<String, AppCoreError>
 where
     T: JsonRpcTransport,
@@ -238,7 +240,7 @@ where
                 "params": [{
                     "to": to,
                     "data": data,
-                }, block_tag],
+                }, block],
                 "id": 1,
                 "jsonrpc": "2.0",
             }),

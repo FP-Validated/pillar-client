@@ -230,6 +230,7 @@ fn non_evm_sent_event(dst_chain_name: &str, dst_eid: u64) -> LzSentEvent {
         message: "0xdeadbeef".to_string(),
         tx_hash: "0xtx".to_string(),
         source_evidence: None,
+        read_block_pins: Vec::new(),
         extra: event_extra,
     }
 }

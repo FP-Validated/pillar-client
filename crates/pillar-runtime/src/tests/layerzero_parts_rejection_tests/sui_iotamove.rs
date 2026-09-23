@@ -92,6 +92,7 @@ async fn runtime_layerzero_parts_routes_sui_iotamove_v302_like_upstream() {
             message: "0xdeadbeef".to_string(),
             tx_hash: "0xtx".to_string(),
             source_evidence: None,
+            read_block_pins: Vec::new(),
             extra: IndexMap::from([(
                 "guid".to_string(),
                 Value::from("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),

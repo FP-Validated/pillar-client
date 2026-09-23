@@ -115,6 +115,16 @@ The following are deployment-side controls the software cannot enforce for you:
   the graceful-drain sequence cannot remove the pod from the endpoint set.
 - Give the Prometheus scrape a token. `GET /metrics` is authenticated, so a
   scrape job without `Authorization` receives 401 and monitoring goes dark.
+- Serve `ReadV1002` targets from providers that implement EIP-1898 block
+  parameters with `requireCanonical`. Every READ `eth_call` is pinned to the
+  block hash readiness validated and is never retried by number, so a provider
+  that rejects the object form cannot vote, and a chain whose providers all
+  reject it cannot be read. Probe every endpoint, and any proxy in front of it,
+  before routing READ traffic: an `eth_call` with
+  `{"blockHash": <a recent canonical hash>, "requireCanonical": true}` must
+  return a result, and the same call with an unknown hash must return an error.
+  Reth answers both ways as required (checked on public mainnet endpoints on
+  2026-09-23: `block not found: canonical hash ...` for the unknown hash).
 
 ## Known caveats
 
@@ -212,22 +222,6 @@ Addresses live in `stellar_uln_302_for_environment` and
   error rather than a signature
   (`crates/pillar-layerzero/src/other_non_evm/ton/mod.rs`,
   `crates/pillar-layerzero/src/other_non_evm/starknet.rs`).
-- A `ReadV1002` request's block identity is agreed on, but not pinned into the
-  read itself. `validation_read_markers.rs` resolves each time marker through a
-  provider quorum whose fingerprint covers the block number, hash and
-  timestamp, so the providers demonstrably agreed on one block; the payload is
-  then fetched by `eth_call` against `0x{number}` alone
-  (`call_evm_view_at_marker`, `crates/pillar-runtime/src/layerzero_runtime/read_payload.rs`).
-  A reorg between the two phases therefore yields a read answered from a
-  different block at the same height, and the exact-value quorum over the
-  returned bytes does not detect it because every honest provider has followed
-  the reorg. This is the READ counterpart of the EVM source-event binding
-  described under "Other hardening" below, and unlike that one it is **not**
-  closed: closing it means carrying the agreed block hash into the call and
-  using EIP-1898 `requireCanonical` where the provider supports it, which must
-  not silently fall back to a number-tagged call while claiming the same
-  guarantee. Weigh it against your finality policy before enabling READ
-  pathways.
 - On EVM the *signing target* is derived from the destination endpoint id -
   below `30000` means ULN301, otherwise ULN302
   (`evm_receive_version_from_dst_eid`, `crates/pillar-layerzero/src/evm.rs`).
@@ -283,6 +277,28 @@ Addresses live in `stellar_uln_302_for_environment` and
   round-two confirmation count. A receipt whose execution status is not success
   is refused at resolution. This is a deliberate fail-closed divergence from
   upstream, which performs the same two-phase read without binding it.
+- A `ReadV1002` read is pinned to the block readiness validated, which
+  upstream does not do. Upstream agrees on a time marker's block through a
+  quorum and then fetches the payload with `eth_call` against the block
+  *number* alone
+  (`packages/sdks/lz-v2-sdk/src/read/cmdResolver/chain/evm/base.ts:22-28`), so
+  a reorg between the two phases answered the read from a different block at
+  the same height, and the exact-value quorum over the returned bytes could not
+  see it because every honest provider had followed the reorg. Readiness now
+  returns the hash it agreed on for every marker - timestamp markers and the
+  command's own block-number markers, which upstream only checks for depth and
+  never looks up (`ReadBlockPin`, `crates/pillar-core/src/lib.rs`;
+  `crates/pillar-runtime/src/layerzero_runtime/validation_read_markers.rs`) -
+  and every `eth_call` for that marker is issued as EIP-1898
+  `{"blockHash": ..., "requireCanonical": true}`
+  (`crates/pillar-runtime/src/layerzero_runtime/read_payload.rs`). A provider
+  whose canonical chain no longer holds that block errors and loses its vote,
+  and there is no number-tagged fallback. A marker readiness did not pin is
+  refused before any RPC, and two reads of one height that disagree during
+  readiness are refused rather than resolved by picking one. What this does
+  not change: the read is still only as final as the marker's
+  `blockConfirmation` makes it, and a reorg deeper than that *after* signing is
+  a finality question this service cannot answer.
 - An external extra-context policy must answer `true`, and the two transports
   wrap that verdict differently. **The shapes are not interchangeable** - a
   policy service migrated from one form to the other will be refused.

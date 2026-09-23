@@ -4,14 +4,19 @@ impl<T> RuntimeRpcValidationChecks<T>
 where
     T: JsonRpcTransport,
 {
+    /// Validates every READ time marker and returns the block each one was
+    /// validated against. The hashes are what `read_payload.rs` pins its
+    /// `eth_call`s to; without them the read would be answered from whatever
+    /// block sits at the same height when the builder runs.
     pub(crate) async fn validate_read_time_markers(
         &self,
         sent_event: &LzSentEvent,
         markers: &[ResolvedTimestampTimeMarker],
-    ) -> Result<(), AppCoreError> {
+    ) -> Result<Vec<ReadBlockPin>, AppCoreError> {
+        let mut pins = Vec::new();
         if sent_event.lz_message_id.uln_send_version.as_str() == Some(ULN_VERSION_READ_V1002) {
             let command_markers = extract_evm_read_resolved_time_markers(&sent_event.message)?;
-            self.validate_read_command_markers(&command_markers, markers)
+            self.validate_read_command_markers(&command_markers, markers, &mut pins)
                 .await?;
         }
         for marker in markers {
@@ -35,6 +40,7 @@ where
             let block = self
                 .block_time_with_quorum(&marker.chain_name, marker.block_number)
                 .await?;
+            push_read_block_pin(&mut pins, &marker.chain_name, &block)?;
             let previous_block = if marker.block_number == 1 {
                 None
             } else {
@@ -74,13 +80,14 @@ where
                 )));
             }
         }
-        Ok(())
+        Ok(pins)
     }
 
     async fn validate_read_command_markers(
         &self,
         command_markers: &[ReadResolvedTimeMarker],
         resolved_markers: &[ResolvedTimestampTimeMarker],
+        pins: &mut Vec<ReadBlockPin>,
     ) -> Result<(), AppCoreError> {
         for marker in command_markers {
             let chain_name = self
@@ -117,6 +124,14 @@ where
                             "Invalid read command block number for chainName {chain_name}: {block_number}"
                         )));
                     }
+                    // Upstream never looks this block up at all; the hash is
+                    // needed so the read cannot drift to a sibling. Pinned
+                    // before the depth check, as timestamp markers are, so the
+                    // depth is measured after the block it vouches for.
+                    let block = self
+                        .block_time_with_quorum(chain_name, block_number as i64)
+                        .await?;
+                    push_read_block_pin(pins, chain_name, &block)?;
                     let latest = self
                         .block_time_for_tag_with_quorum(chain_name, "latest")
                         .await?;
@@ -195,5 +210,40 @@ where
         let observation =
             resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context).await?;
         Ok(observation.block)
+    }
+}
+
+/// Records the block a marker was validated against. Two quorum reads of one
+/// height that disagree on its hash mean the chain reorganised during
+/// validation, which is refused rather than resolved by picking one.
+fn push_read_block_pin(
+    pins: &mut Vec<ReadBlockPin>,
+    chain_name: &str,
+    block: &BlockTime,
+) -> Result<(), AppCoreError> {
+    let block_number = u64::try_from(block.number).map_err(|_| {
+        AppCoreError::Internal(format!(
+            "Invalid block number {} for chain {chain_name}",
+            block.number
+        ))
+    })?;
+    let block_hash = block.hash.to_ascii_lowercase();
+    match pins
+        .iter()
+        .find(|pin| pin.chain_name == chain_name && pin.block_number == block_number)
+    {
+        Some(existing) if existing.block_hash == block_hash => Ok(()),
+        Some(existing) => Err(AppCoreError::BadRequest(format!(
+            "Block {block_number} on chain {chain_name} changed hash during read validation: {} != {block_hash}",
+            existing.block_hash
+        ))),
+        None => {
+            pins.push(ReadBlockPin {
+                chain_name: chain_name.to_string(),
+                block_number,
+                block_hash,
+            });
+            Ok(())
+        }
     }
 }

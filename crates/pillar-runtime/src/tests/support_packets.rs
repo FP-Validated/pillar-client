@@ -329,6 +329,7 @@ pub(super) fn payload_signed_sent_event() -> LzSentEvent {
         message: "0xdeadbeef".to_string(),
         tx_hash: "0xtx".to_string(),
         source_evidence: None,
+        read_block_pins: Vec::new(),
         extra: IndexMap::from([(
             "guid".to_string(),
             Value::from("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
@@ -361,6 +362,7 @@ pub(super) fn payload_signed_solana_sent_event() -> LzSentEvent {
         message: "0xdeadbeef".to_string(),
         tx_hash: "0xtx".to_string(),
         source_evidence: None,
+        read_block_pins: Vec::new(),
         extra: IndexMap::from([(
             "guid".to_string(),
             Value::from("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),

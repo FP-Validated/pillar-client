@@ -80,6 +80,7 @@ fn solana_sent_event() -> LzSentEvent {
         message: "0xdeadbeef".to_string(),
         tx_hash: SIGNATURE.to_string(),
         source_evidence: None,
+        read_block_pins: Vec::new(),
         extra: IndexMap::new(),
     }
 }

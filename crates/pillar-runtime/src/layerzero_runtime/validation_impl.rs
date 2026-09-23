@@ -18,7 +18,7 @@ where
         &self,
         sent_event: &LzSentEvent,
         signing_context: &SigningContext,
-    ) -> Result<(), AppCoreError> {
+    ) -> Result<Vec<ReadBlockPin>, AppCoreError> {
         self.validate_readiness_with_quorum(sent_event, signing_context)
             .await
     }

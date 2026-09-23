@@ -14,6 +14,7 @@ pub(super) fn readiness_sent_event() -> LzSentEvent {
         message: "0xdeadbeef".to_string(),
         tx_hash: "0xtx".to_string(),
         source_evidence: None,
+        read_block_pins: Vec::new(),
         extra: IndexMap::new(),
     }
 }
@@ -49,6 +50,7 @@ fn solana_readiness_sent_event() -> LzSentEvent {
         message: "0xdeadbeef".to_string(),
         tx_hash: "solana-signature".to_string(),
         source_evidence: None,
+        read_block_pins: Vec::new(),
         extra: IndexMap::new(),
     }
 }
@@ -77,6 +79,7 @@ fn move_readiness_sent_event(chain_name: &str, tx_hash: &str) -> LzSentEvent {
         message: "0xdeadbeef".to_string(),
         tx_hash: tx_hash.to_string(),
         source_evidence: None,
+        read_block_pins: Vec::new(),
         extra: IndexMap::new(),
     }
 }
@@ -382,6 +385,7 @@ async fn readiness_against(receipt: Value, sent_event: &LzSentEvent) -> Result<(
         },
     )
     .await
+    .map(|pins| assert!(pins.is_empty(), "a MESSAGE request produced READ pins"))
 }
 
 /// The resolver reads the source receipt once to extract `PacketSent`, and
@@ -710,6 +714,7 @@ pub(super) fn read_command_sent_event(message: String) -> LzSentEvent {
         message,
         tx_hash: "0xtx".to_string(),
         source_evidence: None,
+        read_block_pins: Vec::new(),
         extra: IndexMap::new(),
     }
 }

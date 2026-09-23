@@ -602,8 +602,8 @@ impl RuntimeValidationChecks for ParityChecks {
         &self,
         _sent_event: &LzSentEvent,
         _signing_context: &SigningContext,
-    ) -> Result<(), AppCoreError> {
-        Ok(())
+    ) -> Result<Vec<pillar_core::ReadBlockPin>, AppCoreError> {
+        Ok(Vec::new())
     }
 
     async fn validate_payload_not_signed(
