@@ -27,7 +27,7 @@ lint or run the default test suite.
 | --- | --- |
 | `crates/*/src` | Product code; workspace layout in `README.md` |
 | `crates/pillar-config/src/generated_*.rs` | Generated LayerZero tables (signing-critical addresses, endpoint ids, capability). Never hand-edited; provenance header in each file |
-| `crates/*/src/tests*`, `crates/*/tests` | Unit, integration and E2E tests; about 950 test functions, 13 `#[ignore]` (section 6) |
+| `crates/*/src/tests*`, `crates/*/tests` | Unit, integration and E2E tests: `cargo test --workspace --locked` runs 934 and ignores 13 (section 6) |
 | `crates/*/tests/**/*.json`, `*.hex`, `*.body` | Fixtures: upstream-executed outputs, recorded public-chain RPC responses, official LayerZero vectors, synthetic inputs |
 | `crates/pillar-config/examples/provider-config/` | Example provider files on reserved `.example` hosts; no real endpoint or key |
 | `scripts/` | Table generators, parity emitters (`scripts/gasolina-parity/`), the CI integrity check and the acceptance-matrix builder |
@@ -87,7 +87,7 @@ the controls left to the deployment.
 
 | Boundary | Trusted side assumes | Enforced in | Failure mode required |
 | --- | --- | --- | --- |
-| HTTP caller → API | Bearer token from `PILLAR_API_AUTH_TOKENS` (≥32 chars) unless the operator opens sign routes; request fields are untrusted | `crates/pillar-api/src/lib.rs` (`authorized`, request shape gates), `crates/pillar-cli/src/main.rs` (header/request deadlines, connection cap) | 401/400 before any provider or signer call; no 500 for caller-chosen input |
+| HTTP caller → API | Bearer token from `PILLAR_API_AUTH_TOKENS` (≥32 chars) unless the operator opens sign routes; request fields are untrusted | `crates/pillar-api/src/lib.rs` (`authorized`, request shape gates), `crates/pillar-cli/src/main.rs` (header/request deadlines, connection cap) | 401, or 400 for malformed input, before any provider or signer call |
 | Request → packet | Only the `PacketSent` emitted by the trusted contract for the requested version and pathway is accepted | `crates/pillar-runtime/src/layerzero_runtime/packet_resolver.rs`, per-family `source_events_*.rs` | 400 on identity mismatch; never sign a packet the request does not name |
 | RPC providers → validation | Answers are counted per `(category, entity)`; differing answers never merge | `crates/pillar-runtime/src/provider_health/**` | Fail closed when the strategy is not met or two answers could each meet it |
 | Readiness / reorg | Confirmations from the validated block; READ calls pinned by block hash with `requireCanonical` | `layerzero_runtime/validation_readiness.rs`, `layerzero_runtime/read_payload.rs` | Refuse unpinned or non-canonical reads; no fallback by number |
@@ -105,8 +105,34 @@ the controls left to the deployment.
 2. No signature below the configured provider quorum or confirmation depth.
 3. No signature for a destination contract, environment or `vId` the tables do not
    name; every divergence from upstream is listed in `SECURITY.md`.
-4. No caller-chosen input produces a 5xx or reaches the signer before validation.
+4. No request reaches the signer before source resolution, validation (readiness,
+   expiration, already-signed state, extra context) and call-data construction have
+   succeeded (`sign_request_v2`, `crates/pillar-core/src/lib.rs`; the v1 route
+   delegates to it). Malformed caller input is refused with 400 at the HTTP boundary.
+   This is not a "no 5xx" property: some caller-chosen input still answers 500, as
+   upstream does, for example an unavailable chain name, a missing `dvnAddress` on a
+   Solana or Stellar destination, or a read that misses provider quorum.
 5. No secret reaches a log, metric, `Debug` output or error body.
+
+### What a 5xx does and does not show
+
+An error response never carries signatures or partial signatures. A 5xx alone does
+not prove that no signature was produced. Failures can occur after a signer or KMS
+call has started:
+
+- In a multi-wallet request, an earlier wallet can have signed before a later one
+  fails; the request then fails as a whole.
+- With the durable audit enabled, a failure to commit result evidence after the KMS
+  call returned is an error response.
+- The 58s request deadline and the end of the shutdown grace period close the
+  connection without a response while a KMS call can be in flight.
+- With the audit disabled, the optional Azure hedge can start a second remote
+  signing attempt; cancelling the losing attempt does not prove it was not sent.
+
+With the durable audit enabled, each wallet attempt is committed before its KMS call
+and retained; an attempt without completion evidence stays unresolved and is never
+recorded as "not signed" (`SECURITY.md`, "Durable signing audit"). With the audit
+disabled, which is the default, no record distinguishes these cases.
 
 ## 5. Acceptance evidence
 
@@ -145,6 +171,11 @@ Gates and decisions recorded in the matrix and enforced in code
 What the matrix is not: it is not a record of live production traffic, and no row is
 promoted by family inference. Live checks made by the maintainers against their own
 deployment are not part of this repository.
+
+Open review item outside the matrix: the Solana signer address reported for an Azure
+key is a fixed rule checked against a fixture; its binding to the on-chain Solana DVN
+verifier is not proven in this repository and is under review (`SECURITY.md`, "Where
+responses still differ from upstream").
 
 ## 6. Ignored tests
 
@@ -236,29 +267,27 @@ The maintainers' ledger is not available to auditors.
   generated-file header and the `producedBy` block that most parity fixtures carry.
   A reviewer can check consistency but not origin without the upstream tree.
 
-## 9. Publication provenance
+## 9. Publication and CI status
 
 This tree was prepared from the maintainers' internal branch. Internal history is not
 published. Relative to the internally tested source, the publication changed
-documentation, code comments, example hostnames, the OCI `source` label, one CI step,
-the acceptance-matrix builder and its output, and a comment in the integrity check.
+documentation, code comments, example hostnames, the OCI `source` label, CI
+configuration, the acceptance-matrix builder and its output, and a comment in the
+integrity check.
 
-Run on tree `113b9da0389c9888b16937769c1ac52493b04dbd` with Rust 1.98.1 and
-`RUSTFLAGS="-D warnings"`, each exiting 0:
+CI run [37314461749](https://github.com/FP-Validated/pillar-client/actions/runs/37314461749)
+on commit `a4d8ff3d1b2a0e70e140bd77aea99539de103c09` (the last commit that changed
+code, tests or CI) passed all five jobs: `fmt, clippy, test`, `minimum supported rust
+version` (Rust 1.94.1), `generated config integrity` (including
+`build-acceptance-matrix.mjs --check`), `audit, deny, sbom` and `container image`. The
+Rust test job reported 934 passed, 0 failed and 13 ignored. These are test-function
+counts. They are not route counts and not acceptance-matrix rows; section 5 classifies
+the rows separately. The 13 ignored tests in section 6 are opt-in and are not run by
+CI. Later commits that change only Markdown get their own CI run.
 
-- `cargo fmt --all --check`
-- `cargo clippy --workspace --all-targets --locked`
-- `cargo test --workspace --locked`: 934 passed, 0 failed, 13 ignored
-- `node scripts/check-generated-config-integrity.mjs`
-- `node scripts/build-acceptance-matrix.mjs --check`
-
-The published tree differs from that tree only in `AUDIT.md` and `CONTRIBUTING.md`,
-which no build or test reads; the checks were not repeated.
-
-Not run on either tree: the MSRV check (`cargo +1.94.1 check`), `cargo audit`,
-`cargo deny check`, `docker build`, and the 13 ignored tests in section 6. CI defines
-jobs for the first four; the ignored tests are opt-in and are not part of CI.
-
-Images built from this tree must carry
+The source repository is public. Release images that the maintainers deploy are
+published to a private container package and are not part of this repository. No
+release image built from this repository has been published or deployed yet. An
+image built from this tree must carry
 `org.opencontainers.image.source=https://github.com/FP-Validated/pillar-client` and
 `org.opencontainers.image.revision=<this repository's commit>`.

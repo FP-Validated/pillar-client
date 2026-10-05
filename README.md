@@ -147,6 +147,15 @@ docker run --rm -p 8080:8080 --env-file ./pillar.env pillar-client:local
 The image runs as a non-root user, pins its base images by digest, defaults to
 `SERVER_PORT=8080`, and health-checks `GET /ready`. Use `GET /` for liveness.
 
+### Source and release images
+
+This repository is the public source. The maintainers' own release images are
+published to a private container package and are not distributed; build your own
+image from this tree with the `Dockerfile` above. An image built from this tree
+carries `org.opencontainers.image.source=https://github.com/FP-Validated/pillar-client`
+and `org.opencontainers.image.revision=<commit>` (pass `--build-arg VCS_REVISION=...`),
+so the commit an image was built from can be read from the image itself.
+
 ## Configuration
 
 All configuration is environment based. Required:
@@ -338,9 +347,9 @@ an RPC endpoint dies. Point a Kubernetes readiness probe at `/ready`, not `/`:
 providers.
 
 Clients may send `x-request-id`; it is recorded in server logs and attached to
-error extensions, otherwise the server generates one. Note that it is **not**
-returned as a response header today, so a caller cannot correlate a failure
-response with a server log line on its own.
+error extensions, otherwise the server generates one. It is **not** returned as a
+response header, so a caller cannot correlate a failure response with a server
+log line on its own.
 
 ## Metrics
 
@@ -384,14 +393,20 @@ response with a server log line on its own.
 
 ## Development
 
-CI validates fmt, Clippy, tests and the release build with Rust 1.98.1. Rust 1.99
-reports `double_must_use` on `async_trait`-generated futures; warnings remain errors.
-Install the baseline with `rustup toolchain install 1.98.1 --component rustfmt --component clippy`.
+CI (`.github/workflows/ci.yml`) runs on pushes to `main`, `v*` tags, pull requests
+and a weekly schedule, in five jobs: fmt, Clippy, tests and the release build with
+Rust 1.98.1; `cargo check` at the declared MSRV 1.94.1; the generated-config
+integrity and acceptance-matrix checks; `cargo audit`, `cargo deny` and a CycloneDX
+SBOM; and a container build that checks the revision label and that the binary
+refuses to start without configuration. The image is not pushed. Warnings are
+errors. Rust 1.99 reports `double_must_use` on `async_trait`-generated futures, so
+stay on the pinned toolchain:
+`rustup toolchain install 1.98.1 --component rustfmt --component clippy`.
 
 ```bash
 cargo +1.98.1 fmt --all --check
 cargo +1.98.1 clippy --workspace --all-targets
-cargo +1.98.1 test --workspace --locked
+cargo +1.98.1 test --workspace --locked   # 13 tests are #[ignore], opt-in; see AUDIT.md
 cargo audit && cargo deny check     # dependency and license policy
 ```
 
@@ -443,8 +458,14 @@ Benchmarks are opt-in: `cargo bench -p pillar-bench`.
 - Signing a verification for the wrong contract is a security bug, not a
   configuration nit: unsupported `(chain, environment, ULN version)`
   combinations are rejected instead of being approximated.
-- Provider quorum is enforced per chain; a chain is only healthy when every
-  configured provider answers.
+- Every provider read is decided by the chain's quorum strategy over distinct
+  entities. Differing answers never merge, and a read fails closed when the
+  strategy is not met or two different answers could each meet it. Health
+  reporting is a separate signal: `/provider-health` marks a chain healthy when its
+  probed providers were observed healthy, and `/ready` needs only one advertised
+  chain healthy. Neither proves that a quorum is reachable for a given request.
+- A 5xx is not proof that nothing was signed; see the signing boundary in
+  [AUDIT.md](AUDIT.md#4-threat-model).
 - The startup report and error paths redact provider credentials, headers and
   key identifiers. Please do not add logging that reverses that.
 

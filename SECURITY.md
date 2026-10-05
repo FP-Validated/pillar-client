@@ -116,8 +116,8 @@ The following are deployment-side controls the software cannot enforce for you:
   before routing READ traffic: an `eth_call` with
   `{"blockHash": <a recent canonical hash>, "requireCanonical": true}` must
   return a result, and the same call with an unknown hash must return an error.
-  Reth answers both ways as required (checked on public mainnet endpoints on
-  2026-09-23: `block not found: canonical hash ...` for the unknown hash).
+  Reth answers both ways as required; on public mainnet Reth endpoints the
+  unknown hash returns `block not found: canonical hash ...`.
 
 ## Durable signing audit (default disabled)
 
@@ -198,9 +198,10 @@ multi-wallet partial failure, same-namespace quota races, unresolved/conflicting
 identity, process crashes, caller drop, late completion, and runtime-owner drop.
 They run `RuntimeServerApp` validation/build/control/store and the API router on
 a test `axum::serve` listener, not the CLI socket driver, with a synthetic
-Azure SDK seam and local software ECDSA, not real cloud KMS. Live peak calibration,
+Azure SDK seam and local software ECDSA, not real cloud KMS. They are `#[ignore]`
+and opt-in (`AUDIT.md` section 6); CI does not run them. Live peak calibration,
 production database permissions/HA and live cloud-wire retry behavior remain
-unverified. No production activation is included in this change.
+unverified.
 
 ### Admission accounting and bounded waiting
 
@@ -272,11 +273,16 @@ not reproduce:
   the signature on chain has not been observed, and it verifies secp256k1 only,
   so a local-mnemonic (Ed25519) signature could not pass it.
 - The Solana signer address equals upstream 1.2.66 for a mnemonic, AWS or GCP key:
-  `base58` of the first 32 bytes of SEC1 `04‖X‖Y`. An Azure key answers `base58(X)`,
-  the key registered at offset 17 of the mainnet DVN config account
-  `EqkXVEeapm7JqrS1W3AGeN5ZwCRLDUHtr1XY9TuVr4rD` (`EboBSUoo…`), as fixed in `ded0f97`.
-  Upstream 1.2.66 has no Azure adapter, so this is not a parity divergence. The address
-  is a response label only: the public key and signature bytes are unchanged.
+  `base58` of the first 32 bytes of SEC1 `04‖X‖Y`. For an Azure key this service
+  answers `base58(X)` (`signer_address_for_provider`,
+  `crates/pillar-signer/src/chain_address/chains.rs`). Upstream 1.2.66 has no Azure
+  adapter, so there is no upstream value to compare. The tests check that rule
+  against a fixed public-key fixture only; nothing in this repository reads an
+  on-chain Solana DVN account or proves which key encoding the Solana DVN verifier
+  binds. Whether the Azure-derived address is the binding the verifier expects is
+  an **open question under review**; do not treat the reported Azure address as
+  verified. The address is a response label: the public key and signature bytes
+  are unchanged.
 - Error bodies also mask AWS ARNs and GCP key-ring paths; URL masking is upstream's.
 - Extra-context policies must answer the boolean `true` (only when configured).
 - ReadV1002 reads are pinned to the validated block hash, source receipts are
@@ -439,21 +445,22 @@ those three values is how you confirm you are reading the bytes these citations
 were written against.
 
 This matters because a claim about "upstream" is only as good as the tree it was
-read from. Two reviews reported that upstream runs an entity/category
-provider trust model, and that it switches the hash-call-data builder from V2
-to V3 when a ULN V2-sent packet's destination receiver has migrated. Neither is
-in the tree identified above. Both are in the later snapshot `gasolina-audit`
-`213cd500` (`apps/gasolina/src/app/app.ts:254-273`,
-`packages/dynamic-config/src/providerConfig/index.ts:21-95`). This service now
-implements both: the builder switch (see the `V2` send bullet under "Where responses
-still differ from upstream") and the entity/category trust model of `providers-v2.json`.
+read from. Two behaviours are absent from the tree identified above and present
+in the later snapshot `gasolina-audit` `213cd500`
+(`apps/gasolina/src/app/app.ts:254-273`,
+`packages/dynamic-config/src/providerConfig/index.ts:21-95`): the entity/category
+provider trust model, and the switch of the hash-call-data builder from V2 to V3
+when a ULN V2-sent packet's destination receiver has migrated. This service
+implements both: the builder switch (see the `V2` send bullet under "Where
+responses still differ from upstream") and the entity/category trust model of
+`providers-v2.json`.
 
 ### Stellar deployment addresses
 
-Until upstream 1.2.66 this repository pinned the generation-one Stellar contracts
-of the older upstream packages, which disagreed with LayerZero's live deployment
-metadata. 1.2.66's own getters name generation two, the same values the metadata
-publishes, and those are pinned now:
+The pinned Stellar contracts are generation two: the values upstream 1.2.66's own
+contract getters name, which are also the values LayerZero's deployment metadata
+publishes. Older upstream packages named generation one, which disagrees with that
+metadata.
 
 | Value | mainnet | testnet |
 | --- | --- | --- |
@@ -461,14 +468,13 @@ publishes, and those are pinned now:
 | EndpointV2 (trusted emitter) | `CCQLLRE5JBAWYCW3KTWOIWLMFDUOKROQVZNSALQMGOSXNW3ERUOWTZGK` | `CALTBA5S6GRJEHAXFP45LGGLKWWAF7HTZCPNUBUJF2HWWRRLQNV35AIV` |
 | LayerZeroViews | `CBCH6XLCAVY2KPWGJYDY4ATDHMJCNLISINKB5JAOHPAAXZXLTBMU43ZB` | `CAWX6SA2NX7HD2IBAARR5KP65C47N4GCCTWXTPZ7KH2WIGUOFQGS3ZHO` |
 
-The ULN302 id is hashed into the attestation, so the guard stays: should the
-published deployment and the pinned table ever disagree again, the destination
-builder refuses per request (`stellar_pins_equal_the_published_deployment_where_one_exists`
-checks they agree today). `layerzero_rollout_block_reason` no longer blocks
-Stellar; it blocks `moninet` on `testnet`, and `ton` on `testnet` only. TON
-testnet does have a `UlnConnection` with a delivered packet whose `VERIFIED`
-verdict was read (2026-10-05), and offline tests replay it; the gate stays until
-the operator decides the rollout.
+The ULN302 id is hashed into the attestation, so a guard remains: should the
+published deployment and the pinned table disagree, the destination builder
+refuses per request (`stellar_pins_equal_the_published_deployment_where_one_exists`
+checks that they agree). `layerzero_rollout_block_reason` does not block Stellar;
+it blocks only `moninet` and `ton`, both on `testnet`. For TON testnet, a delivered
+packet on a `UlnConnection` was read with a `VERIFIED` verdict and offline tests
+replay it; the gate stays until the operator decides the rollout.
 Confirm with:
 
 ```bash
@@ -514,11 +520,8 @@ Addresses live in `stellar_uln_302_for_environment`,
   library itself and the quorum agrees on the library as well as on the
   verdict, so one compromised RPC cannot redirect the check to a contract of
   its choosing.
-  Before this was implemented the version was derived, which reads the wrong
-  contract for an OApp on a non-default library. That did not permit a second
-  signature in practice: the address-width defect in the next entry blocked the
-  same path earlier and failed closed. Both were fixed together, so neither was
-  ever reachable on its own in a released build.
+  The derived version alone would read the wrong contract for an OApp on a
+  non-default library, which is why the check reads the actual library.
   Two consequences to know before deploying:
   - A receiver on a message library outside those three is refused, not signed.
     That is deliberate - the service cannot tell whether such a payload is
@@ -573,9 +576,9 @@ Addresses live in `stellar_uln_302_for_environment`,
   quorum and then fetches the payload with `eth_call` against the block
   *number* alone
   (`packages/sdks/lz-v2-sdk/src/read/cmdResolver/chain/evm/base.ts:22-28`), so
-  a reorg between the two phases answered the read from a different block at
-  the same height, and the exact-value quorum over the returned bytes could not
-  see it because every honest provider had followed the reorg. Readiness now
+  a reorg between the two phases can answer the read from a different block at
+  the same height, and the exact-value quorum over the returned bytes cannot
+  see it because every honest provider follows the reorg. Readiness here
   returns the hash it agreed on for every marker - timestamp markers and the
   command's own block-number markers, which upstream only checks for depth and
   never looks up (`ReadBlockPin`, `crates/pillar-core/src/lib.rs`;
@@ -604,25 +607,22 @@ Addresses live in `stellar_uln_302_for_environment`,
     non-success SDK status is a refusal before the payload is examined
     (`crates/pillar-runtime/src/provider_health/transport.rs`).
 
-  What changed is the verdict's type, on both paths: it must be the JSON
-  boolean `true` and nothing else. The strings `"true"` and `"false"`, `{}`,
-  `[]`, `{"allow":false}`, numbers and `null` are all refusals
+  On both paths the verdict must be the JSON boolean `true` and nothing else.
+  The strings `"true"` and `"false"`, `{}`, `[]`, `{"allow":false}`, numbers and
+  `null` are all refusals
   (`crates/pillar-runtime/src/layerzero_runtime/validation_extra_context.rs`).
   Upstream decides both paths with JavaScript truthiness (`app.ts:707`,
-  `:724`), where `{"statusCode":403,"body":"false"}` approved the request and a
-  string body of any content approved it too - this is a deliberate
+  `:724`), where `{"statusCode":403,"body":"false"}` approves the request and a
+  string body of any content approves it too - this is a deliberate
   fail-closed divergence. **A Lambda that returns `body` as a JSON-encoded
-  string is the common shape and is now refused**; confirm the returned type,
-  not just the value, before deploying this version.
-- The receiver's receive-library check no longer depends on caller input. It
-  used to run only when the request supplied `dvnAddress`, which is
-  caller-controlled JSON, so omitting that field skipped both the
-  duplicate-signature query and the refusal of an unsupported or invalid
-  receive library. The library resolution and refusal now run for every EVM
-  sign request, and only the `hashLookup` duplicate query is conditional on an
-  address being supplied
+  string is a common shape and is refused**; confirm the returned type, not
+  just the value, before deploying.
+- The receiver's receive-library check does not depend on caller input. Library
+  resolution and the refusal of an unsupported or invalid receive library run for
+  every EVM sign request; only the `hashLookup` duplicate query is conditional on
+  the caller supplying `dvnAddress`
   (`crates/pillar-runtime/src/layerzero_runtime/validation_payload.rs`). A
-  request that omits `dvnAddress` therefore still cannot reach a receiver on a
+  request that omits `dvnAddress` therefore cannot reach a receiver on a
   library this service does not support.
 
   **The duplicate-signature refusal itself remains caller-selected, and that is
@@ -649,12 +649,11 @@ Addresses live in `stellar_uln_302_for_environment`,
   resolution and validation.
 - The connection lifetime ceiling is checked before each read and write rather
   than only when the underlying socket returns `Pending`
-  (`IdleTimeoutIo`, `crates/pillar-cli/src/main.rs`). A client that keeps the
-  socket continuously readable previously renewed the sliding idle window
-  without ever consulting the 300s ceiling. `poll_flush` and `poll_shutdown`
-  still delegate straight to the socket, so the guarantee is that no
-  application-level read or write is serviced after the ceiling, not that every
-  syscall stops.
+  (`IdleTimeoutIo`, `crates/pillar-cli/src/main.rs`), so a client that keeps the
+  socket continuously readable cannot renew the sliding idle window past the
+  300s ceiling. `poll_flush` and `poll_shutdown` delegate straight to the
+  socket, so the guarantee is that no application-level read or write is
+  serviced after the ceiling, not that every syscall stops.
 - `srcChainName` and `dstChainName` are checked at the HTTP boundary, before
   anything logs them, against the roster and the shape 1-128 characters of
   `[0-9a-zA-Z_-]` (`crates/pillar-api/src/lib.rs`), and a caller-supplied
