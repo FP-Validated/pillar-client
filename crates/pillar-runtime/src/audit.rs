@@ -6,6 +6,7 @@ use pillar_core::{
 };
 use std::{
     future::Future,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
@@ -70,9 +71,52 @@ impl Failure {
 fn unavailable<T>(_: T) -> Failure {
     Failure::Unavailable
 }
+#[derive(Debug, PartialEq, Eq)]
+enum Transport {
+    Plaintext,
+    Tls,
+}
+/// tokio-postgres dials `hostaddr` in place of `host`, so both must be literal loopback.
+fn dials_only_loopback(config: &Config) -> bool {
+    let hosts = config.get_hosts();
+    !hosts.is_empty()
+        && hosts.iter().all(|host| match host {
+            Host::Tcp(host) => matches!(host.as_str(), "127.0.0.1" | "::1"),
+            #[cfg(unix)]
+            Host::Unix(_) => true,
+        })
+        && config.get_hostaddrs().iter().all(|address| {
+            *address == IpAddr::V4(Ipv4Addr::LOCALHOST)
+                || *address == IpAddr::V6(Ipv6Addr::LOCALHOST)
+        })
+}
+fn transport(config: &Config) -> Result<Transport, Failure> {
+    let local = dials_only_loopback(config);
+    match config.get_ssl_mode() {
+        SslMode::Disable if !local => Err(Failure::Configuration),
+        SslMode::Require => Ok(Transport::Tls),
+        _ if local => Ok(Transport::Plaintext),
+        _ => Ok(Transport::Tls),
+    }
+}
+/// An explicit provider, because the release graph enables both `ring` and `aws-lc-rs`
+/// and rustls then refuses to choose a process default.
+fn tls_connector() -> Result<tokio_postgres_rustls::MakeRustlsConnect, Failure> {
+    let roots = rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let tls = rustls::ClientConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .map_err(|_| Failure::Configuration)?
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+    Ok(tokio_postgres_rustls::MakeRustlsConnect::new(tls))
+}
 pub(crate) struct PostgresAuditStore {
     config: AuditConfig,
     session: Mutex<Option<Session>>,
+    /// Readiness probes queue here first, so at most one sits ahead of signing writes.
+    probe: Mutex<()>,
     reachable: Arc<AtomicBool>,
     generation: Arc<AtomicU64>,
 }
@@ -81,6 +125,7 @@ impl PostgresAuditStore {
         let store = Arc::new(Self {
             config,
             session: Mutex::new(None),
+            probe: Mutex::new(()),
             reachable: Arc::new(AtomicBool::new(false)),
             generation: Arc::new(AtomicU64::new(0)),
         });
@@ -155,17 +200,8 @@ impl PostgresAuditStore {
                 .fetch_add(1, Ordering::AcqRel)
                 .wrapping_add(1);
             let epoch = self.generation.clone();
-            let local = !config.get_hosts().is_empty()
-                && config.get_hosts().iter().all(|host| match host {
-                    Host::Tcp(host) => matches!(host.as_str(), "127.0.0.1" | "::1"),
-                    #[cfg(unix)]
-                    Host::Unix(_) => true,
-                });
-            if config.get_ssl_mode() == SslMode::Disable && !local {
-                return Err(Failure::Configuration);
-            }
             let reachable = self.reachable.clone();
-            let session = if local && config.get_ssl_mode() != SslMode::Require {
+            let session = if transport(&config)? == Transport::Plaintext {
                 config.ssl_mode(SslMode::Disable);
                 let (client, connection) = config.connect(NoTls).await.map_err(unavailable)?;
                 Session {
@@ -180,14 +216,8 @@ impl PostgresAuditStore {
                 }
             } else {
                 config.ssl_mode(SslMode::Require);
-                let roots = rustls::RootCertStore::from_iter(
-                    webpki_roots::TLS_SERVER_ROOTS.iter().cloned(),
-                );
-                let tls = rustls::ClientConfig::builder()
-                    .with_root_certificates(roots)
-                    .with_no_client_auth();
                 let (client, connection) = config
-                    .connect(tokio_postgres_rustls::MakeRustlsConnect::new(tls))
+                    .connect(tls_connector()?)
                     .await
                     .map_err(unavailable)?;
                 Session {
@@ -344,6 +374,9 @@ impl SigningAuditStore for PostgresAuditStore {
         self.finish(&mut slot, result)
     }
     async fn healthy(&self) -> bool {
+        let Ok(_probe) = within_deadline(self.config.timeout, self.probe.lock()).await else {
+            return false;
+        };
         let Ok(mut slot) = self.queue().await else {
             return false;
         };
@@ -351,5 +384,174 @@ impl SigningAuditStore for PostgresAuditStore {
         let healthy = self.finish(&mut slot, result).unwrap_or(false);
         self.reachable.store(healthy, Ordering::Release);
         healthy
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pillar_core::audit::{EffectiveKey, ValidatedIntent};
+    use std::{sync::atomic::AtomicUsize, time::Duration};
+
+    #[test]
+    fn audit_tls_connector_builds_where_the_process_default_provider_panics() {
+        let global = std::panic::catch_unwind(rustls::ClientConfig::builder);
+        assert!(
+            global.is_err(),
+            "this graph no longer enables both rustls providers, so the regression below \
+             no longer exercises the release combination"
+        );
+        assert!(tls_connector().is_ok());
+    }
+
+    #[test]
+    fn audit_plaintext_requires_every_dialed_address_to_be_literal_loopback() {
+        let plaintext = Ok(Transport::Plaintext);
+        let tls = Ok(Transport::Tls);
+        let refused = Err(Failure::Configuration.message());
+        let mut cases = vec![
+            ("host=127.0.0.1", &plaintext),
+            ("host=::1", &plaintext),
+            ("host=127.0.0.1 hostaddr=127.0.0.1", &plaintext),
+            ("host=127.0.0.1 hostaddr=::1", &plaintext),
+            ("host=::1 hostaddr=127.0.0.1", &plaintext),
+            ("host=127.0.0.1,::1 hostaddr=::1,127.0.0.1", &plaintext),
+            ("host=127.0.0.1 hostaddr=192.0.2.7", &tls),
+            ("host=::1 hostaddr=2001:db8::7", &tls),
+            ("host=127.0.0.1 hostaddr=::ffff:127.0.0.1", &tls),
+            ("host=127.0.0.1,::1 hostaddr=127.0.0.1,192.0.2.7", &tls),
+            (
+                "host=127.0.0.1,db.example hostaddr=127.0.0.1,127.0.0.1",
+                &tls,
+            ),
+            ("hostaddr=127.0.0.1", &tls),
+            ("host=localhost", &tls),
+            ("host=db.example", &tls),
+            (
+                "postgresql://audit@127.0.0.1/audit?hostaddr=192.0.2.7",
+                &tls,
+            ),
+            ("host=127.0.0.1 sslmode=require", &tls),
+            ("host=127.0.0.1 sslmode=disable", &plaintext),
+            (
+                "host=127.0.0.1 hostaddr=192.0.2.7 sslmode=disable",
+                &refused,
+            ),
+            ("host=db.example sslmode=disable", &refused),
+            ("host=db.example sslmode=prefer", &tls),
+        ];
+        #[cfg(unix)]
+        cases.extend([
+            ("host=/var/run/postgresql", &plaintext),
+            ("host=/var/run/postgresql,127.0.0.1", &plaintext),
+            ("host=/var/run/postgresql hostaddr=192.0.2.7", &tls),
+            (
+                "host=/var/run/postgresql hostaddr=192.0.2.7 sslmode=disable",
+                &refused,
+            ),
+        ]);
+        for (dsn, expected) in cases {
+            let config: Config = dsn.parse().unwrap();
+            assert_eq!(
+                &transport(&config).map_err(|failure| failure.message()),
+                expected,
+                "{dsn}"
+            );
+        }
+    }
+
+    /// Accepts each connection, answers nothing and closes it after `delay`.
+    async fn slow_refusing_database(delay: Duration) -> (String, Arc<AtomicUsize>) {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let count = accepted.clone();
+        tokio::spawn(async move {
+            while let Ok((socket, _)) = listener.accept().await {
+                count.fetch_add(1, Ordering::SeqCst);
+                tokio::spawn(async move {
+                    tokio::time::sleep(delay).await;
+                    drop(socket);
+                });
+            }
+        });
+        (
+            format!("postgresql://audit@127.0.0.1:{port}/audit"),
+            accepted,
+        )
+    }
+
+    fn intent() -> AttemptIntent {
+        AttemptIntent {
+            validated: ValidatedIntent {
+                request_hash: "request".into(),
+                validation_hash: "validation".into(),
+                source_chain: "ethereum".into(),
+                destination_chain: "ethereum".into(),
+                expiration: 1,
+                provider_generation: 7,
+            },
+            key: EffectiveKey {
+                backend: "AZURE",
+                reference: "synthetic/key/7".into(),
+                version: "7".into(),
+                public_key_hash: "public".into(),
+            },
+            wallet_hash: "wallet".into(),
+            signed_digest: "digest".into(),
+            algorithm: "ECDSA",
+        }
+    }
+
+    #[tokio::test]
+    async fn audit_readiness_probes_cannot_queue_ahead_of_a_signing_write() {
+        // Real time: a paused clock can advance past a loopback close before it is observed.
+        // Twelve queued probes at an eighth of the deadline each would outlast the write's deadline.
+        let timeout = Duration::from_secs(2);
+        let delay = timeout / 8;
+        let (url, accepted) = slow_refusing_database(delay).await;
+        let store = Arc::new(PostgresAuditStore {
+            config: AuditConfig {
+                database_url: url.into(),
+                namespace: "synthetic".into(),
+                timeout,
+                max_attempts: 16,
+            },
+            session: Mutex::new(None),
+            probe: Mutex::new(()),
+            reachable: Arc::new(AtomicBool::new(true)),
+            generation: Arc::new(AtomicU64::new(0)),
+        });
+        let probes = (0..12)
+            .map(|_| {
+                let store = store.clone();
+                tokio::spawn(async move { store.healthy().await })
+            })
+            .collect::<Vec<_>>();
+        tokio::time::sleep(delay / 5).await;
+
+        let started = tokio::time::Instant::now();
+        let write = store.begin(&intent()).await;
+        let waited = started.elapsed();
+        let reached_database_as = accepted.load(Ordering::SeqCst);
+
+        assert!(write.unwrap_err().contains("store unavailable"));
+        assert!(
+            waited < timeout,
+            "the signing write timed out in the queue after {waited:?}"
+        );
+        assert_eq!(
+            reached_database_as, 2,
+            "the signing write must reach the database after at most one probe"
+        );
+        for probe in probes {
+            assert!(
+                !probe.await.unwrap(),
+                "a failed probe must not report ready"
+            );
+        }
+        assert!(!store.health_state().load(Ordering::Acquire));
     }
 }

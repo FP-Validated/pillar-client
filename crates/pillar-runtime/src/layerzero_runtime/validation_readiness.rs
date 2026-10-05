@@ -491,17 +491,9 @@ where
             current_confirmations: None,
         });
     };
-    let tx_seqno = trace
-        .pointer("/transaction/mc_block_seqno")
-        .and_then(Value::as_i64)
-        .or_else(|| {
-            trace
-                .pointer("/transaction/mc_block_seqno")
-                .and_then(Value::as_str)?
-                .parse()
-                .ok()
-        });
-    let Some(tx_seqno) = tx_seqno else {
+    // The trace is rooted at its first transaction, which can sit in an earlier
+    // masterchain block than the PacketSent transaction; upstream reads the root here.
+    let Some(tx_seqno) = ton_trace_transaction_seqno(&trace, tx_hash) else {
         return Ok(BlockConfirmationObservation {
             validity: BlockConfirmationValidity::Missing,
             current_confirmations: None,
@@ -549,6 +541,21 @@ where
         validity,
         current_confirmations: Some(confirmations),
     })
+}
+
+fn ton_trace_transaction_seqno(trace: &Value, tx_hash: &str) -> Option<i64> {
+    let mut stack = vec![trace];
+    while let Some(node) = stack.pop() {
+        let transaction = node.get("transaction")?;
+        if transaction.get("hash").and_then(Value::as_str) == Some(tx_hash) {
+            let seqno = transaction.get("mc_block_seqno")?;
+            return seqno.as_i64().or_else(|| seqno.as_str()?.parse().ok());
+        }
+        if let Some(children) = node.get("children").and_then(Value::as_array) {
+            stack.extend(children.iter().rev());
+        }
+    }
+    None
 }
 
 async fn observe_solana_slot_confirmations<T>(
@@ -856,27 +863,91 @@ mod ton_tests {
         }
     }
 
-    #[tokio::test]
-    async fn ton_masterchain_seqno_confirmations_are_quorum_ready() {
+    async fn observe(trace: Value, head: i64, tx_hash: &str) -> BlockConfirmationObservation {
         let transport = RecordingTransport {
             responses: Arc::new(Mutex::new(vec![
-                Ok(json!({"transaction": {"mc_block_seqno": 100}})),
-                Ok(json!({"last": {"seqno": 105}})),
+                Ok(trace),
+                Ok(json!({"last": {"seqno": head}})),
             ])),
         };
-        let observation = observe_ton_block_confirmations(
+        observe_ton_block_confirmations(
             transport,
             "https://ton-v3.example".to_string(),
             HashMap::new(),
-            "tx",
+            tx_hash,
             5,
         )
         .await
-        .unwrap();
+        .unwrap()
+    }
+
+    /// toncenter v3 `/events`: an external message lands at seqno 100 and the
+    /// PacketSent emission happens three hops later, at seqno 105.
+    fn packet_sent_five_blocks_after_root() -> Value {
+        let transaction = |hash: &str, seqno: i64, lt: &str| json!({"hash": hash, "lt": lt, "mc_block_seqno": seqno, "in_msg": {"hash": format!("{hash}-in")}});
+        json!({"events": [{
+            "trace": {"tx_hash": "root", "children": [
+                {"tx_hash": "endpoint", "children": [
+                    {"tx_hash": "channel", "children": [
+                        {"tx_hash": "packet-sent", "children": []}
+                    ]}
+                ]},
+                {"tx_hash": "refund", "children": []}
+            ]},
+            "transactions": {
+                "root": transaction("root", 100, "1000"),
+                "endpoint": transaction("endpoint", 102, "1001"),
+                "channel": transaction("channel", 104, "1002"),
+                "packet-sent": transaction("packet-sent", 105, "1003"),
+                "refund": transaction("refund", 101, "1004"),
+            }
+        }]})
+    }
+
+    #[tokio::test]
+    async fn ton_masterchain_seqno_confirmations_are_quorum_ready() {
+        let observation = observe(
+            json!({"transaction": {"hash": "tx", "mc_block_seqno": 100}, "children": []}),
+            105,
+            "tx",
+        )
+        .await;
         assert!(matches!(
             observation.validity,
             BlockConfirmationValidity::Sufficient { .. }
         ));
         assert_eq!(observation.current_confirmations, Some(5));
+    }
+
+    #[tokio::test]
+    async fn ton_confirmations_count_from_the_packet_sent_transaction_not_the_trace_root() {
+        let observation = observe(packet_sent_five_blocks_after_root(), 105, "packet-sent").await;
+        assert!(matches!(
+            observation.validity,
+            BlockConfirmationValidity::Insufficient {
+                receipt_block_number: 105,
+                ..
+            }
+        ));
+        assert_eq!(observation.current_confirmations, Some(0));
+
+        let observation = observe(packet_sent_five_blocks_after_root(), 110, "packet-sent").await;
+        assert!(matches!(
+            observation.validity,
+            BlockConfirmationValidity::Sufficient {
+                receipt_block_number: 105,
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn ton_confirmations_fail_closed_when_the_trace_lacks_the_transaction() {
+        let observation = observe(packet_sent_five_blocks_after_root(), 200, "elsewhere").await;
+        assert!(matches!(
+            observation.validity,
+            BlockConfirmationValidity::Missing
+        ));
+        assert_eq!(observation.current_confirmations, None);
     }
 }

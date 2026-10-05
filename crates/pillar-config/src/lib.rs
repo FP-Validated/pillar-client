@@ -716,12 +716,37 @@ pub fn wallet_definitions_from_file_path_env_map(
     }
 }
 
+/// serde_json's type errors quote the offending input, which here can be a seed phrase or
+/// an RPC credential; keep only field names, which name a key rather than a value.
+pub fn json_error_without_input(error: &serde_json::Error) -> String {
+    use serde_json::error::Category;
+    let category = match error.classify() {
+        Category::Io => "I/O error",
+        Category::Syntax => "syntax error",
+        Category::Data => "data error",
+        Category::Eof => "unexpected end of input",
+    };
+    let message = error.to_string();
+    let field = ["missing field `", "unknown field `"]
+        .into_iter()
+        .find_map(|prefix| {
+            let (field, _) = message.strip_prefix(prefix)?.split_once('`')?;
+            Some(format!(": {prefix}{field}`"))
+        })
+        .unwrap_or_default();
+    format!(
+        "JSON {category}{field} at line {} column {}",
+        error.line(),
+        error.column()
+    )
+}
+
 pub fn wallet_to_mnemonic_map_from_env_map(
     vars: &HashMap<String, String>,
 ) -> Result<WalletToMnemonicMap, ConfigError> {
     let raw = required(vars, LZ_WALLET_MNEMONIC_MAPPING)?;
     let mapping = serde_json::from_str::<WalletToMnemonicMap>(raw)
-        .map_err(|error| ConfigError::Json(error.to_string()))?;
+        .map_err(|error| ConfigError::Json(json_error_without_input(&error)))?;
     if mapping.is_empty() {
         Err(ConfigError::NoMnemonicDefinition(
             LZ_WALLET_MNEMONIC_MAPPING,
@@ -737,7 +762,7 @@ pub fn wallet_to_mnemonic_map_from_file_path_env_map(
     let path = required(vars, LZ_WALLET_MNEMONIC_MAPPING_FILE_PATH)?;
     let raw = fs::read_to_string(path).map_err(|error| ConfigError::Io(error.to_string()))?;
     let mapping = serde_json::from_str::<WalletToMnemonicMap>(&raw)
-        .map_err(|error| ConfigError::Json(error.to_string()))?;
+        .map_err(|error| ConfigError::Json(json_error_without_input(&error)))?;
     if mapping.is_empty() {
         Err(ConfigError::NoMnemonicDefinition(
             LZ_WALLET_MNEMONIC_MAPPING_FILE_PATH,
@@ -2698,6 +2723,48 @@ mod tests {
             err.to_string(),
             "No mnemonic definition found in LAYERZERO_WALLET_MNEMONIC_MAPPING"
         );
+    }
+
+    #[test]
+    fn mnemonic_mapping_shape_errors_name_the_position_but_not_the_value() {
+        const SENTINEL: &str = "SYNTHETIC-SENTINEL-not-a-seed-phrase";
+        let file = NamedTempFile::new().unwrap();
+        let parse_both = |raw: &str| {
+            std::fs::write(file.path(), raw).unwrap();
+            [
+                wallet_to_mnemonic_map_from_env_map(&HashMap::from([(
+                    LZ_WALLET_MNEMONIC_MAPPING.to_string(),
+                    raw.to_string(),
+                )])),
+                wallet_to_mnemonic_map_from_file_path_env_map(&HashMap::from([(
+                    LZ_WALLET_MNEMONIC_MAPPING_FILE_PATH.to_string(),
+                    file.path().to_string_lossy().into_owned(),
+                )])),
+            ]
+            .map(|result| result.unwrap_err().to_string())
+        };
+        for raw in [
+            format!(r#"{{"wallet-a-EVM":"{SENTINEL}"}}"#),
+            format!(r#""{SENTINEL}""#),
+        ] {
+            for error in parse_both(&raw) {
+                assert!(!error.contains(SENTINEL), "{error}");
+                assert!(
+                    error.starts_with("JSON data error at line 1 column "),
+                    "{error}"
+                );
+            }
+        }
+        for error in parse_both(r#"{"wallet-a-EVM":{"mnemonic":"phrase"}}"#) {
+            assert!(error.contains("missing field `path`"), "{error}");
+        }
+        for error in parse_both(&format!(r#"{{"wallet-a-EVM":{{"mnemonic":"{SENTINEL}""#)) {
+            assert!(!error.contains(SENTINEL), "{error}");
+            assert!(
+                error.starts_with("JSON unexpected end of input at line 1"),
+                "{error}"
+            );
+        }
     }
 
     #[test]

@@ -163,12 +163,15 @@ Session startup sets server lock, statement and idle-transaction timeouts plus T
 keepalive/user timeouts. Remote DSNs use `sslmode=require` with rustls hostname
 and WebPKI-root certificate verification; tokio-postgres does not accept
 `verify-full` or `verify-ca` DSN spellings here. Plaintext is limited to literal
-loopback addresses or Unix sockets. The DSN is redacted; credentials must not be
+loopback addresses or Unix sockets, and every `hostaddr`, which tokio-postgres
+dials in place of `host`, must also be literal loopback. The DSN is redacted; credentials must not be
 placed in logs or release artifacts. `PILLAR_AUDIT_MAX_ATTEMPTS` is a retained-row
 quota, not a byte/disk quota. There is no TTL, automatic cleanup or reconciliation.
 Unknown and partial attempts must survive any operator-approved retention plan.
 
-Each process serializes audit operations through one session mutex. Participating
+Each process serializes audit operations through one session mutex. Readiness
+probes queue for that mutex one at a time, so at most one probe waits ahead of a
+signing write. Participating
 replicas also serialize namespace quota updates on one PostgreSQL row; KMS
 execution holds no such row lock. There is no measured production TPS, capacity
 calibration, pool, pruning or automatic quota reset. The permanent row cap is not
@@ -571,6 +574,13 @@ Addresses live in `stellar_uln_302_for_environment`,
   round-two confirmation count. A receipt whose execution status is not success
   is refused at resolution. This is a deliberate fail-closed divergence from
   upstream, which performs the same two-phase read without binding it.
+- TON block confirmations count from the masterchain seqno of the `PacketSent`
+  transaction itself, found by hash inside the provider's trace, and readiness
+  refuses when that transaction is absent from the trace. Upstream reads the
+  trace root's `mc_block_seqno`
+  (`packages/sdks/rpc-sdk/src/ton/index.ts:175-187`), which can be an earlier
+  block than the emission and so overstates the depth. This is a deliberate
+  fail-closed divergence.
 - A `ReadV1002` read is pinned to the block readiness validated, which
   upstream does not do. Upstream agrees on a time marker's block through a
   quorum and then fetches the payload with `eth_call` against the block

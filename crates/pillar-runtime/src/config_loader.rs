@@ -593,6 +593,79 @@ mod tests {
         assert!(metrics.contains(r#"result="error""#), "{metrics}");
     }
 
+    #[derive(Clone)]
+    struct LogBuffer(Arc<parking_lot::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for LogBuffer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    const REFRESH_SENTINEL: &str = "SYNTHETIC-SENTINEL-not-a-credential";
+
+    /// A bucket whose provider object puts a header string where a header map belongs.
+    struct ShapeErrorBucket;
+
+    #[async_trait]
+    impl RemoteProviderConfigLoader for ShapeErrorBucket {
+        async fn load_provider_config(
+            &self,
+            request: RemoteProviderConfigRequest,
+        ) -> Result<String, ConfigError> {
+            let (RemoteProviderConfigRequest::S3 { key, .. }
+            | RemoteProviderConfigRequest::GCS { key, .. }) = request;
+            Ok(if key == pillar_config::LZ_PROVIDER_CONFIG_REMOTE_KEY {
+                format!(
+                    r#"{{"entities":["operator"],"chains":{{"bsc":{{"rpc":[{{"uri":"https://bsc-rpc.example","category":"internal","entity":"operator","headers":"Bearer {REFRESH_SENTINEL}"}}]}}}}}}"#
+                )
+            } else {
+                r#"{"default":{"allOf":[{"any":1}]}}"#.to_string()
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_config_refresh_failure_logs_the_position_but_not_the_value() {
+        let owner = RemoteProviderConfigOwner::with_loader_for_test(
+            provider_configs(SERVING_PROVIDERS),
+            Arc::new(ShapeErrorBucket),
+            None,
+        );
+        let result = load_remote_snapshot(&owner.loader, &owner.source, None).await;
+        let reason = result
+            .as_ref()
+            .err()
+            .cloned()
+            .expect("a shape error fails the refresh");
+        assert!(!reason.contains(REFRESH_SENTINEL), "{reason}");
+        assert!(reason.contains("at line 1 column "), "{reason}");
+
+        let logs = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let writer = LogBuffer(logs.clone());
+        let _subscriber = tracing::subscriber::set_default(
+            tracing_subscriber::fmt()
+                .with_writer(move || writer.clone())
+                .finish(),
+        );
+        let serving = owner_serving(SERVING_PROVIDERS);
+        let registry = Arc::new(Mutex::new(PillarMetrics::new()));
+        let metrics = refresh_with(&serving, &registry, result).await;
+
+        let logged = String::from_utf8(logs.lock().clone()).unwrap();
+        assert!(metrics.contains(r#"result="error""#), "{metrics}");
+        assert!(
+            logged.contains("provider config refresh failed"),
+            "{logged}"
+        );
+        assert!(logged.contains("at line 1 column "), "{logged}");
+        assert!(!logged.contains(REFRESH_SENTINEL), "{logged}");
+    }
+
     #[test]
     fn provider_config_refresh_accepts_a_snapshot_it_could_sign_with() {
         let handle = ProviderSnapshotHandle::new(

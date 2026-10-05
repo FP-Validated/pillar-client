@@ -91,10 +91,28 @@ pub trait PillarTransport: Clone + Send + Sync + 'static {
     async fn get_json(&self, url: String) -> Result<ApiEnvelope, String>;
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ReqwestPillarTransport {
     client: reqwest::Client,
     headers: HeaderMap,
+}
+
+/// Header values are caller credentials such as `Authorization: Bearer ...`; print names only.
+impl std::fmt::Debug for ReqwestPillarTransport {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ReqwestPillarTransport")
+            .field("client", &self.client)
+            .field(
+                "headers",
+                &self
+                    .headers
+                    .keys()
+                    .map(|name| (name.as_str(), "<redacted>"))
+                    .collect::<Vec<_>>(),
+            )
+            .finish()
+    }
 }
 
 impl ReqwestPillarTransport {
@@ -274,7 +292,9 @@ where
                     first_payload.get_or_insert_with(|| response.payload.clone());
                     signatures.extend(response.signatures);
                     if signatures.len() >= quorum {
-                        signatures.sort_by(|a, b| a.address.cmp(&b.address));
+                        signatures.sort_by(|a, b| {
+                            signer_order(&a.address).cmp(&signer_order(&b.address))
+                        });
                         return Ok(PillarApiResponse {
                             signatures,
                             payload: first_payload
@@ -491,6 +511,31 @@ fn signatures_missing_like_typescript(body: &Value) -> bool {
     is_falsy_like_typescript(signatures)
 }
 
+/// EVM verifiers expect signers in ascending address order, which byte-wise string
+/// order breaks for checksummed (mixed-case) addresses. Other address shapes keep
+/// string order after every EVM address, so the order stays total.
+fn signer_order(address: &str) -> (bool, Option<[u8; 20]>, &str) {
+    let bytes = evm_address_bytes(address);
+    (bytes.is_none(), bytes, address)
+}
+
+fn evm_address_bytes(address: &str) -> Option<[u8; 20]> {
+    let digits = address
+        .strip_prefix("0x")
+        .or_else(|| address.strip_prefix("0X"))?
+        .as_bytes();
+    if digits.len() != 40 {
+        return None;
+    }
+    let mut bytes = [0u8; 20];
+    for (byte, pair) in bytes.iter_mut().zip(digits.chunks_exact(2)) {
+        let high = char::from(pair[0]).to_digit(16)?;
+        let low = char::from(pair[1]).to_digit(16)?;
+        *byte = u8::try_from(high * 16 + low).ok()?;
+    }
+    Some(bytes)
+}
+
 fn join_url(uri: &str, path: &str) -> String {
     if path.is_empty() {
         return uri.trim_end_matches('/').to_string();
@@ -583,6 +628,50 @@ mod tests {
         assert_eq!(result.payload, "0xpayload");
         assert_eq!(result.signatures[0].address, "0xaa");
         assert_eq!(result.signatures[1].address, "0xbb");
+    }
+
+    async fn signed_by(addresses: &[&str], quorum: usize) -> Vec<String> {
+        let transport = MockTransport::default();
+        let mut uris = Vec::new();
+        for (index, address) in addresses.iter().enumerate() {
+            let uri = format!("https://{index}.test");
+            transport.posts.lock().await.insert(
+                format!("{uri}/v2/resolve-and-sign"),
+                Ok(response(address, "0xpayload")),
+            );
+            uris.push(uri);
+        }
+        PillarClient::new(uris, "canonical", transport)
+            .call_resolve_and_sign(serde_json::json!({}), quorum, "/v2/resolve-and-sign")
+            .await
+            .unwrap()
+            .signatures
+            .into_iter()
+            .map(|signature| signature.address)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn client_orders_mixed_case_evm_signers_by_address_bytes() {
+        const LOW: &str = "0xa00000000000000000000000000000000000000a";
+        const HIGH: &str = "0xB00000000000000000000000000000000000000B";
+        assert_eq!(signed_by(&[HIGH, LOW], 2).await, [LOW, HIGH]);
+        assert_eq!(signed_by(&[LOW, HIGH], 2).await, [LOW, HIGH]);
+    }
+
+    #[tokio::test]
+    async fn client_keeps_duplicate_and_unparseable_signers_in_a_total_order() {
+        const LOW: &str = "0xa00000000000000000000000000000000000000a";
+        const HIGH: &str = "0xB00000000000000000000000000000000000000B";
+        const HIGH_LOWERCASE: &str = "0xb00000000000000000000000000000000000000b";
+        const SHORT: &str = "0xb0";
+        const NOT_HEX: &str = "0xg00000000000000000000000000000000000000a";
+        let signed = signed_by(&[NOT_HEX, HIGH, SHORT, HIGH_LOWERCASE, LOW], 5).await;
+        assert_eq!(signed[0], LOW);
+        let mut duplicates = signed[1..3].to_vec();
+        duplicates.sort();
+        assert_eq!(duplicates, [HIGH, HIGH_LOWERCASE]);
+        assert_eq!(signed[3..], [SHORT, NOT_HEX]);
     }
 
     #[tokio::test]

@@ -583,8 +583,12 @@ fn parse_providers_file(raw: &str) -> Result<RawProvidersFile, ConfigError> {
     reject_legacy_provider_config(raw)?;
     // From the text: a `serde_json::Value` object is sorted, which would lose the file's
     // chain order.
-    serde_json::from_str(raw)
-        .map_err(|error| ConfigError::Json(format!("providers-v2.json: {error}")))
+    serde_json::from_str(raw).map_err(|error| {
+        ConfigError::Json(format!(
+            "providers-v2.json: {}",
+            crate::json_error_without_input(&error)
+        ))
+    })
 }
 
 fn parse_strategy_file(

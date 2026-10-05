@@ -207,6 +207,30 @@ fn an_impossible_category_count_is_refused_without_expanding_it() {
 }
 
 #[test]
+fn provider_shape_errors_name_the_position_but_not_the_value() {
+    const SENTINEL: &str = "SYNTHETIC-SENTINEL-not-a-credential";
+    let strategy = r#"{"default": {"allOf": [{"any": 1}]}}"#;
+    for providers in [
+        PROVIDERS.replace(r#"{"x-api-key": "k"}"#, &format!(r#""Bearer {SENTINEL}""#)),
+        format!(
+            r#"{{"entities": ["operator"], "chains": {{"bsc": {{"rpc": "https://rpc.example/{SENTINEL}"}}}}}}"#
+        ),
+        format!(
+            r#"{{"entities": ["operator"], "chains": {{"bsc": "https://rpc.example/{SENTINEL}"}}}}"#
+        ),
+    ] {
+        let error = message(load(&providers, strategy));
+        assert!(!error.contains(SENTINEL), "{error}");
+        assert!(
+            error.starts_with("providers-v2.json: JSON data error at line "),
+            "{error}"
+        );
+    }
+    let missing = message(load(r#"{"chains": {}}"#, strategy));
+    assert!(missing.contains("missing field `entities`"), "{missing}");
+}
+
+#[test]
 fn any_is_a_separate_threshold_that_overlaps_category_slots() {
     // `internal: 1` plus `any: 2` is met by two entities, not three.
     let strategy = QuorumStrategy {

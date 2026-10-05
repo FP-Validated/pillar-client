@@ -3150,6 +3150,7 @@ dependencies = [
  "indexmap 2.14.0",
  "k256",
  "num-bigint",
+ "parking_lot",
  "pillar-api",
  "pillar-config",
  "pillar-core",
