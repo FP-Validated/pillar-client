@@ -1,0 +1,10 @@
+{
+ "method": "POST",
+ "url": "https://api.testnet.aptoslabs.com/v1/view",
+ "headers": {
+  "accept": "application/json",
+  "content-type": "application/json"
+ },
+ "body": "{\"function\":\"0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::inbound_nonce\",\"type_arguments\":[],\"arguments\":[\"0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7\",\"10161\",\"0x1111111111111111111111111111111111111111\"]}",
+ "utc": "2026-10-04T10:34:42Z"
+}

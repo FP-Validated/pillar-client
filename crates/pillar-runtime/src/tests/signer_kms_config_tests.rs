@@ -143,3 +143,138 @@ async fn kms_signer_assembly_uses_runtime_config_and_raw_factory() {
     );
     assert!(sign_requests[0].transform_recovery_id);
 }
+
+struct RegisteredAzureKey;
+
+#[async_trait]
+impl pillar_signer::AzureKmsClient for RegisteredAzureKey {
+    async fn get_ec_public_key_coordinates(
+        &self,
+        key: &pillar_signer::AzureKmsKeyId,
+    ) -> Result<pillar_signer::AzureEcPublicKey, SignerError> {
+        assert_eq!(key.name, "solana-key");
+        Ok(pillar_signer::AzureEcPublicKey {
+            key_id: pillar_signer::AzureKmsKeyId {
+                name: key.name.clone(),
+                version: Some("v1".to_string()),
+            },
+            reference: "https://synthetic.invalid/keys/solana-key/v1".to_string(),
+            x: hex::decode("ca11e4b7d37870aca2ace4d5dee1dd296e6d76c7ff757c648d41f1e65d495d74")
+                .unwrap(),
+            y: hex::decode("0897f8edc07fea309c99494ab3f2115c27f1f8aca0d0843ce485e6266ed351f1")
+                .unwrap(),
+        })
+    }
+
+    async fn sign_es256k_digest(
+        &self,
+        _key: &pillar_signer::AzureKmsKeyId,
+        _digest: &[u8],
+    ) -> Result<Vec<u8>, SignerError> {
+        Err(SignerError::Message("this test never signs".to_string()))
+    }
+}
+
+#[derive(Clone)]
+struct NoRpcTransport;
+
+#[async_trait]
+impl JsonRpcTransport for NoRpcTransport {
+    async fn post_json(
+        &self,
+        url: String,
+        _: HashMap<String, String>,
+        _: Value,
+    ) -> Result<Value, String> {
+        Err(format!("no RPC in this test: {url}"))
+    }
+
+    async fn get_json(&self, url: String, _: HashMap<String, String>) -> Result<Value, String> {
+        Err(format!("no RPC in this test: {url}"))
+    }
+}
+
+/// The production Azure factory and adapter, assembled from the env map and served over
+/// `/signer-info`, must answer the registered `base58(X)` and the 64-byte `X || Y`.
+#[tokio::test]
+async fn azure_solana_signer_info_route_answers_the_registered_address() {
+    use tower::ServiceExt;
+
+    let providers = r#"{"solana":{"uris":["https://solana-rpc.example"],"quorum":1}}"#;
+    let vars = HashMap::from([
+        (
+            pillar_config::PILLAR_API_AUTH_TOKENS.to_string(),
+            "test-token-0123456789abcdef0123456789".to_string(),
+        ),
+        (SERVER_PORT.to_string(), "3000".to_string()),
+        (LZ_PROVIDER_CONFIG_TYPE.to_string(), "LOCAL".to_string()),
+        (LZ_ENV.to_string(), "mainnet".to_string()),
+        (
+            pillar_config::LZ_AVAILABLE_CHAIN_NAMES.to_string(),
+            "solana".to_string(),
+        ),
+        (LZ_PROVIDER_CONFIG.to_string(), providers_json(providers)),
+        (
+            LZ_QUORUM_STRATEGY_CONFIG.to_string(),
+            strategy_json(providers),
+        ),
+        (SIGNER_TYPE.to_string(), "KMS".to_string()),
+        (
+            pillar_config::LZ_KMS_CLOUD_TYPE.to_string(),
+            "AZURE".to_string(),
+        ),
+        (
+            pillar_config::LZ_KMS_IDS.to_string(),
+            "solana-key".to_string(),
+        ),
+        (
+            pillar_config::AZURE_KEY_VAULT_URL.to_string(),
+            "https://synthetic.invalid".to_string(),
+        ),
+    ]);
+    let factory: Arc<dyn RawSignerAdapterFactory> = Arc::new(
+        pillar_signer::AzureKmsRawSignerAdapterFactory::new(Arc::new(RegisteredAzureKey)),
+    );
+    let app = crate::signer_runtime::TEST_KMS_RAW_FACTORY
+        .scope(
+            factory,
+            RuntimeServerApp::from_env_map_with_runtime_core(vars, NoRpcTransport, || {
+                1_767_323_045_000
+            }),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("the production wiring did not assemble: {error}"));
+
+    let response = pillar_api::router(app, "synthetic")
+        .oneshot(
+            axum::http::Request::builder()
+                .method("GET")
+                .uri("/signer-info?chainName=solana")
+                .header(
+                    "authorization",
+                    "Bearer test-token-0123456789abcdef0123456789",
+                )
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let body: Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        body["body"],
+        json!([{
+            "address": "EboBSUoobiqt7JYcH46ro7TGBjtE2vczKnUmsiWy6Ffy",
+            "publicKey": concat!(
+                "0xca11e4b7d37870aca2ace4d5dee1dd296e6d76c7ff757c648d41f1e65d495d74",
+                "0897f8edc07fea309c99494ab3f2115c27f1f8aca0d0843ce485e6266ed351f1"
+            )
+        }]),
+        "{body}"
+    );
+}

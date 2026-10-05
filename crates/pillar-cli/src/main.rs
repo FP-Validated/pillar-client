@@ -1,5 +1,10 @@
 use axum::{body::Body, Router};
-use hyper::{server::conn::http1, service::service_fn, Request};
+use hyper::{
+    header::{HeaderValue, CONNECTION},
+    server::conn::http1,
+    service::service_fn,
+    Request,
+};
 use hyper_util::rt::{TokioIo, TokioTimer};
 use pillar_api::{router_with_shutdown, ShutdownSignal};
 use pillar_config::load_from_env;
@@ -15,13 +20,14 @@ use std::{
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
     signal::unix::{signal, SignalKind},
-    sync::Semaphore,
+    sync::{OwnedSemaphorePermit, Semaphore},
     time::{Instant, Sleep},
 };
 use tower::ServiceExt;
 use tracing_subscriber::{fmt, EnvFilter};
+mod connections;
 
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(58);
 const KEEP_ALIVE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -39,6 +45,7 @@ async fn main() -> anyhow::Result<()> {
     let port = config.server_port;
     let max_connections = config.max_connections;
     let shutdown_grace = Duration::from_secs(config.shutdown_grace_seconds);
+    let shutdown_withdrawal = config.shutdown_withdrawal;
     let runtime_app = RuntimeServerApp::from_env()
         .await
         .map_err(anyhow::Error::msg)?;
@@ -53,6 +60,7 @@ async fn main() -> anyhow::Result<()> {
         app,
         max_connections,
         shutdown_grace,
+        shutdown_withdrawal,
         shutdown_signal,
     )
     .await?;
@@ -75,6 +83,7 @@ async fn serve(
     app: Router,
     max_connections: usize,
     shutdown_grace: Duration,
+    shutdown_withdrawal: Duration,
     shutdown_signal: ShutdownSignal,
 ) -> io::Result<()> {
     serve_until(
@@ -82,29 +91,33 @@ async fn serve(
         app,
         max_connections,
         shutdown_grace,
+        shutdown_withdrawal,
         shutdown_signal,
         shutdown_requested(),
     )
     .await
 }
 
-/// Accept loop with an injectable shutdown source so the drain path is testable
-/// without delivering a real signal to the test process.
+/// Absolute timeline from the signal at `T0`: new signing is refused and
+/// readiness is 503 from `T0`, the listener stays up until `T0 + withdrawal`,
+/// and connection drain plus budget close are bounded by `T0 + shutdown_grace`.
+/// The withdrawal never extends the grace.
 async fn serve_until(
     listener: TcpListener,
     app: Router,
     max_connections: usize,
     shutdown_grace: Duration,
+    shutdown_withdrawal: Duration,
     shutdown_signal: ShutdownSignal,
     shutdown: impl Future<Output = io::Result<&'static str>>,
 ) -> io::Result<()> {
     let semaphore = Arc::new(Semaphore::new(max_connections));
+    let connections = connections::Connections::new(shutdown_signal.clone());
+    let mut tasks = tokio::task::JoinSet::new();
     let mut shutdown = Box::pin(shutdown);
-    let reason = loop {
-        let accepted = tokio::select! {
-            accepted = listener.accept() => accepted,
-            signalled = &mut shutdown => break signalled?,
-        };
+    let reason = 'accept: loop {
+        while tasks.try_join_next().is_some() {}
+        let accepted = tokio::select! { accepted = listener.accept() => accepted, signalled = &mut shutdown => break signalled? };
         let (stream, _) = match accepted {
             Ok(connection) => connection,
             Err(error) => {
@@ -112,64 +125,121 @@ async fn serve_until(
                 continue;
             }
         };
-        // The acquire has to be inside the select too. Parked on a saturated
-        // semaphore, the loop could not reach `break signalled?`, so a SIGTERM
-        // went unobserved until a permit freed - up to the keep-alive timeout -
-        // and `shutdown_signal.trigger()`, which is what takes this pod out of
-        // the load-balancer pool, ran only after that. A client holding every
-        // permit therefore chose when the drain started.
-        let permit = tokio::select! {
-            permit = semaphore.clone().acquire_owned() => permit,
-            signalled = &mut shutdown => {
+        match connection_permit(&semaphore, &connections, &mut shutdown).await? {
+            Ok(permit) => spawn_connection(&mut tasks, &connections, &app, stream, permit),
+            Err(signalled) => {
                 drop(stream);
-                break signalled?;
+                break 'accept signalled?;
             }
-        };
-        let Ok(permit) = permit else {
-            tracing::error!("connection semaphore closed; stopping accept loop");
-            return Ok(());
-        };
-        let app = app.clone();
-        tokio::spawn(async move {
-            let _permit = permit;
-            if let Err(error) = serve_connection(
-                stream,
-                app,
-                SOCKET_TIMEOUT,
-                KEEP_ALIVE_TIMEOUT,
-                HEADER_READ_TIMEOUT,
-                MAX_CONNECTION_LIFETIME,
-            )
-            .await
-            {
-                tracing::debug!(?error, "HTTP connection closed");
-            }
-        });
+        }
     };
-
-    // Leave the load-balancer pool first, then stop accepting, then drain.
+    let started = Instant::now();
+    let deadline = started + shutdown_grace;
+    let withdrawal_end = started + shutdown_withdrawal.min(shutdown_grace);
     shutdown_signal.trigger();
+    if !shutdown_withdrawal.is_zero() {
+        let end = tokio::time::sleep_until(withdrawal_end);
+        tokio::pin!(end);
+        loop {
+            while tasks.try_join_next().is_some() {}
+            // Biased so continuous accepts can never push the listener past `T0 + W`.
+            let accepted = tokio::select! { biased; _ = &mut end => break, accepted = listener.accept() => accepted };
+            let (stream, _) = match accepted {
+                Ok(connection) => connection,
+                Err(error) => {
+                    tracing::error!(?error, "TCP accept failed; continuing");
+                    continue;
+                }
+            };
+            match connection_permit(&semaphore, &connections, &mut end).await? {
+                Ok(permit) => spawn_connection(&mut tasks, &connections, &app, stream, permit),
+                Err(()) => {
+                    drop(stream);
+                    break;
+                }
+            }
+        }
+    }
     drop(listener);
-    let permits = u32::try_from(max_connections).unwrap_or(u32::MAX);
-    let drained = tokio::time::timeout(shutdown_grace, semaphore.acquire_many(permits)).await;
-    match drained {
-        Ok(Ok(_)) => tracing::warn!(
+    connections.drain();
+    let drained = tokio::time::timeout_at(deadline, async {
+        while tasks.join_next().await.is_some() {}
+    })
+    .await;
+    if drained.is_err() {
+        shutdown_signal.close_budgets();
+        connections.cancel();
+        tasks.abort_all();
+        while tasks.join_next().await.is_some() {}
+        tracing::error!(
             signal = reason,
-            "shutdown: all in-flight connections drained; exiting"
-        ),
-        Ok(Err(_)) => tracing::error!(
+            grace_seconds = shutdown_grace.as_secs_f64(),
+            withdrawal_seconds = shutdown_withdrawal.as_secs_f64(),
+            "shutdown: grace expired; remaining connection futures cancelled"
+        );
+    } else {
+        tracing::warn!(
             signal = reason,
-            "shutdown: connection semaphore closed while draining; exiting"
-        ),
-        Err(_) => tracing::error!(
-            signal = reason,
-            grace_seconds = shutdown_grace.as_secs(),
-            "shutdown: grace period elapsed with connections still in flight; exiting"
-        ),
+            "shutdown: active requests drained; idle connections closed"
+        );
     }
     Ok(())
 }
 
+/// Waits for a connection slot, evicting an idle connection if needed; `stop`
+/// wins ties so an elapsed deadline is never starved by free permits.
+async fn connection_permit<S>(
+    semaphore: &Arc<Semaphore>,
+    connections: &connections::Connections,
+    mut stop: impl Future<Output = S> + Unpin,
+) -> io::Result<Result<OwnedSemaphorePermit, S>> {
+    loop {
+        if let Ok(permit) = semaphore.clone().try_acquire_owned() {
+            return Ok(Ok(permit));
+        }
+        connections.evict_idle();
+        tokio::select! {
+            biased;
+            stopped = &mut stop => return Ok(Err(stopped)),
+            permit = semaphore.clone().acquire_owned() => {
+                return permit
+                    .map(Ok)
+                    .map_err(|_| io::Error::other("connection admission closed"));
+            }
+            _ = connections.idle_changed() => {}
+        }
+    }
+}
+
+fn spawn_connection(
+    tasks: &mut tokio::task::JoinSet<()>,
+    connections: &connections::Connections,
+    app: &Router,
+    stream: TcpStream,
+    permit: OwnedSemaphorePermit,
+) {
+    let app = app.clone();
+    let (registration, control, close) = connections.register();
+    tasks.spawn(async move {
+        let _permit = permit;
+        let _registration = registration;
+        if let Err(error) = serve_connection_controlled(
+            stream,
+            app,
+            SOCKET_TIMEOUT,
+            KEEP_ALIVE_TIMEOUT,
+            HEADER_READ_TIMEOUT,
+            MAX_CONNECTION_LIFETIME,
+            Some((control, close)),
+        )
+        .await
+        {
+            tracing::debug!(?error, "HTTP connection closed");
+        }
+    });
+}
+
+#[cfg(test)]
 async fn serve_connection<I>(
     io: I,
     app: Router,
@@ -181,39 +251,86 @@ async fn serve_connection<I>(
 where
     I: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
+    serve_connection_controlled(
+        io,
+        app,
+        request_timeout,
+        keep_alive_timeout,
+        header_read_timeout,
+        max_connection_lifetime,
+        None,
+    )
+    .await
+}
+
+async fn serve_connection_controlled<I>(
+    io: I,
+    app: Router,
+    request_timeout: Duration,
+    keep_alive_timeout: Duration,
+    header_read_timeout: Duration,
+    max_connection_lifetime: Duration,
+    control: Option<(
+        Arc<connections::ConnectionControl>,
+        tokio::sync::watch::Receiver<bool>,
+    )>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+where
+    I: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
+    let service_control = control.as_ref().map(|(control, _)| control.clone());
     let service = service_fn(move |request: Request<hyper::body::Incoming>| {
         let app = app.clone();
+        let control = service_control.clone();
         async move {
+            let context = pillar_core::execution::RequestContext::new(request_timeout);
+            let deadline = context
+                .deadline
+                .expect("socket requests have an absolute deadline");
+            if let Some(control) = &control {
+                control.start(context.clone());
+            }
             let (parts, body) = request.into_parts();
-            let request = Request::from_parts(parts, Body::new(body));
-            match tokio::time::timeout(request_timeout, app.oneshot(request)).await {
-                Ok(Ok(response)) => Ok(response),
-                Ok(Err(error)) => match error {},
-                Err(_) => Err(io::Error::new(
+            let mut request = Request::from_parts(parts, Body::new(body));
+            request.extensions_mut().insert(pillar_api::SocketRequest);
+            let mut response = context
+                .clone()
+                .scope(tokio::time::timeout_at(deadline, app.oneshot(request)))
+                .await;
+            if let Some(control) = &control {
+                control.idle();
+            }
+            let draining = control
+                .as_ref()
+                .is_some_and(|control| control.is_draining());
+            if Instant::now() >= deadline || response.is_err() {
+                context.timeout();
+                if let Ok(Ok(response)) = &mut response {
+                    pillar_api::complete_socket_response(response, true);
+                }
+                Err(io::Error::new(
                     io::ErrorKind::TimedOut,
                     "HTTP request exceeded Pillar's 58-second socket timeout",
-                )),
+                ))
+            } else {
+                match response {
+                    Ok(Ok(mut response)) => {
+                        pillar_api::complete_socket_response(&mut response, false);
+                        if draining {
+                            response
+                                .headers_mut()
+                                .insert(CONNECTION, HeaderValue::from_static("close"));
+                        }
+                        Ok(response)
+                    }
+                    Ok(Err(error)) => match error {},
+                    Err(_) => unreachable!(),
+                }
             }
         }
     });
-    // HTTP/1.1 only, deliberately. The accept loop admits one semaphore permit
-    // per connection, and under HTTP/1.1 a connection carries one request at a
-    // time, so `PILLAR_MAX_CONNECTIONS` is also the in-flight request bound
-    // this service documents. An `auto` builder would negotiate h2 - hyper's
-    // `http2` feature is on process-wide because `aws-smithy-http-client` and
-    // `tonic` enable it for the KMS and storage clients - and a single h2
-    // connection would then multiplex 200 concurrent streams behind one permit.
-    // `auto::Builder::http1_only` cannot express this: hyper-util documents it
-    // as a no-op under `serve_connection_with_upgrades`.
-    // `header_read_timeout` bounds the phase the request timeout cannot see.
-    // That timeout wraps `app.oneshot`, which hyper only calls once it has a
-    // complete `Request`, so header parsing sat outside every deadline: a client
-    // trickling one byte per idle window held a permit forever and never entered
-    // the timed region. The sliding idle window alone could not stop it, because
-    // any successful read pushed the deadline out again.
-    // `header_read_timeout` panics at runtime unless the builder also has a
-    // timer, so the two are set together.
-    http1::Builder::new()
+    // HTTP/1.1 bounds one active request per connection; h2 multiplexing would bypass socket admission.
+    let connection = http1::Builder::new()
         .timer(TokioTimer::new())
         .header_read_timeout(header_read_timeout)
         .serve_connection(
@@ -223,9 +340,16 @@ where
                 max_connection_lifetime,
             )),
             service,
-        )
-        .with_upgrades()
-        .await?;
+        );
+    tokio::pin!(connection);
+    if let Some((_, mut close)) = control {
+        tokio::select! {
+            result = &mut connection => result?,
+            _ = close.changed() => { connection.as_mut().graceful_shutdown(); connection.await?; }
+        }
+    } else {
+        connection.await?;
+    }
     Ok(())
 }
 
@@ -355,6 +479,7 @@ fn init_tracing() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    include!("phase1_tests.rs");
     use axum::{routing::get, Router};
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
@@ -618,10 +743,14 @@ mod tests {
             .await
             .unwrap();
         let mut response = Vec::new();
-        tokio::time::timeout(Duration::from_secs(2), client.read_to_end(&mut response))
+        // Closing with the preface unread makes the kernel send RST; bytes read
+        // before it stay in `response`, so a reset is still a checked refusal.
+        let read = tokio::time::timeout(Duration::from_secs(2), client.read_to_end(&mut response))
             .await
-            .expect("an h2 preface must not leave the connection open")
-            .unwrap();
+            .expect("an h2 preface must not leave the connection open");
+        if let Err(error) = read {
+            assert_eq!(error.kind(), io::ErrorKind::ConnectionReset, "{error}");
+        }
 
         let answered_h2 = response.len() >= 9 && response[3] == 4;
         assert!(
@@ -674,6 +803,7 @@ mod tests {
             app,
             1,
             Duration::from_secs(1),
+            Duration::ZERO,
             shutdown_signal,
             std::future::pending::<io::Result<&'static str>>(),
         ));
@@ -725,3 +855,8 @@ mod tests {
         assert!(server.await.unwrap().is_ok());
     }
 }
+
+#[cfg(test)]
+mod drain_tests;
+#[cfg(test)]
+mod phase1_review_e2e;

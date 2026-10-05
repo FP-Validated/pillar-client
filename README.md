@@ -15,7 +15,15 @@ binary against LayerZero `mainnet` and `testnet`.
 - ULN version handling has two levels, and they are easy to confuse:
   - `ulnSendVersion` on the request picks the **builder**: `V2` selects the
     legacy packet builder, `V301` and `V302` both select the V3 builder, and
-    `ReadV1002` selects the read builder.
+    `ReadV1002` selects the read builder. The one exception is a `V2` send
+    whose destination receiver has migrated off ULNv2: as upstream 1.2.66 does,
+    the destination's receive library is read by provider quorum over the
+    requested pathway before resolution, a ReceiveUln301/ULN302 answer selects
+    the V3 builder over the packet rebuilt with its computed guid, and any other
+    recognised library keeps the V2 builder. An unknown library is upstream's
+    500 `Unsupported ULN version: undefined`, an endpoint-rejected override its
+    500 `Invalid ULN version for lib: <address>`, and a provider disagreement
+    refuses the request.
   - The **destination receive version** is then derived from the destination
     endpoint id, not from the request: endpoint ids below 30000 resolve to
     ULN301, everything else to ULN302 (`ReadV1002` passes through). So a
@@ -30,24 +38,25 @@ binary against LayerZero `mainnet` and `testnet`.
   exists. The table below is a **builder capability matrix** and nothing more:
   a builder existing is not the same as a deployment entry existing for a given
   environment, and neither implies the chain is operationally enabled — a
-  rollout gate (Stellar, above) removes a chain even when both exist. "no"
-  returns an explicit error rather than signing a guess, and so does any
-  `(chain, environment)` pair with no deployment entry:
+  rollout gate (testnet `ton`, testnet `moninet`) removes a chain even when
+  both exist. "no" returns an explicit error rather than signing a guess, and
+  so does any `(chain, environment)` pair with no deployment entry:
 
   | Destination family | Chain names | Legacy `V2` builder | V3 builder (`V301`/`V302`) | `ReadV1002` builder |
   | --- | --- | --- | --- | --- |
   | EVM, incl. Tron | EVM chain names, `tron` | yes | yes | yes |
-  | Move | `aptos`, `initia`, `movement` | yes | yes | no |
+  | Move | `aptos`, `initia`, `movement` | no (with a vId, upstream's 500 `VId is not supported on aptos yet`; with `skipVId`, 400: upstream would sign a utils-version-2 feather proof) | yes | no |
   | Sui | `sui`, `iotal1` | no | yes | no |
   | Solana | `solana` | no | yes | no |
   | TON | `ton` | no | yes | no |
   | Starknet | `starknet` | no | yes | no |
   | Stellar | `stellar` | no | yes | no |
+  | Canton | `canton` | no | yes | no |
 
   The resolved receive version only changes an outcome where the family's
   builder consults it: EVM and Move select a different receive contract for
   ULN301 than for ULN302, and Solana rejects anything but ULN302. The Sui,
-  TON, Starknet and Stellar builders never reference a ULN version. Every
+  TON, Starknet, Stellar and Canton builders never reference a ULN version. Every
   registered non-EVM endpoint id is an Endpoint V2 id (30000 or above), so
   those resolve to ULN302 in practice — but `dstEid` arrives in the request,
   so that is a property of the deployment tables, not a guarantee in the code.
@@ -56,14 +65,27 @@ binary against LayerZero `mainnet` and `testnet`.
   The IOTA Move chain is named `iotal1`. `LAYERZERO_AVAILABLE_CHAIN_NAMES`
   drops names it does not recognise, so a misspelling silently removes a chain
   rather than failing loudly.
-- **Stellar is rollout-blocked on `mainnet` and `testnet`.** Its pinned
-  deployment addresses disagree with LayerZero's live metadata on both
-  environments, including the trusted endpoint address used for source-event
-  filtering, so the chain is excluded from the operational set regardless of
-  `LAYERZERO_AVAILABLE_CHAIN_NAMES` — listing it does not enable it. Enabling it
-  takes three steps: verify the current deployment on-chain, update the pinned
-  data, then remove the gate in `layerzero_rollout_block_reason`. See
-  [Known caveats](SECURITY.md#known-caveats).
+- **Stellar and Canton are in scope**, measured against upstream 1.2.66:
+  - Stellar pins upstream 1.2.66's own contract getters (generation two:
+    EndpointV2 `CCQLLRE5…`/`CALTBA5S…`, ULN302 `CCV4HEII…`/`CCMLPCAW…` on
+    mainnet/testnet), which LayerZero's published deployment also names; a
+    future disagreement between the two refuses per request rather than
+    signing. Already-signed is upstream's `hasPayloadSigned` over Soroban
+    `simulateTransaction`.
+  - Canton builds and signs ULN302 verifies against
+    `STATIC_VE3_CONTRACT_ADDRESSES.uln302` with upstream's raw-key signer
+    identity. Canton as a source and its already-signed check go through the
+    LayerZero sequencer the chain's `sequencer` provider entry names, as
+    upstream does: signed `/scan` and `/vapp` reads, each verified against
+    the entry's `sequencer-validators`/`sequencer-quorum` committee when one
+    is configured and accepted unverified when not. The extra-context sender
+    of a Canton source comes from a Canton ledger read, authenticated as
+    upstream does with an OAuth2 client-credentials token: the `rpc` URI's
+    `token-url`, `client-id`, optional `scope`/`audience`, and `client-secret`
+    or, when the URI has none, `CANTON_CLIENT_SECRET`. Without those it
+    refuses before any request. On `sandbox`/`localnet` upstream self-signs
+    an admin JWT; that development auth is not enabled, so it refuses there.
+    See [Known caveats](SECURITY.md#known-caveats).
 
 Ask a running instance what it actually has enabled: `GET /available-chains`
 and `GET /environment`.
@@ -90,9 +112,9 @@ cargo build --release -p pillar-cli
 SERVER_PORT=8080 \
 LAYERZERO_ENVIRONMENT=testnet \
 LAYERZERO_AVAILABLE_CHAIN_NAMES=bsc \
-LAYERZERO_SUPPORTED_ULN_VERSIONS='["V2","V301"]' \
 PROVIDER_CONFIG_TYPE=LOCAL \
-LAYERZERO_PROVIDER_CONFIG='{"bsc":{"uris":["https://bsc-a.example","https://bsc-b.example"],"quorum":2}}' \
+LAYERZERO_PROVIDER_CONFIG='{"entities":["operator","provider-a"],"chains":{"bsc":{"rpc":[{"uri":"https://bsc-a.example","category":"internal","entity":"operator"},{"uri":"https://bsc-b.example","category":"dedicated_external","entity":"provider-a"}]}}}' \
+LAYERZERO_QUORUM_STRATEGY_CONFIG='{"default":{"allOf":[{"any":2}]}}' \
 SIGNER_TYPE=KMS KMS_CLOUD_TYPE=AWS LAYERZERO_KMS_IDS=arn:aws:kms:...:key/... \
 PILLAR_API_AUTH_TOKENS="$(openssl rand -hex 24)" \
 ./target/release/pillar
@@ -103,9 +125,17 @@ identifiers are masked, tokens are shown only as a count) and then binds
 `0.0.0.0:$SERVER_PORT`. The process refuses to start if `PILLAR_API_AUTH_TOKENS`
 is missing or holds a token shorter than 32 characters.
 
-On `SIGTERM` or `SIGINT` the server stops accepting connections, `GET /ready`
-starts answering 503 so the load balancer drops the instance, in-flight requests
-drain for up to `PILLAR_SHUTDOWN_GRACE_SECONDS`, and the process exits 0.
+On `SIGTERM` or `SIGINT`, shutdown starts at T0. `GET /ready` returns 503 and
+the two signing routes reject new work immediately; the listener continues
+accepting connections until E = T0 + the withdrawal interval, then graceful
+connection draining continues only until D = T0 +
+`PILLAR_SHUTDOWN_GRACE_SECONDS`. The withdrawal interval is part of, not added
+to, the grace period. Requests admitted before T0 may finish until D; at D the
+budgets close and remaining connections are cancelled. Idle keep-alive connections
+are closed at E. Configure the orchestrator's termination grace period longer
+than `PILLAR_SHUTDOWN_GRACE_SECONDS` so the process can complete its own drain.
+This behavior has not been exercised with Kubernetes SIGTERM/preStop; endpoint
+withdrawal and client/load-balancer races are narrowed, not eliminated.
 
 ### Docker
 
@@ -125,34 +155,60 @@ All configuration is environment based. Required:
 | --- | --- |
 | `SERVER_PORT` | TCP port to bind. |
 | `LAYERZERO_ENVIRONMENT` | `mainnet`, `testnet`, or `sandbox`/`localnet`. |
-| `LAYERZERO_SUPPORTED_ULN_VERSIONS` | Non-empty JSON array. Controls legacy EVM `V2`/`V301` builders only; `V302` and `ReadV1002` remain deployment/capability driven. |
 | `PROVIDER_CONFIG_TYPE` | `LOCAL`, `S3`, or `GCS`. |
 | `SIGNER_TYPE` | `KMS`, `MNEMONIC`, or `LOCAL_MNEMONIC`. |
 | `PILLAR_API_AUTH_TOKENS` | Comma-separated bearer tokens accepted on authenticated routes. Each must be at least 32 characters. |
 | `PILLAR_PUBLIC_SIGN_ROUTES` | `true` serves `POST /` and `POST /v2/resolve-and-sign` without a bearer. Anything else, including unset, keeps them authenticated. Required for deployments that receive LayerZero DVN traffic, since LayerZero calls a registered endpoint with no credential of yours. Scoped to those two routes; the tokens above stay required either way. |
 | `PILLAR_API_AUTH_ENABLED` | `false` serves **every** route without a bearer, including `/signer-info`, `/provider-health/report` and `/metrics`, and makes `PILLAR_API_AUTH_TOKENS` optional. Anything else, including unset, keeps authentication on. Only for deployments already restricted at the network edge — e.g. an ingress source-IP allowlist — because it exposes signer identity and internal state to any caller that reaches the port. |
 
-Provider configuration, by `PROVIDER_CONFIG_TYPE`:
+Provider configuration is upstream's `providers-v2.json` plus `quorum-strategy.json`
+(`gasolina-audit` `213cd500`), both required; the retired `{ uris, quorum }` map is
+refused at startup with a message naming it. By `PROVIDER_CONFIG_TYPE`:
 
 | Variable | Applies to | Meaning |
 | --- | --- | --- |
-| `LAYERZERO_PROVIDER_CONFIG` | `LOCAL` | Inline JSON map of chain name to `{ uris, quorum }`. |
-| `LAYERZERO_PROVIDER_CONFIG_FILE_PATH` | `LOCAL` | Same JSON, read from a file. |
-| `CONFIG_BUCKET_NAME` | `S3`, `GCS` | Bucket holding `providers.json`; re-read every 60s. |
+| `LAYERZERO_PROVIDER_CONFIG` | `LOCAL` | Inline `providers-v2.json`: `{ "entities": [...], "chains": { "<chain>": { "rpc": [{ "uri", "category", "entity", "headers"? }] } } }`. Canton also needs a `sequencer` entry, `https://<sequencer>[?sequencer-validators=<0x keys>&sequencer-quorum=<n>]` with an `authorization` header, and its first `rpc` URI must carry `admin-api` and `wallet-url`, as upstream requires. |
+| `LAYERZERO_QUORUM_STRATEGY_CONFIG` | `LOCAL` | Inline `quorum-strategy.json`, required with the inline providers: `{ "default": { "allOf"?, "oneOf"? }, "chains"?: { "<chain>": { "rpc": {...} } }, "restrictions"?: { "minimumMaxEntities" } }`. |
+| `LAYERZERO_PROVIDER_CONFIG_FILE_PATH` | `LOCAL` | `providers-v2.json` from a file; wins over the inline form. |
+| `LAYERZERO_QUORUM_STRATEGY_CONFIG_FILE_PATH` | `LOCAL` | `quorum-strategy.json` from a file, required with the providers file. |
+| `CONFIG_BUCKET_NAME` | `S3`, `GCS` | Bucket holding `providers-v2.json` and `quorum-strategy.json`; both are read on every load. |
 | `LAYERZERO_CDK_DEPLOY_REGION` | `S3` | AWS region (defaults to `us-east-1`). |
 | `GCP_PROJECT_ID` | `GCS` | GCP project owning the bucket. |
 
-On `S3` and `GCS` the bucket is re-read every 60 seconds and a usable
-configuration replaces the one serving, atomically. Every reader of provider
-configuration - the signing path, `/provider-health`, `/available-chains` -
-moves to the new one together, and anything that has to combine two reads of it
-pins one generation for the whole operation: a sign request from start to
-finish, and `/ready`, which asks whether any advertised chain is healthy. A read that fails, or one that could
-never sign (a chain with no URI, a zero quorum, a quorum above the URI count),
-leaves the previous configuration serving and is counted under its own
-`pillar_provider_config_refresh_total{result}` label.
+`category` is `internal`, `dedicated_external` or `shared_external`; every `entity`
+must be listed in `entities`. A strategy counts **distinct entities** among the
+providers that returned the same answer: `{ "any": n }` needs `n` entities from any
+category, `{ "internal": n }` needs `n` internal ones, `allOf` requirements must all
+hold and one `oneOf` alternative must, one entity fills at most one *category* slot
+(`any: n` is a separate threshold on distinct agreeing entities that overlaps them, so
+`{ "allOf": [{ "internal": 1 }, { "any": 2 }] }` is met by two entities), and `"max"`
+resolves to the pool's entity count. Two URIs of one entity are one vote. Only each
+chain's `rpc` pool is dispatched; other endpoint types are validated and ignored, and a
+roster chain without an `rpc` pool does not start. A pair is refused at load when an
+entry or category is invalid, an entity is unregistered, a field is unknown, a
+strategy is unsatisfiable by its pool or needs no agreement at all, or a `"max"` falls
+below `minimumMaxEntities`. Agreement is still exact: if two different answers could
+each meet the strategy, the call fails rather than picking one.
 
-What a refresh can change is the URIs and quorums behind the chains this
+`cargo run -p pillar-config --example provider_config -- convert <legacy.json>
+<labels.json> <out-dir>` rewrites a retired file, given a `{ "<host>": { "category",
+"entity" } }` label per URI host, and refuses to write a pair that would not start;
+`... -- validate <providers-v2.json> <quorum-strategy.json> [chains]` runs the startup
+loader offline and prints a redacted summary. Examples are in
+`crates/pillar-config/examples/provider-config/`.
+
+On `S3` and `GCS` the bucket is re-read every 60 seconds and a usable
+configuration replaces the one serving, atomically: providers, entities and strategy
+are one generation. Every reader of provider configuration - the signing path,
+`/provider-health`, `/available-chains` - moves to the new one together, and anything
+that has to combine two reads of it pins one generation for the whole operation: a
+sign request from start to finish, and `/ready`, which asks whether any advertised
+chain is healthy. A read of either object that fails, or a pair that fails the load
+checks above, leaves the previous configuration serving and is counted under
+`pillar_provider_config_refresh_total{result="error"}`; `result="rejected"` counts a
+loaded pair the publish gate still refuses.
+
+What a refresh can change is the URIs, entities and strategies behind the chains this
 instance was started for. The chain set itself is fixed for the process
 lifetime. It cannot **add** a chain: wallets, signer
 backends and contract tables are assembled once at startup, so a chain that
@@ -185,7 +241,38 @@ Optional:
 | `EXTRA_CONTEXT_AWS_LAMBDA_NAME` | External extra-context check over Lambda (mutually exclusive with the URL form). |
 | `PILLAR_IMAGE_VERSION` | Version string reported by `GET /version` and `pillar_build_info`. |
 | `PILLAR_MAX_CONNECTIONS` | Concurrent connection cap (default 1024). The server speaks HTTP/1.1 only, so a connection carries one request at a time and this is also the in-flight request bound. |
-| `PILLAR_SHUTDOWN_GRACE_SECONDS` | Drain budget after a shutdown signal (default 25). |
+| `PILLAR_SHUTDOWN_GRACE_SECONDS` | Total shutdown grace G (default 25 seconds); connection draining and in-flight work are bounded by absolute deadline D = T0 + G. The orchestrator termination grace period must exceed this value. |
+| `PILLAR_SHUTDOWN_WITHDRAWAL_SECONDS` | Withdrawal interval W (integer seconds when explicitly set; default `min(5 seconds, G/5)` with `Duration` precision; `0` is allowed; must be less than G). At shutdown T0, `POST /` and `POST /v2/resolve-and-sign` are rejected after authentication with HTTP 500 `{"statusCode":500,"body":"resource_draining"}`, and `/ready` returns 503; `GET /` remains 200 `HEALTHY`. The listener keeps accepting until E = T0 + W to allow endpoint withdrawal. W is carved out of G, not added: in-flight work admitted before T0 can finish until D = T0 + G, then budgets close and remaining connections are cancelled; idle keep-alive connections close at E. Draining responses carry `Connection: close`. Kubernetes SIGTERM/preStop has not been exercised, and load-balancer/client races are narrowed, not removed. |
+| `PILLAR_ADMISSION_WAIT_MS` | Bounded resource wait (default 2000); capped by the original absolute request deadline. |
+| `PILLAR_{SIGN,RPC,KMS}_CONCURRENCY` | Global active caps: 64 / 64 / 16. |
+| `PILLAR_{SIGN,RPC,KMS}_CHAIN_CONCURRENCY` | Source-lane active caps: 8 / 8 / 4. RPC also shares a target-chain cap; KMS shares the per-key-reference cap below. |
+| `PILLAR_{SIGN,RPC,KMS}_QUEUE_CAPACITY` | Shared waiting allowances: 128 / 512 / 128, plus at most one reserved first waiter per fixed lane when waiting is enabled. |
+| `PILLAR_{SIGN,RPC,KMS}_CHAIN_QUEUE_CAPACITY` | Per-lane waiting caps: 16 / 64 / 16. |
+| `PILLAR_KMS_KEY_CONCURRENCY` | Shared active cap per supplied KMS key reference string (default 4); see the note below the table for which string each provider supplies. |
+| `PILLAR_KMS_CHAIN_KEY_CONCURRENCY` | Per-lane cap on active KMS permits for each supplied resource string in this process. Default is `min(PILLAR_KMS_KEY_CONCURRENCY - 1, PILLAR_KMS_CHAIN_CONCURRENCY)` when key cap is above 1 (defaults 4/4 → 3); with key cap 1 the limit is 1 and startup warns that headroom is impossible. Explicit 0 or a value above the key cap is rejected; a value equal to the key cap is also rejected when that cap exceeds 1. Values above `PILLAR_KMS_CHAIN_CONCURRENCY` but no greater than the key cap are accepted; the source-lane cap remains an independent bound. With default key cap 4, a single saturated source's maximum occupancy of one resource string falls from 4 permits to 3; this is an occupancy limit, not measured throughput. It counts supplied resource strings, not physical keys, remote KMS quota or fleet-wide usage; multiple saturated sources can still fill the shared resource cap. The supported production guarantee is the resolved-key Azure signing path; the configured resource string is not normalized into provider or physical-key identity. |
+| `PILLAR_AUDIT_ENABLED` | Optional synchronous durable signing audit; default `false`. No database connection or completion-worker pool when disabled. |
+| `PILLAR_AUDIT_DATABASE_URL` | Required when audit is enabled; remote PostgreSQL uses `sslmode=require` with rustls/WebPKI certificate and hostname checks (not `verify-full`/`verify-ca`); plaintext is limited to literal loopback/Unix sockets. |
+| `PILLAR_AUDIT_NAMESPACE` | Required audit scope, 1–128 characters of `[A-Za-z0-9._-]`; replicas must share it and the same quota. |
+| `PILLAR_AUDIT_TIMEOUT_MS` | Database operation deadline, including connection/lock/COMMIT (default 2000, maximum 5000), bounded by the caller deadline. |
+| `PILLAR_AUDIT_MAX_ATTEMPTS` | Retained-attempt quota per namespace (default 100000, maximum 1000000); no TTL or automatic deletion. |
+
+KMS resource strings are not normalized across key spellings. Azure charges the one-time public-key fetch to the configured key id and every signature (including hedges) to the resolved key reference the fetch returns; GCP charges both to the configured version name; AWS charges a public-key lookup to the configured key id (or to an id already resolved for the other key type) and ECDSA signing to the immutable key id that lookup returns, resolved on first use, while Ed25519 signing without audit is charged to the configured key id until a public-key lookup for that key type has populated the cache and to the resolved key id afterwards (`crates/pillar-signer/src/{azure/adapter.rs,gcp.rs,aws.rs}`). Resolutions are cached for the process lifetime without invalidation. The budget is therefore not a physical-key or remote-quota guarantee.
+
+Resource waits and SDK calls inherit one absolute deadline. Local admission failures
+remain legacy 500 envelopes; the CLI's 58s deadline closes the socket without a
+timeout envelope, and a failed wallet batch never returns partial signatures.
+Successful GET/HEAD terminal logs are debug-level; failures remain visible.
+
+The caps are per process, not fleet-wide rate limits. Background RPC rounds have
+their own 10s deadline and reduced lane capacity; speculative Azure hedges never
+wait for a permit. These defaults have synthetic load evidence, **not live peak
+calibration**. Do not treat them as a production sizing recommendation.
+
+Audit-on commits validated intent and immutable effective signing identity before
+each wallet effect, then signature fingerprints before 200. It is not a queue,
+signature cache, recovery engine, or exactly-once guarantee. Unknown attempts are
+retained; a retry revalidates and appends a new attempt. See the durable signing
+section in [SECURITY.md](SECURITY.md) before enabling it.
 
 Production guidance: use `SIGNER_TYPE=KMS`. Mnemonic backends exist for local
 development and tests; they keep key material in the process environment.
@@ -196,6 +283,17 @@ JSON responses use a `{ "statusCode": ..., "body": ... }` envelope. Two routes
 are not JSON and carry no envelope: `GET /` returns the bare string `HEALTHY`,
 and `GET /metrics` returns Prometheus text. Framework-level responses for
 unmatched routes are not enveloped either.
+
+As upstream does, an EVM, Starknet or Stellar source transaction with no trusted
+`PacketSent` matching the request (another nonce or sender, an untrusted
+emitter, or a reverted EVM transaction) returns HTTP 400 with `statusCode: 400`
+and a `body` of `cannot find packet event for srcTxHash <srcTxHash> on pathway
+<pathway JSON>`. This is a typed `BadRequest` classification; unrelated
+provider/internal failures remain HTTP 500 even if their diagnostic text
+contains the same suffix.
+Implementation and response tests: `crates/pillar-runtime/src/layerzero_runtime/packet_resolver.rs`,
+`crates/pillar-core/src/lib.rs`, and
+`crates/pillar-runtime/src/tests/packet_identity_http_tests.rs`.
 
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
@@ -286,36 +384,47 @@ response with a server log line on its own.
 
 ## Development
 
+CI validates fmt, Clippy, tests and the release build with Rust 1.98.1. Rust 1.99
+reports `double_must_use` on `async_trait`-generated futures; warnings remain errors.
+Install the baseline with `rustup toolchain install 1.98.1 --component rustfmt --component clippy`.
+
 ```bash
-cargo fmt --all --check
-cargo clippy --workspace --all-targets
-cargo test --workspace
+cargo +1.98.1 fmt --all --check
+cargo +1.98.1 clippy --workspace --all-targets
+cargo +1.98.1 test --workspace --locked
 cargo audit && cargo deny check     # dependency and license policy
 ```
 
 `crates/pillar-config/src/generated_layerzero_evm.rs`,
-`generated_layerzero_environment.rs` and `generated_ton_layerzero.rs` are generated
-tables — never edit them by hand. There is one generator per file, and every one of
-the three reads the upstream LayerZero deployment configuration from the path given
-by `PILLAR_AUDIT_ROOT`:
+`generated_layerzero_environment.rs`, `generated_ton_layerzero.rs` and
+`generated_layerzero_legacy_chain_ids.rs` are generated tables — never edit them by
+hand. There is one generator per file; the first three read the upstream LayerZero
+deployment configuration from the path given by `PILLAR_AUDIT_ROOT`, the last only
+the lz-definitions package:
 
 ```bash
-export PILLAR_AUDIT_ROOT=/path/to/upstream/source
+# gasolina-audit 213cd500 (1.2.66): the app root, not the repository root
+export PILLAR_AUDIT_ROOT=/path/to/gasolina-audit/migrated/offchain-monorepo
 
-# per-environment chain capability (1221 entries)
+# per-environment chain capability (1259 entries)
 node scripts/generate-layerzero-environment-capability.mjs
 
-# LayerZero endpoint ids and EVM deployments (853 endpoints, 3911 deployments)
+# LayerZero endpoint ids and EVM deployments (874 endpoints, 4033 deployments)
 LZ_DEFINITIONS_ROOT=/path/to/@layerzerolabs/lz-definitions \
   node scripts/generate-layerzero-static-config.mjs
 
 # TON code cells and deployments (23 cells, 29 deployments)
 LZ_TON_SDK_ROOT=/path/to/@layerzerolabs/lz-ton-sdk-v2 \
   node scripts/generate-ton-static-config.mjs
+
+# v1 chain ids as lz-definitions' getNetworkForChainId resolves them (941 ids)
+LZ_DEFINITIONS_ROOT=/path/to/@layerzerolabs/lz-definitions \
+  node scripts/generate-layerzero-legacy-chain-ids.mjs
 ```
 
 `LZ_DEFINITIONS_ROOT` and `LZ_TON_SDK_ROOT` accept any extracted copy of the
-published npm packages, for example `npm pack @layerzerolabs/lz-definitions@3.1.2`
+published npm packages at the versions that tree's lockfile pins, for example
+`npm pack @layerzerolabs/lz-definitions@3.1.15` and `@layerzerolabs/lz-ton-sdk-v2@3.0.168`,
 followed by `tar xzf`. No other install is needed. The TON generator needs a
 *complete* package, artifacts directory included, so use the packed tarball rather
 than a partial local copy.
@@ -340,7 +449,8 @@ Benchmarks are opt-in: `cargo bench -p pillar-bench`.
   key identifiers. Please do not add logging that reverses that.
 
 Report a suspected vulnerability privately to the maintainers rather than in a
-public issue.
+public issue. Reviewers start at [AUDIT.md](AUDIT.md): threat model, trust
+boundaries, reproduction steps, acceptance evidence and opt-in E2E tests.
 
 ## License
 

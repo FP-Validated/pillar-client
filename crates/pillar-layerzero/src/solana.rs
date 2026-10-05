@@ -29,11 +29,16 @@ impl SolanaUlnPayloadBuilder {
         v_id: &str,
         dvn_address: Option<&str>,
     ) -> Result<HashCallDataResult, AppCoreError> {
-        let dvn_address = dvn_address.ok_or_else(|| {
-            AppCoreError::BadRequest(
-                "Solana: DVN Address is required for verify payload".to_string(),
-            )
-        })?;
+        // Upstream throws this string (not a BadRequestError) on `!dvnPda`, so an
+        // empty address counts as missing and the client sees a 500
+        // (`gasolinaSdk/solana/index.ts:89-91`).
+        let dvn_address = dvn_address
+            .filter(|address| !address.is_empty())
+            .ok_or_else(|| {
+                AppCoreError::Internal(
+                    "Solana: DVN Address is required for verify payload".to_string(),
+                )
+            })?;
         let dst_eid = extra_u64(sent_event, "dstEid")?;
         let uln_send_version = uln_send_version_string(&sent_event.lz_message_id.uln_send_version)?;
         if evm_receive_version_from_dst_eid(dst_eid, &uln_send_version) != ULN_VERSION_V302 {

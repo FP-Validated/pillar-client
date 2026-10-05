@@ -19,16 +19,16 @@ async fn runtime_server_app_uses_local_provider_config_for_exposed_state() {
             (LZ_PROVIDER_CONFIG_TYPE.to_string(), "LOCAL".to_string()),
             (LZ_ENV.to_string(), "mainnet".to_string()),
             (
-                pillar_config::LZ_SUPPORTED_ULN_VERSIONS.to_string(),
-                r#"["V2","V301"]"#.to_string(),
-            ),
-            (
                 pillar_config::LZ_AVAILABLE_CHAIN_NAMES.to_string(),
                 "bsc".to_string(),
             ),
             (
                 LZ_PROVIDER_CONFIG.to_string(),
-                r#"{"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#.to_string(),
+                providers_json(r#"{"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#),
+            ),
+            (
+                LZ_QUORUM_STRATEGY_CONFIG.to_string(),
+                strategy_json(r#"{"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#),
             ),
         ]),
         transport,
@@ -63,16 +63,16 @@ async fn runtime_server_app_provider_health_uses_cache() {
             (LZ_PROVIDER_CONFIG_TYPE.to_string(), "LOCAL".to_string()),
             (LZ_ENV.to_string(), "mainnet".to_string()),
             (
-                pillar_config::LZ_SUPPORTED_ULN_VERSIONS.to_string(),
-                r#"["V2","V301"]"#.to_string(),
-            ),
-            (
                 pillar_config::LZ_AVAILABLE_CHAIN_NAMES.to_string(),
                 "bsc".to_string(),
             ),
             (
                 LZ_PROVIDER_CONFIG.to_string(),
-                r#"{"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#.to_string(),
+                providers_json(r#"{"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#),
+            ),
+            (
+                LZ_QUORUM_STRATEGY_CONFIG.to_string(),
+                strategy_json(r#"{"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#),
             ),
         ]),
         transport,
@@ -107,16 +107,16 @@ async fn runtime_server_app_provider_health_report_uses_cache() {
             (LZ_PROVIDER_CONFIG_TYPE.to_string(), "LOCAL".to_string()),
             (LZ_ENV.to_string(), "mainnet".to_string()),
             (
-                pillar_config::LZ_SUPPORTED_ULN_VERSIONS.to_string(),
-                r#"["V2","V301"]"#.to_string(),
-            ),
-            (
                 pillar_config::LZ_AVAILABLE_CHAIN_NAMES.to_string(),
                 "bsc".to_string(),
             ),
             (
                 LZ_PROVIDER_CONFIG.to_string(),
-                r#"{"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#.to_string(),
+                providers_json(r#"{"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#),
+            ),
+            (
+                LZ_QUORUM_STRATEGY_CONFIG.to_string(),
+                strategy_json(r#"{"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#),
             ),
         ]),
         transport,
@@ -156,11 +156,11 @@ async fn runtime_sign_request_v1_delegates_to_core_app_when_wired() {
         .sign_request_v1(PillarApiRequestV1 {
             src_tx_hash: "0xtx".to_string(),
             lz_message_id: pillar_core::LegacyLzMessageId {
-                src_chain_id: "1".to_string(),
-                nonce: 9,
-                dst_chain_id: "56".to_string(),
-                src_ua_address: "0xsrc".to_string(),
-                dst_ua_address: "0xdst".to_string(),
+                src_chain_id: Some(Value::from("1")),
+                nonce: Some(Value::from(9)),
+                dst_chain_id: Some(Value::from("56")),
+                src_ua_address: Some(Value::from("0xsrc")),
+                dst_ua_address: Some(Value::from("0xdst")),
             },
             block_confirmation: 1,
             expiration: 123,
@@ -204,20 +204,12 @@ async fn runtime_server_app_from_env_map_with_core_dependencies_wires_local_mnem
                 (SERVER_PORT.to_string(), "3000".to_string()),
                 (LZ_PROVIDER_CONFIG_TYPE.to_string(), "LOCAL".to_string()),
                 (LZ_ENV.to_string(), "mainnet".to_string()),
-                (
-                    pillar_config::LZ_SUPPORTED_ULN_VERSIONS.to_string(),
-                    r#"["V2","V301"]"#.to_string(),
-                ),
                 (pillar_config::LZ_DEBUG_MODE.to_string(), "true".to_string()),
                 (
                     pillar_config::LZ_AVAILABLE_CHAIN_NAMES.to_string(),
                     "ethereum,bsc".to_string(),
                 ),
-                (
-                    LZ_PROVIDER_CONFIG.to_string(),
-                    r#"{"ethereum":{"uris":["https://eth-rpc.example"],"quorum":1},"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#
-                        .to_string(),
-                ),
+                (LZ_PROVIDER_CONFIG.to_string(), providers_json(r#"{"ethereum":{"uris":["https://eth-rpc.example"],"quorum":1},"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#)), (LZ_QUORUM_STRATEGY_CONFIG.to_string(), strategy_json(r#"{"ethereum":{"uris":["https://eth-rpc.example"],"quorum":1},"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#)),
                 (SIGNER_TYPE.to_string(), "LOCAL_MNEMONIC".to_string()),
                 (
                     pillar_config::LZ_WALLETS.to_string(),
@@ -282,17 +274,10 @@ async fn runtime_server_app_renders_the_metrics_registry_it_was_given() {
             (LZ_PROVIDER_CONFIG_TYPE.to_string(), "LOCAL".to_string()),
             (LZ_ENV.to_string(), "mainnet".to_string()),
             (
-                pillar_config::LZ_SUPPORTED_ULN_VERSIONS.to_string(),
-                r#"["V2","V301"]"#.to_string(),
-            ),
-            (
                 pillar_config::LZ_AVAILABLE_CHAIN_NAMES.to_string(),
                 "bsc".to_string(),
             ),
-            (
-                LZ_PROVIDER_CONFIG.to_string(),
-                r#"{"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#.to_string(),
-            ),
+            (LZ_PROVIDER_CONFIG.to_string(), providers_json(r#"{"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#)), (LZ_QUORUM_STRATEGY_CONFIG.to_string(), strategy_json(r#"{"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#)),
             (SIGNER_TYPE.to_string(), "LOCAL_MNEMONIC".to_string()),
             (
                 pillar_config::LZ_WALLETS.to_string(),
@@ -320,8 +305,7 @@ async fn runtime_server_app_renders_the_metrics_registry_it_was_given() {
         Arc::new(crate::provider_health::ProviderRankTracker::new()),
         None,
         crate::provider_snapshot::ProviderSnapshotHandle::new(
-            serde_json::from_str(r#"{"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#)
-                .unwrap(),
+            pillar_config::test_support::provider_configs_from_uris_json(r#"{"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#),
             vec!["bsc".to_string()],
         ),
         shared_metrics.clone(),
@@ -353,21 +337,20 @@ async fn runtime_server_app_refuses_provider_config_it_could_never_sign_with() {
     // READY and `/provider-health` as healthy - the snapshot treats an empty
     // provider list as healthy, which is upstream behaviour (TS:
     // `apps/gasolina/src/app/app.ts:318`) - while every sign request for it
-    // failed with "No provider URI for chain bsc". A zero quorum was silently
-    // raised to 1, so the operator got a single-provider trust root they did
-    // not ask for.
+    // failed. A strategy needing no agreement asks for a signature on one
+    // provider's word.
     let cases = [
         (
             r#"{"bsc":{"uris":[],"quorum":1}}"#,
-            "No provider URI for chain bsc",
+            r#"Chain "bsc" rpc: strategy not satisfiable"#,
         ),
         (
             r#"{"bsc":{"uris":["https://bsc-rpc.example"],"quorum":0}}"#,
-            "Provider quorum 0 for chain bsc",
+            "requires no provider agreement",
         ),
         (
             r#"{"bsc":{"uris":["https://bsc-rpc.example"],"quorum":2}}"#,
-            "Provider quorum 2 exceeds 1 URIs for chain bsc",
+            r#"Chain "bsc" rpc: strategy not satisfiable"#,
         ),
     ];
 
@@ -386,14 +369,17 @@ async fn runtime_server_app_refuses_provider_config_it_could_never_sign_with() {
                 (LZ_PROVIDER_CONFIG_TYPE.to_string(), "LOCAL".to_string()),
                 (LZ_ENV.to_string(), "mainnet".to_string()),
                 (
-                    pillar_config::LZ_SUPPORTED_ULN_VERSIONS.to_string(),
-                    r#"["V2","V301"]"#.to_string(),
-                ),
-                (
                     pillar_config::LZ_AVAILABLE_CHAIN_NAMES.to_string(),
                     "bsc".to_string(),
                 ),
-                (LZ_PROVIDER_CONFIG.to_string(), provider_config.to_string()),
+                (
+                    LZ_PROVIDER_CONFIG.to_string(),
+                    providers_json(provider_config),
+                ),
+                (
+                    LZ_QUORUM_STRATEGY_CONFIG.to_string(),
+                    strategy_json(provider_config),
+                ),
             ]),
             transport,
             || 777,
@@ -428,16 +414,16 @@ async fn runtime_server_app_refuses_a_chain_selection_that_matches_nothing() {
             (LZ_PROVIDER_CONFIG_TYPE.to_string(), "LOCAL".to_string()),
             (LZ_ENV.to_string(), "mainnet".to_string()),
             (
-                pillar_config::LZ_SUPPORTED_ULN_VERSIONS.to_string(),
-                r#"["V2","V301"]"#.to_string(),
-            ),
-            (
                 pillar_config::LZ_AVAILABLE_CHAIN_NAMES.to_string(),
                 " bsc".to_string(),
             ),
             (
                 LZ_PROVIDER_CONFIG.to_string(),
-                r#"{"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#.to_string(),
+                providers_json(r#"{"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#),
+            ),
+            (
+                LZ_QUORUM_STRATEGY_CONFIG.to_string(),
+                strategy_json(r#"{"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#),
             ),
         ]),
         transport,

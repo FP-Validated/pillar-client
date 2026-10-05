@@ -60,7 +60,8 @@ where
                     observe_solana_payload_signed(transport, url, headers, request, pubkeys).await;
                 (
                     index,
-                    observation.map(|value| (format!("{value:?}"), value)),
+                    provider_response(observation)
+                        .map(|observation| observation.map(|value| (format!("{value:?}"), value))),
                 )
             });
         }
@@ -78,13 +79,13 @@ async fn observe_solana_payload_signed<T>(
     headers: HashMap<String, String>,
     request: SolanaPayloadSignedRequest,
     pubkeys: [String; 5],
-) -> Option<PayloadSignedValidity>
+) -> Result<PayloadSignedValidity, RpcError>
 where
     T: JsonRpcTransport,
 {
     let observation = async {
         let response = transport
-            .post_json(
+            .post_json_scoped(
                 url,
                 headers,
                 json!({
@@ -98,7 +99,7 @@ where
                 }),
             )
             .await
-            .map_err(AppCoreError::Internal)?;
+            .map_err(AppCoreError::from)?;
         let values = response
             .pointer("/result/value")
             .and_then(Value::as_array)
@@ -126,12 +127,9 @@ where
     .await;
 
     match observation {
-        Ok(true) => Some(PayloadSignedValidity::Signed),
-        Ok(false) => Some(PayloadSignedValidity::NotSigned),
-        // The accounts could not be fetched or decoded. Upstream's provider
-        // rejects here, so this contributes nothing to the quorum: providers
-        // that failed have not agreed that the payload is unsigned.
-        Err(_) => None,
+        Ok(true) => Ok(PayloadSignedValidity::Signed),
+        Ok(false) => Ok(PayloadSignedValidity::NotSigned),
+        Err(error) => Err(error.into()),
     }
 }
 

@@ -14,12 +14,18 @@ where
     pub(super) async fn probe_evm_provider_health(
         &self,
         config: &pillar_config::ProviderConfig,
-    ) -> Vec<ProviderHealthEntry> {
-        join_all(config.uris.iter().map(|uri| {
-            let transport = self.transport.clone();
-            let (url, headers) = provider_uri_parts(uri);
-            async move { probe_json_rpc_provider(transport, url, headers).await }
-        }))
+    ) -> Result<Vec<ProviderHealthEntry>, RpcError> {
+        collect_health_probes(
+            config
+                .uris
+                .iter()
+                .map(|uri| {
+                    let transport = self.transport.clone();
+                    let (url, headers) = provider_uri_parts(uri);
+                    async move { probe_json_rpc_provider(transport, url, headers).await }
+                })
+                .collect::<Vec<_>>(),
+        )
         .await
     }
 
@@ -27,8 +33,8 @@ where
         &self,
         chain_name: &str,
         config: &pillar_config::ProviderConfig,
-    ) -> Vec<ProviderHealthEntry> {
-        let mut probes = Vec::<BoxFuture<'static, ProviderHealthEntry>>::new();
+    ) -> Result<Vec<ProviderHealthEntry>, RpcError> {
+        let mut probes = Vec::<BoxFuture<'static, Result<ProviderHealthEntry, RpcError>>>::new();
         for uri in &config.uris {
             let transport = self.transport.clone();
             let (url, headers) = aptos_provider_uri_parts(uri);
@@ -46,18 +52,24 @@ where
             }
         }
 
-        join_all(probes).await
+        collect_health_probes(probes).await
     }
 
     pub(super) async fn probe_solana_provider_health(
         &self,
         config: &pillar_config::ProviderConfig,
-    ) -> Vec<ProviderHealthEntry> {
-        join_all(config.uris.iter().map(|uri| {
-            let transport = self.transport.clone();
-            let (url, headers) = provider_uri_parts(uri);
-            async move { probe_solana_provider_health(transport, url, headers).await }
-        }))
+    ) -> Result<Vec<ProviderHealthEntry>, RpcError> {
+        collect_health_probes(
+            config
+                .uris
+                .iter()
+                .map(|uri| {
+                    let transport = self.transport.clone();
+                    let (url, headers) = provider_uri_parts(uri);
+                    async move { probe_solana_provider_health(transport, url, headers).await }
+                })
+                .collect::<Vec<_>>(),
+        )
         .await
     }
 
@@ -65,45 +77,57 @@ where
         &self,
         chain_name: &str,
         config: &pillar_config::ProviderConfig,
-    ) -> Vec<ProviderHealthEntry> {
-        join_all(config.uris.iter().map(|uri| {
-            let transport = self.transport.clone();
-            let chain_name = chain_name.to_string();
-            let (url, headers) = provider_uri_parts(uri);
-            async move { probe_sui_provider_health(&chain_name, transport, url, headers).await }
-        }))
-        .await
+    ) -> Result<Vec<ProviderHealthEntry>, RpcError> {
+        collect_health_probes(config.uris.iter().map(|uri| {
+        let transport = self.transport.clone();
+        let chain_name = chain_name.to_string();
+        let (url, headers) = provider_uri_parts(uri);
+        async move { probe_sui_provider_health(&chain_name, transport, url, headers).await }
+    }).collect::<Vec<_>>())
+    .await
     }
 
     pub(super) async fn probe_starknet_provider_health(
         &self,
         config: &pillar_config::ProviderConfig,
-    ) -> Vec<ProviderHealthEntry> {
-        join_all(config.uris.iter().map(|uri| {
-            let transport = self.transport.clone();
-            let (url, headers) = provider_uri_parts(uri);
-            async move { probe_starknet_provider_health(transport, url, headers).await }
-        }))
+    ) -> Result<Vec<ProviderHealthEntry>, RpcError> {
+        collect_health_probes(
+            config
+                .uris
+                .iter()
+                .map(|uri| {
+                    let transport = self.transport.clone();
+                    let (url, headers) = provider_uri_parts(uri);
+                    async move { probe_starknet_provider_health(transport, url, headers).await }
+                })
+                .collect::<Vec<_>>(),
+        )
         .await
     }
 
     pub(super) async fn probe_stellar_provider_health(
         &self,
         config: &pillar_config::ProviderConfig,
-    ) -> Vec<ProviderHealthEntry> {
-        join_all(config.uris.iter().map(|uri| {
-            let transport = self.transport.clone();
-            let (url, headers) = provider_uri_parts(uri);
-            async move { probe_stellar_provider_health(transport, url, headers).await }
-        }))
+    ) -> Result<Vec<ProviderHealthEntry>, RpcError> {
+        collect_health_probes(
+            config
+                .uris
+                .iter()
+                .map(|uri| {
+                    let transport = self.transport.clone();
+                    let (url, headers) = provider_uri_parts(uri);
+                    async move { probe_stellar_provider_health(transport, url, headers).await }
+                })
+                .collect::<Vec<_>>(),
+        )
         .await
     }
 
     pub(super) async fn probe_ton_provider_health(
         &self,
         config: &pillar_config::ProviderConfig,
-    ) -> Vec<ProviderHealthEntry> {
-        let mut probes = Vec::<BoxFuture<'static, ProviderHealthEntry>>::new();
+    ) -> Result<Vec<ProviderHealthEntry>, RpcError> {
+        let mut probes = Vec::<BoxFuture<'static, Result<ProviderHealthEntry, RpcError>>>::new();
         for uri in &config.uris {
             let transport = self.transport.clone();
             let (report_url, request_url, headers) = ton_v2_provider_uri_parts(uri);
@@ -118,14 +142,14 @@ where
             }
         }
 
-        join_all(probes).await
+        collect_health_probes(probes).await
     }
 
     pub(super) async fn probe_initia_provider_health(
         &self,
         config: &pillar_config::ProviderConfig,
-    ) -> Vec<ProviderHealthEntry> {
-        let mut probes = Vec::<BoxFuture<'static, ProviderHealthEntry>>::new();
+    ) -> Result<Vec<ProviderHealthEntry>, RpcError> {
+        let mut probes = Vec::<BoxFuture<'static, Result<ProviderHealthEntry, RpcError>>>::new();
         for uri in &config.uris {
             let transport = self.transport.clone();
             let (url, headers) = initia_provider_uri_parts(uri);
@@ -140,15 +164,15 @@ where
             }
         }
 
-        join_all(probes).await
+        collect_health_probes(probes).await
     }
 
     pub(super) async fn probe_tron_provider_health(
         &self,
         chain_name: &str,
         config: &pillar_config::ProviderConfig,
-    ) -> Vec<ProviderHealthEntry> {
-        let mut probes = Vec::<BoxFuture<'static, ProviderHealthEntry>>::new();
+    ) -> Result<Vec<ProviderHealthEntry>, RpcError> {
+        let mut probes = Vec::<BoxFuture<'static, Result<ProviderHealthEntry, RpcError>>>::new();
         for uri in &config.uris {
             let transport = self.transport.clone();
             // Tron is the one family whose probe dials a URL the signing path
@@ -162,9 +186,10 @@ where
             let rank_key = rank_key_url(chain_name, uri);
             let (url, headers) = tron_json_rpc_provider_uri_parts(uri);
             probes.push(Box::pin(async move {
-                let mut entry = probe_json_rpc_block_number_provider(transport, url, headers).await;
+                let mut entry =
+                    probe_json_rpc_block_number_provider(transport, url, headers).await?;
                 entry.rank_key = rank_key;
-                entry
+                Ok(entry)
             }));
             if let Some((report_url, request_url, headers)) = tron_web_provider_uri_parts(uri) {
                 let transport = self.transport.clone();
@@ -175,6 +200,26 @@ where
             }
         }
 
-        join_all(probes).await
+        collect_health_probes(probes).await
+    }
+}
+
+async fn collect_health_probes<I, F>(probes: I) -> Result<Vec<ProviderHealthEntry>, RpcError>
+where
+    I: IntoIterator<Item = F> + Send,
+    I::IntoIter: Send,
+    F: std::future::Future<Output = Result<ProviderHealthEntry, RpcError>> + Send,
+{
+    let capacity = pillar_core::execution::current()
+        .and_then(|context| context.resources)
+        .and_then(|resources| resources.rpc.lane_capacity("background"));
+    match capacity {
+        Some(capacity) => {
+            futures::stream::iter(probes)
+                .buffered(capacity)
+                .try_collect()
+                .await
+        }
+        None => futures::future::try_join_all(probes).await,
     }
 }

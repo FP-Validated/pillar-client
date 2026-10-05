@@ -46,45 +46,60 @@ pub fn core_api_app_from_runtime_parts(parts: RuntimeCoreAppParts) -> CoreApiApp
 pub fn runtime_core_dependencies_from_layerzero_parts<C>(
     parts: RuntimeLayerZeroDependencyParts<C>,
     v_id_by_chain_name: HashMap<String, String>,
-    supported_uln_versions: &[String],
 ) -> RuntimeCoreAppDependencies
 where
     C: RuntimeValidationChecks,
 {
-    let mut hash_call_data_builders = build_hash_call_data_builders(
+    let hash_call_data_builders = build_hash_call_data_builders(
         parts.uln_v2_payload_builder,
         parts.uln_v3_payload_builder,
         parts.uln_read_v1_payload_builder,
         parts.read_payload_resolver,
         v_id_by_chain_name,
     );
-    // The variable only gates the legacy `V2` and `V301` builders; `V302` and
-    // `ReadV1002` are always kept, so any other entry silently does nothing.
-    // Upstream validates no further than "the array is non-empty" (TS:
-    // `packages/dynamic-config/src/boostrapConfig/index.ts:169-175`), so
-    // rejecting an unrecognised value would diverge - name it instead, because
-    // a typo here disables both legacy builders without saying so.
-    let ineffective = supported_uln_versions
-        .iter()
-        .filter(|version| !matches!(version.as_str(), "V2" | "V301"))
-        .collect::<Vec<_>>();
-    if !ineffective.is_empty() {
-        tracing::warn!(
-            target: "pillar_runtime",
-            entries = ?ineffective,
-            "LAYERZERO_SUPPORTED_ULN_VERSIONS entries have no effect: the variable only gates V2 and V301"
-        );
-    }
-    hash_call_data_builders.retain(|version, _| {
-        !matches!(version.as_str(), "V2" | "V301")
-            || supported_uln_versions
-                .iter()
-                .any(|supported| supported == version)
-    });
     RuntimeCoreAppDependencies {
         hash_call_data_builders,
-        sent_event_resolver: parts.sent_event_resolver,
+        sent_event_resolver: Arc::new(UlnV2SdkFactoryResolver {
+            inner: parts.sent_event_resolver,
+        }),
         validator: Arc::new(RuntimeAppValidator::new(parts.validation_checks)),
         legacy_chain_name_resolver: parts.legacy_chain_name_resolver,
+    }
+}
+
+/// Upstream's legacy V1-sdk factory, which a V2 request reaches before any RPC:
+/// an EVM sdk for EVM and TRON sources, an Aptos sdk for APTOS, and a throw for
+/// every other chain type (TS 1.2.66: `lz-v1-sdk/src/factory.ts:21-45`).
+struct UlnV2SdkFactoryResolver {
+    inner: Arc<dyn SentEventResolver>,
+}
+
+#[async_trait::async_trait]
+impl SentEventResolver for UlnV2SdkFactoryResolver {
+    async fn get_lz_sent_event(
+        &self,
+        src_tx_hash: &str,
+        lz_message_id: &pillar_core::LzMessageId,
+    ) -> Result<pillar_core::LzSentEvent, AppCoreError> {
+        if lz_message_id.uln_send_version == "V2" {
+            match pillar_config::static_chain_type_name(&lz_message_id.pathway_id.src_chain_name) {
+                Ok("EVM" | "TRON" | "APTOS") | Err(_) => {}
+                Ok(chain_type) => {
+                    return Err(AppCoreError::Internal(format!(
+                        "Unsupported chain type: {chain_type}"
+                    )))
+                }
+            }
+        }
+        self.inner
+            .get_lz_sent_event(src_tx_hash, lz_message_id)
+            .await
+    }
+
+    async fn refresh_uln_v2_sent_event(
+        &self,
+        sent_event: &pillar_core::LzSentEvent,
+    ) -> Result<Option<pillar_core::UlnV2RefreshedEvent>, AppCoreError> {
+        self.inner.refresh_uln_v2_sent_event(sent_event).await
     }
 }

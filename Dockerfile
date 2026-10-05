@@ -15,10 +15,7 @@ ARG PILLAR_IMAGE_VERSION=unknown
 ENV PILLAR_IMAGE_VERSION=${PILLAR_IMAGE_VERSION}
 ENV SERVER_PORT=8080
 
-# A signing service has to be traceable to the commit it was built from. The
-# tag alone is not evidence: it can be moved, and it is not what the runtime
-# reports. `GET /version` echoes PILLAR_IMAGE_VERSION, and the label below
-# survives independently of both the tag and the Deployment's environment.
+# The immutable revision distinguishes build provenance from runtime configuration.
 ARG VCS_REVISION=unknown
 LABEL org.opencontainers.image.title="pillar" \
       org.opencontainers.image.description="LayerZero DVN client" \

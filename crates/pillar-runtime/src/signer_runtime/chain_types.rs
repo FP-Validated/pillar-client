@@ -12,6 +12,7 @@ pub fn signer_chain_type_from_config(value: &str) -> Result<ChainType, String> {
         "TON" => Ok(ChainType::Ton),
         "STARKNET" => Ok(ChainType::Starknet),
         "STELLAR" => Ok(ChainType::Stellar),
+        "CANTON" => Ok(ChainType::Canton),
         other => Err(format!("Unsupported signer chain type: {other}")),
     }
 }
@@ -28,6 +29,7 @@ pub(crate) fn signer_chain_type_ts_name(chain_type: ChainType) -> &'static str {
         ChainType::Ton => "TON",
         ChainType::Starknet => "STARKNET",
         ChainType::Stellar => "STELLAR",
+        ChainType::Canton => "CANTON",
     }
 }
 

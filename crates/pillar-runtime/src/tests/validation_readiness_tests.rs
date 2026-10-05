@@ -89,10 +89,10 @@ async fn runtime_rpc_validation_checks_aptos_move_readiness() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "aptos".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://aptos.example/".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://aptos.example/".to_string())],
+                1,
+            ),
         )]),
         Some(&["aptos".to_string()]),
     )
@@ -142,10 +142,10 @@ async fn runtime_rpc_validation_checks_movement_move_readiness() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "movement".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://movement.example/".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://movement.example/".to_string())],
+                1,
+            ),
         )]),
         Some(&["movement".to_string()]),
     )
@@ -198,10 +198,10 @@ async fn runtime_rpc_validation_checks_initia_move_readiness() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "initia".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://initia.example/".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://initia.example/".to_string())],
+                1,
+            ),
         )]),
         Some(&["initia".to_string()]),
     )
@@ -249,8 +249,8 @@ async fn runtime_rpc_validation_checks_validates_message_readiness_with_quorum()
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "ethereum".to_string(),
-            ProviderConfig {
-                uris: vec![
+            ProviderConfig::with_distinct_entities(
+                vec![
                     ProviderUri::UriWithHeaders {
                         uri: "https://eth-a.example".to_string(),
                         headers: HashMap::from([("x-api-key".to_string(), "a".to_string())]),
@@ -258,8 +258,8 @@ async fn runtime_rpc_validation_checks_validates_message_readiness_with_quorum()
                     ProviderUri::Uri("https://eth-b.example".to_string()),
                     ProviderUri::Uri("https://eth-c.example".to_string()),
                 ],
-                quorum: Some(2),
-            },
+                2,
+            ),
         )]),
         Some(&["ethereum".to_string()]),
     )
@@ -351,13 +351,13 @@ async fn readiness_against(receipt: Value, sent_event: &LzSentEvent) -> Result<(
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "ethereum".to_string(),
-            ProviderConfig {
-                uris: vec![
+            ProviderConfig::with_distinct_entities(
+                vec![
                     ProviderUri::Uri("https://eth-a.example".to_string()),
                     ProviderUri::Uri("https://eth-b.example".to_string()),
                 ],
-                quorum: Some(2),
-            },
+                2,
+            ),
         )]),
         Some(&["ethereum".to_string()]),
     )
@@ -460,10 +460,10 @@ async fn runtime_rpc_validation_checks_validates_solana_message_readiness_with_s
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "solana".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["solana".to_string()]),
     )
@@ -539,10 +539,10 @@ async fn runtime_rpc_validation_checks_rejects_insufficient_message_confirmation
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "ethereum".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://eth.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://eth.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["ethereum".to_string()]),
     )
@@ -583,10 +583,10 @@ async fn runtime_rpc_validation_checks_rejects_confirmation_overflow() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "ethereum".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://eth.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://eth.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["ethereum".to_string()]),
     )
@@ -623,10 +623,10 @@ async fn runtime_rpc_validation_checks_rejects_missing_message_readiness_data() 
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "ethereum".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://eth.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://eth.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["ethereum".to_string()]),
     )
@@ -726,10 +726,10 @@ pub(super) fn runtime_rpc_read_command_checks(
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "bsc".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://bsc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://bsc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["bsc".to_string()]),
     )
@@ -750,10 +750,10 @@ async fn runtime_rpc_validation_checks_sui_checkpoint_readiness() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "sui".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://sui.example/".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://sui.example/".to_string())],
+                1,
+            ),
         )]),
         Some(&["sui".to_string()]),
     )
@@ -798,10 +798,10 @@ async fn runtime_rpc_validation_checks_stellar_ledger_readiness() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "stellar".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://stellar.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://stellar.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["stellar".to_string()]),
     )
@@ -854,10 +854,10 @@ async fn no_non_evm_chain_falls_through_to_the_evm_block_confirmation_default() 
         let getter = StaticProviderConfig::new(
             indexmap::IndexMap::from([(
                 chain_name.clone(),
-                ProviderConfig {
-                    uris: vec![ProviderUri::Uri(format!("https://{chain_name}.example/"))],
-                    quorum: Some(1),
-                },
+                ProviderConfig::with_distinct_entities(
+                    vec![ProviderUri::Uri(format!("https://{chain_name}.example/"))],
+                    1,
+                ),
             )]),
             Some(std::slice::from_ref(chain_name)),
         )

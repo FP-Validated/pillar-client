@@ -26,6 +26,8 @@ use std::{
 use tokio::sync::Mutex;
 
 mod assembly;
+#[cfg(test)]
+pub(crate) use assembly::TEST_KMS_RAW_FACTORY;
 mod aws_secret;
 mod chain_types;
 mod config;

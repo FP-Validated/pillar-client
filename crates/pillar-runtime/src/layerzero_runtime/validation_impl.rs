@@ -36,4 +36,11 @@ where
     async fn validate_extra_context(&self, sent_event: &LzSentEvent) -> Result<(), AppCoreError> {
         self.validate_extra_context_request(sent_event).await
     }
+
+    async fn uln_receive_version(
+        &self,
+        lz_message_id: &LzMessageId,
+    ) -> Result<String, AppCoreError> {
+        self.uln_receive_version_with_quorum(lz_message_id).await
+    }
 }

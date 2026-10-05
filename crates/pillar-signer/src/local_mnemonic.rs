@@ -89,10 +89,19 @@ impl LocalMnemonicRawSignerAdapter {
 
 #[async_trait]
 impl RawSignerAdapter for LocalMnemonicRawSignerAdapter {
+    fn supports_durable_audit(&self) -> bool {
+        true
+    }
     async fn sign(&self, request: SignRequest) -> Result<Vec<u8>, SignerError> {
         match (request.signature_type, request.private_key_signature_type) {
             (SignatureType::Ecdsa, SignatureType::Ecdsa) => {
                 let signing_key = self.ecdsa_signing_key(request.seed_kind)?;
+                let record = crate::effects::local_begin(
+                    || signing_key.verifying_key().to_encoded_point(false),
+                    &request.data,
+                    "ecdsa",
+                )
+                .await?;
                 let (signature, recovery_id) = signing_key
                     .sign_prehash_recoverable(&request.data)
                     .map_err(|error| SignerError::Message(error.to_string()))?;
@@ -103,6 +112,7 @@ impl RawSignerAdapter for LocalMnemonicRawSignerAdapter {
                     recovery_id.to_byte()
                 };
                 result.push(recovery_id);
+                crate::effects::local_returned(record, &result).await?;
                 Ok(result)
             }
             (SignatureType::Ed25519, SignatureType::Ecdsa) => Err(SignerError::Message(
@@ -111,6 +121,12 @@ impl RawSignerAdapter for LocalMnemonicRawSignerAdapter {
             )),
             (SignatureType::Ecdsa, SignatureType::Ed25519) => {
                 let signing_key = self.ecdsa_signing_key_from_ed25519_seed(request.seed_kind)?;
+                let record = crate::effects::local_begin(
+                    || signing_key.verifying_key().to_encoded_point(false),
+                    &request.data,
+                    "ecdsa",
+                )
+                .await?;
                 let (signature, recovery_id) = signing_key
                     .sign_prehash_recoverable(&request.data)
                     .map_err(|error| SignerError::Message(error.to_string()))?;
@@ -121,12 +137,19 @@ impl RawSignerAdapter for LocalMnemonicRawSignerAdapter {
                     recovery_id.to_byte()
                 };
                 result.push(recovery_id);
+                crate::effects::local_returned(record, &result).await?;
                 Ok(result)
             }
             (SignatureType::Ed25519, SignatureType::Ed25519) => {
-                let signature = self
-                    .ed25519_signing_key(request.seed_kind)?
-                    .sign(&request.data);
+                let signing_key = self.ed25519_signing_key(request.seed_kind)?;
+                let record = crate::effects::local_begin(
+                    || signing_key.verifying_key().to_bytes(),
+                    &request.data,
+                    "ed25519",
+                )
+                .await?;
+                let signature = signing_key.sign(&request.data);
+                crate::effects::local_returned(record, &signature.to_bytes()).await?;
                 Ok(signature.to_bytes().to_vec())
             }
         }

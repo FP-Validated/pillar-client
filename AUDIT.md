@@ -1,0 +1,264 @@
+# Audit guide
+
+This file is the entry point for an external security review. It states what the
+repository contains, how to rebuild and re-run every check that does not need private
+inputs, the threat model and trust boundaries, how acceptance evidence is classified,
+and what cannot be reproduced from this repository alone.
+
+`SECURITY.md` remains the authority for operator responsibilities, the durable signing
+audit, admission accounting, every known divergence from upstream ("Where responses
+still differ from upstream") and known caveats. This file does not restate them.
+
+## 1. What the service does
+
+`pillar` is a LayerZero DVN. For a sign request it resolves the source `PacketSent`
+event through a provider quorum, checks readiness (confirmations), expiration,
+already-signed state and optional extra context, builds the destination ULN verify
+call data for the destination chain family, and signs its hash with a KMS key or a
+local mnemonic. A signature is an on-chain attestation, so a wrong signature is the
+primary harm. See `README.md` for the HTTP surface and configuration.
+
+## 2. Repository contents
+
+Everything tracked here is in scope. Nothing outside the tree is needed to build,
+lint or run the default test suite.
+
+| Path | Content |
+| --- | --- |
+| `crates/*/src` | Product code; workspace layout in `README.md` |
+| `crates/pillar-config/src/generated_*.rs` | Generated LayerZero tables (signing-critical addresses, endpoint ids, capability). Never hand-edited; provenance header in each file |
+| `crates/*/src/tests*`, `crates/*/tests` | Unit, integration and E2E tests; about 950 test functions, 13 `#[ignore]` (section 6) |
+| `crates/*/tests/**/*.json`, `*.hex`, `*.body` | Fixtures: upstream-executed outputs, recorded public-chain RPC responses, official LayerZero vectors, synthetic inputs |
+| `crates/pillar-config/examples/provider-config/` | Example provider files on reserved `.example` hosts; no real endpoint or key |
+| `scripts/` | Table generators, parity emitters (`scripts/gasolina-parity/`), the CI integrity check and the acceptance-matrix builder |
+| `audit/acceptance/` | Acceptance matrix generated from committed inputs (section 5) |
+| `Cargo.toml`, `Cargo.lock`, `deny.toml`, `Dockerfile`, `.github/workflows/ci.yml` | Build, dependency policy, image, CI |
+
+## 3. Reproduce
+
+Toolchains: Rust 1.98.1 with rustfmt and clippy (CI baseline), Rust 1.94.1 for the
+declared `rust-version`, Node.js for `scripts/*.mjs`. All dependencies come from
+crates.io through `Cargo.lock`; there are no git dependencies and no `[patch]`.
+
+```bash
+cargo +1.98.1 fmt --all --check
+cargo +1.98.1 clippy --workspace --all-targets          # CI sets RUSTFLAGS="-D warnings"
+cargo +1.98.1 test --workspace --locked
+cargo +1.94.1 check --workspace --locked --all-targets  # MSRV
+cargo audit && cargo deny check                          # advisories, licenses, sources
+node scripts/check-generated-config-integrity.mjs        # generated tables vs their headers
+node scripts/build-acceptance-matrix.mjs --check         # matrix vs committed inputs
+docker build --build-arg VCS_REVISION="$(git rev-parse HEAD)" -t pillar-client:audit .
+```
+
+The default suite needs no network, database, KMS or cluster. Six E2E tests write a
+JSON artifact per run under `local/e2e-runs/` (gitignored); set
+`PILLAR_E2E_ARTIFACT_DIR` to redirect them:
+`crates/pillar-api/tests/log_record_forgery.rs`, `crates/pillar-cli/src/phase1_review_e2e.rs`,
+`crates/pillar-runtime/src/tests/{background_headroom_e2e,health_availability_e2e,postgres_audit_e2e}.rs`,
+`crates/pillar-signer/src/azure/wire_e2e.rs`.
+
+## 4. Threat model
+
+### Assets
+
+- The DVN signing key (KMS key or mnemonic) and every signature it produces.
+- Correctness of the attested message: source event, pathway, nonce, payload hash,
+  destination contract, `vId`, expiration.
+- Credentials in configuration: API bearer tokens, RPC provider headers, KMS
+  credentials, Canton OAuth2 client secret, audit database URL.
+- Availability of signing for configured pathways.
+
+### Adversaries considered
+
+- Any network caller that reaches the HTTP port, with or without a valid token.
+- A dishonest, faulty or compromised RPC provider, below the configured quorum.
+- A source-chain user who crafts transactions, events or payloads.
+- A reorg on the source chain between resolution and signing.
+- Someone who reads logs, metrics or the startup report.
+
+Not defended in code: a compromised host or KMS principal, an operator who configures
+a quorum that one entity can satisfy (flagged at startup as
+`single-provider-trust-root`), a majority of colluding providers, and fleet-wide rate
+limiting (budgets are per process). `SECURITY.md` "Operator responsibilities" lists
+the controls left to the deployment.
+
+### Trust boundaries
+
+| Boundary | Trusted side assumes | Enforced in | Failure mode required |
+| --- | --- | --- | --- |
+| HTTP caller → API | Bearer token from `PILLAR_API_AUTH_TOKENS` (≥32 chars) unless the operator opens sign routes; request fields are untrusted | `crates/pillar-api/src/lib.rs` (`authorized`, request shape gates), `crates/pillar-cli/src/main.rs` (header/request deadlines, connection cap) | 401/400 before any provider or signer call; no 500 for caller-chosen input |
+| Request → packet | Only the `PacketSent` emitted by the trusted contract for the requested version and pathway is accepted | `crates/pillar-runtime/src/layerzero_runtime/packet_resolver.rs`, per-family `source_events_*.rs` | 400 on identity mismatch; never sign a packet the request does not name |
+| RPC providers → validation | Answers are counted per `(category, entity)`; differing answers never merge | `crates/pillar-runtime/src/provider_health/**` | Fail closed when the strategy is not met or two answers could each meet it |
+| Readiness / reorg | Confirmations from the validated block; READ calls pinned by block hash with `requireCanonical` | `layerzero_runtime/validation_readiness.rs`, `layerzero_runtime/read_payload.rs` | Refuse unpinned or non-canonical reads; no fallback by number |
+| Static tables → builders | Addresses, endpoint ids and `vId` come from generated tables per environment | `crates/pillar-config/src/generated_*.rs`, `crates/pillar-layerzero/src/**` | Unsupported `(chain, environment, version)` is an error, never a default |
+| Extra-context service | External yes/no over HTTPS or Lambda; URL must be absolute, without userinfo, and `https` on mainnet/testnet, checked at startup | `crates/pillar-config/src/lib.rs` (`validate_service_url`), `layerzero_runtime/validation_extra_context.rs` | Process refuses to start on a bad URL; a rejection or error stops the request before the builder and signer |
+| Canton sequencer / ledger | Sequencer reads verified against a configured committee when set; ledger read needs OAuth2 client credentials | `layerzero_runtime/canton_sequencer.rs`, `layerzero_runtime/canton_ledger.rs` | Refuse before any request without credentials; refuse on `sandbox`/`localnet` |
+| Validation → signer | Signer sees only the 32-byte digest built from validated data; key and address derivation per chain family | `crates/pillar-signer/src/**`, `crates/pillar-runtime/src/signer_runtime/assembly.rs` | Unsupported KMS provider fails clearly; secrets redacted in `Debug` and zeroized |
+| Signer → audit store (optional) | Intent and result committed before a 200 when `PILLAR_AUDIT_ENABLED=true` | `crates/pillar-core/src/audit.rs`, `crates/pillar-runtime/src/audit.rs` | No 200 before result commit; unknown outcomes retained, never replayed |
+| Process → logs / metrics | Caller-controlled values bounded or omitted; labels from fixed allowlists | `crates/pillar-api/src/lib.rs`, `crates/pillar-metrics/src/**`, `startup_report.rs` | No secret or caller hash in terminal logs; no unbounded label cardinality |
+
+### Invariants worth attacking first
+
+1. No signature for a packet other than the one the request names, on the trusted
+   emitter, for the requested pathway and version.
+2. No signature below the configured provider quorum or confirmation depth.
+3. No signature for a destination contract, environment or `vId` the tables do not
+   name; every divergence from upstream is listed in `SECURITY.md`.
+4. No caller-chosen input produces a 5xx or reaches the signer before validation.
+5. No secret reaches a log, metric, `Debug` output or error body.
+
+## 5. Acceptance evidence
+
+`audit/acceptance/acceptance-rows.csv` has one row per (environment, chain, role, ULN
+version) for every version the capability table lists as `ACTIVE`: 1696 rows.
+`node scripts/build-acceptance-matrix.mjs` regenerates it from committed inputs only,
+and CI runs it with `--check`. Each row names its evidence. The status kinds are
+separate and are not summed into one completion figure:
+
+| Kind | Status | Rows | Meaning |
+| --- | --- | --- | --- |
+| Exact route evidence | `final-response` | 18 | The production HTTP path answered the same as upstream's own server for this row, offline over recorded public receipts (`historical_smoke.json`, 16 pathways) |
+| Component evidence | `component-exact` | 831 | An upstream-executed fixture covers this exact row at builder, resolver or refresh level, not over HTTP |
+| Family inference | `family` | 822 | Only another chain of the same family, role and version was executed; this row reaches the same table-driven code. Not evidence for the row itself |
+| Divergence | `extension` | 9 | Deliberate, evidenced difference from upstream (testnet `vId`, `SECURITY.md`) |
+| Divergence | `upstream-unsupported` | 2 | Upstream throws for every contract role of the chain; both refuse |
+| Open | `incomplete` | 14 | Rollout-gated, unmeasured, or no executed evidence |
+
+Gates and decisions recorded in the matrix and enforced in code
+(`layerzero_rollout_block_reason`, `crates/pillar-config/src/lib.rs`):
+
+- **Testnet `moninet` is excluded** (6 rows). 8 of 10 deployment addresses match
+  LayerZero's metadata, 2 are unpublished, and no public RPC or EVM chain id was
+  available. The rollout gate refuses it.
+- **Testnet `ton` stays rollout-gated** (2 rows). A delivered testnet packet was read
+  and the already-signed check refuses it over real storage; the signing path was not
+  run there. The gate is unchanged until the operator decides the rollout.
+- **Canton source** (3 rows, `incomplete` against upstream). The ledger read follows
+  the published `common-canton` 1.2.66 source and is covered by this repository's own
+  tests: synthetic ledger, identity provider and token in the default suite, and an
+  opt-in run against a real Canton ledger (section 6). The maintainers accepted these
+  self-tests as the Canton acceptance basis. That is a maintainer decision, not
+  upstream-executed evidence, so the status is unchanged.
+- **Testnet `scroll` destination** (3 rows): `vId` could not be read on chain.
+
+What the matrix is not: it is not a record of live production traffic, and no row is
+promoted by family inference. Live checks made by the maintainers against their own
+deployment are not part of this repository.
+
+## 6. Ignored tests
+
+`cargo test --workspace --locked` skips 13 tests that need external inputs.
+
+### Durable audit against PostgreSQL (11 tests)
+
+`crates/pillar-runtime/src/tests/postgres_audit_e2e.rs` (9) and
+`audit_reconnect_e2e.rs` (2). They need a disposable PostgreSQL that holds no other
+data:
+
+- reachable at `127.0.0.1` (the reconnect test asserts the host and proxies to it);
+  plaintext is accepted only on loopback;
+- a role that may `CREATE SCHEMA`, create tables, `CREATE FUNCTION ... LANGUAGE plpgsql`
+  and `CREATE TRIGGER` / `CREATE CONSTRAINT TRIGGER` in its own database;
+- each case creates a new schema `<case>_<pid>_<n>` and does not drop it.
+
+```bash
+export PILLAR_AUDIT_E2E_DATABASE_URL='postgres://<role>:<password>@127.0.0.1:5432/<database>'
+cargo test -p pillar-runtime --lib --locked -- --ignored postgres_audit --test-threads=1
+```
+
+The crash test re-runs the test binary as a child with
+`--ignored --exact tests::read_vertical_tests::durable_process_worker`, passing
+`PILLAR_AUDIT_E2E_WORKER_MODE` and `PILLAR_AUDIT_E2E_WORKER_NAMESPACE`; that worker is
+the 12th ignored test and is not meant to be run by hand.
+
+### Canton ledger (1 test)
+
+`canton_ledger_tests.rs::canton_sender_is_read_from_a_live_ledger_through_the_production_path`
+reads sender parties from a real, unauthenticated Canton JSON API through the
+production code path, with a synthetic OAuth2 token. It needs a ledger you control
+with contracts whose `sender` you know:
+
+```bash
+export PILLAR_CANTON_LIVE_JSON_API='http://127.0.0.1:<port>'
+export PILLAR_CANTON_LIVE_PARTY='<party id>'
+export PILLAR_CANTON_LIVE_CASES='[{"updateId":"<id>","sender":"<party>"}]'
+export PILLAR_CANTON_LIVE_ARTIFACT=/tmp/canton-live.json   # must not exist
+cargo test -p pillar-runtime --lib --locked -- --ignored --exact \
+  tests::canton_ledger_tests::canton_sender_is_read_from_a_live_ledger_through_the_production_path
+```
+
+The maintainers' ledger is not available to auditors.
+
+## 7. Inputs that are not in this repository
+
+- **Upstream TypeScript service.** Parity is measured against `gasolina-audit` 1.2.66
+  (manifest sha256 `8ad87eb6…`; `SECURITY.md` "Which upstream tree the `TS:`
+  citations refer to"). It is not a published package and is not distributed here.
+  `PILLAR_AUDIT_ROOT` names a checkout of it. Without it you cannot run
+  `generate-layerzero-environment-capability.mjs`, the static and TON generators, the
+  emitters in `scripts/gasolina-parity/`, or `check-layerzero-environment-parity.mjs`.
+  The Rust comparisons against their committed outputs do run, so a reviewer can
+  check this code against the fixtures, but not regenerate the fixtures from upstream.
+- **npm packages.** `@layerzerolabs/lz-definitions` and `@layerzerolabs/lz-ton-sdk-v2`
+  are public; the static, legacy-id and TON generators accept an `npm pack` extract
+  (`README.md` "Development"). A regenerated table must equal the committed file.
+- **Recorded responses.** Fixtures hold recorded public-chain RPC answers.
+  `crates/pillar-runtime/tests/gasolina_parity/aptos_v301_source_provenance.json`
+  names the public URL and the sha256 of the recorded body; the body itself is not
+  committed, and a re-fetch may not be byte-identical.
+- **Live evidence.** Runs against the maintainers' deployments, clusters, KMS keys and
+  Canton ledger, and their raw logs, are not published. Nothing in section 5 depends
+  on them.
+
+## 8. Provenance and licensing uncertainty
+
+- `LICENSE` (MIT) covers this repository's own code. It grants no rights in
+  third-party material.
+- Third-party inputs and the license each one states, as found in the copies the
+  maintainers used. This records what the inputs say; it is not a license clearance.
+
+  | Input | Used for | Stated license |
+  | --- | --- | --- |
+  | `@layerzerolabs/lz-definitions` 3.1.15 | endpoint ids in `generated_layerzero_evm.rs`; all of `generated_layerzero_legacy_chain_ids.rs` | Package `LICENSE`: Business Source License 1.1, Licensor LayerZero Labs Ltd, Licensed Work "LayerZero Protocol", Change Date 2025-02-01. The parameters name no Change License and no Additional Use Grant. 3.1.2, used by earlier releases, ships the same text |
+  | `@layerzerolabs/lz-v2-utilities` 3.0.168 | the options decoder upstream ran to produce `evm_options.json` | `package.json` declares `BUSL-1.1`; the package ships no license file |
+  | `@layerzerolabs/lz-ton-sdk-v2` 3.0.168 | `generated_ton_layerzero.rs` | Not recorded |
+  | Upstream service `gasolina-audit` 1.2.66 | deployment addresses in `generated_layerzero_evm.rs`; `generated_layerzero_environment.rs`; `generated_chain_metadata.rs`; parity fixtures; the TON proxy cell | No license file at the snapshot root; its workspace packages declare `"license": "MIT"` together with `"private": true` |
+  | `@layerzerolabs/common-canton` 1.2.66 | the Canton ledger read, ported | npm registry metadata declares MIT |
+
+  Whether the generated tables and fixtures are copies or derivative works of these
+  inputs, which notices they then need, and the redistribution terms for outputs of
+  the upstream service have not been determined.
+- The TON proxy storage cell in `crates/pillar-runtime/src/layerzero_runtime/ton_v3_builder.rs`
+  was produced by a bundle compiled from upstream's `common-ton` encoder. That bundle
+  is not distributed, so the constant cannot be regenerated from this repository.
+- Upstream-derived data is pinned by hashes: input sha256 values in every
+  generated-file header and the `producedBy` block that most parity fixtures carry.
+  A reviewer can check consistency but not origin without the upstream tree.
+
+## 9. Publication provenance
+
+This tree was prepared from the maintainers' internal branch. Internal history is not
+published. Relative to the internally tested source, the publication changed
+documentation, code comments, example hostnames, the OCI `source` label, one CI step,
+the acceptance-matrix builder and its output, and a comment in the integrity check.
+
+Run on tree `113b9da0389c9888b16937769c1ac52493b04dbd` with Rust 1.98.1 and
+`RUSTFLAGS="-D warnings"`, each exiting 0:
+
+- `cargo fmt --all --check`
+- `cargo clippy --workspace --all-targets --locked`
+- `cargo test --workspace --locked`: 934 passed, 0 failed, 13 ignored
+- `node scripts/check-generated-config-integrity.mjs`
+- `node scripts/build-acceptance-matrix.mjs --check`
+
+The published tree differs from that tree only in `AUDIT.md` and `CONTRIBUTING.md`,
+which no build or test reads; the checks were not repeated.
+
+Not run on either tree: the MSRV check (`cargo +1.94.1 check`), `cargo audit`,
+`cargo deny check`, `docker build`, and the 13 ignored tests in section 6. CI defines
+jobs for the first four; the ignored tests are opt-in and are not part of CI.
+
+Images built from this tree must carry
+`org.opencontainers.image.source=https://github.com/FP-Validated/pillar-client` and
+`org.opencontainers.image.revision=<this repository's commit>`.

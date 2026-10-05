@@ -81,6 +81,14 @@ impl AppValidator for NoopValidator {
     async fn validate_extra_context(&self, _sent_event: &LzSentEvent) -> Result<(), AppCoreError> {
         Ok(())
     }
+
+    /// An unmigrated receiver: a V2 send keeps the V2 builder.
+    async fn uln_receive_version(
+        &self,
+        _lz_message_id: &LzMessageId,
+    ) -> Result<String, AppCoreError> {
+        Ok("V2".to_string())
+    }
 }
 
 pub(super) struct FixedSigner;

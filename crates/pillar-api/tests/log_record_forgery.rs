@@ -1,33 +1,16 @@
-//! A caller must not be able to write a log record.
-//!
-//! This lives in its own integration binary on purpose. `tracing` caches a
-//! callsite's interest globally the first time it is reached, so a sibling unit
-//! test emitting the same event while no subscriber is installed poisons that
-//! cache and the capture silently loses the record under test - green for the
-//! wrong reason, and only under `--test-threads=1` does it pass honestly. One
-//! test per process removes the race instead of papering over it.
-
+// A separate binary avoids tracing callsite-interest races with other tests.
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use axum::body::{to_bytes, Body};
-use http::{Method, Request, StatusCode};
 use pillar_api::{router, AppError, ServerApp, SignerInfo};
 use pillar_core::{
     PillarApiRequestV1, PillarApiRequestV2, PillarApiResponse, ProviderHealthSnapshot,
 };
 use serde_json::{json, Value};
-use tower::ServiceExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing_subscriber::fmt::MakeWriter;
 
-/// Fails every v2 request with the text the core would produce, which quotes the
-/// caller's `messageHash` back verbatim
-/// (`Message hash mismatch, expected: {request}, got: {computed}`,
-/// `pillar-core`). That is the route by which caller bytes reach the formatter:
-/// the field is compared, never interpolated into an outbound request, so it
-/// carries no shape gate of its own and the escaping has to happen where the
-/// record is written.
 struct FailingApp {
     error: String,
 }
@@ -126,75 +109,118 @@ fn v2_request(message_hash: &str) -> Value {
 }
 
 #[test]
-fn control_characters_from_a_caller_cannot_forge_a_log_record() {
+fn caller_error_cannot_expand_logs_and_successful_status_requests_are_quiet() {
     let captured = Arc::new(Mutex::new(Vec::new()));
-    // Mirrors `init_tracing` in `crates/pillar-cli/src/main.rs`: same formatter,
-    // same target rendering, same filter for this crate. Notably it does not
-    // disable ANSI, because the binary does not either.
     let subscriber = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::new("pillar_api=info"))
         .with_target(true)
         .compact()
         .with_writer(SharedLogWriter(captured.clone()))
         .finish();
-    // `with_default` is thread-local, so the request has to run on this thread:
-    // a multi-threaded runtime hands the handler to a worker that never sees the
-    // subscriber.
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
-
     tracing::subscriber::with_default(subscriber, || {
         runtime.block_on(async {
-            let forged = format!("0x{}\nAUDIT_PROBE\x1b", "a".repeat(64));
+            let caller_hash = format!("0x{}\nAUDIT_PROBE\x1b", "a".repeat(98 * 1024));
             let app = FailingApp {
-                error: format!(
-                    "Message hash mismatch, expected: {forged}, got: 0x{}",
-                    "b".repeat(64)
-                ),
+                error: format!("Message hash mismatch, expected: {caller_hash}, got: 0x{}", "b".repeat(64)),
             };
-            let request = Request::builder()
-                .method(Method::POST)
-                .uri("/v2/resolve-and-sign")
-                .header("content-type", "application/json")
-                .body(Body::from(v2_request(&forged).to_string()))
-                .unwrap();
-
-            let response = router(app, "test").oneshot(request).await.unwrap();
-            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-            let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-            let body: Value = serde_json::from_slice(&body).unwrap();
-            // Echoed to the caller who sent it, which is not a forgery vector.
-            // Only the shared log is.
-            assert!(body["body"].as_str().unwrap().contains("AUDIT_PROBE"));
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let (stop, stopped) = tokio::sync::oneshot::channel();
+            let server = tokio::spawn(async move {
+                axum::serve(listener, router(app, "test"))
+                    .with_graceful_shutdown(async { let _ = stopped.await; })
+                    .await.unwrap();
+            });
+            for method in ["GET", "HEAD"] {
+                let mut socket = tokio::net::TcpStream::connect(address).await.unwrap();
+                socket.write_all(format!("{method} / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+                let mut response = Vec::new();
+                socket.read_to_end(&mut response).await.unwrap();
+                assert!(response.starts_with(b"HTTP/1.1 200"));
+            }
+            assert_eq!(captured.lock().unwrap().len(), 0, "successful status requests produced info-level records");
+            let request_id = format!("RID_MARKER{}", "r".repeat(8192));
+            let post = |payload: String| {
+                let request_id = request_id.clone();
+                async move {
+                    let mut socket = tokio::net::TcpStream::connect(address).await.unwrap();
+                    socket.write_all(format!("POST /v2/resolve-and-sign HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: application/json\r\nx-request-id: {request_id}\r\nContent-Length: {}\r\n\r\n{payload}", payload.len()).as_bytes()).await.unwrap();
+                    let mut response = Vec::new();
+                    socket.read_to_end(&mut response).await.unwrap();
+                    response
+                }
+            };
+            let response = post(v2_request(&caller_hash).to_string()).await;
+            assert!(response.starts_with(b"HTTP/1.1 400"));
+            assert!(response.windows(b"AUDIT_PROBE".len()).any(|bytes| bytes == b"AUDIT_PROBE"));
+            // Unknown chains are answered with upstream's unavailable-chain 500, which
+            // echoes the name to the caller but never to the log.
+            let mut input = v2_request(&caller_hash);
+            input["lzMessageId"]["pathwayId"]["srcChainName"] = json!("UNKNOWN_CHAIN_MARKER\nforged");
+            let response = post(input.to_string()).await;
+            assert!(response.starts_with(b"HTTP/1.1 500"));
+            assert!(response.windows(b"UNKNOWN_CHAIN_MARKER".len()).any(|bytes| bytes == b"UNKNOWN_CHAIN_MARKER"));
+            let mut input = v2_request(&caller_hash);
+            input["lzMessageId"]["pathwayId"]["dstChainName"] = json!("UNKNOWN_DEST_MARKER\nforged");
+            let response = post(input.to_string()).await;
+            assert!(response.starts_with(b"HTTP/1.1 500"));
+            assert!(response.windows(b"UNKNOWN_DEST_MARKER".len()).any(|bytes| bytes == b"UNKNOWN_DEST_MARKER"));
+            for query in ["QUERY_MARKER%0Ainjected", "QUERY_MARKER../unsafe", &format!("QUERY_MARKER{}", "q".repeat(129))] {
+                let mut socket = tokio::net::TcpStream::connect(address).await.unwrap();
+                socket.write_all(format!("GET /signer-info?chainName={query} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+                let mut response = Vec::new();
+                socket.read_to_end(&mut response).await.unwrap();
+                assert!(response.starts_with(b"HTTP/1.1 400"));
+            }
+            stop.send(()).unwrap();
+            server.await.unwrap();
         });
     });
-
     let captured = captured.lock().unwrap();
-    let contains = |needle: &[u8]| captured.windows(needle.len()).any(|w| w == needle);
+    let records = String::from_utf8_lossy(&captured);
     assert!(
-        !captured.is_empty(),
-        "nothing was captured, so this test proves nothing"
-    );
-    // The formatter colours its own output, so raw ESC bytes are expected here.
-    // A blanket "no control bytes" assertion would only be measuring whether
-    // ANSI happened to be on. What must never appear is a control byte the
-    // *caller* supplied.
-    assert!(
-        !contains(b"\nAUDIT_PROBE"),
-        "caller text opened a new log line: {:?}",
-        String::from_utf8_lossy(&captured)
+        records.lines().any(|line| line.contains("WARN")),
+        "failure warning was suppressed"
     );
     assert!(
-        !contains(b"AUDIT_PROBE\x1b"),
-        "caller text carried a raw terminal escape: {:?}",
-        String::from_utf8_lossy(&captured)
+        !records.contains("AUDIT_PROBE")
+            && !records.contains("UNKNOWN_CHAIN_MARKER")
+            && !records.contains("UNKNOWN_DEST_MARKER")
+            && !records.contains("RID_MARKER")
+            && !records.contains("QUERY_MARKER"),
+        "caller error leaked into the shared log"
     );
-    // Present, but inert. Without this, simply not logging the error would pass.
     assert!(
-        contains(br"\nAUDIT_PROBE\u{1b}"),
-        "the escaped payload is missing, so the error was never logged: {:?}",
-        String::from_utf8_lossy(&captured)
+        captured.len() < 4096,
+        "near-100 KiB caller input amplified log volume to {} bytes",
+        captured.len()
     );
+    let directory = std::env::var("PILLAR_E2E_ARTIFACT_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../local/e2e-runs")
+        });
+    static RUN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let directory = directory.join(RUN.get_or_init(|| {
+        format!(
+            "run-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        )
+    }));
+    std::fs::create_dir_all(&directory).unwrap();
+    let evidence = json!({"caller_hash_padding_bytes": 98 * 1024, "info_records_for_get_head": 0, "caller_marker_logged": false, "failure_warning_preserved": true, "failure_log_bytes": captured.len(), "http_status": 400});
+    std::fs::write(
+        directory.join("bounded-caller-log-e2e.json"),
+        evidence.to_string(),
+    )
+    .unwrap();
+    println!("{evidence}");
 }

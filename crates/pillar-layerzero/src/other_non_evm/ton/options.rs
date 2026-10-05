@@ -128,7 +128,15 @@ fn encode_address_by_chain(chain_name: &str, address: [u8; 32]) -> String {
     }
     if matches!(
         chain_name,
-        "aptos" | "movement" | "initia" | "ton" | "sui" | "iotal1" | "starknet" | "stellar"
+        "aptos"
+            | "movement"
+            | "initia"
+            | "ton"
+            | "sui"
+            | "iotal1"
+            | "starknet"
+            | "stellar"
+            | "canton"
     ) {
         return format!("0x{}", hex::encode(address));
     }

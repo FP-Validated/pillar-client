@@ -1,0 +1,4 @@
+{
+  "rpc-gateway.operator.example": { "category": "internal", "entity": "operator" },
+  "bsc.provider-a.example": { "category": "dedicated_external", "entity": "provider-a" }
+}

@@ -1,5 +1,10 @@
 use super::*;
 
+#[cfg(test)]
+tokio::task_local! {
+    pub(crate) static TEST_KMS_RAW_FACTORY: Arc<dyn RawSignerAdapterFactory>;
+}
+
 pub async fn runtime_signer_assembly_from_config(
     signer_config: RuntimeSignerConfig,
     chain_type_by_chain_name: HashMap<String, ChainType>,
@@ -228,6 +233,12 @@ pub async fn kms_signer_assembly_from_config_with_metrics(
     let RuntimeSignerMaterial::Kms { options } = signer_config.material.clone() else {
         return Err("runtime signer config is not KMS".to_string());
     };
+    #[cfg(test)]
+    let raw_factory = match TEST_KMS_RAW_FACTORY.try_with(Arc::clone) {
+        Ok(factory) => factory,
+        Err(_) => production_kms_raw_signer_factory_from_options(&options).await?,
+    };
+    #[cfg(not(test))]
     let raw_factory = production_kms_raw_signer_factory_from_options(&options).await?;
     kms_signer_assembly_from_raw_factory_with_metrics(
         signer_config,
@@ -284,7 +295,8 @@ pub async fn production_kms_raw_signer_factory_from_options(
 ) -> Result<Arc<dyn RawSignerAdapterFactory>, String> {
     match options {
         KmsSignerAdapterFactoryOptions::Aws { region } => {
-            let mut config_loader = aws_config::defaults(aws_config::BehaviorVersion::latest());
+            let mut config_loader = aws_config::defaults(aws_config::BehaviorVersion::latest())
+                .retry_config(aws_sdk_kms::config::retry::RetryConfig::disabled());
             if let Some(region) = region {
                 config_loader =
                     config_loader.region(aws_sdk_kms::config::Region::new(region.clone()));
@@ -328,8 +340,18 @@ pub async fn production_kms_raw_signer_factory_from_options(
                     None,
                 )
                 .map_err(|error| error.to_string())?;
-            let client = azure_security_keyvault_keys::KeyClient::new(vault_url, credential, None)
-                .map_err(|error| error.to_string())?;
+            let client = azure_security_keyvault_keys::KeyClient::new(
+                vault_url,
+                credential,
+                Some(azure_security_keyvault_keys::KeyClientOptions {
+                    client_options: azure_core::http::ClientOptions {
+                        retry: azure_core::http::RetryOptions::none(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                }),
+            )
+            .map_err(|error| error.to_string())?;
             Ok(Arc::new(AzureKmsRawSignerAdapterFactory::new(Arc::new(
                 AzureKeyVaultKmsClient::new(client),
             ))) as Arc<dyn RawSignerAdapterFactory>)

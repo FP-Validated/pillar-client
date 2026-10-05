@@ -67,7 +67,7 @@
         "buildULNV3VerifyPayload": "hashVerify(packetHeader, payloadHash, blockConfirmation, bytes32(target ULN), parseInt(vId), expiration)",
         "buildULNReadV1VerifyPayload": "throws 'Not implemented'"
       },
-      "currentRustBehavior": "initia and movement are supported LayerZero destinations through AptosUlnPayloadBuilder using Move-family hashVerify/hashPropose semantics",
+      "currentRustBehavior": "initia and movement are supported LayerZero destinations for V3 (V301/V302 hashVerify) through AptosUlnPayloadBuilder; ULN V2 with a vId is upstream's 500 'VId is not supported on aptos yet', with skipVId it is refused (upstream signs a utils-version-2 feather proof), and the hashPropose helper has no production caller",
       "missingBuilderBehavior": "preserve Move-family builder registration for initia and movement and the Upstream-backed Aptos rejection text"
     },
     {

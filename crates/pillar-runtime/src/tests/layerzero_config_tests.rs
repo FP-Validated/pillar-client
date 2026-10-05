@@ -6,24 +6,30 @@ use crate::layerzero_runtime::config::{
 };
 
 #[test]
-fn runtime_evm_layerzero_config_scopes_send_library_versions_by_source_chain() {
+fn runtime_evm_layerzero_config_scopes_packet_sent_bindings_by_source_chain() {
     let config = runtime_evm_layerzero_config(
         "testnet",
         &["flow".to_string(), "injective1439".to_string()],
     )
     .unwrap();
 
-    let versions = &config
+    // One address is flow's SendUln302 and injective1439's SendUln301; each chain
+    // must bind it to its own role only.
+    let bindings = &config
         .packet_sent_resolver_config
-        .uln_version_by_send_library_address_by_chain_name;
+        .packet_sent_bindings_by_chain_name;
     assert_eq!(
-        versions["flow"]["0xd682ECF100f6F4284138AA925348633B0611Ae21"],
+        bindings["flow"].endpoint_v2_send_library_versions
+            ["0xd682ECF100f6F4284138AA925348633B0611Ae21"],
         "V302"
     );
     assert_eq!(
-        versions["injective1439"]["0xd682ECF100f6F4284138AA925348633B0611Ae21"],
-        "V301"
+        bindings["injective1439"].send_uln_301.as_deref(),
+        Some("0xd682ECF100f6F4284138AA925348633B0611Ae21")
     );
+    assert!(!bindings["injective1439"]
+        .endpoint_v2_send_library_versions
+        .contains_key("0xd682ECF100f6F4284138AA925348633B0611Ae21"));
 }
 
 /// The endpoints the payload-signed check dials have to reach
@@ -91,33 +97,26 @@ fn runtime_evm_layerzero_config_builds_from_static_config() {
             "2XgGZG4oP29U3w5h4nTk1V2LFHL23zKDPJjs3psGzLKQ".to_string(),
         ])
     );
+    let ethereum = &config
+        .packet_sent_resolver_config
+        .packet_sent_bindings_by_chain_name["ethereum"];
     assert_eq!(
-        config
-            .packet_sent_resolver_config
-            .uln_version_by_send_library_address_by_chain_name["ethereum"]
-            ["0xbB2Ea70C9E858123480642Cf96acbcCE1372dCe1"],
-        "V302"
-    );
-    assert_eq!(
-        config
-            .packet_sent_resolver_config
-            .uln_version_by_send_library_address_by_chain_name["ethereum"]
-            ["0xD231084BfB234C107D3eE2b22F97F3346fDAF705"],
-        "V301"
-    );
-    assert_eq!(
-        config
-            .packet_sent_resolver_config
-            .uln_version_by_send_library_address_by_chain_name["ethereum"]
-            ["0x74F55Bc2a79A27A0bF1D1A35dB5d0Fc36b9FDB9D"],
-        "ReadV1002"
-    );
-    assert_eq!(
-        config
-            .packet_sent_resolver_config
-            .uln_version_by_send_library_address_by_chain_name["ethereum"]
-            ["0x4D73AdB72bC3DD368966edD0f0b2148401A178E2"],
-        "V2"
+        ethereum,
+        &EvmPacketSentBindings {
+            endpoint_v2: "0x1a44076050125825900e736c501f859c50fE728c".to_string(),
+            endpoint_v2_send_library_versions: HashMap::from([
+                (
+                    "0xbB2Ea70C9E858123480642Cf96acbcCE1372dCe1".to_string(),
+                    "V302".to_string()
+                ),
+                (
+                    "0x74F55Bc2a79A27A0bF1D1A35dB5d0Fc36b9FDB9D".to_string(),
+                    "ReadV1002".to_string()
+                ),
+            ]),
+            send_uln_301: Some("0xD231084BfB234C107D3eE2b22F97F3346fDAF705".to_string()),
+            uln_v2: Some("0x4D73AdB72bC3DD368966edD0f0b2148401A178E2".to_string()),
+        }
     );
     assert_eq!(
         config.receive_contracts_by_chain_name["ethereum"].receive_uln_302,
@@ -133,6 +132,26 @@ fn runtime_evm_layerzero_config_builds_from_static_config() {
     );
 }
 
+/// Aptos's EndpointV1 id names it per environment, and only Aptos: Initia and Movement
+/// have none, so a V301 packet can never name them.
+#[test]
+fn aptos_endpoint_v1_alias_is_environment_specific() {
+    let aptos = [
+        "aptos".to_string(),
+        "initia".to_string(),
+        "movement".to_string(),
+    ];
+    let mainnet = runtime_chain_name_by_endpoint_id("mainnet", &aptos).unwrap();
+    let testnet = runtime_chain_name_by_endpoint_id("testnet", &aptos).unwrap();
+    assert_eq!(mainnet.get(&108).map(String::as_str), Some("aptos"));
+    assert_eq!(testnet.get(&10_108).map(String::as_str), Some("aptos"));
+    assert!(!mainnet.contains_key(&10_108));
+    assert!(!testnet.contains_key(&108));
+    assert_ne!(mainnet.get(&108).map(String::as_str), Some("initia"));
+    assert_ne!(mainnet.get(&108).map(String::as_str), Some("movement"));
+    assert_ne!(testnet.get(&10_108).map(String::as_str), Some("initia"));
+    assert_ne!(testnet.get(&10_108).map(String::as_str), Some("movement"));
+}
 #[test]
 fn runtime_chain_name_by_endpoint_id_maps_testnet_evm_and_solana() {
     let chain_name_by_eid = runtime_chain_name_by_endpoint_id(
@@ -255,7 +274,7 @@ fn runtime_evm_layerzero_config_maps_supported_mainnet_destination_eids() {
         config
             .packet_sent_resolver_config
             .trusted_stellar_endpoint_addresses,
-        HashSet::from(["CAA4ZB7DNJ7KIZDEVDQRAZOQHYOV6U42LGBW375ZG7HIMUILA5FPXKQH".to_string()])
+        HashSet::from(["CCQLLRE5JBAWYCW3KTWOIWLMFDUOKROQVZNSALQMGOSXNW3ERUOWTZGK".to_string()])
     );
 }
 
@@ -270,8 +289,8 @@ fn runtime_evm_layerzero_config_accepts_v302_only_gensyn() {
     assert_eq!(
         config
             .packet_sent_resolver_config
-            .uln_version_by_send_library_address_by_chain_name["gensyn"]
-            ["0xC39161c743D0307EB9BCc9FEF03eeb9Dc4802de7"],
+            .packet_sent_bindings_by_chain_name["gensyn"]
+            .endpoint_v2_send_library_versions["0xC39161c743D0307EB9BCc9FEF03eeb9Dc4802de7"],
         "V302"
     );
     assert_eq!(
@@ -291,8 +310,8 @@ fn runtime_evm_layerzero_config_accepts_tempo_without_read_lib_1002() {
     assert_eq!(
         config
             .packet_sent_resolver_config
-            .uln_version_by_send_library_address_by_chain_name["tempo"]
-            ["0x572863d9247E52026E0892d9Cd2E519B41EdB73C"],
+            .packet_sent_bindings_by_chain_name["tempo"]
+            .endpoint_v2_send_library_versions["0x572863d9247E52026E0892d9Cd2E519B41EdB73C"],
         "V302"
     );
     assert_eq!(
@@ -316,8 +335,8 @@ fn runtime_evm_layerzero_config_resolves_moderato_testnet() {
     assert_eq!(
         config
             .packet_sent_resolver_config
-            .uln_version_by_send_library_address_by_chain_name["moderato"]
-            ["0x91ec94dd5E949BdB2ecE3b91B9602EC5F7F59FFD"],
+            .packet_sent_bindings_by_chain_name["moderato"]
+            .endpoint_v2_send_library_versions["0x91ec94dd5E949BdB2ecE3b91B9602EC5F7F59FFD"],
         "V302"
     );
     assert_eq!(

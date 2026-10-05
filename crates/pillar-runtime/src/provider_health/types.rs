@@ -58,6 +58,7 @@ pub(crate) struct UlnV2HashInfoObservation {
 pub(crate) struct UlnV2InboundProofTypeObservation {
     pub(crate) fingerprint: String,
     pub(crate) proof_type: String,
+    pub(crate) utils_version: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

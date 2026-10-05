@@ -7,7 +7,6 @@ fn runtime_extra_context_config_builds_from_runtime_config() {
         provider_config_type: pillar_config::ProviderConfigType::LOCAL,
         environment: Some("mainnet".to_string()),
         available_chain_names: Some(vec!["ethereum".to_string()]),
-        supported_uln_versions: vec!["V2".to_string(), "V301".to_string()],
         debug_mode: false,
         extra_context_request_url: Some("https://policy.example/extra".to_string()),
         extra_context_request_auth_token: Some("secret-token".to_string()),
@@ -18,6 +17,9 @@ fn runtime_extra_context_config_builds_from_runtime_config() {
         public_sign_routes: false,
         max_connections: 1024,
         shutdown_grace_seconds: 25,
+        shutdown_withdrawal: std::time::Duration::from_secs(5),
+        execution_limits: pillar_config::ExecutionLimits::default(),
+        audit: None,
     };
 
     assert_eq!(
@@ -161,16 +163,16 @@ async fn runtime_rpc_validation_checks_reads_latest_evm_block_timestamp() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "bsc".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::UriWithHeaders {
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::UriWithHeaders {
                     uri: "https://bsc-rpc.example".to_string(),
                     headers: HashMap::from([(
                         "authorization".to_string(),
                         "Bearer token".to_string(),
                     )]),
                 }],
-                quorum: Some(1),
-            },
+                1,
+            ),
         )]),
         Some(&["bsc".to_string()]),
     )
@@ -223,10 +225,10 @@ async fn runtime_rpc_validation_checks_reads_solana_block_time_via_slot() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "solana".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["solana".to_string()]),
     )
@@ -284,10 +286,10 @@ async fn runtime_rpc_validation_checks_normalizes_millisecond_timestamps() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "seismic".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://seismic-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://seismic-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["seismic".to_string()]),
     )
@@ -325,14 +327,14 @@ async fn runtime_rpc_validation_checks_requires_validity_quorum() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "bsc".to_string(),
-            ProviderConfig {
-                uris: vec![
+            ProviderConfig::with_distinct_entities(
+                vec![
                     ProviderUri::Uri("https://bsc-a.example".to_string()),
                     ProviderUri::Uri("https://bsc-b.example".to_string()),
                     ProviderUri::Uri("https://bsc-c.example".to_string()),
                 ],
-                quorum: Some(2),
-            },
+                2,
+            ),
         )]),
         Some(&["bsc".to_string()]),
     )
@@ -364,13 +366,13 @@ async fn runtime_rpc_validation_checks_rejects_missing_validity_quorum() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "bsc".to_string(),
-            ProviderConfig {
-                uris: vec![
+            ProviderConfig::with_distinct_entities(
+                vec![
                     ProviderUri::Uri("https://bsc-a.example".to_string()),
                     ProviderUri::Uri("https://bsc-b.example".to_string()),
                 ],
-                quorum: Some(2),
-            },
+                2,
+            ),
         )]),
         Some(&["bsc".to_string()]),
     )

@@ -9,10 +9,10 @@ async fn runtime_layerzero_parts_routes_non_evm_destinations_to_registered_build
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "ethereum".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://eth-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://eth-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["ethereum".to_string()]),
     )
@@ -75,9 +75,6 @@ async fn runtime_layerzero_parts_routes_non_evm_destinations_to_registered_build
         "0x0727f40349719ac76861a51a0b3d3e07be1577fff137bb81a5dc32e5a5c61d38"
     );
 
-    // Stellar routes to a registered builder like its neighbours, but that
-    // builder refuses: the pinned ULN302 was confirmed on chain to be a
-    // superseded generation, and it is hashed into the attestation.
     let stellar = hash_builders[ULN_VERSION_V302]
         .build_dvn_hash_call_data(
             &non_evm_sent_event("stellar", 30_600),
@@ -89,12 +86,12 @@ async fn runtime_layerzero_parts_routes_non_evm_destinations_to_registered_build
             },
         )
         .await
-        .expect_err("an unconfirmed destination deployment must not produce a payload");
-    assert!(
-        format!("{stellar:?}").contains("stellar deployment for mainnet is unconfirmed"),
-        "expected the provenance refusal, got {stellar:?}"
+        .expect("generation-2 Stellar deployment is the configured target");
+    assert_eq!(
+        stellar.details["dvnCallData"]["targetContract"],
+        crate::layerzero_runtime::config::stellar_uln_302_for_environment("mainnet").unwrap()
     );
-
+    assert_eq!(stellar.details["ulnCallData"]["methodName"], "verify");
     let ton_error = hash_builders[ULN_VERSION_V302]
         .build_dvn_hash_call_data(
             &non_evm_sent_event("ton", 30_300),
@@ -132,10 +129,10 @@ async fn runtime_layerzero_parts_wires_starknet_and_stellar_on_testnet() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "sepolia".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://eth-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://eth-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["sepolia".to_string()]),
     )
@@ -186,15 +183,13 @@ async fn runtime_layerzero_parts_wires_starknet_and_stellar_on_testnet() {
         "0x0706572d6f7b938c813a20dc1b0328b83de939066e25bd0fbe14c270077f769d"
     );
 
-    // Testnet was redeployed too, and later than mainnet, so the refusal is not
-    // a mainnet-only rule.
     let stellar = hash_builders[ULN_VERSION_V302]
         .build_dvn_hash_call_data(&non_evm_sent_event("stellar", 40_600), &context())
         .await
-        .expect_err("an unconfirmed destination deployment must not produce a payload");
-    assert!(
-        format!("{stellar:?}").contains("stellar deployment for testnet is unconfirmed"),
-        "expected the provenance refusal, got {stellar:?}"
+        .expect("generation-2 Stellar deployment is configured on testnet");
+    assert_eq!(
+        stellar.details["dvnCallData"]["targetContract"],
+        crate::layerzero_runtime::config::stellar_uln_302_for_environment("testnet").unwrap()
     );
 }
 

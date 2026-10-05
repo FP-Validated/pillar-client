@@ -108,6 +108,9 @@ impl ProviderRankTracker {
     pub(crate) async fn seed_from_report(&self, report: &ProviderHealthReport) {
         for (chain_name, chain_report) in report.iter() {
             for entry in &chain_report.providers {
+                if !entry.observed {
+                    continue;
+                }
                 self.record(chain_name, &entry.rank_key, entry.healthy, entry.latency_ms)
                     .await;
             }

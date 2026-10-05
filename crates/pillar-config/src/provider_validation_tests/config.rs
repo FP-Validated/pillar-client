@@ -1,5 +1,6 @@
 use super::*;
 
+// Upstream providerValidate.test.ts › validateProviderConfig › “passes for a valid config”.
 #[test]
 fn passes_for_a_valid_config() {
     let file = providers(BTreeMap::new());
@@ -11,6 +12,7 @@ fn passes_for_a_valid_config() {
     );
 }
 
+// Upstream providerValidate.test.ts › validateProviderConfig › “throws for missing uri”.
 #[test]
 fn throws_for_missing_uri() {
     let file = providers(rpc_entries(vec![entry(
@@ -22,6 +24,7 @@ fn throws_for_missing_uri() {
     assert!(err.to_string().contains(r#"missing required "uri""#));
 }
 
+// Upstream providerValidate.test.ts › validateProviderConfig › “throws for missing category”.
 #[test]
 fn throws_for_missing_category() {
     let file = providers(rpc_entries(vec![entry(
@@ -33,6 +36,7 @@ fn throws_for_missing_category() {
     assert!(err.to_string().contains(r#"missing required "category""#));
 }
 
+// Upstream providerValidate.test.ts › validateProviderConfig › “throws for unknown category”.
 #[test]
 fn throws_for_unknown_category() {
     let file = providers(rpc_entries(vec![entry(
@@ -46,6 +50,7 @@ fn throws_for_unknown_category() {
         .contains(r#"unknown category "private_cloud""#));
 }
 
+// Upstream providerValidate.test.ts › validateProviderConfig › “throws for missing entity”.
 #[test]
 fn throws_for_missing_entity() {
     let file = providers(rpc_entries(vec![entry(
@@ -57,6 +62,7 @@ fn throws_for_missing_entity() {
     assert!(err.to_string().contains(r#"missing required "entity""#));
 }
 
+// Upstream providerValidate.test.ts › validateProviderConfig › “throws for ADD_ENTITY placeholder”.
 #[test]
 fn throws_for_add_entity_placeholder() {
     let file = providers(rpc_entries(vec![entry(
@@ -71,6 +77,7 @@ fn throws_for_add_entity_placeholder() {
         .contains("not in the registered entities list"));
 }
 
+// Upstream providerValidate.test.ts › validateProviderConfig › “throws for entity not in registered list”.
 #[test]
 fn throws_for_entity_not_in_registered_list() {
     let file = providers(rpc_entries(vec![entry(
@@ -85,6 +92,7 @@ fn throws_for_entity_not_in_registered_list() {
         .contains("not in the registered entities list"));
 }
 
+// Upstream providerValidate.test.ts › validateProviderConfig › “aggregates multiple errors into a single throw”.
 #[test]
 fn aggregates_multiple_errors_into_a_single_throw() {
     let file = providers(rpc_entries(vec![

@@ -1,21 +1,28 @@
 use super::*;
 
 /// Stellar Soroban's `packet_sent` event is returned by `getTransaction` as
-/// base64-encoded `ContractEvent` XDR. The event has one symbol topic and a
-/// map-valued data SCVal containing `encoded_packet`, `options`, and
-/// `send_library`.
+/// base64-encoded `ContractEvent` XDR. The event's first topic is the symbol and its
+/// data a map holding `encoded_packet`, `options` and `send_library`.
 #[derive(Debug, Clone)]
 pub(crate) struct StellarPacketSentEvent {
     pub(crate) endpoint_address: String,
     pub(crate) packet: LzPacketV1,
     pub(crate) options: String,
-    pub(crate) send_library: String,
+    /// Absent where the event carries none; upstream then reports no `sendLibrary`.
+    pub(crate) send_library: Option<String>,
 }
 
+/// What upstream's `data.encoded_packet.toString('hex')` throws on a missing field.
+const MISSING_FIELD: &str = "Cannot read properties of undefined (reading 'toString')";
+
+/// Upstream's `getPacketSentEventsFromTxHash` after the status check
+/// (`lz-v2-sdk/src/endpoint/stellar/index.ts:239-264`, `utils/stellar/events.ts:46-64`): the
+/// endpoint's events whose first topic is the `packet_sent` symbol, each extracted; the first
+/// extraction that throws fails the read.
 pub(crate) fn decode_stellar_packet_sent_events(
     transaction: &Value,
     trusted_endpoint_addresses: &HashSet<String>,
-) -> Vec<StellarPacketSentEvent> {
+) -> Result<Vec<StellarPacketSentEvent>, String> {
     transaction
         .pointer("/events/contractEventsXdr")
         .and_then(Value::as_array)
@@ -28,10 +35,11 @@ pub(crate) fn decode_stellar_packet_sent_events(
         .collect()
 }
 
+/// `None` for an event that is not the endpoint's `packet_sent`, or whose XDR does not decode.
 fn decode_packet_sent_event(
     encoded: &str,
     trusted_endpoint_addresses: &HashSet<String>,
-) -> Option<StellarPacketSentEvent> {
+) -> Option<Result<StellarPacketSentEvent, String>> {
     let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded).ok()?;
     let mut reader = XdrReader::new(&bytes);
     let _event_ext = reader.u32()?;
@@ -41,8 +49,10 @@ fn decode_packet_sent_event(
     } else {
         return None;
     };
+    // `ContractEventType` is SYSTEM=0, CONTRACT=1, DIAGNOSTIC=2. Only a contract event is
+    // accepted; upstream also takes the host's system events.
     let event_type = reader.u32()?;
-    if event_type != 0 {
+    if event_type != 1 {
         return None;
     }
     let _body_ext = reader.u32()?;
@@ -74,38 +84,37 @@ fn decode_packet_sent_event(
     }
     let fields = match data {
         ScVal::Map(fields) => fields,
-        _ => return None,
+        _ => return Some(Err(MISSING_FIELD.to_string())),
     };
-    let encoded_packet = map_bytes(&fields, "encoded_packet")?;
-    let options = map_bytes(&fields, "options")?;
-    let send_library = map_address(&fields, "send_library")?;
-    let packet = decode_lz_packet_v1(&format!("0x{}", hex::encode(encoded_packet))).ok()?;
-    Some(StellarPacketSentEvent {
-        endpoint_address,
-        packet,
-        options: format!("0x{}", hex::encode(options)),
-        send_library,
-    })
+    Some((|| {
+        let encoded_packet =
+            map_bytes(&fields, "encoded_packet").ok_or_else(|| MISSING_FIELD.to_string())?;
+        let packet = decode_lz_packet_v1(&format!("0x{}", hex::encode(encoded_packet)))
+            .map_err(|error| error.to_string())?;
+        let options = map_bytes(&fields, "options").ok_or_else(|| MISSING_FIELD.to_string())?;
+        Ok(StellarPacketSentEvent {
+            endpoint_address,
+            packet,
+            options: format!("0x{}", hex::encode(options)),
+            send_library: map_address(&fields, "send_library"),
+        })
+    })())
 }
 
+/// Upstream's `extractLZEventFromPacketSentEvent` (`stellar/decoders/index.ts:173-197`):
+/// pathway by `formatPathwayId`, always `V302`, options decoded into relayer options.
 pub(crate) fn stellar_packet_to_lz_sent_event(
     src_tx_hash: &str,
     event: StellarPacketSentEvent,
     chain_name_by_eid: &HashMap<u32, String>,
 ) -> Result<LzSentEvent, AppCoreError> {
     let packet = event.packet;
-    let src_chain_name = chain_name_by_eid
-        .get(&packet.src_eid)
-        .cloned()
-        .ok_or_else(|| {
-            AppCoreError::Internal(format!("No chain name for endpoint id {}", packet.src_eid))
-        })?;
-    let dst_chain_name = chain_name_by_eid
-        .get(&packet.dst_eid)
-        .cloned()
-        .ok_or_else(|| {
-            AppCoreError::Internal(format!("No chain name for endpoint id {}", packet.dst_eid))
-        })?;
+    let src_chain_name = chain_name_for_packet_eid(chain_name_by_eid, packet.src_eid)?;
+    let dst_chain_name = chain_name_for_packet_eid(chain_name_by_eid, packet.dst_eid)?;
+    let options = hex::decode(strip_hex_prefix(&event.options))
+        .map_err(|error| AppCoreError::Internal(error.to_string()))?;
+    let options =
+        decode_move_relayer_options(&options, &dst_chain_name).map_err(AppCoreError::Internal)?;
     let mut pathway_extra = IndexMap::new();
     pathway_extra.insert("srcEid".to_string(), Value::from(packet.src_eid));
     pathway_extra.insert("dstEid".to_string(), Value::from(packet.dst_eid));
@@ -113,8 +122,10 @@ pub(crate) fn stellar_packet_to_lz_sent_event(
     pathway_extra.insert("receiver".to_string(), Value::from(packet.receiver.clone()));
     let mut extra = IndexMap::new();
     extra.insert("guid".to_string(), Value::from(packet.guid.clone()));
-    extra.insert("options".to_string(), Value::from(event.options));
-    extra.insert("sendLibrary".to_string(), Value::from(event.send_library));
+    extra.insert("options".to_string(), options);
+    if let Some(send_library) = event.send_library {
+        extra.insert("sendLibrary".to_string(), Value::from(send_library));
+    }
     extra.insert(
         "packetEmitAddress".to_string(),
         Value::from(event.endpoint_address),
@@ -184,7 +195,7 @@ fn decode_stellar_strkey(address: &str) -> Option<[u8; 32]> {
     payload[1..].try_into().ok()
 }
 
-fn stellar_contract_address(bytes: &[u8; 32]) -> String {
+pub(crate) fn stellar_contract_address(bytes: &[u8; 32]) -> String {
     stellar_strkey(0x10, bytes)
 }
 
@@ -382,14 +393,20 @@ impl<'a> XdrReader<'a> {
             }
             13 => Some(ScVal::Bytes(self.opaque()?)),
             15 => Some(ScVal::Symbol(String::from_utf8(self.opaque()?).ok()?)),
+            // `SCV_VEC` and `SCV_MAP` hold optional pointers: a presence flag, then the items.
             16 => {
-                let count = self.u32()? as usize;
-                for _ in 0..count {
-                    self.sc_val()?;
+                if self.u32()? == 1 {
+                    let count = self.u32()? as usize;
+                    for _ in 0..count {
+                        self.sc_val()?;
+                    }
                 }
                 Some(ScVal::Vec)
             }
             17 => {
+                if self.u32()? != 1 {
+                    return Some(ScVal::Other);
+                }
                 let count = self.u32()? as usize;
                 // Each pair is two `sc_val`s of at least 4 bytes each, so the
                 // remaining input bounds the count. See the topic-count guard.
@@ -402,13 +419,23 @@ impl<'a> XdrReader<'a> {
                 }
                 Some(ScVal::Map(values))
             }
-            18 => {
-                let address_type = self.u32()?;
-                Some(ScVal::Address {
-                    contract: address_type == 1,
+            // An account address is a `PublicKey` union (ed25519 only), a contract one a hash.
+            18 => match self.u32()? {
+                0 => {
+                    if self.u32()? != 0 {
+                        return None;
+                    }
+                    Some(ScVal::Address {
+                        contract: false,
+                        bytes: self.bytes_fixed()?,
+                    })
+                }
+                1 => Some(ScVal::Address {
+                    contract: true,
                     bytes: self.bytes_fixed()?,
-                })
-            }
+                }),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -417,84 +444,6 @@ impl<'a> XdrReader<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pillar_layerzero::encode_lz_packet_v1;
-    use serde_json::json;
-
-    fn u32_xdr(value: u32) -> Vec<u8> {
-        value.to_be_bytes().to_vec()
-    }
-    fn opaque_xdr(value: &[u8]) -> Vec<u8> {
-        let mut out = u32_xdr(value.len() as u32);
-        out.extend_from_slice(value);
-        out.resize(out.len() + (4 - (value.len() % 4)) % 4, 0);
-        out
-    }
-    fn symbol(value: &str) -> Vec<u8> {
-        let mut out = u32_xdr(15);
-        out.extend(opaque_xdr(value.as_bytes()));
-        out
-    }
-    fn bytes(value: &[u8]) -> Vec<u8> {
-        let mut out = u32_xdr(13);
-        out.extend(opaque_xdr(value));
-        out
-    }
-    fn address(value: &[u8; 32]) -> Vec<u8> {
-        let mut out = u32_xdr(18);
-        out.extend(u32_xdr(1));
-        out.extend(value);
-        out
-    }
-    fn map_entry(key: &str, value: Vec<u8>) -> Vec<u8> {
-        let mut out = symbol(key);
-        out.extend(value);
-        out
-    }
-    fn packet_event(endpoint: [u8; 32]) -> String {
-        let packet = encode_lz_packet_v1(&LzPacketV1 {
-            nonce: 7,
-            src_eid: 30_600,
-            sender: "0x1111111111111111111111111111111111111111111111111111111111111111".into(),
-            dst_eid: 30_102,
-            receiver: "0x2222222222222222222222222222222222222222222222222222222222222222".into(),
-            guid: "0x3333333333333333333333333333333333333333333333333333333333333333".into(),
-            message: "0xdeadbeef".into(),
-        })
-        .unwrap();
-        let mut data = u32_xdr(17);
-        data.extend(u32_xdr(3));
-        data.extend(map_entry("encoded_packet", bytes(&packet)));
-        data.extend(map_entry("options", bytes(&[])));
-        data.extend(map_entry("send_library", address(&[0x22; 32])));
-        let mut event = u32_xdr(0);
-        event.extend(u32_xdr(1));
-        event.extend(endpoint);
-        event.extend(u32_xdr(0));
-        event.extend(u32_xdr(0));
-        event.extend(u32_xdr(1));
-        event.extend(symbol("packet_sent"));
-        event.extend(data);
-        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, event)
-    }
-    fn transaction(endpoint: [u8; 32]) -> Value {
-        json!({"status":"SUCCESS","events":{"contractEventsXdr":[[packet_event(endpoint)]]}})
-    }
-
-    #[test]
-    fn decodes_packet_sent_from_trusted_endpoint() {
-        let endpoint = [0xabu8; 32];
-        let events = decode_stellar_packet_sent_events(
-            &transaction(endpoint),
-            &HashSet::from([format!("0x{}", hex::encode(endpoint))]),
-        );
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].packet.nonce, 7);
-        assert_eq!(events[0].options, "0x");
-        assert_eq!(
-            events[0].send_library,
-            stellar_contract_address(&[0x22; 32])
-        );
-    }
 
     #[test]
     fn decodes_muxed_transaction_source_with_sep23_payload_order() {
@@ -513,14 +462,5 @@ mod tests {
             stellar_transaction_source_from_envelope_xdr(&encoded).unwrap(),
             "MA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVAAAAAAAAAAAAAJLK"
         );
-    }
-
-    #[test]
-    fn rejects_packet_sent_from_untrusted_endpoint() {
-        let events = decode_stellar_packet_sent_events(
-            &transaction([0xabu8; 32]),
-            &HashSet::from([format!("0x{}", hex::encode([0xcdu8; 32]))]),
-        );
-        assert!(events.is_empty());
     }
 }

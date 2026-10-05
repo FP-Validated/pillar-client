@@ -21,3 +21,4 @@ sha3.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+parking_lot.workspace = true

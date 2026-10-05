@@ -9,10 +9,10 @@ async fn runtime_layerzero_parts_routes_sui_iotamove_v302_like_upstream() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "ethereum".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://eth-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://eth-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["ethereum".to_string()]),
     )

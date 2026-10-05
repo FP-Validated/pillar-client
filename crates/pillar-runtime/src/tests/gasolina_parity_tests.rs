@@ -13,13 +13,104 @@ fn gasolina_parity_json(name: &str) -> String {
     })
 }
 
-/// The vId is packed into every signed DVN call data, so it is not enough for it
-/// to look like upstream's: it has to be upstream's. The fixture is what
-/// `@monorepo/static-config`'s `getVId` returns for the same chain names, and
-/// the assertion is exhaustive in both directions so a chain appearing or
-/// disappearing is a failure rather than a silently skipped row.
+/// `calculate_guid` against guids EndpointV2 itself wrote into recorded mainnet
+/// and testnet `PacketSent` events. A V2 send migrated to ReceiveUln301 is signed
+/// over this guid, so it has to be the contract's `GUID.generate`, not a lookalike.
+/// The two Solana receivers are base58; the guid helper is hex-only because V2
+/// sends only ever come from EVM-shaped chains.
 #[test]
-fn v_id_by_chain_name_matches_upstream_for_every_available_chain() {
+fn calculate_guid_reproduces_the_guids_endpoint_v2_emitted() {
+    let fixture: Value = serde_json::from_str(&gasolina_parity_json("historical_smoke.json"))
+        .expect("fixture parses");
+    let mut compared = 0;
+    let mut skipped = Vec::new();
+    for pathway in fixture["pathways"].as_array().expect("pathways") {
+        let event = &pathway["normalizedEvent"];
+        let id = &event["lzMessageId"]["pathwayId"];
+        let receiver = id["receiver"].as_str().unwrap();
+        if !receiver.starts_with("0x") {
+            skipped.push(id["dstChainName"].as_str().unwrap().to_string());
+            continue;
+        }
+        let guid = pillar_core::calculate_guid(
+            event["lzMessageId"]["nonce"].as_u64().unwrap(),
+            u32::try_from(id["srcEid"].as_u64().unwrap()).unwrap(),
+            id["sender"].as_str().unwrap(),
+            u32::try_from(id["dstEid"].as_u64().unwrap()).unwrap(),
+            receiver,
+        )
+        .unwrap();
+        assert_eq!(guid, event["guid"].as_str().unwrap(), "{id}");
+        compared += 1;
+    }
+    assert_eq!((compared, skipped), (14, vec!["solana".to_string(); 2]));
+}
+
+/// Replays `legacy_message_id.json`: upstream's own `App.signRequestV1` conversion
+/// of a v1 `lzMessageId` (parseInt, lz-definitions' `getNetworkForChainId`,
+/// `toString`) through the production resolver. The one recorded residual is a
+/// nonce JavaScript keeps as NaN, negative or past 2^64, which the typed nonce
+/// cannot hold and refuses.
+#[test]
+fn legacy_message_ids_convert_like_upstreams_sign_request_v1() {
+    let fixture: Value = serde_json::from_str(&gasolina_parity_json("legacy_message_id.json"))
+        .expect("fixture parses");
+    let mut mismatches = Vec::new();
+    for (name, case) in fixture["cases"].as_object().expect("cases") {
+        let legacy: pillar_core::LegacyLzMessageId =
+            serde_json::from_value(case["lzMessageId"].clone()).expect("lzMessageId parses");
+        let actual = pillar_core::legacy_lz_message_id(
+            &RuntimeLegacyChainNameResolver,
+            &legacy,
+            Value::from("V2"),
+        );
+        let expected = &case["result"];
+        match (&actual, expected["error"].as_str()) {
+            (Err(error), Some(message)) if error.to_string() == message => {}
+            (Err(AppCoreError::BadRequest(message)), None)
+                if message.contains("is not a uint64")
+                    && !expected["nonce"]
+                        .as_u64()
+                        .is_some_and(|nonce| nonce < u64::MAX) => {}
+            (Ok(id), None) => {
+                let pathway = &expected["pathwayId"];
+                let got = json!({
+                    "srcEid": id.pathway_id.extra.get("srcEid"),
+                    "dstEid": id.pathway_id.extra.get("dstEid"),
+                    "srcChainName": id.pathway_id.src_chain_name,
+                    "dstChainName": id.pathway_id.dst_chain_name,
+                    "sender": id.pathway_id.extra.get("sender"),
+                    "receiver": id.pathway_id.extra.get("receiver"),
+                });
+                if &got != pathway || expected["nonce"] != id.nonce {
+                    mismatches.push(format!(
+                        "{name}: got {got} nonce {}, upstream {expected}",
+                        id.nonce
+                    ));
+                }
+            }
+            _ => mismatches.push(format!("{name}: got {actual:?}, upstream {expected}")),
+        }
+    }
+    assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+}
+
+/// Testnet chains whose EndpointV1 id differs from `V2 % 30000`, where this service
+/// signs the V1 id and upstream `213cd500` signs the folded V2 id.
+const V_ID_DIVERGENCES: [(&str, &str, &str); 4] = [
+    ("doma", "10423", "10425"),
+    ("lineasep", "10286", "10287"),
+    ("scroll", "10214", "10170"),
+    ("zksyncsep", "10248", "10305"),
+];
+
+/// The vId is packed into every signed DVN call data. The fixture is what
+/// `@offchain-monorepo/static-config`'s `getVId` returns at `213cd500` for this
+/// service's available union; every chain must match it except the listed divergences,
+/// and the assertion is exhaustive in both directions so a chain appearing, disappearing
+/// or newly diverging is a failure rather than a silently skipped row.
+#[test]
+fn v_id_by_chain_name_matches_upstream_except_where_onchain_dvns_disagree() {
     let fixture: Value = serde_json::from_str(&gasolina_parity_json("v_id_by_chain_name.json"))
         .expect("fixture parses");
     let expected_by_environment = fixture["vIdByChainName"]
@@ -32,10 +123,24 @@ fn v_id_by_chain_name_matches_upstream_for_every_available_chain() {
         let actual = runtime_v_id_by_chain_name(environment, &chain_names).unwrap();
 
         for (chain_name, upstream_v_id) in expected {
+            let divergence = V_ID_DIVERGENCES
+                .iter()
+                .find(|(name, ..)| environment == "testnet" && name == chain_name);
+            let wanted = match divergence {
+                Some((_, endpoint_v1, folded)) => {
+                    assert_eq!(
+                        upstream_v_id.as_str(),
+                        Some(*folded),
+                        "{chain_name} upstream"
+                    );
+                    *endpoint_v1
+                }
+                None => upstream_v_id.as_str().expect("vId is a string"),
+            };
             assert_eq!(
                 actual.get(chain_name).map(String::as_str),
-                upstream_v_id.as_str(),
-                "vId disagrees with upstream for {environment}/{chain_name}"
+                Some(wanted),
+                "vId for {environment}/{chain_name}"
             );
         }
         let mut unexpected = actual
@@ -50,38 +155,47 @@ fn v_id_by_chain_name_matches_upstream_for_every_available_chain() {
     }
 }
 
-/// The five chains that make this a correctness fix rather than a refactor.
-/// Upstream reads the EndpointV1 id; folding the V2 id into the V1 range - the
-/// arithmetic this service used to do - lands somewhere else entirely for each
-/// of them, and all five are deployed on testnet.
+/// What the deployed LayerZero Labs DVNs enforce, read on chain: the signed vId for
+/// these chains must be the value their `vid()` returns.
 #[test]
-fn v_id_reads_the_endpoint_v1_id_where_folding_the_v2_id_would_diverge() {
+fn v_id_equals_the_vid_deployed_dvns_enforce() {
+    let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("tests/onchain_provenance/dvn_vid.json");
+    let provenance: Value =
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).expect("provenance parses");
     let chain_names = pillar_config::layerzero_available_chain_names("testnet").unwrap();
     let table = runtime_v_id_by_chain_name("testnet", &chain_names).unwrap();
 
-    for (chain_name, endpoint_v1, folded_endpoint_v2) in [
-        ("doma", "10423", "10425"),
-        ("dos", "10162", "10286"),
-        ("lineasep", "10286", "10287"),
-        ("scroll", "10214", "10170"),
-        ("zksyncsep", "10248", "10305"),
-    ] {
+    let mut checked = std::collections::BTreeSet::new();
+    for observation in provenance["observations"].as_array().unwrap() {
+        let chain_name = observation["chain"].as_str().unwrap();
+        let onchain_vid = observation["vid"].as_u64().unwrap().to_string();
         assert_eq!(
-            table.get(chain_name).map(String::as_str),
-            Some(endpoint_v1),
-            "{chain_name} must sign with its EndpointV1 id"
+            table.get(chain_name),
+            Some(&onchain_vid),
+            "{chain_name} DVN {} enforces vid {onchain_vid}",
+            observation["dvn"]
         );
-        assert_ne!(
-            table.get(chain_name).map(String::as_str),
-            Some(folded_endpoint_v2),
-            "{chain_name} must not sign with the folded V2 id"
-        );
+        checked.insert(chain_name);
     }
+    assert_eq!(
+        checked.into_iter().collect::<Vec<_>>(),
+        ["doma", "lineasep", "zksyncsep"]
+    );
+    // Scroll's EndpointV1 id is a corrected input, not an on-chain fact; it must stay
+    // named until a vid() read replaces it.
+    let unverified: Vec<&str> = provenance["unverified"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["chain"].as_str().unwrap())
+        .collect();
+    assert_eq!(unverified, ["scroll"]);
+    assert_eq!(table.get("scroll").map(String::as_str), Some("10214"));
 }
 
-/// Non-EVM chains have no EndpointV1 id, which is exactly when upstream folds the
-/// V2 id instead. Verified against `getVId` in the fixture above; named here so
-/// the second branch is not silently lost if the first one is broadened.
+/// Non-EVM chains have no EndpointV1 id and take their V2 id from the non-EVM table,
+/// not the generated EVM one. Verified against `getVId` in the fixture above.
 #[test]
 fn v_id_folds_the_v2_id_for_chains_without_an_endpoint_v1_id() {
     let chain_names = pillar_config::layerzero_available_chain_names("mainnet").unwrap();
@@ -174,10 +288,10 @@ async fn evm_signing_path_matches_gasolina_for_the_same_packet_sent_log() {
         let getter = StaticProviderConfig::new(
             IndexMap::from([(
                 src_chain_name.to_string(),
-                ProviderConfig {
-                    uris: vec![ProviderUri::Uri("https://src.example/".to_string())],
-                    quorum: Some(1),
-                },
+                ProviderConfig::with_distinct_entities(
+                    vec![ProviderUri::Uri("https://src.example/".to_string())],
+                    1,
+                ),
             )]),
             None,
         )
@@ -335,7 +449,7 @@ fn signer_path(chain_type: &str) -> &'static str {
 
 /// A real local-mnemonic signer for one destination chain, so the smoke can show the
 /// hash reaching the signer stage rather than stopping at the builder.
-async fn historical_signer(
+pub(super) async fn historical_signer(
     chain_name: &str,
     chain_type: &str,
 ) -> Result<LocalMnemonicSignerAssembly, String> {
@@ -404,7 +518,7 @@ fn felts(rendered: &str) -> Vec<String> {
         .collect()
 }
 
-/// The read-only smoke plan Unit 6 asks for (`docs/plans/2026-08-24-gasolina-mainnet-testnet-parity-plan.md:282-289`):
+/// The read-only historical smoke comparison:
 /// known historical `PacketSent` transactions, at least one pathway per destination
 /// chain family, on both environments, put through each service's public signing
 /// path and compared on the normalized event, the target contract and the hash
@@ -474,6 +588,7 @@ async fn historical_service_app(
     already_signed: bool,
     available: Vec<String>,
     signer_calls: Arc<std::sync::atomic::AtomicUsize>,
+    debug_mode: bool,
 ) -> Result<(CoreApiApp, Arc<dyn SentEventResolver>), String> {
     let chain_names = [src_chain_name.to_string(), dst_chain_name.to_string()];
     // A TON destination reads its DVN proxy's account state before it can name the
@@ -483,19 +598,19 @@ async fn historical_service_app(
     let mut provider_chains = vec![src_chain_name.to_string()];
     let mut providers = IndexMap::from([(
         src_chain_name.to_string(),
-        ProviderConfig {
-            uris: vec![ProviderUri::Uri("https://src.example/".to_string())],
-            quorum: Some(1),
-        },
+        ProviderConfig::with_distinct_entities(
+            vec![ProviderUri::Uri("https://src.example/".to_string())],
+            1,
+        ),
     )]);
     if dvn_state.is_some() {
         provider_chains.push(dst_chain_name.to_string());
         providers.insert(
             dst_chain_name.to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://dst.example/".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://dst.example/".to_string())],
+                1,
+            ),
         );
     }
     let getter = StaticProviderConfig::new(providers, Some(&provider_chains))
@@ -534,7 +649,6 @@ async fn historical_service_app(
     let dependencies = runtime_core_dependencies_from_layerzero_parts(
         parts,
         runtime_v_id_by_chain_name(environment, &chain_names).map_err(|e| format!("{e:?}"))?,
-        &[ULN_VERSION_V302.to_string()],
     );
     let mut provider_health = ProviderHealthSnapshot::new();
     provider_health.insert(src_chain_name.to_string(), true);
@@ -546,8 +660,7 @@ async fn historical_service_app(
                 provider_config_type: pillar_config::ProviderConfigType::LOCAL,
                 environment: Some(environment.to_string()),
                 available_chain_names: Some(available.clone()),
-                supported_uln_versions: vec![ULN_VERSION_V302.to_string()],
-                debug_mode: true,
+                debug_mode,
                 extra_context_request_url: None,
                 extra_context_request_auth_token: None,
                 extra_context_aws_lambda_name: None,
@@ -557,6 +670,9 @@ async fn historical_service_app(
                 public_sign_routes: false,
                 max_connections: 16,
                 shutdown_grace_seconds: 5,
+                shutdown_withdrawal: std::time::Duration::from_secs(1),
+                execution_limits: pillar_config::ExecutionLimits::default(),
+                audit: None,
             },
             available_chain_names: Arc::new(available),
             wallets_by_chain_name: HashMap::from([(
@@ -613,17 +729,27 @@ impl RuntimeValidationChecks for ParityChecks {
         dst_chain_name: &str,
     ) -> Result<(), AppCoreError> {
         if self.already_signed {
-            return Err(AppCoreError::BadRequest(format!(
-                "{} for message {:?} on chain {dst_chain_name}",
-                pillar_core::PAYLOAD_ALREADY_SIGNED_ERROR_PREFIX,
-                sent_event.lz_message_id
-            )));
+            // The production refusal, so the HTTP comparison covers its text.
+            return crate::layerzero_runtime::payload_signed_validation_result(
+                crate::provider_health::PayloadSignedValidity::Signed,
+                sent_event,
+                dst_chain_name,
+            );
         }
         Ok(())
     }
 
     async fn validate_extra_context(&self, _sent_event: &LzSentEvent) -> Result<(), AppCoreError> {
         Ok(())
+    }
+
+    async fn uln_receive_version(
+        &self,
+        _lz_message_id: &LzMessageId,
+    ) -> Result<String, AppCoreError> {
+        Err(AppCoreError::Internal(
+            "the historical corpus carries no V2 sends".to_string(),
+        ))
     }
 }
 
@@ -665,40 +791,17 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
 
     let mut compared: Vec<String> = Vec::new();
     let mut skipped: Vec<String> = Vec::new();
-    let mut blocked: Vec<String> = Vec::new();
     // Collected rather than asserted one at a time: when a shared encoder breaks, the
     // useful output is every pathway it broke, not the alphabetically first one.
     let mut mismatches: Vec<String> = Vec::new();
     let mut signed: Vec<String> = Vec::new();
     let mut rejected: Vec<String> = Vec::new();
-    let mut policy_refused: Vec<String> = Vec::new();
-
-    // Upstream signs these and a real receipt exists for them, so they are not
-    // absent from the acceptance matrix below - they are refused on purpose.
-    // The pinned Stellar ULN302 was confirmed on chain (2026-08-28) to be a
-    // superseded generation, and that id is hashed into the attestation rather
-    // than merely addressed by it, so producing a signature would mean emitting
-    // an attestation no live verifier reads. Asserted as a refusal, with the
-    // reason, so the gate cannot decay back into a silent signature.
-    const REFUSED_BY_POLICY: &[(&str, &str)] = &[
-        (
-            "mainnet-stellar",
-            "stellar deployment for mainnet is unconfirmed",
-        ),
-        (
-            "testnet-stellar",
-            "stellar deployment for testnet is unconfirmed",
-        ),
-    ];
 
     for expected in reference["pathways"].as_array().expect("pathways") {
         let id = expected["id"].as_str().unwrap();
         if expected.get("skipped").is_some() {
             skipped.push(id.to_string());
             continue;
-        }
-        if expected["gate0Blocked"].is_string() {
-            blocked.push(id.to_string());
         }
         let expected_hash = expected["hashCallData"]
             .as_str()
@@ -720,6 +823,7 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
             false,
             vec![src_chain_name.to_string(), dst_chain_name.to_string()],
             signer_calls.clone(),
+            true,
         )
         .await
         .unwrap_or_else(|error| panic!("{id}: assembling the service failed: {error}"));
@@ -744,25 +848,6 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
             message_hash: pillar_core::hash_sent_event_message_for_pillar(&sent_event)
                 .unwrap_or_else(|error| panic!("{id}: hashing the message failed: {error:?}")),
         };
-
-        if let Some((_, reason)) = REFUSED_BY_POLICY.iter().find(|(row, _)| *row == id) {
-            let error = app
-                .sign_request_v2(request.clone())
-                .await
-                .expect_err("a destination with an unconfirmed deployment must not sign");
-            let rendered = format!("{error:?}");
-            assert!(
-                rendered.contains(reason),
-                "{id}: expected the provenance refusal to name {reason}, got {rendered}"
-            );
-            assert_eq!(
-                signer_calls.load(std::sync::atomic::Ordering::SeqCst),
-                0,
-                "{id}: a refused destination must never reach the signer"
-            );
-            policy_refused.push(id.to_string());
-            continue;
-        }
 
         // The service entrypoint, not the builder underneath it: protocol checks,
         // message hash, readiness, expiration, already-signed, build, sign. A reject
@@ -884,44 +969,10 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
                 (
                     "signerAddress",
                     signature.address.clone(),
-                    // Solana is the one family whose address is the key's bytes
-                    // rather than a hash of them, so the provider's key shape
-                    // leaks into it. These fixtures were emitted with upstream's
-                    // local-mnemonic signer, which returns SEC1-uncompressed and
-                    // is then sliced without stripping the `04`, so upstream
-                    // records `base58(04 || X[..31])`. Upstream's own Azure
-                    // adapter returns a bare `X||Y`
-                    // (`azureKmsSignerAdapter.ts:185-187`), and the key
-                    // registered on chain at offset 17 of
-                    // `EqkXVEeapm7JqrS1W3AGeN5ZwCRLDUHtr1XY9TuVr4rD` is that
-                    // bare pair, so the deployed answer is `base58(X)` - which
-                    // is what this service now returns. The divergence is
-                    // pinned rather than skipped: the two must differ by
-                    // exactly that one-byte shift and nothing else.
-                    if pathway["family"] == "SOLANA" {
-                        let ours = bs58::decode(&signature.address)
-                            .into_vec()
-                            .expect("our solana address is base58");
-                        let theirs = bs58::decode(
-                            expected["signerAddress"]
-                                .as_str()
-                                .expect("upstream addressed"),
-                        )
-                        .into_vec()
-                        .expect("upstream solana address is base58");
-                        assert_eq!(
-                            (theirs[0], &theirs[1..]),
-                            (0x04, &ours[..31]),
-                            "{id}: upstream's Solana address is not this service's \
-                             address shifted by the SEC1 prefix"
-                        );
-                        signature.address.clone()
-                    } else {
-                        expected["signerAddress"]
-                            .as_str()
-                            .expect("upstream addressed")
-                            .to_string()
-                    },
+                    expected["signerAddress"]
+                        .as_str()
+                        .expect("upstream addressed")
+                        .to_string(),
                 ),
             ] {
                 if ours != theirs {
@@ -970,6 +1021,7 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
                 already_signed,
                 available,
                 calls.clone(),
+                true,
             )
             .await
             .unwrap_or_else(|error| panic!("{id}: assembling {scenario} failed: {error}"));
@@ -998,6 +1050,72 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
         }
         rejected.push(id.to_string());
 
+        use tower::ServiceExt;
+        // The production HTTP answer, upstream's own `startServer` against this router,
+        // debug mode off as deployed: status and the whole envelope, for the signing run
+        // and each refusal.
+        let mut foreign = pathway["receipt"].clone();
+        for log in foreign["logs"].as_array_mut().unwrap() {
+            log["address"] = Value::from("0x00000000000000000000000000000000deadbeef");
+        }
+        let both = vec![src_chain_name.to_string(), dst_chain_name.to_string()];
+        for (scenario, receipt, already_signed, available) in [
+            ("signed", pathway["receipt"].clone(), false, both.clone()),
+            ("foreignEmitter", foreign, false, both.clone()),
+            (
+                "alreadySigned",
+                pathway["receipt"].clone(),
+                true,
+                both.clone(),
+            ),
+            (
+                "unavailableChain",
+                pathway["receipt"].clone(),
+                false,
+                vec![src_chain_name.to_string()],
+            ),
+        ] {
+            let (http_app, _) = historical_service_app(
+                pathway,
+                environment,
+                src_chain_name,
+                dst_chain_name,
+                receipt,
+                already_signed,
+                available,
+                Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                false,
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{id}: assembling HTTP {scenario} failed: {error}"));
+            let response = pillar_api::router(http_app.with_public_sign_routes(true), "parity")
+                .oneshot(
+                    axum::http::Request::builder()
+                        .method("POST")
+                        .uri("/v2/resolve-and-sign")
+                        .header("content-type", "application/json")
+                        .body(axum::body::Body::from(
+                            expected["httpRequest"].as_str().unwrap().to_string(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = response.status().as_u16();
+            let body: Value = serde_json::from_slice(
+                &axum::body::to_bytes(response.into_body(), 1_000_000)
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            let theirs = &expected["http"][scenario];
+            if &json!({ "status": status, "body": body }) != theirs {
+                mismatches.push(format!(
+                    "{id}: HTTP {scenario}\n      ours {status} {body}\n      them {theirs}"
+                ));
+            }
+        }
+
         compared.push(id.to_string());
     }
 
@@ -1011,15 +1129,9 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
 
     compared.sort();
     skipped.sort();
-    blocked.sort();
     assert!(
         skipped.is_empty(),
         "every recorded pathway is now comparable offline: {skipped:?}"
-    );
-    assert_eq!(
-        blocked,
-        vec!["mainnet-stellar".to_string(), "testnet-stellar".to_string()],
-        "Gate 0 blocked pathways must stay named"
     );
     // The acceptance matrix, written out rather than inferred, so a row that is not
     // compared is a recorded decision instead of an oversight. `None` means compared;
@@ -1095,14 +1207,7 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
         "the acceptance matrix and the compared rows disagree; \
          a new row needs a recorded receipt, a vanished one needs a reason"
     );
-    policy_refused.sort();
-    assert_eq!(
-        policy_refused,
-        vec!["mainnet-stellar".to_string(), "testnet-stellar".to_string()],
-        "destinations refused for unconfirmed provenance must stay named: re-pinning \
-         Stellar to a confirmed deployment moves these back into `compared`"
-    );
-    assert_eq!(compared.len(), 14, "compared pathways: {compared:?}");
+    assert_eq!(compared.len(), 16, "compared pathways: {compared:?}");
     assert_eq!(signed.len(), compared.len(), "signed pathways: {signed:?}");
     assert_eq!(
         rejected.len(),

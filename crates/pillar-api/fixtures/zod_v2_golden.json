@@ -1,0 +1,500 @@
+{
+ "_provenance": {
+  "producedBy": "gasolina-audit 385006b packages/gasolina-client/src/types.ts GasolinaApiRequestV2Schema.safeParse (zod 3.25.76), rendered as bootstrap.ts:130-134 renders it; re-emitted at 213cd500 (@offchain-monorepo/gasolina-client) with every case identical",
+  "generator": "scripts/gasolina-parity/emit-zod-v2-golden.ts (run as the README of that directory describes; output keys map 1:1 to `cases`)",
+  "reverified": "gasolina-audit 1.2.66 (manifest sha256 8ad87eb6...) produced byte-identical cases (emit-zod-v2-golden-1-20261004T232304Z)"
+ },
+ "cases": {
+  "emptyObject": {
+   "body": {},
+   "error": "Invalid request: Required, Required, Required, Required"
+  },
+  "array": {
+   "body": [
+    1
+   ],
+   "error": "Invalid request: Expected object, received array"
+  },
+  "string": {
+   "body": "x",
+   "error": "Invalid request: Expected object, received string"
+  },
+  "nullBody": {
+   "body": null,
+   "error": "Invalid request: Expected object, received null"
+  },
+  "missingSrcTxHash": {
+   "body": {
+    "lzMessageId": {
+     "pathwayId": {
+      "srcEid": 30101,
+      "dstEid": 30102,
+      "sender": "0xs",
+      "receiver": "0xr",
+      "srcChainName": "ethereum",
+      "dstChainName": "bsc"
+     },
+     "nonce": 7,
+     "ulnSendVersion": "V302"
+    },
+    "signingContext": {
+     "protocolType": "MESSAGE",
+     "expiration": 123,
+     "blockConfirmation": 1
+    },
+    "messageHash": "0xhash"
+   },
+   "error": "Invalid request: Required"
+  },
+  "numericSrcTxHash": {
+   "body": {
+    "srcTxHash": 1,
+    "lzMessageId": {
+     "pathwayId": {
+      "srcEid": 30101,
+      "dstEid": 30102,
+      "sender": "0xs",
+      "receiver": "0xr",
+      "srcChainName": "ethereum",
+      "dstChainName": "bsc"
+     },
+     "nonce": 7,
+     "ulnSendVersion": "V302"
+    },
+    "signingContext": {
+     "protocolType": "MESSAGE",
+     "expiration": 123,
+     "blockConfirmation": 1
+    },
+    "messageHash": "0xhash"
+   },
+   "error": "Invalid request: Expected string, received number"
+  },
+  "nullMessageHash": {
+   "body": {
+    "srcTxHash": "0xtx",
+    "lzMessageId": {
+     "pathwayId": {
+      "srcEid": 30101,
+      "dstEid": 30102,
+      "sender": "0xs",
+      "receiver": "0xr",
+      "srcChainName": "ethereum",
+      "dstChainName": "bsc"
+     },
+     "nonce": 7,
+     "ulnSendVersion": "V302"
+    },
+    "signingContext": {
+     "protocolType": "MESSAGE",
+     "expiration": 123,
+     "blockConfirmation": 1
+    },
+    "messageHash": null
+   },
+   "error": "Invalid request: Expected string, received null"
+  },
+  "lzMessageIdString": {
+   "body": {
+    "srcTxHash": "0xtx",
+    "lzMessageId": "x",
+    "signingContext": {
+     "protocolType": "MESSAGE",
+     "expiration": 123,
+     "blockConfirmation": 1
+    },
+    "messageHash": "0xhash"
+   },
+   "error": "Invalid request: Expected object, received string"
+  },
+  "missingPathway": {
+   "body": {
+    "srcTxHash": "0xtx",
+    "lzMessageId": {
+     "nonce": 7,
+     "ulnSendVersion": "V302"
+    },
+    "signingContext": {
+     "protocolType": "MESSAGE",
+     "expiration": 123,
+     "blockConfirmation": 1
+    },
+    "messageHash": "0xhash"
+   },
+   "error": "Invalid request: Required"
+  },
+  "pathwayStrings": {
+   "body": {
+    "srcTxHash": "0xtx",
+    "lzMessageId": {
+     "pathwayId": {
+      "srcEid": "30101",
+      "dstEid": 30102,
+      "sender": 5,
+      "receiver": "0xr",
+      "srcChainName": "ethereum",
+      "dstChainName": "bsc"
+     },
+     "nonce": 7,
+     "ulnSendVersion": "V302"
+    },
+    "signingContext": {
+     "protocolType": "MESSAGE",
+     "expiration": 123,
+     "blockConfirmation": 1
+    },
+    "messageHash": "0xhash"
+   },
+   "error": "Invalid request: Expected number, received string, Expected string, received number"
+  },
+  "missingNonceAndVersion": {
+   "body": {
+    "srcTxHash": "0xtx",
+    "lzMessageId": {
+     "pathwayId": {
+      "srcEid": 30101,
+      "dstEid": 30102,
+      "sender": "0xs",
+      "receiver": "0xr",
+      "srcChainName": "ethereum",
+      "dstChainName": "bsc"
+     }
+    },
+    "signingContext": {
+     "protocolType": "MESSAGE",
+     "expiration": 123,
+     "blockConfirmation": 1
+    },
+    "messageHash": "0xhash"
+   },
+   "error": "Invalid request: Required, Required"
+  },
+  "floatNonce": {
+   "body": {
+    "srcTxHash": "0xtx",
+    "lzMessageId": {
+     "pathwayId": {
+      "srcEid": 30101,
+      "dstEid": 30102,
+      "sender": "0xs",
+      "receiver": "0xr",
+      "srcChainName": "ethereum",
+      "dstChainName": "bsc"
+     },
+     "nonce": 7.5,
+     "ulnSendVersion": "V302"
+    },
+    "signingContext": {
+     "protocolType": "MESSAGE",
+     "expiration": 123,
+     "blockConfirmation": 1
+    },
+    "messageHash": "0xhash"
+   },
+   "error": null
+  },
+  "boolChainName": {
+   "body": {
+    "srcTxHash": "0xtx",
+    "lzMessageId": {
+     "pathwayId": {
+      "srcEid": 30101,
+      "dstEid": 30102,
+      "sender": "0xs",
+      "receiver": "0xr",
+      "srcChainName": "ethereum",
+      "dstChainName": true
+     },
+     "nonce": 7,
+     "ulnSendVersion": "V302"
+    },
+    "signingContext": {
+     "protocolType": "MESSAGE",
+     "expiration": 123,
+     "blockConfirmation": 1
+    },
+    "messageHash": "0xhash"
+   },
+   "error": "Invalid request: Expected string, received boolean"
+  },
+  "missingSigningContext": {
+   "body": {
+    "srcTxHash": "0xtx",
+    "lzMessageId": {
+     "pathwayId": {
+      "srcEid": 30101,
+      "dstEid": 30102,
+      "sender": "0xs",
+      "receiver": "0xr",
+      "srcChainName": "ethereum",
+      "dstChainName": "bsc"
+     },
+     "nonce": 7,
+     "ulnSendVersion": "V302"
+    },
+    "messageHash": "0xhash"
+   },
+   "error": "Invalid request: Required"
+  },
+  "signingContextArray": {
+   "body": {
+    "srcTxHash": "0xtx",
+    "lzMessageId": {
+     "pathwayId": {
+      "srcEid": 30101,
+      "dstEid": 30102,
+      "sender": "0xs",
+      "receiver": "0xr",
+      "srcChainName": "ethereum",
+      "dstChainName": "bsc"
+     },
+     "nonce": 7,
+     "ulnSendVersion": "V302"
+    },
+    "signingContext": [
+     1
+    ],
+    "messageHash": "0xhash"
+   },
+   "error": "Invalid request: Expected object, received array"
+  },
+  "badProtocolType": {
+   "body": {
+    "srcTxHash": "0xtx",
+    "lzMessageId": {
+     "pathwayId": {
+      "srcEid": 30101,
+      "dstEid": 30102,
+      "sender": "0xs",
+      "receiver": "0xr",
+      "srcChainName": "ethereum",
+      "dstChainName": "bsc"
+     },
+     "nonce": 7,
+     "ulnSendVersion": "V302"
+    },
+    "signingContext": {
+     "protocolType": "OTHER",
+     "expiration": 123,
+     "blockConfirmation": 1
+    },
+    "messageHash": "0xhash"
+   },
+   "error": "Invalid request: Invalid discriminator value. Expected 'MESSAGE' | 'READ'"
+  },
+  "missingProtocolType": {
+   "body": {
+    "srcTxHash": "0xtx",
+    "lzMessageId": {
+     "pathwayId": {
+      "srcEid": 30101,
+      "dstEid": 30102,
+      "sender": "0xs",
+      "receiver": "0xr",
+      "srcChainName": "ethereum",
+      "dstChainName": "bsc"
+     },
+     "nonce": 7,
+     "ulnSendVersion": "V302"
+    },
+    "signingContext": {
+     "expiration": 123,
+     "blockConfirmation": 1
+    },
+    "messageHash": "0xhash"
+   },
+   "error": "Invalid request: Invalid discriminator value. Expected 'MESSAGE' | 'READ'"
+  },
+  "messageMissingFields": {
+   "body": {
+    "srcTxHash": "0xtx",
+    "lzMessageId": {
+     "pathwayId": {
+      "srcEid": 30101,
+      "dstEid": 30102,
+      "sender": "0xs",
+      "receiver": "0xr",
+      "srcChainName": "ethereum",
+      "dstChainName": "bsc"
+     },
+     "nonce": 7,
+     "ulnSendVersion": "V302"
+    },
+    "signingContext": {
+     "protocolType": "MESSAGE"
+    },
+    "messageHash": "0xhash"
+   },
+   "error": "Invalid request: Required, Required"
+  },
+  "messageWrongTypes": {
+   "body": {
+    "srcTxHash": "0xtx",
+    "lzMessageId": {
+     "pathwayId": {
+      "srcEid": 30101,
+      "dstEid": 30102,
+      "sender": "0xs",
+      "receiver": "0xr",
+      "srcChainName": "ethereum",
+      "dstChainName": "bsc"
+     },
+     "nonce": 7,
+     "ulnSendVersion": "V302"
+    },
+    "signingContext": {
+     "protocolType": "MESSAGE",
+     "expiration": "1",
+     "blockConfirmation": null,
+     "skipVId": "no",
+     "dvnAddress": 1
+    },
+    "messageHash": "0xhash"
+   },
+   "error": "Invalid request: Expected number, received string, Expected boolean, received string, Expected string, received number, Expected number, received null"
+  },
+  "readMissingMarkers": {
+   "body": {
+    "srcTxHash": "0xtx",
+    "lzMessageId": {
+     "pathwayId": {
+      "srcEid": 30101,
+      "dstEid": 30102,
+      "sender": "0xs",
+      "receiver": "0xr",
+      "srcChainName": "ethereum",
+      "dstChainName": "bsc"
+     },
+     "nonce": 7,
+     "ulnSendVersion": "V302"
+    },
+    "signingContext": {
+     "protocolType": "READ",
+     "expiration": 1
+    },
+    "messageHash": "0xhash"
+   },
+   "error": "Invalid request: Required"
+  },
+  "readBadMarker": {
+   "body": {
+    "srcTxHash": "0xtx",
+    "lzMessageId": {
+     "pathwayId": {
+      "srcEid": 30101,
+      "dstEid": 30102,
+      "sender": "0xs",
+      "receiver": "0xr",
+      "srcChainName": "ethereum",
+      "dstChainName": "bsc"
+     },
+     "nonce": 7,
+     "ulnSendVersion": "V302"
+    },
+    "signingContext": {
+     "protocolType": "READ",
+     "expiration": 1,
+     "resolvedTimestampTimeMarkers": [
+      {
+       "blockConfirmation": 1,
+       "isBlockNumber": true,
+       "chainName": "x",
+       "blockNumber": "1"
+      }
+     ]
+    },
+    "messageHash": "0xhash"
+   },
+   "error": "Invalid request: Invalid literal value, expected false, Expected number, received string, Required"
+  },
+  "readMarkersObject": {
+   "body": {
+    "srcTxHash": "0xtx",
+    "lzMessageId": {
+     "pathwayId": {
+      "srcEid": 30101,
+      "dstEid": 30102,
+      "sender": "0xs",
+      "receiver": "0xr",
+      "srcChainName": "ethereum",
+      "dstChainName": "bsc"
+     },
+     "nonce": 7,
+     "ulnSendVersion": "V302"
+    },
+    "signingContext": {
+     "protocolType": "READ",
+     "expiration": 1,
+     "resolvedTimestampTimeMarkers": {}
+    },
+    "messageHash": "0xhash"
+   },
+   "error": "Invalid request: Expected array, received object"
+  },
+  "everything": {
+   "body": {
+    "srcTxHash": 1,
+    "lzMessageId": {
+     "pathwayId": {
+      "srcEid": "a"
+     },
+     "nonce": "b",
+     "ulnSendVersion": "X"
+    },
+    "signingContext": {
+     "protocolType": "MESSAGE"
+    },
+    "messageHash": false
+   },
+   "error": "Invalid request: Expected string, received number, Expected number, received string, Required, Required, Required, Required, Required, Expected number, received string, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'X', Required, Required, Expected string, received boolean"
+  },
+  "bigVersion": {
+   "body": {
+    "srcTxHash": "0xtx",
+    "lzMessageId": {
+     "pathwayId": {
+      "srcEid": 30101,
+      "dstEid": 30102,
+      "sender": "0xs",
+      "receiver": "0xr",
+      "srcChainName": "ethereum",
+      "dstChainName": "bsc"
+     },
+     "nonce": 7,
+     "ulnSendVersion": 1e+21
+    },
+    "signingContext": {
+     "protocolType": "MESSAGE",
+     "expiration": 123,
+     "blockConfirmation": 1
+    },
+    "messageHash": "0xhash"
+   },
+   "error": "Invalid request: Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received '1e+21'"
+  },
+  "smallFloatVersion": {
+   "body": {
+    "srcTxHash": "0xtx",
+    "lzMessageId": {
+     "pathwayId": {
+      "srcEid": 30101,
+      "dstEid": 30102,
+      "sender": "0xs",
+      "receiver": "0xr",
+      "srcChainName": "ethereum",
+      "dstChainName": "bsc"
+     },
+     "nonce": 7,
+     "ulnSendVersion": 1e-06
+    },
+    "signingContext": {
+     "protocolType": "MESSAGE",
+     "expiration": 123,
+     "blockConfirmation": 1
+    },
+    "messageHash": "0xhash"
+   },
+   "error": "Invalid request: Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received '0.000001'"
+  }
+ }
+}

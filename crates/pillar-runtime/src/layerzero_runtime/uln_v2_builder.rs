@@ -37,93 +37,112 @@ where
         src_chain_name: &str,
         tx_hash: &str,
     ) -> Result<UlnV2HashInfo, AppCoreError> {
-        let snapshot = self.providers.load();
-        let dispatch = snapshot
-            .dispatch(&self.rank_tracker, src_chain_name)
-            .await?;
-        let ChainDispatch {
-            config: provider_config,
-            quorum,
-            plan,
-        } = dispatch;
-        let requests = FuturesUnordered::new();
-        for DispatchEntry { index, uri, delay } in plan {
-            let (url, headers) = provider_uri_parts(uri);
-            let transport = self.transport.clone();
-            let tx_hash = tx_hash.to_string();
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
-                let observation = observe_uln_v2_mpt_hash_info(transport, url, headers, &tx_hash)
-                    .await
-                    .ok();
-                let observation =
-                    observation.map(|observation| (observation.fingerprint.clone(), observation));
-                (index, observation)
-            });
-        }
-        let context = format!("ULN V2 derived-hash for chain {src_chain_name}");
-        let observation =
-            resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context).await?;
-        Ok(observation.hash_info)
+        crate::provider_health::rpc_scope(src_chain_name, async {
+            let snapshot = self.providers.load();
+            let dispatch = snapshot
+                .dispatch(&self.rank_tracker, src_chain_name)
+                .await?;
+            let ChainDispatch {
+                config: provider_config,
+                quorum,
+                plan,
+            } = dispatch;
+            let requests = FuturesUnordered::new();
+            for DispatchEntry { index, uri, delay } in plan {
+                let (url, headers) = provider_uri_parts(uri);
+                let transport = self.transport.clone();
+                let tx_hash = tx_hash.to_string();
+                requests.push(async move {
+                    if !delay.is_zero() {
+                        tokio::time::sleep(delay).await;
+                    }
+                    let observation = provider_response(
+                        observe_uln_v2_mpt_hash_info(transport, url, headers, &tx_hash).await,
+                    );
+                    let observation = observation.map(|observation| {
+                        observation
+                            .map(|observation| (observation.fingerprint.clone(), observation))
+                    });
+                    (index, observation)
+                });
+            }
+            let context = format!("ULN V2 derived-hash for chain {src_chain_name}");
+            let observation =
+                resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
+                    .await?;
+            Ok(observation.hash_info)
+        })
+        .await
     }
 
-    async fn inbound_proof_type_with_quorum(
+    async fn inbound_proof_library_with_quorum(
         &self,
         sent_event: &LzSentEvent,
-    ) -> Result<String, AppCoreError> {
-        let dst_chain_name = &sent_event.lz_message_id.pathway_id.dst_chain_name;
-        let snapshot = self.providers.load();
-        let dispatch = snapshot
-            .dispatch(&self.rank_tracker, dst_chain_name)
-            .await?;
-        let ChainDispatch {
-            config: provider_config,
-            quorum,
-            plan,
-        } = dispatch;
+    ) -> Result<(String, u64), AppCoreError> {
+        crate::provider_health::rpc_scope(
+            &sent_event.lz_message_id.pathway_id.dst_chain_name,
+            async {
+                let dst_chain_name = &sent_event.lz_message_id.pathway_id.dst_chain_name;
+                let snapshot = self.providers.load();
+                let dispatch = snapshot
+                    .dispatch(&self.rank_tracker, dst_chain_name)
+                    .await?;
+                let ChainDispatch {
+                    config: provider_config,
+                    quorum,
+                    plan,
+                } = dispatch;
 
-        let uln_v2_contract = self
-            .payload_builder
-            .uln_v2_contract_for_chain(dst_chain_name)
-            .ok_or_else(|| {
-                AppCoreError::Internal(format!("No EVM ULN V2 contract for {dst_chain_name}"))
-            })?
-            .to_string();
-        let src_eid = pathway_extra_u64(sent_event, "srcEid")?;
-        let receiver =
-            evm_address_from_pathway_value(&pathway_extra_string_value(sent_event, "receiver")?)?;
+                let uln_v2_contract = self
+                    .payload_builder
+                    .uln_v2_contract_for_chain(dst_chain_name)
+                    .ok_or_else(|| {
+                        AppCoreError::Internal(format!(
+                            "No EVM ULN V2 contract for {dst_chain_name}"
+                        ))
+                    })?
+                    .to_string();
+                let src_eid = pathway_extra_u64(sent_event, "srcEid")?;
+                let receiver = evm_address_from_pathway_value(&pathway_extra_string_value(
+                    sent_event, "receiver",
+                )?)?;
 
-        let requests = FuturesUnordered::new();
-        for DispatchEntry { index, uri, delay } in plan {
-            let (url, headers) = provider_uri_parts(uri);
-            let transport = self.transport.clone();
-            let uln_v2_contract = uln_v2_contract.clone();
-            let receiver = receiver.clone();
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
+                let requests = FuturesUnordered::new();
+                for DispatchEntry { index, uri, delay } in plan {
+                    let (url, headers) = provider_uri_parts(uri);
+                    let transport = self.transport.clone();
+                    let uln_v2_contract = uln_v2_contract.clone();
+                    let receiver = receiver.clone();
+                    requests.push(async move {
+                        if !delay.is_zero() {
+                            tokio::time::sleep(delay).await;
+                        }
+                        let observation = provider_response(
+                            observe_uln_v2_inbound_proof_type(
+                                transport,
+                                url,
+                                headers,
+                                &uln_v2_contract,
+                                src_eid,
+                                &receiver,
+                            )
+                            .await,
+                        );
+                        let observation = observation.map(|observation| {
+                            observation
+                                .map(|observation| (observation.fingerprint.clone(), observation))
+                        });
+                        (index, observation)
+                    });
                 }
-                let observation = observe_uln_v2_inbound_proof_type(
-                    transport,
-                    url,
-                    headers,
-                    &uln_v2_contract,
-                    src_eid,
-                    &receiver,
-                )
-                .await
-                .ok();
+                let context = format!("ULN V2 inbound proofType for chain {dst_chain_name}");
                 let observation =
-                    observation.map(|observation| (observation.fingerprint.clone(), observation));
-                (index, observation)
-            });
-        }
-        let context = format!("ULN V2 inbound proofType for chain {dst_chain_name}");
-        let observation =
-            resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context).await?;
-        Ok(observation.proof_type)
+                    resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
+                        .await?;
+                Ok((observation.proof_type, observation.utils_version))
+            },
+        )
+        .await
     }
 }
 
@@ -140,12 +159,28 @@ where
         v_id: String,
     ) -> Result<pillar_core::HashCallDataResult, AppCoreError> {
         let src_chain_name = &sent_event.lz_message_id.pathway_id.src_chain_name;
-        let proof_type = match uln_v2_inbound_proof_type(sent_event) {
-            Some(proof_type) => proof_type,
-            None => self.inbound_proof_type_with_quorum(sent_event).await?,
-        };
+        let (proof_type, utils_version) =
+            self.inbound_proof_library_with_quorum(sent_event).await?;
+        // Aptos's V1 SDK has a feather proof builder only (`lz-v1-sdk/src/aptos/aptos.ts:93,735-740`).
+        if src_chain_name == "aptos" && proof_type != "2" {
+            return Err(AppCoreError::Internal(format!(
+                "Unknown proof type {proof_type}"
+            )));
+        }
         let hash_info = match proof_type.as_str() {
             "2" => {
+                // Every deployed FPValidator with published source hard-codes `utilsVersion = 1`
+                // and reads bytes [0..32] of the proof as the source ULN; any other version has
+                // no verifiable on-chain meaning, so the bytes it would bind are not signed.
+                if utils_version != FEATHER_PROOF_UTILS_VERSION {
+                    let receiver = pathway_extra_string_value(sent_event, "receiver")?;
+                    return Err(AppCoreError::BadRequest(format!(
+                        "Receiver {receiver} on chain {} uses a feather proof library with \
+                         utilsVersion {utils_version}; only utilsVersion \
+                         {FEATHER_PROOF_UTILS_VERSION} is supported, refusing to sign",
+                        sent_event.lz_message_id.pathway_id.dst_chain_name
+                    )));
+                }
                 let packet_emit_address = sent_event
                     .extra
                     .get("packetEmitAddress")
@@ -156,7 +191,14 @@ where
                                 .to_string(),
                         )
                     })?;
-                derive_evm_feather_hash_info(sent_event, packet_emit_address)?
+                if src_chain_name == "aptos" {
+                    pillar_layerzero::derive_aptos_feather_hash_info(
+                        sent_event,
+                        packet_emit_address,
+                    )?
+                } else {
+                    derive_evm_feather_hash_info(sent_event, packet_emit_address)?
+                }
             }
             "1" => {
                 self.mpt_hash_info_with_quorum(src_chain_name, &sent_event.tx_hash)
@@ -179,11 +221,4 @@ where
     }
 }
 
-pub(crate) fn uln_v2_inbound_proof_type(sent_event: &LzSentEvent) -> Option<String> {
-    sent_event.extra.get("inboundProofType").and_then(|value| {
-        value
-            .as_str()
-            .map(ToOwned::to_owned)
-            .or_else(|| value.as_u64().map(|value| value.to_string()))
-    })
-}
+const FEATHER_PROOF_UTILS_VERSION: u64 = 1;

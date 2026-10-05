@@ -314,12 +314,6 @@ fn read_vertical_env_map() -> HashMap<String, String> {
             "test-token-0123456789abcdef0123456789".to_string(),
         ),
         (SERVER_PORT.to_string(), "3000".to_string()),
-        // Deliberately silent about READ: `ReadV1002` is always built, so this
-        // setting cannot switch the path under test off.
-        (
-            pillar_config::LZ_SUPPORTED_ULN_VERSIONS.to_string(),
-            r#"["V2"]"#.to_string(),
-        ),
         (LZ_PROVIDER_CONFIG_TYPE.to_string(), "LOCAL".to_string()),
         (LZ_ENV.to_string(), "mainnet".to_string()),
         (pillar_config::LZ_DEBUG_MODE.to_string(), "true".to_string()),
@@ -329,11 +323,7 @@ fn read_vertical_env_map() -> HashMap<String, String> {
         ),
         // Two agreeing providers on the read target, so a refusal is the pin
         // doing its job rather than the providers disagreeing.
-        (
-            LZ_PROVIDER_CONFIG.to_string(),
-            r#"{"ethereum":{"uris":["https://eth-rpc.example"],"quorum":1},"bsc":{"uris":["https://bsc-rpc-a.example","https://bsc-rpc-b.example"],"quorum":2}}"#
-                .to_string(),
-        ),
+        (LZ_PROVIDER_CONFIG.to_string(), providers_json(r#"{"ethereum":{"uris":["https://eth-rpc.example"],"quorum":1},"bsc":{"uris":["https://bsc-rpc-a.example","https://bsc-rpc-b.example"],"quorum":2}}"#)), (LZ_QUORUM_STRATEGY_CONFIG.to_string(), strategy_json(r#"{"ethereum":{"uris":["https://eth-rpc.example"],"quorum":1},"bsc":{"uris":["https://bsc-rpc-a.example","https://bsc-rpc-b.example"],"quorum":2}}"#)),
         (SIGNER_TYPE.to_string(), "LOCAL_MNEMONIC".to_string()),
         (
             pillar_config::LZ_WALLETS.to_string(),
@@ -454,4 +444,19 @@ async fn production_read_vertical_never_signs_when_the_read_block_moved_after_va
             "{marker:?}: both providers must have been asked for the validated block"
         );
     }
+}
+
+#[path = "background_headroom_e2e.rs"]
+mod background_headroom_e2e;
+
+#[path = "health_availability_e2e.rs"]
+mod health_availability_e2e;
+
+#[path = "postgres_audit_e2e.rs"]
+mod postgres_audit_e2e;
+
+#[tokio::test]
+#[ignore = "Internal worker invoked only by the isolated process-crash E2E"]
+async fn durable_process_worker() {
+    postgres_audit_e2e::run_crash_worker().await;
 }

@@ -1,0 +1,10 @@
+{
+ "method": "POST",
+ "url": "https://api.testnet.aptoslabs.com/v1/tables/0x4c4692fa137285d61f5da152e7a2a5385868970331a16a3f72d479038ec564bb/item",
+ "headers": {
+  "accept": "application/json",
+  "content-type": "application/json"
+ },
+ "body": "{\"key_type\":\"0x1759cc0d3161f1eb79f65847d4feb9d1f74fb79014698a23b16b28b9cd4c37e3::channel::Remote\",\"value_type\":\"0x1759cc0d3161f1eb79f65847d4feb9d1f74fb79014698a23b16b28b9cd4c37e3::channel::Channel\",\"key\":{\"chain_id\":\"10161\",\"addr\":\"0x1111111111111111111111111111111111111111\"}}",
+ "utc": "2026-10-04T10:34:42Z"
+}

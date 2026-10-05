@@ -37,9 +37,10 @@ async fn rejects_unsupported_signature_type() {
         async fn get_ec_public_key_coordinates(
             &self,
             key_id: &AzureKmsKeyId,
-        ) -> Result<(Vec<u8>, Vec<u8>), SignerError> {
+        ) -> Result<AzureEcPublicKey, SignerError> {
             assert_eq!(key_id, &self.key_id);
-            Ok(self.public_key_coordinates.lock().await.clone())
+            let (x,y) = self.public_key_coordinates.lock().await.clone();
+            Ok(AzureEcPublicKey { key_id: key_id.clone(), reference: "test-key".into(), x, y })
         }
     }
 

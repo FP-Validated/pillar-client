@@ -15,6 +15,18 @@ use crate::types::{
     SignRequest, SignatureType, SignerError,
 };
 
+pub struct AwsPublicKey {
+    pub key_id: String,
+    pub der: Vec<u8>,
+}
+fn immutable_key_id(id: &str) -> bool {
+    id.starts_with("arn:")
+        && id.split(':').nth(2) == Some("kms")
+        && id
+            .split(':')
+            .nth(5)
+            .is_some_and(|part| part.starts_with("key/") && part.len() > 4)
+}
 #[async_trait]
 pub trait AwsKmsClient: Send + Sync + 'static {
     async fn sign_ecdsa_sha256_digest(
@@ -23,7 +35,7 @@ pub trait AwsKmsClient: Send + Sync + 'static {
         digest: &[u8],
     ) -> Result<Vec<u8>, SignerError>;
     async fn sign_ed25519_raw(&self, key_id: &str, message: &[u8]) -> Result<Vec<u8>, SignerError>;
-    async fn get_public_key_der(&self, key_id: &str) -> Result<Vec<u8>, SignerError>;
+    async fn get_public_key_der(&self, key_id: &str) -> Result<AwsPublicKey, SignerError>;
 }
 
 #[derive(Clone)]
@@ -54,6 +66,11 @@ impl AwsKmsClient for AwsSdkKmsClient {
             .send()
             .await
             .map_err(|error| SignerError::Message(error.to_string()))?;
+        if immutable_key_id(key_id) && response.key_id() != Some(key_id) {
+            return Err(SignerError::Message(
+                "AWS KMS: signing key identity changed".into(),
+            ));
+        }
         response
             .signature()
             .map(|signature| signature.as_ref().to_vec())
@@ -71,13 +88,18 @@ impl AwsKmsClient for AwsSdkKmsClient {
             .send()
             .await
             .map_err(|error| SignerError::Message(error.to_string()))?;
+        if immutable_key_id(key_id) && response.key_id() != Some(key_id) {
+            return Err(SignerError::Message(
+                "AWS KMS: signing key identity changed".into(),
+            ));
+        }
         response
             .signature()
             .map(|signature| signature.as_ref().to_vec())
             .ok_or_else(|| SignerError::Message("AWS KMS: sign() failed".to_string()))
     }
 
-    async fn get_public_key_der(&self, key_id: &str) -> Result<Vec<u8>, SignerError> {
+    async fn get_public_key_der(&self, key_id: &str) -> Result<AwsPublicKey, SignerError> {
         let response = self
             .client
             .get_public_key()
@@ -85,9 +107,17 @@ impl AwsKmsClient for AwsSdkKmsClient {
             .send()
             .await
             .map_err(|error| SignerError::Message(error.to_string()))?;
+        let resolved = response
+            .key_id()
+            .filter(|id| immutable_key_id(id))
+            .ok_or_else(|| SignerError::Message("AWS KMS: immutable key identity missing".into()))?
+            .to_owned();
         response
             .public_key()
-            .map(|public_key| public_key.as_ref().to_vec())
+            .map(|public_key| AwsPublicKey {
+                key_id: resolved,
+                der: public_key.as_ref().to_vec(),
+            })
             .ok_or_else(|| {
                 SignerError::Message(format!(
                     "AWS KMS: getPublicKey() failed, public key is undefined, keyId: {key_id}"
@@ -99,9 +129,26 @@ impl AwsKmsClient for AwsSdkKmsClient {
 pub struct AwsKmsRawSignerAdapter<C> {
     key_id: String,
     client: Arc<C>,
-    public_key_by_signature_type: tokio::sync::Mutex<HashMap<SignatureType, Vec<u8>>>,
+    public_key_by_signature_type: tokio::sync::Mutex<HashMap<SignatureType, Arc<ResolvedAwsKey>>>,
 }
 
+struct ResolvedAwsKey {
+    id: String,
+    public_key: Vec<u8>,
+}
+impl ResolvedAwsKey {
+    fn identity(&self) -> Option<pillar_core::audit::EffectiveKey> {
+        pillar_core::audit::enabled().then(|| {
+            let hash = pillar_core::audit::fingerprint(&self.public_key);
+            pillar_core::audit::EffectiveKey {
+                backend: "aws",
+                reference: self.id.clone(),
+                version: hash.clone(),
+                public_key_hash: hash,
+            }
+        })
+    }
+}
 impl<C> AwsKmsRawSignerAdapter<C>
 where
     C: AwsKmsClient,
@@ -113,6 +160,38 @@ where
             public_key_by_signature_type: tokio::sync::Mutex::new(HashMap::new()),
         }
     }
+    async fn resolved_key(
+        &self,
+        signature_type: SignatureType,
+    ) -> Result<Arc<ResolvedAwsKey>, SignerError> {
+        let mut cache = self.public_key_by_signature_type.lock().await;
+        if let Some(key) = cache.get(&signature_type) {
+            return Ok(key.clone());
+        }
+        let reference = cache
+            .values()
+            .next()
+            .map(|key| key.id.as_str())
+            .unwrap_or(&self.key_id);
+        let key =
+            crate::effects::kms_operation(reference, self.client.get_public_key_der(reference))
+                .await?;
+        if !immutable_key_id(&key.key_id) {
+            return Err(SignerError::Message(
+                "AWS KMS: unresolved mutable key identity".into(),
+            ));
+        }
+        let public_key = match signature_type {
+            SignatureType::Ecdsa => ecdsa_public_key_from_spki_der(&key.der)?,
+            SignatureType::Ed25519 => ed25519_public_key_from_spki_der(&key.der)?,
+        };
+        let key = Arc::new(ResolvedAwsKey {
+            id: key.key_id,
+            public_key,
+        });
+        cache.insert(signature_type, key.clone());
+        Ok(key)
+    }
 }
 
 #[async_trait]
@@ -120,25 +199,47 @@ impl<C> RawSignerAdapter for AwsKmsRawSignerAdapter<C>
 where
     C: AwsKmsClient,
 {
+    fn supports_durable_audit(&self) -> bool {
+        true
+    }
+    fn kms_provider(&self) -> Option<KmsProvider> {
+        Some(KmsProvider::Aws)
+    }
     async fn sign(&self, request: SignRequest) -> Result<Vec<u8>, SignerError> {
         match request.signature_type {
             SignatureType::Ecdsa => {
-                let public_key = self
-                    .get_public_key(PublicKeyRequest {
-                        signature_type: SignatureType::Ecdsa,
-                        private_key_signature_type: SignatureType::Ecdsa,
-                        seed_kind: request.seed_kind,
-                    })
-                    .await?;
-                let der_signature = self
-                    .client
-                    .sign_ecdsa_sha256_digest(&self.key_id, &request.data)
-                    .await?;
+                let key = self.resolved_key(SignatureType::Ecdsa).await?;
+                let der_signature = if pillar_core::audit::enabled() {
+                    let digest = crate::effects::owned_digest(&request.data)?;
+                    let client = self.client.clone();
+                    let owned_key = key.clone();
+                    crate::effects::sign_owned_effect(
+                        &key.id,
+                        key.identity(),
+                        &request.data,
+                        "ecdsa",
+                        async move {
+                            client
+                                .sign_ecdsa_sha256_digest(&owned_key.id, &digest)
+                                .await
+                        },
+                    )
+                    .await?
+                } else {
+                    crate::effects::sign_effect(
+                        &key.id,
+                        None,
+                        &request.data,
+                        "ecdsa",
+                        self.client.sign_ecdsa_sha256_digest(&key.id, &request.data),
+                    )
+                    .await?
+                };
                 kms_ecdsa_signature_to_recoverable(
                     &der_signature,
                     KmsEcdsaSignatureEncoding::Der,
                     &request.data,
-                    &public_key,
+                    &key.public_key,
                     request.transform_recovery_id,
                 )
             }
@@ -148,33 +249,53 @@ where
                         "AWS KMS Ed25519 signing requires an Ed25519 key".to_string(),
                     ));
                 }
-                self.client
-                    .sign_ed25519_raw(&self.key_id, &request.data)
+                let cached = self
+                    .public_key_by_signature_type
+                    .lock()
                     .await
+                    .get(&SignatureType::Ed25519)
+                    .cloned();
+                let key = if pillar_core::audit::enabled() {
+                    Some(self.resolved_key(SignatureType::Ed25519).await?)
+                } else {
+                    cached
+                };
+                let reference = key
+                    .as_ref()
+                    .map(|key| key.id.as_str())
+                    .unwrap_or(&self.key_id);
+                if pillar_core::audit::enabled() {
+                    let digest = crate::effects::owned_digest(&request.data)?;
+                    let client = self.client.clone();
+                    let owned_key = key.as_ref().expect("audit resolved key").clone();
+                    crate::effects::sign_owned_effect(
+                        reference,
+                        key.as_ref().and_then(|key| key.identity()),
+                        &request.data,
+                        "ed25519",
+                        async move { client.sign_ed25519_raw(&owned_key.id, &digest).await },
+                    )
+                    .await
+                } else {
+                    crate::effects::sign_effect(
+                        reference,
+                        None,
+                        &request.data,
+                        "ed25519",
+                        self.client.sign_ed25519_raw(reference, &request.data),
+                    )
+                    .await
+                }
             }
         }
     }
 
     async fn get_public_key(&self, request: PublicKeyRequest) -> Result<Vec<u8>, SignerError> {
-        if let Some(cached) = self
-            .public_key_by_signature_type
-            .lock()
-            .await
-            .get(&request.signature_type)
-            .cloned()
-        {
-            return Ok(cached);
-        }
-        let der = self.client.get_public_key_der(&self.key_id).await?;
-        let public_key = match request.signature_type {
-            SignatureType::Ecdsa => ecdsa_public_key_from_spki_der(&der)?,
-            SignatureType::Ed25519 => ed25519_public_key_from_spki_der(&der)?,
-        };
-        self.public_key_by_signature_type
-            .lock()
-            .await
-            .insert(request.signature_type, public_key.clone());
-        Ok(public_key)
+        Ok(self
+            .resolved_key(request.signature_type)
+            .await?
+            .public_key
+            .clone())
     }
 }
 

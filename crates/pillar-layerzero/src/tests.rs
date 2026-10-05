@@ -168,6 +168,9 @@ fn evm_payload_builder() -> EvmUlnPayloadBuilder {
             receive_uln_302_view: "0x2222222222222222222222222222222222222223".to_string(),
             read_lib_1002: Some("0x3333333333333333333333333333333333333333".to_string()),
             read_lib_1002_view: Some("0x3333333333333333333333333333333333333334".to_string()),
+            send_uln_302: None,
+            send_uln_301: None,
+            simple_message_lib: None,
         },
     )]))
 }
@@ -186,6 +189,9 @@ fn evm_corpus_payload_builder() -> EvmUlnPayloadBuilder {
                 receive_uln_302_view: "0xA4ab842be43aC4De9f4bD2D063eC0479fFDD3A9b".to_string(),
                 read_lib_1002: Some("0x1273141a3f7923AA2d9edDfA402440cE075ed8Ff".to_string()),
                 read_lib_1002_view: Some("0xFDac1618FdcD0e96CCF6c14B6eFA55Aa1D0aD483".to_string()),
+                send_uln_302: None,
+                send_uln_301: None,
+                simple_message_lib: None,
             },
         ),
         (
@@ -200,6 +206,9 @@ fn evm_corpus_payload_builder() -> EvmUlnPayloadBuilder {
                 receive_uln_302_view: "0xcc0de82D7d520d8d5897d23cf961867Bc16Fd346".to_string(),
                 read_lib_1002: Some("0x74F55Bc2a79A27A0bF1D1A35dB5d0Fc36b9FDB9D".to_string()),
                 read_lib_1002_view: Some("0x60adfF2ADb728f7D3029e43dEA8c212f31c2962c".to_string()),
+                send_uln_302: None,
+                send_uln_301: None,
+                simple_message_lib: None,
             },
         ),
     ]))
@@ -790,6 +799,123 @@ async fn aptos_payload_builder_rejects_v_id_for_v2_like_typescript() {
     assert_eq!(err.to_string(), "VId is not supported on aptos yet");
 }
 
+/// The vId-less ULN V2 proposal: upstream's mainnet vector
+/// (`pillar-runtime/tests/gasolina_parity/aptos_ulnv2_destination.json`, "mainnet skipVId"), and
+/// each identity condition this service adds refused before any hash is built.
+#[tokio::test]
+async fn aptos_v2_without_v_id_is_served_only_for_the_pinned_identity() {
+    let pinned = |chain: &str, oracle: &str| {
+        AptosUlnPayloadBuilder::new(HashMap::from([(
+            chain.to_string(),
+            AptosReceiveContracts {
+                v1_oracle: oracle.to_string(),
+                v1_uln_301: "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812"
+                    .to_string(),
+                uln_302: "0x3333333333333333333333333333333333333333333333333333333333333333"
+                    .to_string(),
+            },
+        )]))
+    };
+    let mainnet_oracle = "0xc2846ea05319c339b3b52186ceae40b43d4e9cf6c7350336c3eb0b351d9394eb";
+    let event = |mutate: &dyn Fn(&mut LzSentEvent)| {
+        let mut event = aptos_sent_event();
+        event.lz_message_id.uln_send_version = Value::from(ULN_VERSION_V2);
+        event.lz_message_id.nonce = 7;
+        event.message = format!("0x01{}2a", "0".repeat(62));
+        for (key, value) in [
+            ("srcEid", Value::from(101)),
+            ("dstEid", Value::from(108)),
+            (
+                "sender",
+                Value::from("0x50002cdfe7ccb0c41f519c6eb0653158d11cd907"),
+            ),
+            ("receiver", Value::from(format!("0x{}", "7a".repeat(32)))),
+        ] {
+            event
+                .lz_message_id
+                .pathway_id
+                .extra
+                .insert(key.to_string(), value);
+        }
+        mutate(&mut event);
+        event
+    };
+    let built = pinned("aptos", mainnet_oracle)
+        .build_uln_v2_verify_payload(&event(&|_| {}), 15, 1_712_345_678, String::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        built.hash_call_data,
+        "764531aa4efe7a937b3a516d5348cde184888e78dbb14f5eebdb26734c7360b7"
+    );
+    assert_eq!(
+        built.details["dvnCallData"]["targetContract"],
+        mainnet_oracle
+    );
+
+    let refused = [
+        (
+            "unpinned oracle",
+            pinned(
+                "aptos",
+                "0x86052d5722c3222a88de346aad92a02ace56839487165c6b1bad844e85297d5e",
+            ),
+            event(&|_| {}),
+        ),
+        (
+            "testnet EndpointV1 id with the mainnet oracle",
+            pinned("aptos", mainnet_oracle),
+            event(&|event| {
+                event
+                    .lz_message_id
+                    .pathway_id
+                    .extra
+                    .insert("dstEid".to_string(), Value::from(10_108));
+            }),
+        ),
+        (
+            "20-byte receiver",
+            pinned("aptos", mainnet_oracle),
+            event(&|event| {
+                event.lz_message_id.pathway_id.extra.insert(
+                    "receiver".to_string(),
+                    Value::from(format!("0x{}", "7a".repeat(20))),
+                );
+            }),
+        ),
+        (
+            "V301 send",
+            pinned("aptos", mainnet_oracle),
+            event(&|event| event.lz_message_id.uln_send_version = Value::from(ULN_VERSION_V301)),
+        ),
+        (
+            "movement destination",
+            pinned("movement", mainnet_oracle),
+            event(&|event| event.lz_message_id.pathway_id.dst_chain_name = "movement".to_string()),
+        ),
+        (
+            "32-byte sender",
+            pinned("aptos", mainnet_oracle),
+            event(&|event| {
+                event.lz_message_id.pathway_id.extra.insert(
+                    "sender".to_string(),
+                    Value::from(format!("0x{}", "0a".repeat(32))),
+                );
+            }),
+        ),
+    ];
+    for (name, builder, event) in refused {
+        let error = builder
+            .build_uln_v2_verify_payload(&event, 15, 1_712_345_678, String::new())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, AppCoreError::BadRequest(text) if text.starts_with("ULN V2 verification without a vId")),
+            "{name}: {error:?}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn aptos_payload_builder_builds_v3_hash_verify_like_typescript() {
     let mut sent_event = aptos_sent_event();
@@ -999,13 +1125,16 @@ fn decode_endpoint_v2_packet_sent_log_matches_ethers_event_data() {
                 "0000000000000000000000000000000000000000000000000000000000000002",
                 "1234000000000000000000000000000000000000000000000000000000000000",
             ),
+            &|_| 20,
         )
         .unwrap();
 
     assert_eq!(decoded.options, "0x1234");
     assert_eq!(
-        decoded.send_library.as_deref(),
-        Some("0x3333333333333333333333333333333333333333")
+        decoded.kind,
+        EvmPacketSentKind::EndpointV2 {
+            send_library: "0x3333333333333333333333333333333333333333".to_string()
+        }
     );
     assert_eq!(decoded.packet.nonce, 7);
     assert_eq!(decoded.packet.src_eid, 30_101);
@@ -1033,11 +1162,12 @@ fn decode_uln301_packet_sent_log_matches_ethers_event_data() {
                 "0000000000000000000000000000000000000000000000000000000000000002",
                 "1234000000000000000000000000000000000000000000000000000000000000",
             ),
+            &|_| 20,
         )
         .unwrap();
 
     assert_eq!(decoded.options, "0x1234");
-    assert_eq!(decoded.send_library, None);
+    assert_eq!(decoded.kind, EvmPacketSentKind::SendUln301);
     assert_eq!(decoded.packet.nonce, 7);
     assert_eq!(
         decoded.packet.guid,
@@ -1062,6 +1192,7 @@ fn decode_legacy_uln_v2_packet_log_matches_typescript_payload_decoder() {
     let decoded = decode_evm_packet_sent_log(
         &[LEGACY_ULN_V2_PACKET_TOPIC.to_string()],
         &format!("0x{}", hex::encode(data)),
+        &|_| 20,
     )
     .unwrap();
 
@@ -1082,7 +1213,7 @@ fn decode_legacy_uln_v2_packet_log_matches_typescript_payload_decoder() {
         "0x0000000000000000000000000000000000000000000000000000000000000000"
     );
     assert_eq!(decoded.options, "0x");
-    assert_eq!(decoded.send_library, None);
+    assert_eq!(decoded.kind, EvmPacketSentKind::UltraLightNodeV2);
 }
 
 #[test]
@@ -1473,7 +1604,7 @@ fn proof_ignores_a_precomputed_proof_supplied_in_the_event_extra() {
 /// and the V2 id folded into the V1 range for the non-EVM ones (TS:
 /// `packages/static-config/src/index.ts:211-243`). The real table is checked
 /// against upstream for every chain by `pillar-runtime`'s
-/// `v_id_by_chain_name_matches_upstream_for_every_available_chain`.
+/// `v_id_by_chain_name_matches_upstream_except_where_onchain_dvns_disagree`.
 fn test_v_ids() -> HashMap<String, String> {
     [
         ("aptos", "108"),

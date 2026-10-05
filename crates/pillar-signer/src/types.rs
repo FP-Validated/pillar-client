@@ -26,6 +26,7 @@ pub enum ChainType {
     Ton,
     Starknet,
     Stellar,
+    Canton,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,6 +47,12 @@ pub struct PublicKeyRequest {
 
 #[async_trait]
 pub trait RawSignerAdapter: Send + Sync + 'static {
+    fn supports_durable_audit(&self) -> bool {
+        false
+    }
+    fn kms_provider(&self) -> Option<KmsProvider> {
+        None
+    }
     async fn sign(&self, request: SignRequest) -> Result<Vec<u8>, SignerError>;
     async fn get_public_key(&self, request: PublicKeyRequest) -> Result<Vec<u8>, SignerError>;
 }
@@ -102,6 +109,10 @@ pub struct WalletDefinition {
 pub enum SignerError {
     #[error("{0}")]
     Message(String),
+    #[error("{0}")]
+    Admission(pillar_core::execution::BudgetError),
+    #[error("{0}")]
+    Audit(String),
     #[error("Unsupported chain type: {0:?}")]
     UnsupportedChainType(ChainType),
     #[error("SignerAdapter: Duplicate wallet definition found for {0}")]
@@ -132,6 +143,7 @@ pub(crate) fn chain_type_ts_name(chain_type: ChainType) -> &'static str {
         ChainType::Ton => "TON",
         ChainType::Starknet => "STARKNET",
         ChainType::Stellar => "STELLAR",
+        ChainType::Canton => "CANTON",
     }
 }
 
@@ -140,6 +152,12 @@ impl<T> RawSignerAdapter for Arc<T>
 where
     T: RawSignerAdapter + ?Sized,
 {
+    fn supports_durable_audit(&self) -> bool {
+        (**self).supports_durable_audit()
+    }
+    fn kms_provider(&self) -> Option<KmsProvider> {
+        (**self).kms_provider()
+    }
     async fn sign(&self, request: SignRequest) -> Result<Vec<u8>, SignerError> {
         (**self).sign(request).await
     }

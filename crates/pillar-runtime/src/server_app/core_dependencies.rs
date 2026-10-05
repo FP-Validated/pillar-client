@@ -25,12 +25,23 @@ where
         // The roster the handle was published with, not a recomputation: the
         // signers assembled below must match the chains actually serving.
         let available_chain_names = providers.load().available_chain_names().to_vec();
+        let controls =
+            crate::execution::RuntimeControls::new(&runtime_config, &available_chain_names).await?;
+        metrics
+            .lock()
+            .await
+            .attach_execution(controls.resources.clone());
+        metrics
+            .lock()
+            .await
+            .attach_audit(controls.audit_health.clone());
         let provider_health_source = RpcProviderHealthSource::from_serving_snapshot(
             providers.clone(),
             transport,
             now_unix_ms,
             chain_type_by_chain_name.clone(),
-        );
+        )
+        .with_execution_resources(controls.resources.clone());
         let now = provider_health_source.now_unix_ms();
         let provider_health_cache =
             ProviderHealthCache::new(provider_health_source.clone(), move || now());
@@ -40,18 +51,31 @@ where
             &chain_type_by_chain_name,
         )?;
         let wallets_by_chain_name = signer_config.wallets_by_chain_name.clone();
-        let signer_assembly = runtime_signer_assembly_from_config_with_metrics(
-            signer_config,
-            typed_chain_type_by_chain_name(&chain_type_by_chain_name)?,
-            metrics.clone(),
-        )
-        .await?;
+        let signer_assembly = controls
+            .scope(
+                providers.generation(),
+                runtime_signer_assembly_from_config_with_metrics(
+                    signer_config,
+                    typed_chain_type_by_chain_name(&chain_type_by_chain_name)?,
+                    metrics.clone(),
+                ),
+            )
+            .await?;
         // Read before probing, for the same reason the cache's own refresh
         // does: the refresh loop is already running, so a first refresh could
         // overtake this startup probe and the report would then be labelled as
         // describing a configuration it never saw.
         let probed_generation = providers.generation();
-        let provider_health_report = provider_health_source.get_provider_health_report().await;
+        let provider_health_report = controls
+            .scope(
+                probed_generation,
+                provider_health_source.get_provider_health_report(),
+            )
+            .await
+            .unwrap_or_else(|_| {
+                tracing::warn!("startup provider health was not observed");
+                pillar_core::ProviderHealthReport::new()
+            });
         let provider_health = provider_health_snapshot_from_report(&provider_health_report);
         provider_health_cache
             .warm(provider_health.clone(), probed_generation)
@@ -68,7 +92,7 @@ where
             .filter_map(|chain_name| {
                 provider_config
                     .get_provider_config(chain_name)
-                    .filter(|config| config.quorum.unwrap_or(1).max(1) == 1)
+                    .filter(|config| config.single_entity_trust_root())
                     .map(|_| chain_name.as_str())
             })
             .collect::<Vec<_>>();
@@ -76,7 +100,7 @@ where
             tracing::warn!(
                 target: "pillar_runtime",
                 chains = ?single_provider_chains,
-                "configured chains use quorum=1 single-provider trust roots"
+                "configured chains let one provider entity alone satisfy the quorum strategy"
             );
         }
         let signing_app = core_api_app_from_runtime_parts(RuntimeCoreAppParts {
@@ -114,36 +138,44 @@ where
                 registry.register_background_task(PROVIDER_HEALTH_CACHE_REFRESH_TASK),
             )
         };
+        let rank_controls = controls.clone();
         let provider_rank_refresh = tokio::spawn(async move {
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(150)).await;
-                let probed_generation = rank_refresh_providers.generation();
-                let report = rank_refresh_source.get_provider_health_report().await;
-                seed_provider_rank_if_current(
-                    &rank_refresh_tracker,
-                    &rank_refresh_providers,
-                    probed_generation,
-                    &report,
-                )
-                .await;
-                // Stamped on completion: a probe that hangs must not publish a
-                // fresh-looking heartbeat on its way in.
                 rank_heartbeat.stamp();
+                let probed_generation = rank_refresh_providers.generation();
+                let report = rank_controls
+                    .scope(
+                        probed_generation,
+                        rank_refresh_source.get_provider_health_report(),
+                    )
+                    .await;
+                if let Ok(report) = report {
+                    seed_provider_rank_if_current(
+                        &rank_refresh_tracker,
+                        &rank_refresh_providers,
+                        probed_generation,
+                        &report,
+                    )
+                    .await;
+                }
             }
         });
         let refresh_cache = provider_health_cache.clone();
+        let cache_controls = controls.clone();
         let provider_health_cache_refresh = tokio::spawn(async move {
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_millis(
                     pillar_core::PROVIDER_HEALTH_CACHE_TTL_MS,
                 ))
                 .await;
-                let _ = refresh_cache.read().await;
                 cache_heartbeat.stamp();
+                let _ = cache_controls.scope(0, refresh_cache.read()).await;
             }
         });
 
         Ok(Self {
+            controls,
             runtime_config,
             providers,
             provider_health_cache,

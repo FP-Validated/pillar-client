@@ -4,8 +4,10 @@ mod evm;
 mod non_evm;
 mod parts;
 
+#[cfg(test)]
+pub use evm::stellar_layerzero_views_for_environment;
 pub use evm::{
-    runtime_chain_name_by_endpoint_id, runtime_evm_layerzero_config,
+    canton_uln_302, runtime_chain_name_by_endpoint_id, runtime_evm_layerzero_config,
     runtime_evm_uln_payload_builder, runtime_rpc_validation_checks_from_evm_config,
     runtime_v_id_by_chain_name, starknet_uln_302_for_environment, stellar_uln_302_for_environment,
     stellar_uln_302_published_for_environment,
@@ -17,6 +19,7 @@ pub use non_evm::{
 pub use parts::{runtime_layerzero_parts_from_evm_config, RuntimeLayerZeroDependencyInputs};
 
 pub(crate) use evm::is_evm_shaped_chain_type;
+pub(crate) use non_evm::aptos_v301_contracts_for_environment;
 pub(crate) use non_evm::move_endpoint_v2_for_environment;
 pub(crate) use non_evm::move_views_for_environment;
 pub(crate) use non_evm::trusted_move_packet_emitters_for_environment;

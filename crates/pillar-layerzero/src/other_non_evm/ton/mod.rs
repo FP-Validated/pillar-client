@@ -17,7 +17,10 @@ pub use address::{
     address_to_be32 as ton_address_to_be32, derive_uln_addresses, DerivedAddresses,
     TonContractCodeCells, TonPathway,
 };
-pub use cell::{boc_from_base64, boc_to_base64 as ton_boc_to_base64};
+pub use cell::{
+    boc_from_base64, boc_from_hex as ton_boc_from_hex, boc_to_base64 as ton_boc_to_base64,
+    state_init_address as ton_state_init_address,
+};
 
 /// A parsed TON contract storage cell, as handed to the pure decoders.
 pub type TonStorageCell = ton_core::cell::TonCell;

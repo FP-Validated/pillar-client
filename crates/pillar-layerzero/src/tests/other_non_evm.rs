@@ -116,8 +116,8 @@ async fn stellar_uln_v3_rejects_missing_dvn_address_like_upstream() {
         .unwrap_err();
 
     assert_eq!(
-        err.to_string(),
-        "Stellar: DVN Address is required for verify payload"
+        err,
+        AppCoreError::Internal("Stellar: DVN Address is required for verify payload".to_string())
     );
 }
 

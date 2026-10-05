@@ -42,6 +42,9 @@ fn evm_payload_builder() -> EvmUlnPayloadBuilder {
             receive_uln_302_view: "0x2222222222222222222222222222222222222223".to_string(),
             read_lib_1002: Some("0x3333333333333333333333333333333333333333".to_string()),
             read_lib_1002_view: Some("0x3333333333333333333333333333333333333334".to_string()),
+            send_uln_302: None,
+            send_uln_301: None,
+            simple_message_lib: None,
         },
     )]))
 }

@@ -1,0 +1,2257 @@
+{
+  "provenance": {
+    "upstream": "Gasolina 1.2.66 source snapshot; @layerzerolabs/lz-aptos-sdk-v1@3.0.168 (lockfile)",
+    "entrypoints": [
+      "packages/sdks/lz-v2-sdk/src/uln/move/index.ts:getUlnReceiveDetails",
+      "packages/sdks/lz-v2-sdk/src/uln/aptos/index.ts:UlnAptosSdk.getDstUlnConfig",
+      "packages/sdks/lz-v2-sdk/src/uln/aptos/index.ts:UlnAptosSdk.hasPayloadSigned"
+    ],
+    "input": "stub Move provider answering each scenario; offline"
+  },
+  "nonce": 74756,
+  "dvn": "0x3333333333333333333333333333333333333333333333333333333333333333",
+  "environments": {
+    "mainnet": {
+      "unsigned": {
+        "state": {
+          "receiveMsglib": [
+            "2",
+            0
+          ],
+          "requiredConfirmations": 2,
+          "dvnConfirmations": 1,
+          "verificationState": 0,
+          "inboundNonce": 74755,
+          "storedPayloadHash": null
+        },
+        "requests": [
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::get_receive_msglib",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::get_config",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "2",
+              "0",
+              "101",
+              "3"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "2",
+              "0",
+              "101",
+              "3"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "u8",
+              "u64",
+              "u8"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::msglib::get_verification_confirmations",
+            "arguments": [
+              "0x1d5b4495ea5cec3fc146c4eff970fbd6cd2ba63eda6c93ced232342c32a343a5",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArguments": [
+              "0x1d5b4495ea5cec3fc146c4eff970fbd6cd2ba63eda6c93ced232342c32a343a5",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>",
+              "address"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x49bbf8d8214fb2b158f50ecf3d75a73da133440776bff0db6005c1175138e7c0::uln_301::verifiable",
+            "arguments": [
+              "0x0100000000000124040000006500000000000000000000000050002cdfe7ccb0c41f519c6eb0653158d11cd9070000006cf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArguments": [
+              "0x0100000000000124040000006500000000000000000000000050002cdfe7ccb0c41f519c6eb0653158d11cd9070000006cf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::inbound_nonce",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101",
+              "0x50002cdfe7ccb0c41f519c6eb0653158d11cd907"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101",
+              "0x50002cdfe7ccb0c41f519c6eb0653158d11cd907"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "vector<u8>"
+            ]
+          },
+          {
+            "kind": "getAccountResource",
+            "accountAddress": "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+            "resourceType": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::channel::Channels"
+          }
+        ],
+        "verdict": {
+          "ulnVersion": "V301",
+          "signed": false
+        }
+      },
+      "confirmationsAtThreshold": {
+        "state": {
+          "receiveMsglib": [
+            "2",
+            0
+          ],
+          "requiredConfirmations": 2,
+          "dvnConfirmations": 2,
+          "verificationState": 0,
+          "inboundNonce": 74755,
+          "storedPayloadHash": null
+        },
+        "requests": [
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::get_receive_msglib",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::get_config",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "2",
+              "0",
+              "101",
+              "3"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "2",
+              "0",
+              "101",
+              "3"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "u8",
+              "u64",
+              "u8"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::msglib::get_verification_confirmations",
+            "arguments": [
+              "0x1d5b4495ea5cec3fc146c4eff970fbd6cd2ba63eda6c93ced232342c32a343a5",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArguments": [
+              "0x1d5b4495ea5cec3fc146c4eff970fbd6cd2ba63eda6c93ced232342c32a343a5",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>",
+              "address"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x49bbf8d8214fb2b158f50ecf3d75a73da133440776bff0db6005c1175138e7c0::uln_301::verifiable",
+            "arguments": [
+              "0x0100000000000124040000006500000000000000000000000050002cdfe7ccb0c41f519c6eb0653158d11cd9070000006cf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArguments": [
+              "0x0100000000000124040000006500000000000000000000000050002cdfe7ccb0c41f519c6eb0653158d11cd9070000006cf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::inbound_nonce",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101",
+              "0x50002cdfe7ccb0c41f519c6eb0653158d11cd907"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101",
+              "0x50002cdfe7ccb0c41f519c6eb0653158d11cd907"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "vector<u8>"
+            ]
+          },
+          {
+            "kind": "getAccountResource",
+            "accountAddress": "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+            "resourceType": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::channel::Channels"
+          }
+        ],
+        "verdict": {
+          "ulnVersion": "V301",
+          "signed": true
+        }
+      },
+      "nonceAlreadyReceived": {
+        "state": {
+          "receiveMsglib": [
+            "2",
+            0
+          ],
+          "requiredConfirmations": 2,
+          "dvnConfirmations": 1,
+          "verificationState": 0,
+          "inboundNonce": 74756,
+          "storedPayloadHash": null
+        },
+        "requests": [
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::get_receive_msglib",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::get_config",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "2",
+              "0",
+              "101",
+              "3"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "2",
+              "0",
+              "101",
+              "3"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "u8",
+              "u64",
+              "u8"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::msglib::get_verification_confirmations",
+            "arguments": [
+              "0x1d5b4495ea5cec3fc146c4eff970fbd6cd2ba63eda6c93ced232342c32a343a5",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArguments": [
+              "0x1d5b4495ea5cec3fc146c4eff970fbd6cd2ba63eda6c93ced232342c32a343a5",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>",
+              "address"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x49bbf8d8214fb2b158f50ecf3d75a73da133440776bff0db6005c1175138e7c0::uln_301::verifiable",
+            "arguments": [
+              "0x0100000000000124040000006500000000000000000000000050002cdfe7ccb0c41f519c6eb0653158d11cd9070000006cf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArguments": [
+              "0x0100000000000124040000006500000000000000000000000050002cdfe7ccb0c41f519c6eb0653158d11cd9070000006cf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::inbound_nonce",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101",
+              "0x50002cdfe7ccb0c41f519c6eb0653158d11cd907"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101",
+              "0x50002cdfe7ccb0c41f519c6eb0653158d11cd907"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "vector<u8>"
+            ]
+          }
+        ],
+        "verdict": {
+          "ulnVersion": "V301",
+          "signed": true
+        }
+      },
+      "payloadHashStored": {
+        "state": {
+          "receiveMsglib": [
+            "2",
+            0
+          ],
+          "requiredConfirmations": 2,
+          "dvnConfirmations": 1,
+          "verificationState": 0,
+          "inboundNonce": 74755,
+          "storedPayloadHash": "0xfeed"
+        },
+        "requests": [
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::get_receive_msglib",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::get_config",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "2",
+              "0",
+              "101",
+              "3"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "2",
+              "0",
+              "101",
+              "3"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "u8",
+              "u64",
+              "u8"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::msglib::get_verification_confirmations",
+            "arguments": [
+              "0x1d5b4495ea5cec3fc146c4eff970fbd6cd2ba63eda6c93ced232342c32a343a5",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArguments": [
+              "0x1d5b4495ea5cec3fc146c4eff970fbd6cd2ba63eda6c93ced232342c32a343a5",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>",
+              "address"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x49bbf8d8214fb2b158f50ecf3d75a73da133440776bff0db6005c1175138e7c0::uln_301::verifiable",
+            "arguments": [
+              "0x0100000000000124040000006500000000000000000000000050002cdfe7ccb0c41f519c6eb0653158d11cd9070000006cf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArguments": [
+              "0x0100000000000124040000006500000000000000000000000050002cdfe7ccb0c41f519c6eb0653158d11cd9070000006cf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::inbound_nonce",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101",
+              "0x50002cdfe7ccb0c41f519c6eb0653158d11cd907"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101",
+              "0x50002cdfe7ccb0c41f519c6eb0653158d11cd907"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "vector<u8>"
+            ]
+          },
+          {
+            "kind": "getAccountResource",
+            "accountAddress": "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+            "resourceType": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::channel::Channels"
+          },
+          {
+            "kind": "getTableItem",
+            "handle": "0xstates",
+            "data": {
+              "key_type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::channel::Remote",
+              "value_type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::channel::Channel",
+              "key": {
+                "chain_id": "101",
+                "addr": "0x50002cdfe7ccb0c41f519c6eb0653158d11cd907"
+              }
+            }
+          },
+          {
+            "kind": "getTableItem",
+            "handle": "0xhashes",
+            "data": {
+              "key_type": "u64",
+              "value_type": "vector<u8>",
+              "key": "74756"
+            }
+          }
+        ],
+        "verdict": {
+          "ulnVersion": "V301",
+          "signed": true
+        }
+      },
+      "verifyingWithoutStoredHash": {
+        "state": {
+          "receiveMsglib": [
+            "2",
+            0
+          ],
+          "requiredConfirmations": 2,
+          "dvnConfirmations": 1,
+          "verificationState": 0,
+          "inboundNonce": 74755,
+          "storedPayloadHash": null
+        },
+        "requests": [
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::get_receive_msglib",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::get_config",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "2",
+              "0",
+              "101",
+              "3"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "2",
+              "0",
+              "101",
+              "3"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "u8",
+              "u64",
+              "u8"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::msglib::get_verification_confirmations",
+            "arguments": [
+              "0x1d5b4495ea5cec3fc146c4eff970fbd6cd2ba63eda6c93ced232342c32a343a5",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArguments": [
+              "0x1d5b4495ea5cec3fc146c4eff970fbd6cd2ba63eda6c93ced232342c32a343a5",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>",
+              "address"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x49bbf8d8214fb2b158f50ecf3d75a73da133440776bff0db6005c1175138e7c0::uln_301::verifiable",
+            "arguments": [
+              "0x0100000000000124040000006500000000000000000000000050002cdfe7ccb0c41f519c6eb0653158d11cd9070000006cf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArguments": [
+              "0x0100000000000124040000006500000000000000000000000050002cdfe7ccb0c41f519c6eb0653158d11cd9070000006cf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::inbound_nonce",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101",
+              "0x50002cdfe7ccb0c41f519c6eb0653158d11cd907"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101",
+              "0x50002cdfe7ccb0c41f519c6eb0653158d11cd907"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "vector<u8>"
+            ]
+          },
+          {
+            "kind": "getAccountResource",
+            "accountAddress": "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+            "resourceType": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::channel::Channels"
+          }
+        ],
+        "verdict": {
+          "ulnVersion": "V301",
+          "signed": false
+        }
+      },
+      "verified": {
+        "state": {
+          "receiveMsglib": [
+            "2",
+            0
+          ],
+          "requiredConfirmations": 2,
+          "dvnConfirmations": 1,
+          "verificationState": 2,
+          "inboundNonce": 74755,
+          "storedPayloadHash": null
+        },
+        "requests": [
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::get_receive_msglib",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::get_config",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "2",
+              "0",
+              "101",
+              "3"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "2",
+              "0",
+              "101",
+              "3"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "u8",
+              "u64",
+              "u8"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::msglib::get_verification_confirmations",
+            "arguments": [
+              "0x1d5b4495ea5cec3fc146c4eff970fbd6cd2ba63eda6c93ced232342c32a343a5",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArguments": [
+              "0x1d5b4495ea5cec3fc146c4eff970fbd6cd2ba63eda6c93ced232342c32a343a5",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>",
+              "address"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x49bbf8d8214fb2b158f50ecf3d75a73da133440776bff0db6005c1175138e7c0::uln_301::verifiable",
+            "arguments": [
+              "0x0100000000000124040000006500000000000000000000000050002cdfe7ccb0c41f519c6eb0653158d11cd9070000006cf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArguments": [
+              "0x0100000000000124040000006500000000000000000000000050002cdfe7ccb0c41f519c6eb0653158d11cd9070000006cf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>"
+            ]
+          }
+        ],
+        "verdict": {
+          "ulnVersion": "V301",
+          "signed": true
+        }
+      },
+      "verifiable": {
+        "state": {
+          "receiveMsglib": [
+            "2",
+            0
+          ],
+          "requiredConfirmations": 2,
+          "dvnConfirmations": 1,
+          "verificationState": 1,
+          "inboundNonce": 74755,
+          "storedPayloadHash": null
+        },
+        "requests": [
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::get_receive_msglib",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::get_config",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "2",
+              "0",
+              "101",
+              "3"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "2",
+              "0",
+              "101",
+              "3"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "u8",
+              "u64",
+              "u8"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::msglib::get_verification_confirmations",
+            "arguments": [
+              "0x1d5b4495ea5cec3fc146c4eff970fbd6cd2ba63eda6c93ced232342c32a343a5",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArguments": [
+              "0x1d5b4495ea5cec3fc146c4eff970fbd6cd2ba63eda6c93ced232342c32a343a5",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>",
+              "address"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x49bbf8d8214fb2b158f50ecf3d75a73da133440776bff0db6005c1175138e7c0::uln_301::verifiable",
+            "arguments": [
+              "0x0100000000000124040000006500000000000000000000000050002cdfe7ccb0c41f519c6eb0653158d11cd9070000006cf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArguments": [
+              "0x0100000000000124040000006500000000000000000000000050002cdfe7ccb0c41f519c6eb0653158d11cd9070000006cf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>"
+            ]
+          }
+        ],
+        "verdict": {
+          "ulnVersion": "V301",
+          "signed": false
+        }
+      },
+      "notInitializable": {
+        "state": {
+          "receiveMsglib": [
+            "2",
+            0
+          ],
+          "requiredConfirmations": 2,
+          "dvnConfirmations": 1,
+          "verificationState": 3,
+          "inboundNonce": 74755,
+          "storedPayloadHash": null
+        },
+        "requests": [
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::get_receive_msglib",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::get_config",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "2",
+              "0",
+              "101",
+              "3"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "2",
+              "0",
+              "101",
+              "3"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "u8",
+              "u64",
+              "u8"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::msglib::get_verification_confirmations",
+            "arguments": [
+              "0x1d5b4495ea5cec3fc146c4eff970fbd6cd2ba63eda6c93ced232342c32a343a5",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArguments": [
+              "0x1d5b4495ea5cec3fc146c4eff970fbd6cd2ba63eda6c93ced232342c32a343a5",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>",
+              "address"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x49bbf8d8214fb2b158f50ecf3d75a73da133440776bff0db6005c1175138e7c0::uln_301::verifiable",
+            "arguments": [
+              "0x0100000000000124040000006500000000000000000000000050002cdfe7ccb0c41f519c6eb0653158d11cd9070000006cf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArguments": [
+              "0x0100000000000124040000006500000000000000000000000050002cdfe7ccb0c41f519c6eb0653158d11cd9070000006cf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>"
+            ]
+          }
+        ],
+        "verdict": {
+          "ulnVersion": "V301",
+          "signed": false
+        }
+      },
+      "capExceeded": {
+        "state": {
+          "receiveMsglib": [
+            "2",
+            0
+          ],
+          "requiredConfirmations": 2,
+          "dvnConfirmations": 1,
+          "verificationState": 4,
+          "inboundNonce": 74755,
+          "storedPayloadHash": null
+        },
+        "requests": [
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::get_receive_msglib",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::get_config",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "2",
+              "0",
+              "101",
+              "3"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "2",
+              "0",
+              "101",
+              "3"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "u8",
+              "u64",
+              "u8"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::msglib::get_verification_confirmations",
+            "arguments": [
+              "0x1d5b4495ea5cec3fc146c4eff970fbd6cd2ba63eda6c93ced232342c32a343a5",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArguments": [
+              "0x1d5b4495ea5cec3fc146c4eff970fbd6cd2ba63eda6c93ced232342c32a343a5",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>",
+              "address"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x49bbf8d8214fb2b158f50ecf3d75a73da133440776bff0db6005c1175138e7c0::uln_301::verifiable",
+            "arguments": [
+              "0x0100000000000124040000006500000000000000000000000050002cdfe7ccb0c41f519c6eb0653158d11cd9070000006cf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArguments": [
+              "0x0100000000000124040000006500000000000000000000000050002cdfe7ccb0c41f519c6eb0653158d11cd9070000006cf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>"
+            ]
+          }
+        ],
+        "verdict": {
+          "ulnVersion": "V301",
+          "signed": false
+        }
+      },
+      "unknownState": {
+        "state": {
+          "receiveMsglib": [
+            "2",
+            0
+          ],
+          "requiredConfirmations": 2,
+          "dvnConfirmations": 1,
+          "verificationState": 5,
+          "inboundNonce": 74755,
+          "storedPayloadHash": null
+        },
+        "requests": [
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::get_receive_msglib",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::get_config",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "2",
+              "0",
+              "101",
+              "3"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "2",
+              "0",
+              "101",
+              "3"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "u8",
+              "u64",
+              "u8"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::msglib::get_verification_confirmations",
+            "arguments": [
+              "0x1d5b4495ea5cec3fc146c4eff970fbd6cd2ba63eda6c93ced232342c32a343a5",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArguments": [
+              "0x1d5b4495ea5cec3fc146c4eff970fbd6cd2ba63eda6c93ced232342c32a343a5",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>",
+              "address"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x49bbf8d8214fb2b158f50ecf3d75a73da133440776bff0db6005c1175138e7c0::uln_301::verifiable",
+            "arguments": [
+              "0x0100000000000124040000006500000000000000000000000050002cdfe7ccb0c41f519c6eb0653158d11cd9070000006cf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArguments": [
+              "0x0100000000000124040000006500000000000000000000000050002cdfe7ccb0c41f519c6eb0653158d11cd9070000006cf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>"
+            ]
+          }
+        ],
+        "verdict": {
+          "error": "Unknown delivery state: 5"
+        }
+      },
+      "ulnV2ReceiveLibrary": {
+        "state": {
+          "receiveMsglib": [
+            "1",
+            0
+          ],
+          "requiredConfirmations": 2,
+          "dvnConfirmations": 1,
+          "verificationState": 0,
+          "inboundNonce": 74755,
+          "storedPayloadHash": null
+        },
+        "requests": [
+          {
+            "kind": "view",
+            "function": "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::get_receive_msglib",
+            "arguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101"
+            ],
+            "functionArguments": [
+              "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+              "101"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64"
+            ]
+          }
+        ],
+        "verdict": {
+          "error": "Unsupported ULN version"
+        }
+      }
+    },
+    "testnet": {
+      "unsigned": {
+        "state": {
+          "receiveMsglib": [
+            "2",
+            0
+          ],
+          "requiredConfirmations": 2,
+          "dvnConfirmations": 1,
+          "verificationState": 0,
+          "inboundNonce": 74755,
+          "storedPayloadHash": null
+        },
+        "requests": [
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::get_receive_msglib",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::get_config",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "2",
+              "0",
+              "10161",
+              "3"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "2",
+              "0",
+              "10161",
+              "3"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "u8",
+              "u64",
+              "u8"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x9b4f328857baf5471ffe873471459a75da3aa3db0629f4c1b0ede4d48cf9fac1::msglib::get_verification_confirmations",
+            "arguments": [
+              "0x2762e0998f36b4ab1db305c2ee42f4d70e9563e578a854bfb0a50b050c2ebb3f",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArguments": [
+              "0x2762e0998f36b4ab1db305c2ee42f4d70e9563e578a854bfb0a50b050c2ebb3f",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>",
+              "address"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0xa37316bc18fa9b5b5e976b9bc9b103565443cc72b85981d61c72324bf50ede1f::uln_301::verifiable",
+            "arguments": [
+              "0x010000000000012404000027b10000000000000000000000002afd0d8a477ad393d2234253407fb1cec92749d10000277cec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArguments": [
+              "0x010000000000012404000027b10000000000000000000000002afd0d8a477ad393d2234253407fb1cec92749d10000277cec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::inbound_nonce",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161",
+              "0x2afd0d8a477ad393d2234253407fb1cec92749d1"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161",
+              "0x2afd0d8a477ad393d2234253407fb1cec92749d1"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "vector<u8>"
+            ]
+          },
+          {
+            "kind": "getAccountResource",
+            "accountAddress": "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+            "resourceType": "0x1759cc0d3161f1eb79f65847d4feb9d1f74fb79014698a23b16b28b9cd4c37e3::channel::Channels"
+          }
+        ],
+        "verdict": {
+          "ulnVersion": "V301",
+          "signed": false
+        }
+      },
+      "confirmationsAtThreshold": {
+        "state": {
+          "receiveMsglib": [
+            "2",
+            0
+          ],
+          "requiredConfirmations": 2,
+          "dvnConfirmations": 2,
+          "verificationState": 0,
+          "inboundNonce": 74755,
+          "storedPayloadHash": null
+        },
+        "requests": [
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::get_receive_msglib",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::get_config",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "2",
+              "0",
+              "10161",
+              "3"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "2",
+              "0",
+              "10161",
+              "3"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "u8",
+              "u64",
+              "u8"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x9b4f328857baf5471ffe873471459a75da3aa3db0629f4c1b0ede4d48cf9fac1::msglib::get_verification_confirmations",
+            "arguments": [
+              "0x2762e0998f36b4ab1db305c2ee42f4d70e9563e578a854bfb0a50b050c2ebb3f",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArguments": [
+              "0x2762e0998f36b4ab1db305c2ee42f4d70e9563e578a854bfb0a50b050c2ebb3f",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>",
+              "address"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0xa37316bc18fa9b5b5e976b9bc9b103565443cc72b85981d61c72324bf50ede1f::uln_301::verifiable",
+            "arguments": [
+              "0x010000000000012404000027b10000000000000000000000002afd0d8a477ad393d2234253407fb1cec92749d10000277cec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArguments": [
+              "0x010000000000012404000027b10000000000000000000000002afd0d8a477ad393d2234253407fb1cec92749d10000277cec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::inbound_nonce",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161",
+              "0x2afd0d8a477ad393d2234253407fb1cec92749d1"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161",
+              "0x2afd0d8a477ad393d2234253407fb1cec92749d1"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "vector<u8>"
+            ]
+          },
+          {
+            "kind": "getAccountResource",
+            "accountAddress": "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+            "resourceType": "0x1759cc0d3161f1eb79f65847d4feb9d1f74fb79014698a23b16b28b9cd4c37e3::channel::Channels"
+          }
+        ],
+        "verdict": {
+          "ulnVersion": "V301",
+          "signed": true
+        }
+      },
+      "nonceAlreadyReceived": {
+        "state": {
+          "receiveMsglib": [
+            "2",
+            0
+          ],
+          "requiredConfirmations": 2,
+          "dvnConfirmations": 1,
+          "verificationState": 0,
+          "inboundNonce": 74756,
+          "storedPayloadHash": null
+        },
+        "requests": [
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::get_receive_msglib",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::get_config",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "2",
+              "0",
+              "10161",
+              "3"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "2",
+              "0",
+              "10161",
+              "3"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "u8",
+              "u64",
+              "u8"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x9b4f328857baf5471ffe873471459a75da3aa3db0629f4c1b0ede4d48cf9fac1::msglib::get_verification_confirmations",
+            "arguments": [
+              "0x2762e0998f36b4ab1db305c2ee42f4d70e9563e578a854bfb0a50b050c2ebb3f",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArguments": [
+              "0x2762e0998f36b4ab1db305c2ee42f4d70e9563e578a854bfb0a50b050c2ebb3f",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>",
+              "address"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0xa37316bc18fa9b5b5e976b9bc9b103565443cc72b85981d61c72324bf50ede1f::uln_301::verifiable",
+            "arguments": [
+              "0x010000000000012404000027b10000000000000000000000002afd0d8a477ad393d2234253407fb1cec92749d10000277cec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArguments": [
+              "0x010000000000012404000027b10000000000000000000000002afd0d8a477ad393d2234253407fb1cec92749d10000277cec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::inbound_nonce",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161",
+              "0x2afd0d8a477ad393d2234253407fb1cec92749d1"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161",
+              "0x2afd0d8a477ad393d2234253407fb1cec92749d1"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "vector<u8>"
+            ]
+          }
+        ],
+        "verdict": {
+          "ulnVersion": "V301",
+          "signed": true
+        }
+      },
+      "payloadHashStored": {
+        "state": {
+          "receiveMsglib": [
+            "2",
+            0
+          ],
+          "requiredConfirmations": 2,
+          "dvnConfirmations": 1,
+          "verificationState": 0,
+          "inboundNonce": 74755,
+          "storedPayloadHash": "0xfeed"
+        },
+        "requests": [
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::get_receive_msglib",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::get_config",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "2",
+              "0",
+              "10161",
+              "3"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "2",
+              "0",
+              "10161",
+              "3"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "u8",
+              "u64",
+              "u8"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x9b4f328857baf5471ffe873471459a75da3aa3db0629f4c1b0ede4d48cf9fac1::msglib::get_verification_confirmations",
+            "arguments": [
+              "0x2762e0998f36b4ab1db305c2ee42f4d70e9563e578a854bfb0a50b050c2ebb3f",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArguments": [
+              "0x2762e0998f36b4ab1db305c2ee42f4d70e9563e578a854bfb0a50b050c2ebb3f",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>",
+              "address"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0xa37316bc18fa9b5b5e976b9bc9b103565443cc72b85981d61c72324bf50ede1f::uln_301::verifiable",
+            "arguments": [
+              "0x010000000000012404000027b10000000000000000000000002afd0d8a477ad393d2234253407fb1cec92749d10000277cec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArguments": [
+              "0x010000000000012404000027b10000000000000000000000002afd0d8a477ad393d2234253407fb1cec92749d10000277cec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::inbound_nonce",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161",
+              "0x2afd0d8a477ad393d2234253407fb1cec92749d1"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161",
+              "0x2afd0d8a477ad393d2234253407fb1cec92749d1"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "vector<u8>"
+            ]
+          },
+          {
+            "kind": "getAccountResource",
+            "accountAddress": "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+            "resourceType": "0x1759cc0d3161f1eb79f65847d4feb9d1f74fb79014698a23b16b28b9cd4c37e3::channel::Channels"
+          },
+          {
+            "kind": "getTableItem",
+            "handle": "0xstates",
+            "data": {
+              "key_type": "0x1759cc0d3161f1eb79f65847d4feb9d1f74fb79014698a23b16b28b9cd4c37e3::channel::Remote",
+              "value_type": "0x1759cc0d3161f1eb79f65847d4feb9d1f74fb79014698a23b16b28b9cd4c37e3::channel::Channel",
+              "key": {
+                "chain_id": "10161",
+                "addr": "0x2afd0d8a477ad393d2234253407fb1cec92749d1"
+              }
+            }
+          },
+          {
+            "kind": "getTableItem",
+            "handle": "0xhashes",
+            "data": {
+              "key_type": "u64",
+              "value_type": "vector<u8>",
+              "key": "74756"
+            }
+          }
+        ],
+        "verdict": {
+          "ulnVersion": "V301",
+          "signed": true
+        }
+      },
+      "verifyingWithoutStoredHash": {
+        "state": {
+          "receiveMsglib": [
+            "2",
+            0
+          ],
+          "requiredConfirmations": 2,
+          "dvnConfirmations": 1,
+          "verificationState": 0,
+          "inboundNonce": 74755,
+          "storedPayloadHash": null
+        },
+        "requests": [
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::get_receive_msglib",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::get_config",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "2",
+              "0",
+              "10161",
+              "3"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "2",
+              "0",
+              "10161",
+              "3"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "u8",
+              "u64",
+              "u8"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x9b4f328857baf5471ffe873471459a75da3aa3db0629f4c1b0ede4d48cf9fac1::msglib::get_verification_confirmations",
+            "arguments": [
+              "0x2762e0998f36b4ab1db305c2ee42f4d70e9563e578a854bfb0a50b050c2ebb3f",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArguments": [
+              "0x2762e0998f36b4ab1db305c2ee42f4d70e9563e578a854bfb0a50b050c2ebb3f",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>",
+              "address"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0xa37316bc18fa9b5b5e976b9bc9b103565443cc72b85981d61c72324bf50ede1f::uln_301::verifiable",
+            "arguments": [
+              "0x010000000000012404000027b10000000000000000000000002afd0d8a477ad393d2234253407fb1cec92749d10000277cec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArguments": [
+              "0x010000000000012404000027b10000000000000000000000002afd0d8a477ad393d2234253407fb1cec92749d10000277cec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::inbound_nonce",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161",
+              "0x2afd0d8a477ad393d2234253407fb1cec92749d1"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161",
+              "0x2afd0d8a477ad393d2234253407fb1cec92749d1"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "vector<u8>"
+            ]
+          },
+          {
+            "kind": "getAccountResource",
+            "accountAddress": "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+            "resourceType": "0x1759cc0d3161f1eb79f65847d4feb9d1f74fb79014698a23b16b28b9cd4c37e3::channel::Channels"
+          }
+        ],
+        "verdict": {
+          "ulnVersion": "V301",
+          "signed": false
+        }
+      },
+      "verified": {
+        "state": {
+          "receiveMsglib": [
+            "2",
+            0
+          ],
+          "requiredConfirmations": 2,
+          "dvnConfirmations": 1,
+          "verificationState": 2,
+          "inboundNonce": 74755,
+          "storedPayloadHash": null
+        },
+        "requests": [
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::get_receive_msglib",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::get_config",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "2",
+              "0",
+              "10161",
+              "3"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "2",
+              "0",
+              "10161",
+              "3"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "u8",
+              "u64",
+              "u8"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x9b4f328857baf5471ffe873471459a75da3aa3db0629f4c1b0ede4d48cf9fac1::msglib::get_verification_confirmations",
+            "arguments": [
+              "0x2762e0998f36b4ab1db305c2ee42f4d70e9563e578a854bfb0a50b050c2ebb3f",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArguments": [
+              "0x2762e0998f36b4ab1db305c2ee42f4d70e9563e578a854bfb0a50b050c2ebb3f",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>",
+              "address"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0xa37316bc18fa9b5b5e976b9bc9b103565443cc72b85981d61c72324bf50ede1f::uln_301::verifiable",
+            "arguments": [
+              "0x010000000000012404000027b10000000000000000000000002afd0d8a477ad393d2234253407fb1cec92749d10000277cec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArguments": [
+              "0x010000000000012404000027b10000000000000000000000002afd0d8a477ad393d2234253407fb1cec92749d10000277cec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>"
+            ]
+          }
+        ],
+        "verdict": {
+          "ulnVersion": "V301",
+          "signed": true
+        }
+      },
+      "verifiable": {
+        "state": {
+          "receiveMsglib": [
+            "2",
+            0
+          ],
+          "requiredConfirmations": 2,
+          "dvnConfirmations": 1,
+          "verificationState": 1,
+          "inboundNonce": 74755,
+          "storedPayloadHash": null
+        },
+        "requests": [
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::get_receive_msglib",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::get_config",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "2",
+              "0",
+              "10161",
+              "3"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "2",
+              "0",
+              "10161",
+              "3"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "u8",
+              "u64",
+              "u8"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x9b4f328857baf5471ffe873471459a75da3aa3db0629f4c1b0ede4d48cf9fac1::msglib::get_verification_confirmations",
+            "arguments": [
+              "0x2762e0998f36b4ab1db305c2ee42f4d70e9563e578a854bfb0a50b050c2ebb3f",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArguments": [
+              "0x2762e0998f36b4ab1db305c2ee42f4d70e9563e578a854bfb0a50b050c2ebb3f",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>",
+              "address"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0xa37316bc18fa9b5b5e976b9bc9b103565443cc72b85981d61c72324bf50ede1f::uln_301::verifiable",
+            "arguments": [
+              "0x010000000000012404000027b10000000000000000000000002afd0d8a477ad393d2234253407fb1cec92749d10000277cec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArguments": [
+              "0x010000000000012404000027b10000000000000000000000002afd0d8a477ad393d2234253407fb1cec92749d10000277cec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>"
+            ]
+          }
+        ],
+        "verdict": {
+          "ulnVersion": "V301",
+          "signed": false
+        }
+      },
+      "notInitializable": {
+        "state": {
+          "receiveMsglib": [
+            "2",
+            0
+          ],
+          "requiredConfirmations": 2,
+          "dvnConfirmations": 1,
+          "verificationState": 3,
+          "inboundNonce": 74755,
+          "storedPayloadHash": null
+        },
+        "requests": [
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::get_receive_msglib",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::get_config",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "2",
+              "0",
+              "10161",
+              "3"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "2",
+              "0",
+              "10161",
+              "3"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "u8",
+              "u64",
+              "u8"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x9b4f328857baf5471ffe873471459a75da3aa3db0629f4c1b0ede4d48cf9fac1::msglib::get_verification_confirmations",
+            "arguments": [
+              "0x2762e0998f36b4ab1db305c2ee42f4d70e9563e578a854bfb0a50b050c2ebb3f",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArguments": [
+              "0x2762e0998f36b4ab1db305c2ee42f4d70e9563e578a854bfb0a50b050c2ebb3f",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>",
+              "address"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0xa37316bc18fa9b5b5e976b9bc9b103565443cc72b85981d61c72324bf50ede1f::uln_301::verifiable",
+            "arguments": [
+              "0x010000000000012404000027b10000000000000000000000002afd0d8a477ad393d2234253407fb1cec92749d10000277cec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArguments": [
+              "0x010000000000012404000027b10000000000000000000000002afd0d8a477ad393d2234253407fb1cec92749d10000277cec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>"
+            ]
+          }
+        ],
+        "verdict": {
+          "ulnVersion": "V301",
+          "signed": false
+        }
+      },
+      "capExceeded": {
+        "state": {
+          "receiveMsglib": [
+            "2",
+            0
+          ],
+          "requiredConfirmations": 2,
+          "dvnConfirmations": 1,
+          "verificationState": 4,
+          "inboundNonce": 74755,
+          "storedPayloadHash": null
+        },
+        "requests": [
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::get_receive_msglib",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::get_config",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "2",
+              "0",
+              "10161",
+              "3"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "2",
+              "0",
+              "10161",
+              "3"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "u8",
+              "u64",
+              "u8"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x9b4f328857baf5471ffe873471459a75da3aa3db0629f4c1b0ede4d48cf9fac1::msglib::get_verification_confirmations",
+            "arguments": [
+              "0x2762e0998f36b4ab1db305c2ee42f4d70e9563e578a854bfb0a50b050c2ebb3f",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArguments": [
+              "0x2762e0998f36b4ab1db305c2ee42f4d70e9563e578a854bfb0a50b050c2ebb3f",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>",
+              "address"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0xa37316bc18fa9b5b5e976b9bc9b103565443cc72b85981d61c72324bf50ede1f::uln_301::verifiable",
+            "arguments": [
+              "0x010000000000012404000027b10000000000000000000000002afd0d8a477ad393d2234253407fb1cec92749d10000277cec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArguments": [
+              "0x010000000000012404000027b10000000000000000000000002afd0d8a477ad393d2234253407fb1cec92749d10000277cec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>"
+            ]
+          }
+        ],
+        "verdict": {
+          "ulnVersion": "V301",
+          "signed": false
+        }
+      },
+      "unknownState": {
+        "state": {
+          "receiveMsglib": [
+            "2",
+            0
+          ],
+          "requiredConfirmations": 2,
+          "dvnConfirmations": 1,
+          "verificationState": 5,
+          "inboundNonce": 74755,
+          "storedPayloadHash": null
+        },
+        "requests": [
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::get_receive_msglib",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::get_config",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "2",
+              "0",
+              "10161",
+              "3"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "2",
+              "0",
+              "10161",
+              "3"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64",
+              "u8",
+              "u64",
+              "u8"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0x9b4f328857baf5471ffe873471459a75da3aa3db0629f4c1b0ede4d48cf9fac1::msglib::get_verification_confirmations",
+            "arguments": [
+              "0x2762e0998f36b4ab1db305c2ee42f4d70e9563e578a854bfb0a50b050c2ebb3f",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArguments": [
+              "0x2762e0998f36b4ab1db305c2ee42f4d70e9563e578a854bfb0a50b050c2ebb3f",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+              "0x3333333333333333333333333333333333333333333333333333333333333333"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>",
+              "address"
+            ]
+          },
+          {
+            "kind": "view",
+            "function": "0xa37316bc18fa9b5b5e976b9bc9b103565443cc72b85981d61c72324bf50ede1f::uln_301::verifiable",
+            "arguments": [
+              "0x010000000000012404000027b10000000000000000000000002afd0d8a477ad393d2234253407fb1cec92749d10000277cec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArguments": [
+              "0x010000000000012404000027b10000000000000000000000002afd0d8a477ad393d2234253407fb1cec92749d10000277cec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea"
+            ],
+            "functionArgumentTypes": [
+              "vector<u8>",
+              "vector<u8>"
+            ]
+          }
+        ],
+        "verdict": {
+          "error": "Unknown delivery state: 5"
+        }
+      },
+      "ulnV2ReceiveLibrary": {
+        "state": {
+          "receiveMsglib": [
+            "1",
+            0
+          ],
+          "requiredConfirmations": 2,
+          "dvnConfirmations": 1,
+          "verificationState": 0,
+          "inboundNonce": 74755,
+          "storedPayloadHash": null
+        },
+        "requests": [
+          {
+            "kind": "view",
+            "function": "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f::endpoint_view::get_receive_msglib",
+            "arguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161"
+            ],
+            "functionArguments": [
+              "0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7",
+              "10161"
+            ],
+            "functionArgumentTypes": [
+              "address",
+              "u64"
+            ]
+          }
+        ],
+        "verdict": {
+          "error": "Unsupported ULN version"
+        }
+      }
+    }
+  }
+}

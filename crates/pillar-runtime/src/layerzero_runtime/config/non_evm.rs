@@ -78,6 +78,39 @@ pub(crate) fn move_views_for_environment(
         .collect())
 }
 
+/// Aptos EndpointV1 accounts Gasolina reads to check a V301 destination: its ULN301
+/// receive table row plus the pinned `@layerzerolabs/lz-aptos-sdk-v1@3.0.168` constants
+/// `LAYERZERO_ADDRESS`, `LAYERZERO_VIEW_ADDRESS` and `LAYERZERO_VIEW_ULN301_ADDRESS`
+/// (`dist/index.mjs:59-63,166-175`).
+pub(crate) fn aptos_v301_contracts_for_environment(
+    environment: &str,
+) -> Result<AptosV301Contracts, ConfigError> {
+    let (layerzero, view, view_uln301) = match environment {
+        "mainnet" => (
+            "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90",
+            "0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf",
+            "0x49bbf8d8214fb2b158f50ecf3d75a73da133440776bff0db6005c1175138e7c0",
+        ),
+        "testnet" => (
+            "0x1759cc0d3161f1eb79f65847d4feb9d1f74fb79014698a23b16b28b9cd4c37e3",
+            "0x2eed41cf51a714f968d2ee4a3fa1483bc7e2ce7fb22192fd55c0df96a2aad45f",
+            "0xa37316bc18fa9b5b5e976b9bc9b103565443cc72b85981d61c72324bf50ede1f",
+        ),
+        "sandbox" | "localnet" => (
+            "0xf2e1e034475dc0439487dd09dfc3950c462f731599e53a6b015dd85502352e68",
+            "0xaebc3f4f27559ea378f21d75b43236ea0f8038a2c171224eb01be7a7dfe918ab",
+            "0x5df37117d3fa3d577908d8741a70122cfb04718e94e768a130d2133363c505c8",
+        ),
+        other => return Err(ConfigError::UnknownLayerZeroEnvironment(other.to_string())),
+    };
+    let uln_301 = aptos_receive_contracts_for_environment(environment)?.v1_uln_301;
+    Ok(AptosV301Contracts {
+        uln_301,
+        layerzero: layerzero.to_string(),
+        view: view.to_string(),
+        view_uln301: view_uln301.to_string(),
+    })
+}
 pub fn runtime_aptos_layerzero_config(
     environment: &str,
     chain_names: &[String],
@@ -483,4 +516,21 @@ pub fn runtime_sui_payload_contracts(
         ("sui".to_string(), build(sui)),
         ("iotal1".to_string(), build(iota)),
     ]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn initia_and_movement_retain_v301_destination_targets() {
+        let aptos = aptos_receive_contracts_for_environment("mainnet").unwrap();
+        for chain_name in ["initia", "movement"] {
+            let destination = move_receive_contracts_for_environment(chain_name, "mainnet")
+                .unwrap()
+                .unwrap();
+            assert_eq!(destination.v1_oracle, aptos.v1_oracle);
+            assert_eq!(destination.v1_uln_301, aptos.v1_uln_301);
+        }
+    }
 }

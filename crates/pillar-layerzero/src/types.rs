@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use pillar_core::{AppCoreError, HashCallDataResult, LzSentEvent, SigningContext};
 
 pub const ULN_VERSION_V2: &str = "V2";
+pub const ULN_VERSION_V300: &str = "V300";
 pub const ULN_VERSION_V301: &str = "V301";
 pub const ULN_VERSION_V302: &str = "V302";
 pub const ULN_VERSION_READ_V1002: &str = "ReadV1002";

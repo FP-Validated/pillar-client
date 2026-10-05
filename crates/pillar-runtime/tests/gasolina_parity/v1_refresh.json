@@ -1,0 +1,1741 @@
+{
+ "producedBy": {
+  "upstream": "gasolina-audit 1.2.66 (manifest sha256 8ad87eb6...; archive comment 213cd500...)",
+  "entrypoints": [
+   "packages/sdks/lz-v1-sdk/src/evm/index.ts:LZEvmSdk.getLZSentEvent",
+   "packages/sdks/lz-v1-sdk/src/aptos/aptos.ts:LZAptosSdk.getLZSentEvent"
+  ],
+  "synthetic": "receipts, logs, transactions and table answers are scripted; contracts and constants are upstream"
+ },
+ "environment": "mainnet",
+ "evm": {
+  "uln": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+  "packetTopic": "0xe9bded5f24a4168e4f3bf44e00298c993b22376aad8c58c7dda9718a54cbea82",
+  "relayerParamsTopic": "0xb0c632f55f1e1b3b2c3d82f41ee4716bb4c00f0f5d84cdafc141581bb8757a4f",
+  "maxEthGetLogsBlockRange": 500,
+  "sentEvent": {
+   "lzMessageId": {
+    "pathwayId": {
+     "srcEid": 102,
+     "dstEid": 101,
+     "srcChainName": "bsc",
+     "dstChainName": "ethereum",
+     "sender": "0x1111111111111111111111111111111111111111",
+     "receiver": "0x2222222222222222222222222222222222222222"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V2"
+   },
+   "message": "0xdeadbeefcafe",
+   "packetEmitAddress": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+   "onChainEvent": {
+    "txHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+    "blockHash": "0xabababababababababababababababababababababababababababababababab",
+    "blockNumber": 4096,
+    "chainName": "bsc"
+   }
+  },
+  "scenarios": [
+   {
+    "name": "adapter params in receipt",
+    "script": {
+     "receipts": {
+      "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a": {
+       "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+       "transactionIndex": "0x0",
+       "blockHash": "0xabababababababababababababababababababababababababababababababab",
+       "blockNumber": "0x1000",
+       "from": "0x1111111111111111111111111111111111111111",
+       "to": "0x5555555555555555555555555555555555555555",
+       "cumulativeGasUsed": "0x1",
+       "gasUsed": "0x1",
+       "contractAddress": null,
+       "logs": [
+        {
+         "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+         "topics": [
+          "0xb0c632f55f1e1b3b2c3d82f41ee4716bb4c00f0f5d84cdafc141581bb8757a4f"
+         ],
+         "data": "0x00000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000002200010000000000000000000000000000000000000000000000000000000000030d40000000000000000000000000000000000000000000000000000000000000",
+         "blockNumber": "0x1000",
+         "blockHash": "0xabababababababababababababababababababababababababababababababab",
+         "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+         "transactionIndex": "0x0",
+         "logIndex": "0x0",
+         "removed": false
+        },
+        {
+         "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+         "topics": [
+          "0xe9bded5f24a4168e4f3bf44e00298c993b22376aad8c58c7dda9718a54cbea82"
+         ],
+         "data": "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000003a00000000000000070066111111111111111111111111111111111111111100652222222222222222222222222222222222222222deadbeefcafe000000000000",
+         "blockNumber": "0x1000",
+         "blockHash": "0xabababababababababababababababababababababababababababababababab",
+         "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+         "transactionIndex": "0x0",
+         "logIndex": "0x1",
+         "removed": false
+        }
+       ],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "status": "0x1",
+       "type": "0x0",
+       "effectiveGasPrice": "0x1"
+      }
+     }
+    },
+    "calls": [
+     {
+      "method": "eth_getTransactionReceipt",
+      "params": [
+       "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a"
+      ]
+     }
+    ],
+    "outcome": {
+     "refreshed": {
+      "lzMessageId": {
+       "pathwayId": {
+        "srcEid": 102,
+        "sender": "0x1111111111111111111111111111111111111111",
+        "dstEid": 101,
+        "receiver": "0x2222222222222222222222222222222222222222",
+        "srcChainName": "bsc",
+        "dstChainName": "ethereum"
+       },
+       "nonce": 7,
+       "ulnSendVersion": "V2"
+      },
+      "packetEmitAddress": "0x4D73AdB72bC3DD368966edD0f0b2148401A178E2",
+      "message": "0xdeadbeefcafe",
+      "onChainEvent": {
+       "chainName": "bsc",
+       "txHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+       "blockHash": "0xabababababababababababababababababababababababababababababababab",
+       "blockNumber": 4096
+      },
+      "adapterParams": {
+       "decodedAdapterParams": {
+        "version": "1",
+        "dstGasLimit": "200000"
+       },
+       "rawAdapterParams": "0x00010000000000000000000000000000000000000000000000000000000000030d40"
+      }
+     },
+     "hydrated": {
+      "lzMessageId": {
+       "pathwayId": {
+        "srcEid": 102,
+        "sender": "0x1111111111111111111111111111111111111111",
+        "dstEid": 101,
+        "receiver": "0x2222222222222222222222222222222222222222",
+        "srcChainName": "bsc",
+        "dstChainName": "ethereum"
+       },
+       "nonce": 7,
+       "ulnSendVersion": "V2"
+      },
+      "guid": "0x75f2d61d911843ab163ef64735cc5b897bbc0cc7ad299d102225da91437b3702",
+      "message": "0xdeadbeefcafe",
+      "options": {
+       "lzReceive": {
+        "gas": "200000",
+        "value": "0"
+       },
+       "ordered": true
+      },
+      "payload": "0x75f2d61d911843ab163ef64735cc5b897bbc0cc7ad299d102225da91437b3702deadbeefcafe",
+      "sendLibrary": "0x4D73AdB72bC3DD368966edD0f0b2148401A178E2",
+      "onChainEvent": {
+       "chainName": "bsc",
+       "txHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+       "blockHash": "0xabababababababababababababababababababababababababababababababab",
+       "blockNumber": 4096
+      }
+     }
+    }
+   },
+   {
+    "name": "airdrop adapter params",
+    "script": {
+     "receipts": {
+      "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a": {
+       "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+       "transactionIndex": "0x0",
+       "blockHash": "0xabababababababababababababababababababababababababababababababab",
+       "blockNumber": "0x1000",
+       "from": "0x1111111111111111111111111111111111111111",
+       "to": "0x5555555555555555555555555555555555555555",
+       "cumulativeGasUsed": "0x1",
+       "gasUsed": "0x1",
+       "contractAddress": null,
+       "logs": [
+        {
+         "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+         "topics": [
+          "0xb0c632f55f1e1b3b2c3d82f41ee4716bb4c00f0f5d84cdafc141581bb8757a4f"
+         ],
+         "data": "0x00000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000005600020000000000000000000000000000000000000000000000000000000000030d4000000000000000000000000000000000000000000000000000000000000003e8333333333333333333333333333333333333333300000000000000000000",
+         "blockNumber": "0x1000",
+         "blockHash": "0xabababababababababababababababababababababababababababababababab",
+         "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+         "transactionIndex": "0x0",
+         "logIndex": "0x0",
+         "removed": false
+        },
+        {
+         "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+         "topics": [
+          "0xe9bded5f24a4168e4f3bf44e00298c993b22376aad8c58c7dda9718a54cbea82"
+         ],
+         "data": "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000003a00000000000000070066111111111111111111111111111111111111111100652222222222222222222222222222222222222222deadbeefcafe000000000000",
+         "blockNumber": "0x1000",
+         "blockHash": "0xabababababababababababababababababababababababababababababababab",
+         "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+         "transactionIndex": "0x0",
+         "logIndex": "0x1",
+         "removed": false
+        }
+       ],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "status": "0x1",
+       "type": "0x0",
+       "effectiveGasPrice": "0x1"
+      }
+     }
+    },
+    "calls": [
+     {
+      "method": "eth_getTransactionReceipt",
+      "params": [
+       "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a"
+      ]
+     }
+    ],
+    "outcome": {
+     "refreshed": {
+      "lzMessageId": {
+       "pathwayId": {
+        "srcEid": 102,
+        "sender": "0x1111111111111111111111111111111111111111",
+        "dstEid": 101,
+        "receiver": "0x2222222222222222222222222222222222222222",
+        "srcChainName": "bsc",
+        "dstChainName": "ethereum"
+       },
+       "nonce": 7,
+       "ulnSendVersion": "V2"
+      },
+      "packetEmitAddress": "0x4D73AdB72bC3DD368966edD0f0b2148401A178E2",
+      "message": "0xdeadbeefcafe",
+      "onChainEvent": {
+       "chainName": "bsc",
+       "txHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+       "blockHash": "0xabababababababababababababababababababababababababababababababab",
+       "blockNumber": 4096
+      },
+      "adapterParams": {
+       "decodedAdapterParams": {
+        "version": "2",
+        "dstGasLimit": "200000",
+        "dstNativeGasTransferAmount": "1000",
+        "dstNativeGasTransferAddress": "0x3333333333333333333333333333333333333333"
+       },
+       "rawAdapterParams": "0x00020000000000000000000000000000000000000000000000000000000000030d4000000000000000000000000000000000000000000000000000000000000003e83333333333333333333333333333333333333333"
+      }
+     },
+     "hydrated": {
+      "lzMessageId": {
+       "pathwayId": {
+        "srcEid": 102,
+        "sender": "0x1111111111111111111111111111111111111111",
+        "dstEid": 101,
+        "receiver": "0x2222222222222222222222222222222222222222",
+        "srcChainName": "bsc",
+        "dstChainName": "ethereum"
+       },
+       "nonce": 7,
+       "ulnSendVersion": "V2"
+      },
+      "guid": "0x75f2d61d911843ab163ef64735cc5b897bbc0cc7ad299d102225da91437b3702",
+      "message": "0xdeadbeefcafe",
+      "options": {
+       "lzReceive": {
+        "gas": "200000",
+        "value": "0"
+       },
+       "ordered": true
+      },
+      "payload": "0x75f2d61d911843ab163ef64735cc5b897bbc0cc7ad299d102225da91437b3702deadbeefcafe",
+      "sendLibrary": "0x4D73AdB72bC3DD368966edD0f0b2148401A178E2",
+      "onChainEvent": {
+       "chainName": "bsc",
+       "txHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+       "blockHash": "0xabababababababababababababababababababababababababababababababab",
+       "blockNumber": 4096
+      }
+     }
+    }
+   },
+   {
+    "name": "default adapter params read",
+    "script": {
+     "receipts": {
+      "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a": {
+       "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+       "transactionIndex": "0x0",
+       "blockHash": "0xabababababababababababababababababababababababababababababababab",
+       "blockNumber": "0x1000",
+       "from": "0x1111111111111111111111111111111111111111",
+       "to": "0x5555555555555555555555555555555555555555",
+       "cumulativeGasUsed": "0x1",
+       "gasUsed": "0x1",
+       "contractAddress": null,
+       "logs": [
+        {
+         "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+         "topics": [
+          "0xb0c632f55f1e1b3b2c3d82f41ee4716bb4c00f0f5d84cdafc141581bb8757a4f"
+         ],
+         "data": "0x000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000",
+         "blockNumber": "0x1000",
+         "blockHash": "0xabababababababababababababababababababababababababababababababab",
+         "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+         "transactionIndex": "0x0",
+         "logIndex": "0x0",
+         "removed": false
+        },
+        {
+         "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+         "topics": [
+          "0xe9bded5f24a4168e4f3bf44e00298c993b22376aad8c58c7dda9718a54cbea82"
+         ],
+         "data": "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000003a00000000000000070066111111111111111111111111111111111111111100652222222222222222222222222222222222222222deadbeefcafe000000000000",
+         "blockNumber": "0x1000",
+         "blockHash": "0xabababababababababababababababababababababababababababababababab",
+         "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+         "transactionIndex": "0x0",
+         "logIndex": "0x1",
+         "removed": false
+        }
+       ],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "status": "0x1",
+       "type": "0x0",
+       "effectiveGasPrice": "0x1"
+      }
+     },
+     "defaultAdapterParams": "0x00010000000000000000000000000000000000000000000000000000000000030d40"
+    },
+    "calls": [
+     {
+      "method": "eth_getTransactionReceipt",
+      "params": [
+       "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a"
+      ]
+     },
+     {
+      "method": "eth_call",
+      "params": [
+       {
+        "to": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+        "data": "0x2a819bbf00000000000000000000000000000000000000000000000000000000000000650000000000000000000000000000000000000000000000000000000000000002"
+       },
+       "latest"
+      ]
+     }
+    ],
+    "outcome": {
+     "refreshed": {
+      "lzMessageId": {
+       "pathwayId": {
+        "srcEid": 102,
+        "sender": "0x1111111111111111111111111111111111111111",
+        "dstEid": 101,
+        "receiver": "0x2222222222222222222222222222222222222222",
+        "srcChainName": "bsc",
+        "dstChainName": "ethereum"
+       },
+       "nonce": 7,
+       "ulnSendVersion": "V2"
+      },
+      "packetEmitAddress": "0x4D73AdB72bC3DD368966edD0f0b2148401A178E2",
+      "message": "0xdeadbeefcafe",
+      "onChainEvent": {
+       "chainName": "bsc",
+       "txHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+       "blockHash": "0xabababababababababababababababababababababababababababababababab",
+       "blockNumber": 4096
+      },
+      "adapterParams": {
+       "decodedAdapterParams": {
+        "version": "1",
+        "dstGasLimit": "200000"
+       },
+       "rawAdapterParams": "0x00010000000000000000000000000000000000000000000000000000000000030d40"
+      }
+     },
+     "hydrated": {
+      "lzMessageId": {
+       "pathwayId": {
+        "srcEid": 102,
+        "sender": "0x1111111111111111111111111111111111111111",
+        "dstEid": 101,
+        "receiver": "0x2222222222222222222222222222222222222222",
+        "srcChainName": "bsc",
+        "dstChainName": "ethereum"
+       },
+       "nonce": 7,
+       "ulnSendVersion": "V2"
+      },
+      "guid": "0x75f2d61d911843ab163ef64735cc5b897bbc0cc7ad299d102225da91437b3702",
+      "message": "0xdeadbeefcafe",
+      "options": {
+       "lzReceive": {
+        "gas": "200000",
+        "value": "0"
+       },
+       "ordered": true
+      },
+      "payload": "0x75f2d61d911843ab163ef64735cc5b897bbc0cc7ad299d102225da91437b3702deadbeefcafe",
+      "sendLibrary": "0x4D73AdB72bC3DD368966edD0f0b2148401A178E2",
+      "onChainEvent": {
+       "chainName": "bsc",
+       "txHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+       "blockHash": "0xabababababababababababababababababababababababababababababababab",
+       "blockNumber": 4096
+      }
+     }
+    }
+   },
+   {
+    "name": "default adapter params read fails, found again by logs",
+    "script": {
+     "receipts": {
+      "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a": {
+       "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+       "transactionIndex": "0x0",
+       "blockHash": "0xabababababababababababababababababababababababababababababababab",
+       "blockNumber": "0x1000",
+       "from": "0x1111111111111111111111111111111111111111",
+       "to": "0x5555555555555555555555555555555555555555",
+       "cumulativeGasUsed": "0x1",
+       "gasUsed": "0x1",
+       "contractAddress": null,
+       "logs": [
+        {
+         "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+         "topics": [
+          "0xb0c632f55f1e1b3b2c3d82f41ee4716bb4c00f0f5d84cdafc141581bb8757a4f"
+         ],
+         "data": "0x000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000",
+         "blockNumber": "0x1000",
+         "blockHash": "0xabababababababababababababababababababababababababababababababab",
+         "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+         "transactionIndex": "0x0",
+         "logIndex": "0x0",
+         "removed": false
+        },
+        {
+         "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+         "topics": [
+          "0xe9bded5f24a4168e4f3bf44e00298c993b22376aad8c58c7dda9718a54cbea82"
+         ],
+         "data": "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000003a00000000000000070066111111111111111111111111111111111111111100652222222222222222222222222222222222222222deadbeefcafe000000000000",
+         "blockNumber": "0x1000",
+         "blockHash": "0xabababababababababababababababababababababababababababababababab",
+         "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+         "transactionIndex": "0x0",
+         "logIndex": "0x1",
+         "removed": false
+        }
+       ],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "status": "0x1",
+       "type": "0x0",
+       "effectiveGasPrice": "0x1"
+      }
+     },
+     "callError": "call reverted",
+     "logs": [
+      {
+       "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+       "topics": [
+        "0xe9bded5f24a4168e4f3bf44e00298c993b22376aad8c58c7dda9718a54cbea82"
+       ],
+       "data": "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000003a00000000000000070066111111111111111111111111111111111111111100652222222222222222222222222222222222222222deadbeefcafe000000000000",
+       "blockNumber": "0x1000",
+       "blockHash": "0xabababababababababababababababababababababababababababababababab",
+       "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+       "transactionIndex": "0x0",
+       "logIndex": "0x1",
+       "removed": false
+      }
+     ]
+    },
+    "calls": [
+     {
+      "method": "eth_getTransactionReceipt",
+      "params": [
+       "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a"
+      ]
+     },
+     {
+      "method": "eth_call",
+      "params": [
+       {
+        "to": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+        "data": "0x2a819bbf00000000000000000000000000000000000000000000000000000000000000650000000000000000000000000000000000000000000000000000000000000002"
+       },
+       "latest"
+      ]
+     },
+     {
+      "method": "eth_getLogs",
+      "params": [
+       {
+        "fromBlock": "0xf06",
+        "toBlock": "0x10fa",
+        "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+        "topics": [
+         "0xe9bded5f24a4168e4f3bf44e00298c993b22376aad8c58c7dda9718a54cbea82"
+        ]
+       }
+      ]
+     },
+     {
+      "method": "eth_getTransactionReceipt",
+      "params": [
+       "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a"
+      ]
+     },
+     {
+      "method": "eth_call",
+      "params": [
+       {
+        "to": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+        "data": "0x2a819bbf00000000000000000000000000000000000000000000000000000000000000650000000000000000000000000000000000000000000000000000000000000002"
+       },
+       "latest"
+      ]
+     }
+    ],
+    "outcome": {
+     "refreshed": null
+    }
+   },
+   {
+    "name": "no relayer params, not found by logs",
+    "script": {
+     "receipts": {
+      "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a": {
+       "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+       "transactionIndex": "0x0",
+       "blockHash": "0xabababababababababababababababababababababababababababababababab",
+       "blockNumber": "0x1000",
+       "from": "0x1111111111111111111111111111111111111111",
+       "to": "0x5555555555555555555555555555555555555555",
+       "cumulativeGasUsed": "0x1",
+       "gasUsed": "0x1",
+       "contractAddress": null,
+       "logs": [
+        {
+         "address": "0x4444444444444444444444444444444444444444",
+         "topics": [
+          "0x9999999999999999999999999999999999999999999999999999999999999999"
+         ],
+         "data": "0x",
+         "blockNumber": "0x1000",
+         "blockHash": "0xabababababababababababababababababababababababababababababababab",
+         "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+         "transactionIndex": "0x0",
+         "logIndex": "0x0",
+         "removed": false
+        },
+        {
+         "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+         "topics": [
+          "0xe9bded5f24a4168e4f3bf44e00298c993b22376aad8c58c7dda9718a54cbea82"
+         ],
+         "data": "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000003a00000000000000070066111111111111111111111111111111111111111100652222222222222222222222222222222222222222deadbeefcafe000000000000",
+         "blockNumber": "0x1000",
+         "blockHash": "0xabababababababababababababababababababababababababababababababab",
+         "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+         "transactionIndex": "0x0",
+         "logIndex": "0x1",
+         "removed": false
+        }
+       ],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "status": "0x1",
+       "type": "0x0",
+       "effectiveGasPrice": "0x1"
+      }
+     },
+     "logs": []
+    },
+    "calls": [
+     {
+      "method": "eth_getTransactionReceipt",
+      "params": [
+       "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a"
+      ]
+     },
+     {
+      "method": "eth_getLogs",
+      "params": [
+       {
+        "fromBlock": "0xf06",
+        "toBlock": "0x10fa",
+        "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+        "topics": [
+         "0xe9bded5f24a4168e4f3bf44e00298c993b22376aad8c58c7dda9718a54cbea82"
+        ]
+       }
+      ]
+     }
+    ],
+    "outcome": {
+     "refreshed": null
+    }
+   },
+   {
+    "name": "relayer params after packet only",
+    "script": {
+     "receipts": {
+      "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a": {
+       "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+       "transactionIndex": "0x0",
+       "blockHash": "0xabababababababababababababababababababababababababababababababab",
+       "blockNumber": "0x1000",
+       "from": "0x1111111111111111111111111111111111111111",
+       "to": "0x5555555555555555555555555555555555555555",
+       "cumulativeGasUsed": "0x1",
+       "gasUsed": "0x1",
+       "contractAddress": null,
+       "logs": [
+        {
+         "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+         "topics": [
+          "0xe9bded5f24a4168e4f3bf44e00298c993b22376aad8c58c7dda9718a54cbea82"
+         ],
+         "data": "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000003a00000000000000070066111111111111111111111111111111111111111100652222222222222222222222222222222222222222deadbeefcafe000000000000",
+         "blockNumber": "0x1000",
+         "blockHash": "0xabababababababababababababababababababababababababababababababab",
+         "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+         "transactionIndex": "0x0",
+         "logIndex": "0x0",
+         "removed": false
+        },
+        {
+         "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+         "topics": [
+          "0xb0c632f55f1e1b3b2c3d82f41ee4716bb4c00f0f5d84cdafc141581bb8757a4f"
+         ],
+         "data": "0x00000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000002200010000000000000000000000000000000000000000000000000000000000030d40000000000000000000000000000000000000000000000000000000000000",
+         "blockNumber": "0x1000",
+         "blockHash": "0xabababababababababababababababababababababababababababababababab",
+         "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+         "transactionIndex": "0x0",
+         "logIndex": "0x1",
+         "removed": false
+        }
+       ],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "status": "0x1",
+       "type": "0x0",
+       "effectiveGasPrice": "0x1"
+      }
+     },
+     "logs": []
+    },
+    "calls": [
+     {
+      "method": "eth_getTransactionReceipt",
+      "params": [
+       "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a"
+      ]
+     },
+     {
+      "method": "eth_getLogs",
+      "params": [
+       {
+        "fromBlock": "0xf06",
+        "toBlock": "0x10fa",
+        "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+        "topics": [
+         "0xe9bded5f24a4168e4f3bf44e00298c993b22376aad8c58c7dda9718a54cbea82"
+        ]
+       }
+      ]
+     }
+    ],
+    "outcome": {
+     "refreshed": null
+    }
+   },
+   {
+    "name": "malformed adapter params",
+    "script": {
+     "receipts": {
+      "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a": {
+       "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+       "transactionIndex": "0x0",
+       "blockHash": "0xabababababababababababababababababababababababababababababababab",
+       "blockNumber": "0x1000",
+       "from": "0x1111111111111111111111111111111111111111",
+       "to": "0x5555555555555555555555555555555555555555",
+       "cumulativeGasUsed": "0x1",
+       "gasUsed": "0x1",
+       "contractAddress": null,
+       "logs": [
+        {
+         "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+         "topics": [
+          "0xb0c632f55f1e1b3b2c3d82f41ee4716bb4c00f0f5d84cdafc141581bb8757a4f"
+         ],
+         "data": "0x0000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000020001000000000000000000000000000000000000000000000000000000000000",
+         "blockNumber": "0x1000",
+         "blockHash": "0xabababababababababababababababababababababababababababababababab",
+         "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+         "transactionIndex": "0x0",
+         "logIndex": "0x0",
+         "removed": false
+        },
+        {
+         "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+         "topics": [
+          "0xe9bded5f24a4168e4f3bf44e00298c993b22376aad8c58c7dda9718a54cbea82"
+         ],
+         "data": "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000003a00000000000000070066111111111111111111111111111111111111111100652222222222222222222222222222222222222222deadbeefcafe000000000000",
+         "blockNumber": "0x1000",
+         "blockHash": "0xabababababababababababababababababababababababababababababababab",
+         "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+         "transactionIndex": "0x0",
+         "logIndex": "0x1",
+         "removed": false
+        }
+       ],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "status": "0x1",
+       "type": "0x0",
+       "effectiveGasPrice": "0x1"
+      }
+     },
+     "logs": []
+    },
+    "calls": [
+     {
+      "method": "eth_getTransactionReceipt",
+      "params": [
+       "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a"
+      ]
+     },
+     {
+      "method": "eth_getLogs",
+      "params": [
+       {
+        "fromBlock": "0xf06",
+        "toBlock": "0x10fa",
+        "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+        "topics": [
+         "0xe9bded5f24a4168e4f3bf44e00298c993b22376aad8c58c7dda9718a54cbea82"
+        ]
+       }
+      ]
+     }
+    ],
+    "outcome": {
+     "refreshed": null
+    }
+   },
+   {
+    "name": "packet at receipt index 0",
+    "script": {
+     "receipts": {
+      "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a": {
+       "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+       "transactionIndex": "0x0",
+       "blockHash": "0xabababababababababababababababababababababababababababababababab",
+       "blockNumber": "0x1000",
+       "from": "0x1111111111111111111111111111111111111111",
+       "to": "0x5555555555555555555555555555555555555555",
+       "cumulativeGasUsed": "0x1",
+       "gasUsed": "0x1",
+       "contractAddress": null,
+       "logs": [
+        {
+         "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+         "topics": [
+          "0xe9bded5f24a4168e4f3bf44e00298c993b22376aad8c58c7dda9718a54cbea82"
+         ],
+         "data": "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000003a00000000000000070066111111111111111111111111111111111111111100652222222222222222222222222222222222222222deadbeefcafe000000000000",
+         "blockNumber": "0x1000",
+         "blockHash": "0xabababababababababababababababababababababababababababababababab",
+         "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+         "transactionIndex": "0x0",
+         "logIndex": "0x0",
+         "removed": false
+        },
+        {
+         "address": "0x4444444444444444444444444444444444444444",
+         "topics": [
+          "0x9999999999999999999999999999999999999999999999999999999999999999"
+         ],
+         "data": "0x",
+         "blockNumber": "0x1000",
+         "blockHash": "0xabababababababababababababababababababababababababababababababab",
+         "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+         "transactionIndex": "0x0",
+         "logIndex": "0x1",
+         "removed": false
+        }
+       ],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "status": "0x1",
+       "type": "0x0",
+       "effectiveGasPrice": "0x1"
+      }
+     },
+     "logs": []
+    },
+    "calls": [
+     {
+      "method": "eth_getTransactionReceipt",
+      "params": [
+       "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a"
+      ]
+     },
+     {
+      "method": "eth_getLogs",
+      "params": [
+       {
+        "fromBlock": "0xf06",
+        "toBlock": "0x10fa",
+        "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+        "topics": [
+         "0xe9bded5f24a4168e4f3bf44e00298c993b22376aad8c58c7dda9718a54cbea82"
+        ]
+       }
+      ]
+     }
+    ],
+    "outcome": {
+     "refreshed": null
+    }
+   },
+   {
+    "name": "receipt gone, moved by reorg",
+    "script": {
+     "receipts": {
+      "0x7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b": {
+       "transactionHash": "0x7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b",
+       "transactionIndex": "0x0",
+       "blockHash": "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "blockNumber": "0x1003",
+       "from": "0x1111111111111111111111111111111111111111",
+       "to": "0x5555555555555555555555555555555555555555",
+       "cumulativeGasUsed": "0x1",
+       "gasUsed": "0x1",
+       "contractAddress": null,
+       "logs": [
+        {
+         "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+         "topics": [
+          "0xb0c632f55f1e1b3b2c3d82f41ee4716bb4c00f0f5d84cdafc141581bb8757a4f"
+         ],
+         "data": "0x00000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000002200010000000000000000000000000000000000000000000000000000000000030d40000000000000000000000000000000000000000000000000000000000000",
+         "blockNumber": "0x1003",
+         "blockHash": "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+         "transactionHash": "0x7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b",
+         "transactionIndex": "0x0",
+         "logIndex": "0x0",
+         "removed": false
+        },
+        {
+         "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+         "topics": [
+          "0xe9bded5f24a4168e4f3bf44e00298c993b22376aad8c58c7dda9718a54cbea82"
+         ],
+         "data": "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000003a00000000000000070066111111111111111111111111111111111111111100652222222222222222222222222222222222222222deadbeefcafe000000000000",
+         "blockNumber": "0x1003",
+         "blockHash": "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+         "transactionHash": "0x7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b",
+         "transactionIndex": "0x0",
+         "logIndex": "0x1",
+         "removed": false
+        }
+       ],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "status": "0x1",
+       "type": "0x0",
+       "effectiveGasPrice": "0x1"
+      }
+     },
+     "logs": [
+      {
+       "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+       "topics": [
+        "0xe9bded5f24a4168e4f3bf44e00298c993b22376aad8c58c7dda9718a54cbea82"
+       ],
+       "data": "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000003a00000000000000080066111111111111111111111111111111111111111100652222222222222222222222222222222222222222deadbeefcafe000000000000",
+       "blockNumber": "0x1003",
+       "blockHash": "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "transactionHash": "0x7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b",
+       "transactionIndex": "0x0",
+       "logIndex": "0x0",
+       "removed": false
+      },
+      {
+       "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+       "topics": [
+        "0xe9bded5f24a4168e4f3bf44e00298c993b22376aad8c58c7dda9718a54cbea82"
+       ],
+       "data": "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000003a00000000000000070066111111111111111111111111111111111111111100652222222222222222222222222222222222222222deadbeefcafe000000000000",
+       "blockNumber": "0x1003",
+       "blockHash": "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "transactionHash": "0x7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b",
+       "transactionIndex": "0x0",
+       "logIndex": "0x1",
+       "removed": false
+      }
+     ]
+    },
+    "calls": [
+     {
+      "method": "eth_getTransactionReceipt",
+      "params": [
+       "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a"
+      ]
+     },
+     {
+      "method": "eth_getLogs",
+      "params": [
+       {
+        "fromBlock": "0xf06",
+        "toBlock": "0x10fa",
+        "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+        "topics": [
+         "0xe9bded5f24a4168e4f3bf44e00298c993b22376aad8c58c7dda9718a54cbea82"
+        ]
+       }
+      ]
+     },
+     {
+      "method": "eth_getTransactionReceipt",
+      "params": [
+       "0x7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b"
+      ]
+     }
+    ],
+    "outcome": {
+     "refreshed": {
+      "lzMessageId": {
+       "pathwayId": {
+        "srcEid": 102,
+        "sender": "0x1111111111111111111111111111111111111111",
+        "dstEid": 101,
+        "receiver": "0x2222222222222222222222222222222222222222",
+        "srcChainName": "bsc",
+        "dstChainName": "ethereum"
+       },
+       "nonce": 7,
+       "ulnSendVersion": "V2"
+      },
+      "packetEmitAddress": "0x4D73AdB72bC3DD368966edD0f0b2148401A178E2",
+      "message": "0xdeadbeefcafe",
+      "onChainEvent": {
+       "chainName": "bsc",
+       "txHash": "0x7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b",
+       "blockHash": "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "blockNumber": 4099
+      },
+      "adapterParams": {
+       "decodedAdapterParams": {
+        "version": "1",
+        "dstGasLimit": "200000"
+       },
+       "rawAdapterParams": "0x00010000000000000000000000000000000000000000000000000000000000030d40"
+      }
+     },
+     "hydrated": {
+      "lzMessageId": {
+       "pathwayId": {
+        "srcEid": 102,
+        "sender": "0x1111111111111111111111111111111111111111",
+        "dstEid": 101,
+        "receiver": "0x2222222222222222222222222222222222222222",
+        "srcChainName": "bsc",
+        "dstChainName": "ethereum"
+       },
+       "nonce": 7,
+       "ulnSendVersion": "V2"
+      },
+      "guid": "0x75f2d61d911843ab163ef64735cc5b897bbc0cc7ad299d102225da91437b3702",
+      "message": "0xdeadbeefcafe",
+      "options": {
+       "lzReceive": {
+        "gas": "200000",
+        "value": "0"
+       },
+       "ordered": true
+      },
+      "payload": "0x75f2d61d911843ab163ef64735cc5b897bbc0cc7ad299d102225da91437b3702deadbeefcafe",
+      "sendLibrary": "0x4D73AdB72bC3DD368966edD0f0b2148401A178E2",
+      "onChainEvent": {
+       "chainName": "bsc",
+       "txHash": "0x7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b",
+       "blockHash": "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+       "blockNumber": 4099
+      }
+     }
+    }
+   },
+   {
+    "name": "receipt gone, not found by logs",
+    "script": {
+     "logs": []
+    },
+    "calls": [
+     {
+      "method": "eth_getTransactionReceipt",
+      "params": [
+       "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a"
+      ]
+     },
+     {
+      "method": "eth_getLogs",
+      "params": [
+       {
+        "fromBlock": "0xf06",
+        "toBlock": "0x10fa",
+        "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+        "topics": [
+         "0xe9bded5f24a4168e4f3bf44e00298c993b22376aad8c58c7dda9718a54cbea82"
+        ]
+       }
+      ]
+     }
+    ],
+    "outcome": {
+     "refreshed": null
+    }
+   },
+   {
+    "name": "receipt read fails",
+    "script": {
+     "receiptError": "upstream receipt failure"
+    },
+    "calls": [
+     {
+      "method": "eth_getTransactionReceipt",
+      "params": [
+       "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a"
+      ]
+     }
+    ],
+    "outcome": {
+     "error": "upstream receipt failure"
+    }
+   },
+   {
+    "name": "logs read fails",
+    "script": {
+     "logsError": "upstream getLogs failure"
+    },
+    "calls": [
+     {
+      "method": "eth_getTransactionReceipt",
+      "params": [
+       "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a"
+      ]
+     },
+     {
+      "method": "eth_getLogs",
+      "params": [
+       {
+        "fromBlock": "0xf06",
+        "toBlock": "0x10fa",
+        "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+        "topics": [
+         "0xe9bded5f24a4168e4f3bf44e00298c993b22376aad8c58c7dda9718a54cbea82"
+        ]
+       }
+      ]
+     }
+    ],
+    "outcome": {
+     "error": "upstream getLogs failure"
+    }
+   },
+   {
+    "name": "reverted receipt, not found by logs",
+    "script": {
+     "receipts": {
+      "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a": {
+       "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+       "transactionIndex": "0x0",
+       "blockHash": "0xabababababababababababababababababababababababababababababababab",
+       "blockNumber": "0x1000",
+       "from": "0x1111111111111111111111111111111111111111",
+       "to": "0x5555555555555555555555555555555555555555",
+       "cumulativeGasUsed": "0x1",
+       "gasUsed": "0x1",
+       "contractAddress": null,
+       "logs": [],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "status": "0x0",
+       "type": "0x0",
+       "effectiveGasPrice": "0x1"
+      }
+     },
+     "logs": []
+    },
+    "calls": [
+     {
+      "method": "eth_getTransactionReceipt",
+      "params": [
+       "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a"
+      ]
+     },
+     {
+      "method": "eth_getLogs",
+      "params": [
+       {
+        "fromBlock": "0xf06",
+        "toBlock": "0x10fa",
+        "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+        "topics": [
+         "0xe9bded5f24a4168e4f3bf44e00298c993b22376aad8c58c7dda9718a54cbea82"
+        ]
+       }
+      ]
+     }
+    ],
+    "outcome": {
+     "refreshed": null
+    }
+   },
+   {
+    "name": "other nonce in receipt only",
+    "script": {
+     "receipts": {
+      "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a": {
+       "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+       "transactionIndex": "0x0",
+       "blockHash": "0xabababababababababababababababababababababababababababababababab",
+       "blockNumber": "0x1000",
+       "from": "0x1111111111111111111111111111111111111111",
+       "to": "0x5555555555555555555555555555555555555555",
+       "cumulativeGasUsed": "0x1",
+       "gasUsed": "0x1",
+       "contractAddress": null,
+       "logs": [
+        {
+         "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+         "topics": [
+          "0xb0c632f55f1e1b3b2c3d82f41ee4716bb4c00f0f5d84cdafc141581bb8757a4f"
+         ],
+         "data": "0x00000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000002200010000000000000000000000000000000000000000000000000000000000030d40000000000000000000000000000000000000000000000000000000000000",
+         "blockNumber": "0x1000",
+         "blockHash": "0xabababababababababababababababababababababababababababababababab",
+         "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+         "transactionIndex": "0x0",
+         "logIndex": "0x0",
+         "removed": false
+        },
+        {
+         "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+         "topics": [
+          "0xe9bded5f24a4168e4f3bf44e00298c993b22376aad8c58c7dda9718a54cbea82"
+         ],
+         "data": "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000003a00000000000000080066111111111111111111111111111111111111111100652222222222222222222222222222222222222222deadbeefcafe000000000000",
+         "blockNumber": "0x1000",
+         "blockHash": "0xabababababababababababababababababababababababababababababababab",
+         "transactionHash": "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a",
+         "transactionIndex": "0x0",
+         "logIndex": "0x1",
+         "removed": false
+        }
+       ],
+       "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+       "status": "0x1",
+       "type": "0x0",
+       "effectiveGasPrice": "0x1"
+      }
+     },
+     "logs": []
+    },
+    "calls": [
+     {
+      "method": "eth_getTransactionReceipt",
+      "params": [
+       "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a"
+      ]
+     },
+     {
+      "method": "eth_getLogs",
+      "params": [
+       {
+        "fromBlock": "0xf06",
+        "toBlock": "0x10fa",
+        "address": "0x4d73adb72bc3dd368966edd0f0b2148401a178e2",
+        "topics": [
+         "0xe9bded5f24a4168e4f3bf44e00298c993b22376aad8c58c7dda9718a54cbea82"
+        ]
+       }
+      ]
+     }
+    ],
+    "outcome": {
+     "refreshed": null
+    }
+   }
+  ]
+ },
+ "aptos": {
+  "guid": "0x04f7249fa0491662a822f771b1c0ae2f9312bca6a7d14c09d6163bfdc1784f77",
+  "sentEvent": {
+   "lzMessageId": {
+    "pathwayId": {
+     "srcChainName": "aptos",
+     "dstChainName": "arbitrum",
+     "sender": "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+     "receiver": "0x1bacc2205312534375c8d1801c27d28370656cff",
+     "srcEid": 108,
+     "dstEid": 110
+    },
+    "nonce": 26733,
+    "ulnSendVersion": "V2"
+   },
+   "packetEmitAddress": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90",
+   "onChainEvent": {
+    "txHash": "26629",
+    "blockHash": "0xb1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+    "blockNumber": 12345,
+    "chainName": "aptos"
+   },
+   "message": "0x0100000000000000000000000082af49447d8a07e3bd95bd0d56f35241523fbab10000000000000000000000005e5878e61a4b3d83eb43aea9eee76e2c3fa97f4100000000000010a901"
+  },
+  "scenarios": [
+   {
+    "name": "executor_v2 event",
+    "script": {
+     "events": [
+      {
+       "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v2::ExecutorRequested",
+       "data": {
+        "guid": "0x04f7249fa0491662a822f771b1c0ae2f9312bca6a7d14c09d6163bfdc1784f77",
+        "adapter_params": "0x00020000000000030d4000000000000003e83333333333333333333333333333333333333333"
+       }
+      }
+     ]
+    },
+    "calls": [
+     {
+      "getTransactionByVersion": "26629"
+     }
+    ],
+    "outcome": {
+     "refreshed": {
+      "adapterParams": {
+       "decodedAdapterParams": {
+        "version": "2",
+        "dstGasLimit": "200000",
+        "dstNativeGasTransferAmount": "1000",
+        "dstNativeGasTransferAddress": "0x3333333333333333333333333333333333333333"
+       },
+       "rawAdapterParams": "0x00020000000000030d4000000000000003e83333333333333333333333333333333333333333"
+      }
+     },
+     "hydrated": {
+      "lzMessageId": {
+       "pathwayId": {
+        "srcChainName": "aptos",
+        "dstChainName": "arbitrum",
+        "sender": "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+        "receiver": "0x1bacc2205312534375c8d1801c27d28370656cff",
+        "srcEid": 108,
+        "dstEid": 110
+       },
+       "nonce": 26733,
+       "ulnSendVersion": "V2"
+      },
+      "guid": "0x54222636769e5aaa96f549bc3919d92b008cd8853e33f4415d0389b4c1377dee",
+      "message": "0x0100000000000000000000000082af49447d8a07e3bd95bd0d56f35241523fbab10000000000000000000000005e5878e61a4b3d83eb43aea9eee76e2c3fa97f4100000000000010a901",
+      "options": {
+       "lzReceive": {
+        "gas": "200000",
+        "value": "0"
+       },
+       "ordered": true
+      },
+      "payload": "0x54222636769e5aaa96f549bc3919d92b008cd8853e33f4415d0389b4c1377dee0100000000000000000000000082af49447d8a07e3bd95bd0d56f35241523fbab10000000000000000000000005e5878e61a4b3d83eb43aea9eee76e2c3fa97f4100000000000010a901",
+      "sendLibrary": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90",
+      "onChainEvent": {
+       "txHash": "26629",
+       "blockHash": "0xb1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+       "blockNumber": 12345,
+       "chainName": "aptos"
+      }
+     }
+    }
+   },
+   {
+    "name": "executor_v1 event",
+    "script": {
+     "events": [
+      {
+       "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v1::RequestEvent",
+       "data": {
+        "guid": "0x04f7249fa0491662a822f771b1c0ae2f9312bca6a7d14c09d6163bfdc1784f77",
+        "adapter_params": "0x00010000000000030d40"
+       }
+      }
+     ]
+    },
+    "calls": [
+     {
+      "getTransactionByVersion": "26629"
+     }
+    ],
+    "outcome": {
+     "refreshed": {
+      "adapterParams": {
+       "decodedAdapterParams": {
+        "version": "1",
+        "dstGasLimit": "200000"
+       },
+       "rawAdapterParams": "0x00010000000000030d40"
+      }
+     },
+     "hydrated": {
+      "lzMessageId": {
+       "pathwayId": {
+        "srcChainName": "aptos",
+        "dstChainName": "arbitrum",
+        "sender": "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+        "receiver": "0x1bacc2205312534375c8d1801c27d28370656cff",
+        "srcEid": 108,
+        "dstEid": 110
+       },
+       "nonce": 26733,
+       "ulnSendVersion": "V2"
+      },
+      "guid": "0x54222636769e5aaa96f549bc3919d92b008cd8853e33f4415d0389b4c1377dee",
+      "message": "0x0100000000000000000000000082af49447d8a07e3bd95bd0d56f35241523fbab10000000000000000000000005e5878e61a4b3d83eb43aea9eee76e2c3fa97f4100000000000010a901",
+      "options": {
+       "lzReceive": {
+        "gas": "200000",
+        "value": "0"
+       },
+       "ordered": true
+      },
+      "payload": "0x54222636769e5aaa96f549bc3919d92b008cd8853e33f4415d0389b4c1377dee0100000000000000000000000082af49447d8a07e3bd95bd0d56f35241523fbab10000000000000000000000005e5878e61a4b3d83eb43aea9eee76e2c3fa97f4100000000000010a901",
+      "sendLibrary": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90",
+      "onChainEvent": {
+       "txHash": "26629",
+       "blockHash": "0xb1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+       "blockNumber": 12345,
+       "chainName": "aptos"
+      }
+     }
+    }
+   },
+   {
+    "name": "executor_v2 other guid falls back to v1",
+    "script": {
+     "events": [
+      {
+       "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v2::ExecutorRequested",
+       "data": {
+        "guid": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "adapter_params": "0x00020000000000030d4000000000000003e83333333333333333333333333333333333333333"
+       }
+      },
+      {
+       "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v1::RequestEvent",
+       "data": {
+        "guid": "0x04f7249fa0491662a822f771b1c0ae2f9312bca6a7d14c09d6163bfdc1784f77",
+        "adapter_params": "0x00010000000000030d40"
+       }
+      }
+     ]
+    },
+    "calls": [
+     {
+      "getTransactionByVersion": "26629"
+     }
+    ],
+    "outcome": {
+     "refreshed": {
+      "adapterParams": {
+       "decodedAdapterParams": {
+        "version": "1",
+        "dstGasLimit": "200000"
+       },
+       "rawAdapterParams": "0x00010000000000030d40"
+      }
+     },
+     "hydrated": {
+      "lzMessageId": {
+       "pathwayId": {
+        "srcChainName": "aptos",
+        "dstChainName": "arbitrum",
+        "sender": "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+        "receiver": "0x1bacc2205312534375c8d1801c27d28370656cff",
+        "srcEid": 108,
+        "dstEid": 110
+       },
+       "nonce": 26733,
+       "ulnSendVersion": "V2"
+      },
+      "guid": "0x54222636769e5aaa96f549bc3919d92b008cd8853e33f4415d0389b4c1377dee",
+      "message": "0x0100000000000000000000000082af49447d8a07e3bd95bd0d56f35241523fbab10000000000000000000000005e5878e61a4b3d83eb43aea9eee76e2c3fa97f4100000000000010a901",
+      "options": {
+       "lzReceive": {
+        "gas": "200000",
+        "value": "0"
+       },
+       "ordered": true
+      },
+      "payload": "0x54222636769e5aaa96f549bc3919d92b008cd8853e33f4415d0389b4c1377dee0100000000000000000000000082af49447d8a07e3bd95bd0d56f35241523fbab10000000000000000000000005e5878e61a4b3d83eb43aea9eee76e2c3fa97f4100000000000010a901",
+      "sendLibrary": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90",
+      "onChainEvent": {
+       "txHash": "26629",
+       "blockHash": "0xb1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+       "blockNumber": 12345,
+       "chainName": "aptos"
+      }
+     }
+    }
+   },
+   {
+    "name": "executor_v2 empty params falls back to v1",
+    "script": {
+     "events": [
+      {
+       "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v2::ExecutorRequested",
+       "data": {
+        "guid": "0x04f7249fa0491662a822f771b1c0ae2f9312bca6a7d14c09d6163bfdc1784f77",
+        "adapter_params": ""
+       }
+      },
+      {
+       "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v1::RequestEvent",
+       "data": {
+        "guid": "0x04f7249fa0491662a822f771b1c0ae2f9312bca6a7d14c09d6163bfdc1784f77",
+        "adapter_params": "0x00010000000000030d40"
+       }
+      }
+     ]
+    },
+    "calls": [
+     {
+      "getTransactionByVersion": "26629"
+     }
+    ],
+    "outcome": {
+     "refreshed": {
+      "adapterParams": {
+       "decodedAdapterParams": {
+        "version": "1",
+        "dstGasLimit": "200000"
+       },
+       "rawAdapterParams": "0x00010000000000030d40"
+      }
+     },
+     "hydrated": {
+      "lzMessageId": {
+       "pathwayId": {
+        "srcChainName": "aptos",
+        "dstChainName": "arbitrum",
+        "sender": "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+        "receiver": "0x1bacc2205312534375c8d1801c27d28370656cff",
+        "srcEid": 108,
+        "dstEid": 110
+       },
+       "nonce": 26733,
+       "ulnSendVersion": "V2"
+      },
+      "guid": "0x54222636769e5aaa96f549bc3919d92b008cd8853e33f4415d0389b4c1377dee",
+      "message": "0x0100000000000000000000000082af49447d8a07e3bd95bd0d56f35241523fbab10000000000000000000000005e5878e61a4b3d83eb43aea9eee76e2c3fa97f4100000000000010a901",
+      "options": {
+       "lzReceive": {
+        "gas": "200000",
+        "value": "0"
+       },
+       "ordered": true
+      },
+      "payload": "0x54222636769e5aaa96f549bc3919d92b008cd8853e33f4415d0389b4c1377dee0100000000000000000000000082af49447d8a07e3bd95bd0d56f35241523fbab10000000000000000000000005e5878e61a4b3d83eb43aea9eee76e2c3fa97f4100000000000010a901",
+      "sendLibrary": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90",
+      "onChainEvent": {
+       "txHash": "26629",
+       "blockHash": "0xb1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+       "blockNumber": 12345,
+       "chainName": "aptos"
+      }
+     }
+    }
+   },
+   {
+    "name": "default adapter params from table",
+    "script": {
+     "events": [
+      {
+       "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v1::RequestEvent",
+       "data": {
+        "guid": "0x04f7249fa0491662a822f771b1c0ae2f9312bca6a7d14c09d6163bfdc1784f77",
+        "adapter_params": "0x"
+       }
+      }
+     ],
+     "tableItem": "0x00010000000000030d40"
+    },
+    "calls": [
+     {
+      "getTransactionByVersion": "26629"
+     },
+     {
+      "getAccountResource": {
+       "accountAddress": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90",
+       "resourceType": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v1::AdapterParamsConfig"
+      }
+     },
+     {
+      "getTableItem": {
+       "handle": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+       "data": {
+        "key_type": "u64",
+        "value_type": "vector<u8>",
+        "key": "110"
+       }
+      }
+     }
+    ],
+    "outcome": {
+     "refreshed": {
+      "adapterParams": {
+       "decodedAdapterParams": {
+        "version": "1",
+        "dstGasLimit": "200000"
+       },
+       "rawAdapterParams": "00010000000000030d40"
+      }
+     },
+     "hydrated": {
+      "lzMessageId": {
+       "pathwayId": {
+        "srcChainName": "aptos",
+        "dstChainName": "arbitrum",
+        "sender": "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+        "receiver": "0x1bacc2205312534375c8d1801c27d28370656cff",
+        "srcEid": 108,
+        "dstEid": 110
+       },
+       "nonce": 26733,
+       "ulnSendVersion": "V2"
+      },
+      "guid": "0x54222636769e5aaa96f549bc3919d92b008cd8853e33f4415d0389b4c1377dee",
+      "message": "0x0100000000000000000000000082af49447d8a07e3bd95bd0d56f35241523fbab10000000000000000000000005e5878e61a4b3d83eb43aea9eee76e2c3fa97f4100000000000010a901",
+      "options": {
+       "lzReceive": {
+        "gas": "200000",
+        "value": "0"
+       },
+       "ordered": true
+      },
+      "payload": "0x54222636769e5aaa96f549bc3919d92b008cd8853e33f4415d0389b4c1377dee0100000000000000000000000082af49447d8a07e3bd95bd0d56f35241523fbab10000000000000000000000005e5878e61a4b3d83eb43aea9eee76e2c3fa97f4100000000000010a901",
+      "sendLibrary": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90",
+      "onChainEvent": {
+       "txHash": "26629",
+       "blockHash": "0xb1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+       "blockNumber": 12345,
+       "chainName": "aptos"
+      }
+     }
+    }
+   },
+   {
+    "name": "default adapter params table miss",
+    "script": {
+     "events": [
+      {
+       "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v1::RequestEvent",
+       "data": {
+        "guid": "0x04f7249fa0491662a822f771b1c0ae2f9312bca6a7d14c09d6163bfdc1784f77",
+        "adapter_params": "0x"
+       }
+      }
+     ],
+     "tableError": "table item not found"
+    },
+    "calls": [
+     {
+      "getTransactionByVersion": "26629"
+     },
+     {
+      "getAccountResource": {
+       "accountAddress": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90",
+       "resourceType": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v1::AdapterParamsConfig"
+      }
+     },
+     {
+      "getTableItem": {
+       "handle": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+       "data": {
+        "key_type": "u64",
+        "value_type": "vector<u8>",
+        "key": "110"
+       }
+      }
+     }
+    ],
+    "outcome": {
+     "refreshed": {
+      "adapterParams": {
+       "decodedAdapterParams": {
+        "version": "1",
+        "dstGasLimit": "0"
+       },
+       "rawAdapterParams": "00010000000000000000"
+      }
+     },
+     "hydrated": {
+      "lzMessageId": {
+       "pathwayId": {
+        "srcChainName": "aptos",
+        "dstChainName": "arbitrum",
+        "sender": "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+        "receiver": "0x1bacc2205312534375c8d1801c27d28370656cff",
+        "srcEid": 108,
+        "dstEid": 110
+       },
+       "nonce": 26733,
+       "ulnSendVersion": "V2"
+      },
+      "guid": "0x54222636769e5aaa96f549bc3919d92b008cd8853e33f4415d0389b4c1377dee",
+      "message": "0x0100000000000000000000000082af49447d8a07e3bd95bd0d56f35241523fbab10000000000000000000000005e5878e61a4b3d83eb43aea9eee76e2c3fa97f4100000000000010a901",
+      "options": {
+       "lzReceive": {
+        "gas": "0",
+        "value": "0"
+       },
+       "ordered": true
+      },
+      "payload": "0x54222636769e5aaa96f549bc3919d92b008cd8853e33f4415d0389b4c1377dee0100000000000000000000000082af49447d8a07e3bd95bd0d56f35241523fbab10000000000000000000000005e5878e61a4b3d83eb43aea9eee76e2c3fa97f4100000000000010a901",
+      "sendLibrary": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90",
+      "onChainEvent": {
+       "txHash": "26629",
+       "blockHash": "0xb1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+       "blockNumber": 12345,
+       "chainName": "aptos"
+      }
+     }
+    }
+   },
+   {
+    "name": "default adapter params resource fails",
+    "script": {
+     "events": [
+      {
+       "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v1::RequestEvent",
+       "data": {
+        "guid": "0x04f7249fa0491662a822f771b1c0ae2f9312bca6a7d14c09d6163bfdc1784f77",
+        "adapter_params": "0x"
+       }
+      }
+     ],
+     "resourceError": "resource not found"
+    },
+    "calls": [
+     {
+      "getTransactionByVersion": "26629"
+     },
+     {
+      "getAccountResource": {
+       "accountAddress": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90",
+       "resourceType": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v1::AdapterParamsConfig"
+      }
+     }
+    ],
+    "outcome": {
+     "error": "resource not found"
+    }
+   },
+   {
+    "name": "no executor event",
+    "script": {
+     "events": []
+    },
+    "calls": [
+     {
+      "getTransactionByVersion": "26629"
+     }
+    ],
+    "outcome": {
+     "error": "Cannot read properties of undefined (reading 'data')"
+    }
+   },
+   {
+    "name": "invalid adapter params",
+    "script": {
+     "events": [
+      {
+       "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v1::RequestEvent",
+       "data": {
+        "guid": "0x04f7249fa0491662a822f771b1c0ae2f9312bca6a7d14c09d6163bfdc1784f77",
+        "adapter_params": "0x0003"
+       }
+      }
+     ]
+    },
+    "calls": [
+     {
+      "getTransactionByVersion": "26629"
+     }
+    ],
+    "outcome": {
+     "error": "invalid adapter params"
+    }
+   },
+   {
+    "name": "short default adapter params",
+    "script": {
+     "events": [
+      {
+       "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v1::RequestEvent",
+       "data": {
+        "guid": "0x04f7249fa0491662a822f771b1c0ae2f9312bca6a7d14c09d6163bfdc1784f77",
+        "adapter_params": "0x00010000"
+       }
+      }
+     ]
+    },
+    "calls": [
+     {
+      "getTransactionByVersion": "26629"
+     }
+    ],
+    "outcome": {
+     "error": "invalid adapter params"
+    }
+   }
+  ]
+ },
+ "aptosAddresses": {
+  "mainnet": {
+   "layerzero": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90",
+   "executorV2": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90"
+  },
+  "testnet": {
+   "layerzero": "0x1759cc0d3161f1eb79f65847d4feb9d1f74fb79014698a23b16b28b9cd4c37e3",
+   "executorV2": "0x1759cc0d3161f1eb79f65847d4feb9d1f74fb79014698a23b16b28b9cd4c37e3"
+  },
+  "sandbox": {
+   "layerzero": "0xf2e1e034475dc0439487dd09dfc3950c462f731599e53a6b015dd85502352e68",
+   "executorV2": "0xf2e1e034475dc0439487dd09dfc3950c462f731599e53a6b015dd85502352e68"
+  }
+ }
+}

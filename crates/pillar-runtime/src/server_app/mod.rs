@@ -177,13 +177,6 @@ pub(crate) fn validate_operational_chains(
         .iter()
         .filter_map(|chain_name| {
             let config = provider_config.get_provider_config(chain_name)?;
-            // `required_provider_quorum` coerces a zero quorum up to 1, so it
-            // can never report one. A zero quorum asks for a signature with no
-            // provider agreement at all; for a signer that is a typo, not a
-            // configuration.
-            if config.quorum == Some(0) {
-                return Some(format!("Provider quorum 0 for chain {chain_name}"));
-            }
             crate::provider_health::required_provider_quorum(config, chain_name)
                 .err()
                 .map(|error| error.to_string())
@@ -203,13 +196,12 @@ mod tests {
     #[test]
     fn available_chains_come_from_filtered_provider_keys() {
         let provider_config = pillar_config::StaticProviderConfig::new(
-            serde_json::from_str(
+            pillar_config::test_support::provider_configs_from_uris_json(
                 r#"{
-                    "ethereum": {"uris": ["https://eth.example"], "quorum": 1},
-                    "bsc": {"uris": ["https://bsc.example"], "quorum": 1}
-                }"#,
-            )
-            .unwrap(),
+            "ethereum": {"uris": ["https://eth.example"], "quorum": 1},
+            "bsc": {"uris": ["https://bsc.example"], "quorum": 1}
+        }"#,
+            ),
             None,
         )
         .unwrap();

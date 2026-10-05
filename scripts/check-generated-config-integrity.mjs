@@ -10,11 +10,10 @@
 // address table, and a wrong trusted-emitter or ULN address is a security bug, not a
 // cosmetic one.
 //
-// Deliberately self-contained: no upstream checkout, no npm package, no network. The two
-// existing checkers (check-layerzero-environment-parity.mjs, check-parity-coverage.mjs)
-// both require PILLAR_AUDIT_ROOT, the private TypeScript service checkout, so neither can
-// run in CI. This one can, which is the whole point of it being a separate script rather
-// than another branch inside those.
+// Deliberately self-contained: no upstream checkout, no npm package, no network.
+// check-layerzero-environment-parity.mjs requires PILLAR_AUDIT_ROOT, an upstream
+// TypeScript checkout not distributed with this repository, so it cannot run in CI.
+// This one can, which is the whole point of it being a separate script.
 //
 // What it does NOT do: prove the values are correct. Only regenerating from the pinned
 // upstream package does that. This catches drift between a file and its own header.
@@ -47,6 +46,16 @@ const EXPECTED = [
             ['Code cells', 'TON_CODE_CELLS'],
             ['Deployments', 'TON_DEPLOYMENTS'],
         ],
+    },
+    {
+        file: 'generated_layerzero_legacy_chain_ids.rs',
+        generator: 'scripts/generate-layerzero-legacy-chain-ids.mjs',
+        counts: [['Entries', 'LZ_LEGACY_CHAIN_NAME_BY_ID']],
+    },
+    {
+        file: 'generated_chain_metadata.rs',
+        generator: 'scripts/generate-chain-metadata-config.mjs',
+        counts: [['Entries', 'CHAIN_MAX_ETH_GET_LOGS_BLOCK_RANGE']],
     },
 ]
 

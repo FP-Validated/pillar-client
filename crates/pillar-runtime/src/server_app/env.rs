@@ -69,8 +69,11 @@ where
             &available_chain_names,
             RuntimeMode::Development,
         )?;
+        let controls =
+            crate::execution::RuntimeControls::new(&runtime_config, &available_chain_names).await?;
 
         Ok(Self {
+            controls,
             runtime_config,
             providers,
             provider_health_cache,

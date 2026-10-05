@@ -1,0 +1,27 @@
+{
+  "eventToken": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::sending::PacketSent",
+  "event": {
+    "onChainEvent": {
+      "chainName": "aptos",
+      "txHash": "7469155248",
+      "blockHash": "0x038ab162500d08cfba80b42cfa26cf0a42f20a5d2d53af76bd16451f439481bf",
+      "blockNumber": 7469155248
+    },
+    "lzMessageId": {
+      "pathwayId": {
+        "srcChainName": "aptos",
+        "dstChainName": "bsc",
+        "srcEid": 108,
+        "dstEid": 102,
+        "sender": "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e58338f964a01b17fa",
+        "receiver": "0x2762409baa1804d94d8c0bcff8400b78bf915d5b"
+      },
+      "nonce": 314702,
+      "ulnSendVersion": "V301"
+    },
+    "guid": "0x4a30b8ae81864a0525ea4c9b25f02d8373273b4984775ed5112db82f04d5b211",
+    "message": "0x0100000000000000000000000055d398326f99059ff775485246999027b3197955000000000000000000000000884f18e3572cd95cd3c419fe14110a44eeba1f440000000002625a0000",
+    "sendLibrary": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812",
+    "options": {}
+  }
+}

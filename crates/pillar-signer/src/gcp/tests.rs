@@ -147,3 +147,37 @@ async fn gcp_kms_factory_builds_crypto_key_version_name_like_typescript() {
     };
     assert_eq!(err, SignerError::UnsupportedKmsProvider(KmsProvider::Aws));
 }
+
+#[tokio::test]
+async fn gcp_solana_signer_info_keeps_the_upstream_sec1_slice_address() {
+    let x_y = hex::decode(concat!(
+        "ca11e4b7d37870aca2ace4d5dee1dd296e6d76c7ff757c648d41f1e65d495d74",
+        "0897f8edc07fea309c99494ab3f2115c27f1f8aca0d0843ce485e6266ed351f1"
+    ))
+    .unwrap();
+    let mut sec1 = vec![0x04];
+    sec1.extend_from_slice(&x_y);
+    let version_name =
+        "projects/project/locations/global/keyRings/ring/cryptoKeys/solana/cryptoKeyVersions/1"
+            .to_string();
+    let client = Arc::new(MockGcpKmsClient {
+        version_name: version_name.clone(),
+        ecdsa_signing_key: EcdsaSigningKey::from_slice(&[25u8; 32]).unwrap(),
+        public_key_pem: secp256k1_public_key_pem(&sec1),
+        sign_digests: Mutex::new(Vec::new()),
+        public_key_calls: Mutex::new(0),
+    });
+    let adapter = GcpKmsRawSignerAdapter::new(version_name, client);
+    let info = crate::chain_address::PillarSignerAdapterKind::for_chain_type(
+        ChainType::Solana,
+        Arc::new(adapter),
+        true,
+    )
+    .unwrap()
+    .get_signer_info()
+    .await
+    .unwrap();
+
+    assert_eq!(info.address, "KhLrwX6FuKJfNtoxn2meHYBxKjvazGPHbfMdmx78HZ6");
+    assert_eq!(info.public_key, format!("0x{}", hex::encode(&x_y)));
+}

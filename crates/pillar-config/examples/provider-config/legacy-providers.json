@@ -1,0 +1,17 @@
+{
+  "ethereum": {
+    "uris": ["http://rpc-gateway.operator.example:8545/rpc/ethereum"],
+    "quorum": 1
+  },
+  "bsc": {
+    "uris": [
+      "http://rpc-gateway.operator.example:8545/rpc/bsc",
+      { "uri": "https://bsc.provider-a.example/v1", "headers": { "x-api-key": "REPLACE_ME" } }
+    ],
+    "quorum": 2
+  },
+  "solana": {
+    "uris": ["http://rpc-gateway.operator.example:8545/rpc/solana"],
+    "quorum": 1
+  }
+}

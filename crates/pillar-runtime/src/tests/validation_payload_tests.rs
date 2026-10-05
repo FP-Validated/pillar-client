@@ -100,10 +100,10 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_starknet_payload() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "starknet".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://starknet.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://starknet.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["starknet".to_string()]),
     )
@@ -148,10 +148,10 @@ async fn runtime_rpc_validation_checks_rejects_signed_starknet_payload() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "starknet".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://starknet.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://starknet.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["starknet".to_string()]),
     )
@@ -190,10 +190,10 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_move_payloads() {
         let getter = StaticProviderConfig::new(
             indexmap::IndexMap::from([(
                 chain_name.to_string(),
-                ProviderConfig {
-                    uris: vec![ProviderUri::Uri(format!("https://{chain_name}.example/"))],
-                    quorum: Some(1),
-                },
+                ProviderConfig::with_distinct_entities(
+                    vec![ProviderUri::Uri(format!("https://{chain_name}.example/"))],
+                    1,
+                ),
             )]),
             Some(&[chain_name.to_string()]),
         )
@@ -204,6 +204,9 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_move_payloads() {
             RecordingTransport {
                 calls: calls.clone(),
                 responses: Arc::new(Mutex::new(vec![
+                    Ok(json!([
+                        "0x4444444444444444444444444444444444444444444444444444444444444444"
+                    ])),
                     Ok(json!(["0x0000000000000002"])),
                     Ok(json!([0])),
                     Ok(json!([1])),
@@ -223,12 +226,15 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_move_payloads() {
             .await
             .unwrap();
         let calls = calls.lock().unwrap();
-        assert_eq!(calls.len(), 3);
-        assert_eq!(calls[0].0, format!("https://{chain_name}.example/view"));
-        assert_eq!(calls[0].2["function"], "0xendpoint::endpoint::get_config");
-        assert_eq!(calls[1].2["function"], "0xviews::uln_302::verifiable");
+        assert_eq!(calls.len(), 4);
         assert_eq!(
-            calls[2].2["function"],
+            calls[0].2["function"],
+            "0xendpoint::endpoint::get_effective_receive_library"
+        );
+        assert_eq!(calls[1].2["function"], "0xendpoint::endpoint::get_config");
+        assert_eq!(calls[2].2["function"], "0xviews::uln_302::verifiable");
+        assert_eq!(
+            calls[3].2["function"],
             "0xuln302::msglib::get_verification_confirmations"
         );
     }
@@ -239,10 +245,10 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_initia_payload() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "initia".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://initia.example/".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://initia.example/".to_string())],
+                1,
+            ),
         )]),
         Some(&["initia".to_string()]),
     )
@@ -253,6 +259,7 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_initia_payload() {
         RecordingTransport {
             calls: calls.clone(),
             responses: Arc::new(Mutex::new(vec![
+                Ok(json!({"data": "[\"0x0000000000000003\"]"})),
                 Ok(json!({"data": "[\"0x0000000000000002\"]"})),
                 Ok(json!({"data": "[0]"})),
                 Ok(json!({"data": "[0]"})),
@@ -272,23 +279,27 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_initia_payload() {
         .await
         .unwrap();
     let calls = calls.lock().unwrap();
-    assert_eq!(calls.len(), 3);
-    assert_eq!(
-        calls[0].0,
-        "https://initia.example/initia/move/v1/accounts/0x33/modules/endpoint/view_functions/get_config"
-    );
-    assert_eq!(calls[0].2["args"].as_array().unwrap().len(), 4);
+    assert_eq!(calls.len(), 4);
+    assert!(calls[0]
+        .0
+        .ends_with("endpoint/view_functions/get_effective_receive_library"));
+    assert_eq!(calls[0].2["args"].as_array().unwrap().len(), 2);
     assert_eq!(
         calls[1].0,
-        "https://initia.example/initia/move/v1/accounts/0x22/modules/uln_302/view_functions/verifiable"
+        "https://initia.example/initia/move/v1/accounts/0x33/modules/endpoint/view_functions/get_config"
     );
-    assert_eq!(calls[1].2["type_args"], json!([]));
-    assert_eq!(calls[1].2["args"].as_array().unwrap().len(), 2);
+    assert_eq!(calls[1].2["args"].as_array().unwrap().len(), 4);
     assert_eq!(
         calls[2].0,
+        "https://initia.example/initia/move/v1/accounts/0x22/modules/uln_302/view_functions/verifiable"
+    );
+    assert_eq!(calls[2].2["type_args"], json!([]));
+    assert_eq!(calls[2].2["args"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        calls[3].0,
         "https://initia.example/initia/move/v1/accounts/0x11/modules/msglib/view_functions/get_verification_confirmations"
     );
-    assert_eq!(calls[2].2["args"].as_array().unwrap().len(), 3);
+    assert_eq!(calls[3].2["args"].as_array().unwrap().len(), 3);
 }
 
 #[tokio::test]
@@ -296,10 +307,10 @@ async fn runtime_rpc_validation_checks_rejects_confirmed_move_payload() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "movement".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://movement.example/".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://movement.example/".to_string())],
+                1,
+            ),
         )]),
         Some(&["movement".to_string()]),
     )
@@ -309,8 +320,12 @@ async fn runtime_rpc_validation_checks_rejects_confirmed_move_payload() {
         RecordingTransport {
             calls: Arc::new(Mutex::new(Vec::new())),
             responses: Arc::new(Mutex::new(vec![
+                Ok(json!([
+                    "0x4444444444444444444444444444444444444444444444444444444444444444"
+                ])),
                 Ok(json!(["0x0000000000000002"])),
                 Ok(json!([0])),
+                Ok(json!([2])),
                 Ok(json!([2])),
             ])),
         },
@@ -332,14 +347,14 @@ async fn runtime_rpc_validation_checks_rejects_confirmed_move_payload() {
 
 #[tokio::test]
 async fn runtime_rpc_validation_checks_never_falls_back_to_evm_for_native_payloads() {
-    for chain_name in ["stellar"] {
+    for chain_name in ["stellar", "canton"] {
         let getter = StaticProviderConfig::new(
             indexmap::IndexMap::from([(
                 chain_name.to_string(),
-                ProviderConfig {
-                    uris: vec![ProviderUri::Uri(format!("https://{chain_name}.example"))],
-                    quorum: Some(1),
-                },
+                ProviderConfig::with_distinct_entities(
+                    vec![ProviderUri::Uri(format!("https://{chain_name}.example"))],
+                    1,
+                ),
             )]),
             Some(&[chain_name.to_string()]),
         )
@@ -360,9 +375,9 @@ async fn runtime_rpc_validation_checks_never_falls_back_to_evm_for_native_payloa
             .await
             .unwrap_err();
         assert!(
-            error
-                .to_string()
-                .contains("Chain-native payload-signed validation is unavailable"),
+            matches!(&error, AppCoreError::Internal(message)
+                if message.contains("No Stellar payload-signed contracts configured")
+                    || message == "Missing \"sequencer\" provider config for chain: canton"),
             "{chain_name}: {error}"
         );
         assert!(calls.lock().unwrap().is_empty());
@@ -377,10 +392,10 @@ async fn runtime_rpc_validation_checks_never_falls_back_to_evm_for_unconfigured_
         let getter = StaticProviderConfig::new(
             indexmap::IndexMap::from([(
                 chain_name.to_string(),
-                ProviderConfig {
-                    uris: vec![ProviderUri::Uri(format!("https://{chain_name}.example"))],
-                    quorum: Some(1),
-                },
+                ProviderConfig::with_distinct_entities(
+                    vec![ProviderUri::Uri(format!("https://{chain_name}.example"))],
+                    1,
+                ),
             )]),
             Some(&[chain_name.to_string()]),
         )
@@ -417,10 +432,10 @@ async fn runtime_rpc_validation_checks_never_falls_back_to_evm_for_unconfigured_
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "ton".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://ton.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://ton.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["ton".to_string()]),
     )
@@ -808,10 +823,10 @@ async fn runtime_rpc_validation_checks_resolves_solana_transaction_from_address(
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "solana".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["solana".to_string()]),
     )
@@ -866,10 +881,10 @@ async fn runtime_rpc_validation_checks_resolves_move_transaction_from_address() 
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "movement".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://movement.example/".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://movement.example/".to_string())],
+                1,
+            ),
         )]),
         Some(&["movement".to_string()]),
     )
@@ -902,15 +917,56 @@ async fn runtime_rpc_validation_checks_resolves_move_transaction_from_address() 
     assert_eq!(calls[0].2, json!({"method": "GET"}));
 }
 
+/// A ULNv2 send names its ledger version; upstream's `getTransactionByHashOrVersion`
+/// reads it with `BigInt`, so leading zeros do not reach the URL.
+#[tokio::test]
+async fn runtime_rpc_validation_checks_reads_aptos_sender_by_ledger_version() {
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "aptos".to_string(),
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://aptos.example/v1".to_string())],
+                1,
+            ),
+        )]),
+        Some(&["aptos".to_string()]),
+    )
+    .unwrap();
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let checks = RuntimeRpcValidationChecks::from_getter(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        RecordingTransport {
+            calls: calls.clone(),
+            responses: Arc::new(Mutex::new(vec![Ok(json!({
+                "version": "26629",
+                "sender": "0xABCDEF",
+                "events": []
+            }))])),
+        },
+    );
+
+    assert_eq!(
+        checks
+            .source_transaction_from_address("aptos", "026629")
+            .await
+            .unwrap(),
+        "0xabcdef"
+    );
+    assert_eq!(
+        calls.lock().unwrap()[0].0,
+        "https://aptos.example/v1/transactions/by_version/26629"
+    );
+}
+
 #[tokio::test]
 async fn runtime_rpc_validation_checks_derives_initia_sender_from_public_key() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "initia".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://initia.example/".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://initia.example/".to_string())],
+                1,
+            ),
         )]),
         Some(&["initia".to_string()]),
     )
@@ -955,10 +1011,10 @@ async fn runtime_rpc_validation_checks_resolves_sui_and_iota_transaction_from_ad
         let getter = StaticProviderConfig::new(
             indexmap::IndexMap::from([(
                 chain_name.to_string(),
-                ProviderConfig {
-                    uris: vec![ProviderUri::Uri(format!("https://{chain_name}.example"))],
-                    quorum: Some(1),
-                },
+                ProviderConfig::with_distinct_entities(
+                    vec![ProviderUri::Uri(format!("https://{chain_name}.example"))],
+                    1,
+                ),
             )]),
             Some(&[chain_name.to_string()]),
         )
@@ -1003,10 +1059,10 @@ async fn runtime_rpc_validation_checks_rejects_failed_sui_transaction_sender() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "sui".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://sui.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://sui.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["sui".to_string()]),
     )
@@ -1041,10 +1097,10 @@ async fn runtime_rpc_validation_checks_resolves_starknet_transaction_from_addres
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "starknet".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://starknet.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://starknet.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["starknet".to_string()]),
     )
@@ -1087,10 +1143,10 @@ async fn runtime_rpc_validation_checks_resolves_ton_transaction_from_address() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "ton".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri(provider_uri.to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri(provider_uri.to_string())],
+                1,
+            ),
         )]),
         Some(&["ton".to_string()]),
     )
@@ -1106,9 +1162,12 @@ async fn runtime_rpc_validation_checks_resolves_ton_transaction_from_address() {
                     "in_msg": {
                         "destination": format!("0:{}", "11".repeat(32)),
                         "hash": "tx-hash",
-                        "message_content": {"body": "body"}
+                        "message_content": {
+                            "body": pillar_layerzero::ton_boc_to_base64(&ton_core::cell::TonCell::empty().clone()).unwrap()
+                        }
                     }
-                }
+                },
+                "children": []
             }))])),
         },
     );
@@ -1121,11 +1180,127 @@ async fn runtime_rpc_validation_checks_resolves_ton_transaction_from_address() {
         format!("0x{}", "11".repeat(32))
     );
     let calls = calls.lock().unwrap();
-    assert_eq!(calls[0].0, "https://ton-v3.example/traces/0xtx");
+    assert_eq!(calls[0].0, "https://ton-v3.example/events?tx_hash=0xtx");
     assert_eq!(calls[0].1["X-API-Key"], "secret");
     assert_eq!(calls[0].2, json!({"method": "GET"}));
 }
 
+#[tokio::test]
+async fn ton_sender_extra_context_uses_projection_quorum_for_seqno_disagreement() {
+    let uris = [
+        "https://ton-a.example?v3-endpoint=https%3A%2F%2Fton-a.example%2Fv3",
+        "https://ton-b.example?v3-endpoint=https%3A%2F%2Fton-b.example%2Fv3",
+        "https://ton-c.example?v3-endpoint=https%3A%2F%2Fton-c.example%2Fv3",
+    ];
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "ton".to_string(),
+            ProviderConfig::with_distinct_entities(
+                uris.into_iter()
+                    .map(|uri| ProviderUri::Uri(uri.to_string()))
+                    .collect(),
+                2,
+            ),
+        )]),
+        Some(&["ton".to_string()]),
+    )
+    .unwrap();
+    let body = pillar_layerzero::ton_boc_to_base64(ton_core::cell::TonCell::empty()).unwrap();
+    let trace = |seqno| {
+        json!({
+            "transaction": {
+                "mc_block_seqno": seqno,
+                "in_msg": {
+                    "destination": format!("0:{}", "11".repeat(32)),
+                    "source": "0:2222222222222222222222222222222222222222222222222222222222222222",
+                    "hash": "tx-hash",
+                    "message_content": { "body": body }
+                }
+            },
+            "children": []
+        })
+    };
+    let checks = RuntimeRpcValidationChecks::from_getter(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        RecordingTransport {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            responses: Arc::new(Mutex::new(vec![
+                Ok(trace(42)),
+                Ok(trace(42)),
+                Ok(trace(43)),
+            ])),
+        },
+    );
+
+    assert_eq!(
+        checks
+            .source_transaction_from_address("ton", "0xtx")
+            .await
+            .unwrap(),
+        format!("0x{}", "11".repeat(32))
+    );
+}
+
+#[tokio::test]
+async fn ton_sender_extra_context_excludes_missing_in_msg_provider_vote() {
+    let uris = [
+        "https://ton-a.example?v3-endpoint=https%3A%2F%2Fton-a.example%2Fv3",
+        "https://ton-b.example?v3-endpoint=https%3A%2F%2Fton-b.example%2Fv3",
+        "https://ton-c.example?v3-endpoint=https%3A%2F%2Fton-c.example%2Fv3",
+    ];
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "ton".to_string(),
+            ProviderConfig::with_distinct_entities(
+                uris.into_iter()
+                    .map(|uri| ProviderUri::Uri(uri.to_string()))
+                    .collect(),
+                2,
+            ),
+        )]),
+        Some(&["ton".to_string()]),
+    )
+    .unwrap();
+    let body = pillar_layerzero::ton_boc_to_base64(ton_core::cell::TonCell::empty()).unwrap();
+    let trace = |seqno, missing_child| {
+        let mut value = json!({
+            "transaction": {
+                "mc_block_seqno": seqno,
+                "in_msg": {
+                    "destination": format!("0:{}", "11".repeat(32)),
+                    "source": "0:2222222222222222222222222222222222222222222222222222222222222222",
+                    "hash": "tx-hash",
+                    "message_content": { "body": body }
+                }
+            },
+            "children": []
+        });
+        if missing_child {
+            value["children"] = json!([{ "transaction": {}, "children": [] }]);
+        }
+        value
+    };
+    let checks = RuntimeRpcValidationChecks::from_getter(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        RecordingTransport {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            responses: Arc::new(Mutex::new(vec![
+                Ok(trace(42, false)),
+                Ok(trace(43, false)),
+                Ok(trace(42, true)),
+            ])),
+        },
+    );
+
+    let error = checks
+        .source_transaction_from_address("ton", "0xtx")
+        .await
+        .expect_err("missing in_msg loses its vote, leaving no two-provider quorum");
+    assert!(
+        matches!(error, AppCoreError::Internal(_)),
+        "expected no-quorum failure after the malformed provider is excluded: {error:?}"
+    );
+}
 #[tokio::test]
 async fn runtime_rpc_validation_checks_resolves_stellar_transaction_from_address() {
     use base64::Engine;
@@ -1133,10 +1308,10 @@ async fn runtime_rpc_validation_checks_resolves_stellar_transaction_from_address
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "stellar".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://stellar.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://stellar.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["stellar".to_string()]),
     )
@@ -1185,10 +1360,10 @@ async fn no_non_evm_chain_falls_through_to_the_evm_transaction_from_default() {
         let getter = StaticProviderConfig::new(
             indexmap::IndexMap::from([(
                 chain_name.clone(),
-                ProviderConfig {
-                    uris: vec![ProviderUri::Uri(format!("https://{chain_name}.example/"))],
-                    quorum: Some(1),
-                },
+                ProviderConfig::with_distinct_entities(
+                    vec![ProviderUri::Uri(format!("https://{chain_name}.example/"))],
+                    1,
+                ),
             )]),
             Some(std::slice::from_ref(chain_name)),
         )
@@ -1238,10 +1413,10 @@ async fn no_non_evm_chain_falls_through_to_the_evm_payload_check() {
         let getter = StaticProviderConfig::new(
             indexmap::IndexMap::from([(
                 chain_name.clone(),
-                ProviderConfig {
-                    uris: vec![ProviderUri::Uri(format!("https://{chain_name}.example/"))],
-                    quorum: Some(1),
-                },
+                ProviderConfig::with_distinct_entities(
+                    vec![ProviderUri::Uri(format!("https://{chain_name}.example/"))],
+                    1,
+                ),
             )]),
             Some(std::slice::from_ref(chain_name)),
         )

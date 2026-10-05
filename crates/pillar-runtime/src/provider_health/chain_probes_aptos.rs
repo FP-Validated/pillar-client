@@ -4,29 +4,34 @@ pub(crate) async fn probe_aptos_provider_health<T>(
     transport: T,
     url: String,
     headers: HashMap<String, String>,
-) -> ProviderHealthEntry
+) -> Result<ProviderHealthEntry, RpcError>
 where
     T: JsonRpcTransport,
 {
     let started_at = Instant::now();
-    let response = match transport.get_json(url.clone(), headers).await {
+    let response = match transport.get_json_scoped(url.clone(), headers).await {
         Ok(response) => aptos_health_numeric_response(&response).unwrap_or(Value::Null),
-        Err(error) => Value::String(error),
+        Err(RpcError::Remote(error)) => Value::String(error),
+        Err(error) => health_error_response(error)?,
     };
 
-    normalize_provider_health_entry(url, response, Some(started_at.elapsed().as_millis() as u64))
+    Ok(normalize_provider_health_entry(
+        url,
+        response,
+        Some(started_at.elapsed().as_millis() as u64),
+    ))
 }
 
 pub(crate) async fn probe_aptos_indexer_provider_health<T>(
     transport: T,
     request: AptosIndexerProviderHealthRequest,
-) -> ProviderHealthEntry
+) -> Result<ProviderHealthEntry, RpcError>
 where
     T: JsonRpcTransport,
 {
     let started_at = Instant::now();
     let response = match transport
-        .post_json(request.request_url, request.headers, request.body)
+        .post_json_scoped(request.request_url, request.headers, request.body)
         .await
     {
         Ok(response) => match request.kind {
@@ -45,14 +50,15 @@ where
                 .cloned()
                 .unwrap_or(Value::Null),
         },
-        Err(error) => Value::String(error),
+        Err(RpcError::Remote(error)) => Value::String(error),
+        Err(error) => health_error_response(error)?,
     };
 
-    normalize_provider_health_entry(
+    Ok(normalize_provider_health_entry(
         request.report_url,
         response,
         Some(started_at.elapsed().as_millis() as u64),
-    )
+    ))
 }
 
 pub(crate) fn aptos_health_numeric_response(response: &Value) -> Option<Value> {

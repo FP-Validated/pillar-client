@@ -67,43 +67,48 @@ where
         dst_chain_name: &str,
         dvn_address: &str,
     ) -> Result<String, AppCoreError> {
-        let snapshot = self.providers.load();
-        let dispatch = snapshot
-            .dispatch(&self.rank_tracker, dst_chain_name)
-            .await?;
-        let ChainDispatch {
-            config: provider_config,
-            quorum,
-            plan,
-        } = dispatch;
+        crate::provider_health::rpc_scope(dst_chain_name, async {
+            let snapshot = self.providers.load();
+            let dispatch = snapshot
+                .dispatch(&self.rank_tracker, dst_chain_name)
+                .await?;
+            let ChainDispatch {
+                config: provider_config,
+                quorum,
+                plan,
+            } = dispatch;
 
-        let requests = FuturesUnordered::new();
-        for DispatchEntry { index, uri, delay } in plan {
-            let (url, headers) = provider_uri_parts(uri);
-            let transport = self.transport.clone();
-            let dvn_address = dvn_address.to_string();
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
-                let observation =
-                    observe_ton_contract_state(transport, url, headers, &dvn_address).await;
-                (index, observation)
-            });
-        }
-        let context = format!("TON DVN proxy storage for chain {dst_chain_name}");
-        let storage_data: Option<String> =
-            resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context).await?;
+            let requests = FuturesUnordered::new();
+            for DispatchEntry { index, uri, delay } in plan {
+                let (url, headers) = provider_uri_parts(uri);
+                let transport = self.transport.clone();
+                let dvn_address = dvn_address.to_string();
+                requests.push(async move {
+                    if !delay.is_zero() {
+                        tokio::time::sleep(delay).await;
+                    }
+                    let observation = provider_response(
+                        observe_ton_contract_state(transport, url, headers, &dvn_address).await,
+                    );
+                    (index, observation)
+                });
+            }
+            let context = format!("TON DVN proxy storage for chain {dst_chain_name}");
+            let storage_data: Option<String> =
+                resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
+                    .await?;
 
-        match storage_data {
-            Some(data_base64) => match decode_proxy_admin_target(&data_base64)? {
-                Some(target) => Ok(target),
-                // Present but not a Proxy contract -> fall back to the DVN address.
+            match storage_data {
+                Some(data_base64) => match decode_proxy_admin_target(&data_base64)? {
+                    Some(target) => Ok(target),
+                    // Present but not a Proxy contract -> fall back to the DVN address.
+                    None => Ok(dvn_address.to_string()),
+                },
+                // Not active / not deployed -> fall back to the DVN address.
                 None => Ok(dvn_address.to_string()),
-            },
-            // Not active / not deployed -> fall back to the DVN address.
-            None => Ok(dvn_address.to_string()),
-        }
+            }
+        })
+        .await
     }
 }
 
@@ -116,7 +121,7 @@ async fn observe_ton_contract_state<T>(
     url: String,
     headers: HashMap<String, String>,
     address: &str,
-) -> Option<(String, Option<String>)>
+) -> Result<(String, Option<String>), RpcError>
 where
     T: JsonRpcTransport,
 {
@@ -126,8 +131,8 @@ where
         "method": "getAddressInformation",
         "params": { "address": address },
     });
-    let response = transport.post_json(url, headers, body).await.ok()?;
-    let result = response.get("result")?;
+    let response = transport.post_json_scoped(url, headers, body).await?;
+    let result = response.get("result").ok_or(RpcError::Unavailable)?;
 
     let state = result.get("state").and_then(Value::as_str);
     let data = result
@@ -139,8 +144,8 @@ where
     // "0" bucket (uninit/frozen/no-data) that drives the not-a-proxy fallback.
     let active = matches!(state, Some("active")) || (state.is_none() && data.is_some());
     match (active, data) {
-        (true, Some(data)) => Some((data.to_string(), Some(data.to_string()))),
-        _ => Some(("0".to_string(), None)),
+        (true, Some(data)) => Ok((data.to_string(), Some(data.to_string()))),
+        _ => Ok(("0".to_string(), None)),
     }
 }
 
@@ -157,9 +162,22 @@ where
         v_id: String,
         dvn_address: Option<&str>,
     ) -> Result<pillar_core::HashCallDataResult, AppCoreError> {
-        let dvn_address = dvn_address.ok_or_else(|| {
-            AppCoreError::BadRequest("TON DVN verify requires a dvnAddress".to_string())
-        })?;
+        // Upstream hands `dvnAddress!` to `parseTonAddress` before any RPC: an absent
+        // address throws on `.startsWith`, an empty one on `BigInt('0x')`; both are
+        // 500s (`common-ton/src/utils.ts:248-270`, `lz-ton-contracts/src/index.ts:634-638`).
+        let dvn_address = match dvn_address {
+            None => {
+                return Err(AppCoreError::Internal(
+                    "Cannot read properties of undefined (reading 'startsWith')".to_string(),
+                ))
+            }
+            Some("") => {
+                return Err(AppCoreError::Internal(
+                    "Cannot convert 0x to a BigInt".to_string(),
+                ))
+            }
+            Some(address) => address,
+        };
         let dst_chain_name = sent_event.lz_message_id.pathway_id.dst_chain_name.clone();
         let target = self.resolve_target(&dst_chain_name, dvn_address).await?;
 
@@ -239,8 +257,8 @@ mod tests {
     use std::sync::Arc;
 
     // DVN Proxy storage cell (admin = 0:4444...4444, matching oracle VEC A
-    // target), emitted by `bundle.cjs` `lzEncodeClass('Proxy', ...)` — the real
-    // compiled LayerZero TON encoder — in local/ton-oracle, then base64 BOC.
+    // target), emitted by `lzEncodeClass('Proxy', ...)` from a bundle compiled from
+    // upstream's `common-ton` class encoder (not distributed here), then base64 BOC.
     const PROXY_STORAGE_B64: &str = "te6cckEBAwEAwAABVwAAAHBmUHJveHmT/wBXv//////////////////////////////////////9AQHXd3JrQ29yU3RvcpP/IFe4Je////////////////////////////////////6qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAgBARERERERERERERERERERERERERERERERERERERERERET8w675";
 
     #[derive(Clone)]
@@ -264,6 +282,30 @@ mod tests {
             _headers: HashMap<String, String>,
         ) -> Result<Value, String> {
             Ok((*self.result).clone())
+        }
+    }
+
+    #[derive(Clone)]
+    struct CountingTonTransport(Arc<std::sync::atomic::AtomicUsize>);
+
+    #[async_trait]
+    impl JsonRpcTransport for CountingTonTransport {
+        async fn post_json(
+            &self,
+            _url: String,
+            _headers: HashMap<String, String>,
+            _body: Value,
+        ) -> Result<Value, String> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err("no RPC expected".to_string())
+        }
+        async fn get_json(
+            &self,
+            _url: String,
+            _headers: HashMap<String, String>,
+        ) -> Result<Value, String> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err("no RPC expected".to_string())
         }
     }
 
@@ -317,10 +359,10 @@ mod tests {
         StaticProviderConfig::new(
             indexmap::IndexMap::from([(
                 "ton".to_string(),
-                ProviderConfig {
-                    uris: vec![ProviderUri::Uri("https://ton-rpc.example".to_string())],
-                    quorum: Some(1),
-                },
+                ProviderConfig::with_distinct_entities(
+                    vec![ProviderUri::Uri("https://ton-rpc.example".to_string())],
+                    1,
+                ),
             )]),
             Some(&["ton".to_string()]),
         )
@@ -396,6 +438,43 @@ mod tests {
             result.hash_call_data,
             "0x5e098fe4a9092360a48d98507c75e2e4808170d27ef37fe380d95c8fdddd07b6"
         );
+    }
+
+    /// Upstream fails in `parseTonAddress` before any RPC; the fake transport would
+    /// otherwise answer, so a recorded call would show the order is wrong.
+    #[tokio::test]
+    async fn missing_or_empty_dvn_address_fails_like_upstream_before_any_rpc() {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let transport = CountingTonTransport(calls.clone());
+        let getter = ton_getter();
+        let builder = RuntimeTonUlnPayloadBuilder::new(
+            &crate::provider_snapshot::ProviderSnapshotHandle::from_getter(&getter),
+            transport,
+            code(),
+            "EQAGtSsRq69lvx_0fFfokLpK1qdaaIWbvlpRwfxFGVTFTLrH".to_string(),
+            code(),
+            "EQAVBkV0biW-VIbrOy9dmLRMazJGl8SNSV0Fn5b8nT7DaMIn".to_string(),
+        );
+        for (address, message) in [
+            (
+                None,
+                "Cannot read properties of undefined (reading 'startsWith')",
+            ),
+            (Some(""), "Cannot convert 0x to a BigInt"),
+        ] {
+            let error = builder
+                .build_uln_v3_verify_payload(
+                    &vec_a_sent_event(),
+                    15,
+                    1_234_567_890,
+                    "300".to_string(),
+                    address,
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(error, AppCoreError::Internal(message.to_string()));
+        }
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 
     #[test]

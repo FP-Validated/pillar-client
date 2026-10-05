@@ -6,13 +6,26 @@ pub fn normalize_provider_health_entry(
     latency_ms: Option<u64>,
 ) -> ProviderHealthEntry {
     let numeric_response = numeric_response(&response);
+    let observed = response.get("observation").and_then(Value::as_str) != Some("not_attempted");
     ProviderHealthEntry {
         url: redact_url(&url),
         rank_key: url,
         response: redact_response_urls(response),
         latency_ms,
         healthy: numeric_response.is_some(),
+        observed,
         numeric_response,
+    }
+}
+
+pub(super) fn health_error_response(error: RpcError) -> Result<Value, RpcError> {
+    match error {
+        RpcError::Admission(error) => {
+            Ok(json!({"observation":"not_attempted","reason":error.to_string()}))
+        }
+        RpcError::Configuration(_) => Err(error),
+        RpcError::Remote(error) => Ok(Value::String(error)),
+        RpcError::Unavailable => Ok(Value::String("provider response unavailable".into())),
     }
 }
 

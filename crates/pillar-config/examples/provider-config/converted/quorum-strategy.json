@@ -1,0 +1,38 @@
+{
+  "default": {
+    "allOf": [
+      {
+        "any": 1
+      }
+    ]
+  },
+  "chains": {
+    "ethereum": {
+      "rpc": {
+        "allOf": [
+          {
+            "any": 1
+          }
+        ]
+      }
+    },
+    "bsc": {
+      "rpc": {
+        "allOf": [
+          {
+            "any": 2
+          }
+        ]
+      }
+    },
+    "solana": {
+      "rpc": {
+        "allOf": [
+          {
+            "any": 1
+          }
+        ]
+      }
+    }
+  }
+}

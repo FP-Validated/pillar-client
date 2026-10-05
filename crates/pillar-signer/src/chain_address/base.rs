@@ -3,11 +3,20 @@ use std::sync::Arc;
 
 use crate::chain_address::{bytes_to_hex, strip_public_key_prefix};
 use crate::types::{
-    PublicKeyRequest, RawSignerAdapter, SeedKind, SignRequest, SignatureType, SignerError,
+    KmsProvider, PublicKeyRequest, RawSignerAdapter, SeedKind, SignRequest, SignatureType,
+    SignerError,
 };
 
 pub trait ChainAddress: Send + Sync + 'static {
     fn signer_address(&self, public_key: &[u8]) -> Result<String, SignerError>;
+
+    fn signer_address_for_provider(
+        &self,
+        public_key: &[u8],
+        _kms_provider: Option<KmsProvider>,
+    ) -> Result<String, SignerError> {
+        self.signer_address(public_key)
+    }
 
     fn private_key_signature_type(&self, _is_kms: bool) -> SignatureType {
         SignatureType::Ecdsa
@@ -61,6 +70,11 @@ where
     }
 
     pub async fn pillar_sign(&self, data: &[u8]) -> Result<Signature, SignerError> {
+        if pillar_core::audit::enabled() && !self.signer_adapter.supports_durable_audit() {
+            return Err(SignerError::Audit(
+                "durable audit: signer does not support write-ahead evidence".into(),
+            ));
+        }
         let prepared = self.chain.prepare_data(data);
         let signature = self
             .signer_adapter
@@ -94,7 +108,9 @@ where
             return Ok(address);
         }
         let public_key = self.get_address_public_key().await?;
-        let address = self.chain.signer_address(&public_key)?;
+        let address = self
+            .chain
+            .signer_address_for_provider(&public_key, self.signer_adapter.kms_provider())?;
         *self.cached_address.lock().await = Some(address.clone());
         Ok(address)
     }

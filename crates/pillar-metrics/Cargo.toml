@@ -15,6 +15,7 @@ async-trait.workspace = true
 pillar-core = { path = "../pillar-core" }
 tokio.workspace = true
 indexmap.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

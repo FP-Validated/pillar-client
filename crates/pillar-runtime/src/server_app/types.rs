@@ -2,6 +2,7 @@ use super::*;
 
 pub struct RuntimeServerApp<T> {
     pub(super) runtime_config: RuntimeConfig,
+    pub(super) controls: crate::execution::RuntimeControls,
     /// The generation now serving. `/available-chains` reads it rather than a
     /// roster fixed at startup, so what the process advertises cannot outlive
     /// the configuration it would sign with. It only ever shrinks - see

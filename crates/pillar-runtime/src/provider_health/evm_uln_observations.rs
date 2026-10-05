@@ -11,7 +11,7 @@ where
 {
     let receipt = transport
         .clone()
-        .post_json(
+        .post_json_scoped(
             url.clone(),
             headers.clone(),
             json!({
@@ -22,7 +22,7 @@ where
             }),
         )
         .await
-        .map_err(AppCoreError::Internal)?;
+        .map_err(AppCoreError::from)?;
     let block_hash = receipt
         .get("result")
         .filter(|result| !result.is_null())
@@ -31,7 +31,7 @@ where
         .map(str::to_ascii_lowercase)
         .ok_or_else(|| AppCoreError::Internal("Missing receipt blockHash".to_string()))?;
     let block = transport
-        .post_json(
+        .post_json_scoped(
             url,
             headers,
             json!({
@@ -42,7 +42,7 @@ where
             }),
         )
         .await
-        .map_err(AppCoreError::Internal)?;
+        .map_err(AppCoreError::from)?;
     parse_uln_v2_mpt_hash_info_observation(&block)
 }
 
@@ -111,6 +111,7 @@ where
             proof_type
         ),
         proof_type,
+        utils_version,
     })
 }
 

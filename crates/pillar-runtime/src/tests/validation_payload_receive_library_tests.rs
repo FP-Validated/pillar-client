@@ -322,13 +322,13 @@ async fn payload_signed_requires_providers_to_agree_on_the_receive_library() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "bsc".to_string(),
-            ProviderConfig {
-                uris: vec![
+            ProviderConfig::with_distinct_entities(
+                vec![
                     ProviderUri::Uri(first.clone()),
                     ProviderUri::Uri(second.clone()),
                 ],
-                quorum: Some(2),
-            },
+                2,
+            ),
         )]),
         Some(&["bsc".to_string()]),
     )
@@ -452,9 +452,9 @@ async fn payload_signed_accepts_the_bytes32_receiver_the_resolver_produces() {
 /// A 32-byte receiver whose leading bytes are not zero is not an EVM address.
 ///
 /// Upstream would silently keep the low 20 bytes
-/// (`packages/static-config/src/index.ts:723-727`). Attesting for a truncated
-/// address is attesting for a different OApp than the packet names, so this
-/// refuses. Deliberate divergence, recorded in SECURITY.md.
+/// (`packages/static-config/src/index.ts:723-727`), as the destination's
+/// `receiverB20()` does; this refuses instead. Deliberate policy divergence,
+/// recorded in SECURITY.md.
 #[tokio::test]
 async fn payload_signed_refuses_a_receiver_that_is_not_a_padded_evm_address() {
     let calls = Arc::new(Mutex::new(Vec::new()));
@@ -516,6 +516,7 @@ async fn payload_signed_queries_move_validation_with_a_dvn_address() {
     let calls = Arc::new(Mutex::new(Vec::new()));
     let checks = aptos_payload_checks(
         vec![
+            Ok(json!([format!("0x{}", "44".repeat(32)), false])),
             Ok(json!(["0x0000000000000002"])),
             Ok(json!([0])),
             Ok(json!([1])),
@@ -533,13 +534,17 @@ async fn payload_signed_queries_move_validation_with_a_dvn_address() {
     let calls = calls.lock().unwrap();
     assert_eq!(
         calls.len(),
-        3,
+        4,
         "the Move validation query must run: {calls:?}"
     );
-    assert_eq!(calls[0].2["function"], "0xendpoint::endpoint::get_config");
-    assert_eq!(calls[1].2["function"], "0xviews::uln_302::verifiable");
     assert_eq!(
-        calls[2].2["function"],
+        calls[0].2["function"],
+        "0xendpoint::endpoint::get_effective_receive_library"
+    );
+    assert_eq!(calls[1].2["function"], "0xendpoint::endpoint::get_config");
+    assert_eq!(calls[2].2["function"], "0xviews::uln_302::verifiable");
+    assert_eq!(
+        calls[3].2["function"],
         "0xuln302::msglib::get_verification_confirmations"
     );
 }
@@ -551,12 +556,12 @@ fn aptos_payload_checks(
     let getter = pillar_config::StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "aptos".to_string(),
-            pillar_config::ProviderConfig {
-                uris: vec![pillar_config::ProviderUri::Uri(
+            pillar_config::ProviderConfig::with_distinct_entities(
+                vec![pillar_config::ProviderUri::Uri(
                     "https://aptos-rpc.example/".to_string(),
                 )],
-                quorum: Some(1),
-            },
+                1,
+            ),
         )]),
         Some(&["aptos".to_string()]),
     )
@@ -606,4 +611,54 @@ impl JsonRpcTransport for PerUrlPayloadTransport {
     ) -> Result<Value, String> {
         Err("unexpected GET".to_string())
     }
+}
+
+/// Routing a V2 send classifies the receive library as upstream does: a
+/// non-default library the endpoint rejects is `Invalid ULN version for lib`
+/// with ethers' checksummed rendering, an address outside upstream's table is
+/// `Unsupported ULN version: undefined` (both `NonRetryableError`, so 500), and
+/// a recognised non-V3 library such as ReadLib1002 is an answer, not a refusal
+/// (TS 1.2.66: `endpoint/evm/endpointV2.ts:73-104`, `decoders/index.ts:49-93`).
+#[tokio::test]
+async fn receive_routing_classifies_libraries_like_upstream() {
+    let route = |responses: Vec<Result<Value, String>>| async move {
+        let checks = runtime_rpc_payload_checks(responses, Arc::new(Mutex::new(Vec::new())));
+        RuntimeValidationChecks::uln_receive_version(
+            &checks,
+            &payload_signed_sent_event().lz_message_id,
+        )
+        .await
+    };
+
+    assert_eq!(
+        route(vec![
+            eth_call_result(&abi_address_bool(
+                "0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed",
+                false
+            )),
+            eth_call_result(&abi_word(0)),
+        ])
+        .await,
+        Err(AppCoreError::Internal(
+            "Invalid ULN version for lib: 0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed".to_string()
+        ))
+    );
+    assert_eq!(
+        route(vec![eth_call_result(&abi_address_bool(
+            "0x00000000000000000000000000000000deadbeef",
+            true
+        ))])
+        .await,
+        Err(AppCoreError::Internal(
+            "Unsupported ULN version: undefined".to_string()
+        ))
+    );
+    assert_eq!(
+        route(vec![eth_call_result(&abi_address_bool(
+            "0x3333333333333333333333333333333333333333",
+            true
+        ))])
+        .await,
+        Ok("ReadV1002".to_string())
+    );
 }

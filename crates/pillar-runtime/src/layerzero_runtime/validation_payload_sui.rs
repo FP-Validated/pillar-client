@@ -112,13 +112,7 @@ where
             .map_err(|error| AppCoreError::Internal(format!("payloadHash hex: {error}")))?;
 
         let quorum = required_provider_quorum(provider_config, dst_chain_name)?;
-        let plan = plan_dispatch(
-            &self.rank_tracker,
-            dst_chain_name,
-            &provider_config.uris,
-            quorum,
-        )
-        .await?;
+        let plan = plan_dispatch(&self.rank_tracker, dst_chain_name, quorum).await?;
 
         let requests = FuturesUnordered::new();
         for DispatchEntry { index, uri, delay } in plan {
@@ -132,21 +126,23 @@ where
                 if !delay.is_zero() {
                     tokio::time::sleep(delay).await;
                 }
-                let observation = observe_sui_payload_signed(
-                    &transport,
-                    &url,
-                    headers,
-                    SuiPayloadSignedObservation {
-                        chain_name: &chain_name,
-                        contracts: &contracts,
-                        receiver: &receiver,
-                        src_eid,
-                        verifier: &verifier,
-                        packet_header: &packet_header,
-                        payload_hash: &payload_hash,
-                    },
-                )
-                .await;
+                let observation = provider_response(
+                    observe_sui_payload_signed(
+                        &transport,
+                        &url,
+                        headers,
+                        SuiPayloadSignedObservation {
+                            chain_name: &chain_name,
+                            contracts: &contracts,
+                            receiver: &receiver,
+                            src_eid,
+                            verifier: &verifier,
+                            packet_header: &packet_header,
+                            payload_hash: &payload_hash,
+                        },
+                    )
+                    .await,
+                );
                 (index, observation)
             });
         }
@@ -180,7 +176,7 @@ async fn observe_sui_payload_signed<T>(
     url: &str,
     headers: HashMap<String, String>,
     observation: SuiPayloadSignedObservation<'_>,
-) -> Option<(String, PayloadSignedValidity)>
+) -> Result<(String, PayloadSignedValidity), RpcError>
 where
     T: JsonRpcTransport,
 {
@@ -194,10 +190,14 @@ where
         payload_hash,
     } = observation;
 
-    let endpoint_package = sui_address_from_hex(&contracts.endpoint_v2_package).ok()?;
-    let uln_package = sui_address_from_hex(&contracts.uln_302_package).ok()?;
-    let views_package = sui_address_from_hex(&contracts.layerzero_views_package).ok()?;
-    let utils_package = sui_address_from_hex(&contracts.utils_package).ok()?;
+    let endpoint_package =
+        sui_address_from_hex(&contracts.endpoint_v2_package).map_err(|_| RpcError::Unavailable)?;
+    let uln_package =
+        sui_address_from_hex(&contracts.uln_302_package).map_err(|_| RpcError::Unavailable)?;
+    let views_package = sui_address_from_hex(&contracts.layerzero_views_package)
+        .map_err(|_| RpcError::Unavailable)?;
+    let utils_package =
+        sui_address_from_hex(&contracts.utils_package).map_err(|_| RpcError::Unavailable)?;
 
     // 1. messaging channel for the destination OApp.
     let endpoint_object = resolve_shared_object(
@@ -229,8 +229,8 @@ where
         }],
     )
     .await?
-    .ok()?;
-    let channel_id = decode_sui_address(&channel_bytes).ok()?;
+    .map_err(|_| RpcError::Unavailable)?;
+    let channel_id = decode_sui_address(&channel_bytes).map_err(|_| RpcError::Unavailable)?;
 
     // 2. verification state.
     let uln_object = resolve_shared_object(
@@ -303,8 +303,8 @@ where
         }],
     )
     .await?
-    .ok()?;
-    let state = decode_sui_u8(&state_bytes).ok()?;
+    .map_err(|_| RpcError::Unavailable)?;
+    let state = decode_sui_u8(&state_bytes).map_err(|_| RpcError::Unavailable)?;
 
     // 3. this DVN's confirmations. A Move abort with sub_status 1 is "no
     //    confirmations recorded", which upstream maps to zero.
@@ -359,9 +359,9 @@ where
     )
     .await?;
     let confirmations = match confirmations_result {
-        Ok(bytes) => decode_sui_u64(&bytes).ok()?,
+        Ok(bytes) => decode_sui_u64(&bytes).map_err(|_| RpcError::Unavailable)?,
         Err(SuiViewFailure::MoveAbort(E_CONFIRMATIONS_NOT_FOUND)) => 0,
-        Err(_) => return None,
+        Err(_) => return Err(RpcError::Unavailable),
     };
 
     // 4. the pathway's required confirmations.
@@ -399,8 +399,10 @@ where
         }],
     )
     .await?
-    .ok()?;
-    let required = decode_sui_uln_config(&config_bytes).ok()?.confirmations;
+    .map_err(|_| RpcError::Unavailable)?;
+    let required = decode_sui_uln_config(&config_bytes)
+        .map_err(|_| RpcError::Unavailable)?
+        .confirmations;
 
     let dvn_confirmed = confirmations >= required;
     let validity = if state == SUI_VERIFICATION_STATE_VERIFIED || dvn_confirmed {
@@ -408,7 +410,7 @@ where
     } else {
         PayloadSignedValidity::NotSigned
     };
-    Some((format!("{state}:{confirmations}:{required}"), validity))
+    Ok((format!("{state}:{confirmations}:{required}"), validity))
 }
 
 /// Why a `devInspect` produced no value.
@@ -434,7 +436,7 @@ async fn resolve_shared_object<T>(
     module: &str,
     function: &str,
     parameter_index: usize,
-) -> Option<SuiSharedObject>
+) -> Result<SuiSharedObject, RpcError>
 where
     T: JsonRpcTransport,
 {
@@ -463,7 +465,7 @@ async fn resolve_shared_object_id<T>(
     module: &str,
     function: &str,
     parameter_index: usize,
-) -> Option<SuiSharedObject>
+) -> Result<SuiSharedObject, RpcError>
 where
     T: JsonRpcTransport,
 {
@@ -480,8 +482,8 @@ where
     .await?;
     let initial_shared_version =
         shared_object_initial_version(transport, url, headers, chain_name, object_id).await?;
-    Some(SuiSharedObject {
-        object_id: sui_address_from_hex(object_id).ok()?,
+    Ok(SuiSharedObject {
+        object_id: sui_address_from_hex(object_id).map_err(|_| RpcError::Unavailable)?,
         initial_shared_version,
         mutable,
     })
@@ -501,7 +503,7 @@ async fn normalized_parameter_is_mutable<T>(
     module: &str,
     function: &str,
     parameter_index: usize,
-) -> Option<bool>
+) -> Result<bool, RpcError>
 where
     T: JsonRpcTransport,
 {
@@ -512,16 +514,19 @@ where
         "params": [format!("0x{}", hex::encode(package)), module, function],
     });
     let response = transport
-        .post_json(url.to_string(), headers, body)
-        .await
-        .ok()?;
+        .post_json_scoped(url.to_string(), headers, body)
+        .await?;
     let parameter = response
-        .get("result")?
-        .get("parameters")?
-        .as_array()?
-        .get(parameter_index)?;
+        .get("result")
+        .ok_or(RpcError::Unavailable)?
+        .get("parameters")
+        .ok_or(RpcError::Unavailable)?
+        .as_array()
+        .ok_or(RpcError::Unavailable)?
+        .get(parameter_index)
+        .ok_or(RpcError::Unavailable)?;
     // A `Reference` parameter is an immutable borrow; anything else is mutable.
-    Some(parameter.get("Reference").is_none())
+    Ok(parameter.get("Reference").is_none())
 }
 
 /// `multiGetObjects` with `showOwner: true` -> the shared object's
@@ -533,7 +538,7 @@ async fn shared_object_initial_version<T>(
     headers: HashMap<String, String>,
     chain_name: &str,
     object_id: &str,
-) -> Option<u64>
+) -> Result<u64, RpcError>
 where
     T: JsonRpcTransport,
 {
@@ -544,21 +549,28 @@ where
         "params": [[object_id], { "showOwner": true }],
     });
     let response = transport
-        .post_json(url.to_string(), headers, body)
-        .await
-        .ok()?;
+        .post_json_scoped(url.to_string(), headers, body)
+        .await?;
     let shared = response
-        .get("result")?
-        .as_array()?
-        .first()?
-        .get("data")?
-        .get("owner")?
-        .get("Shared")?;
-    let version = shared.get("initial_shared_version")?;
+        .get("result")
+        .ok_or(RpcError::Unavailable)?
+        .as_array()
+        .ok_or(RpcError::Unavailable)?
+        .first()
+        .ok_or(RpcError::Unavailable)?
+        .get("data")
+        .ok_or(RpcError::Unavailable)?
+        .get("owner")
+        .ok_or(RpcError::Unavailable)?
+        .get("Shared")
+        .ok_or(RpcError::Unavailable)?;
+    let version = shared
+        .get("initial_shared_version")
+        .ok_or(RpcError::Unavailable)?;
     match version {
-        Value::Number(number) => number.as_u64(),
-        Value::String(text) => text.parse().ok(),
-        _ => None,
+        Value::Number(number) => number.as_u64().ok_or(RpcError::Unavailable),
+        Value::String(text) => text.parse().map_err(|_| RpcError::Unavailable),
+        _ => Err(RpcError::Unavailable),
     }
 }
 
@@ -570,7 +582,7 @@ async fn dev_inspect_return<T>(
     chain_name: &str,
     inputs: &[SuiCallArg],
     commands: &[SuiMoveCall],
-) -> Option<Result<Vec<u8>, SuiViewFailure>>
+) -> Result<Result<Vec<u8>, SuiViewFailure>, RpcError>
 where
     T: JsonRpcTransport,
 {
@@ -589,28 +601,37 @@ where
         ],
     });
     let response = transport
-        .post_json(url.to_string(), headers, body)
-        .await
-        .ok()?;
-    let result = response.get("result")?;
+        .post_json_scoped(url.to_string(), headers, body)
+        .await?;
+    let result = response.get("result").ok_or(RpcError::Unavailable)?;
 
     // An execution error is reported in the result, not as an RPC error.
     if let Some(error) = result.get("error").and_then(Value::as_str) {
-        return Some(Err(move_abort_sub_status(error)
+        return Ok(Err(move_abort_sub_status(error)
             .map(SuiViewFailure::MoveAbort)
             .unwrap_or(SuiViewFailure::Unusable)));
     }
     // `suiMoveView` reads the last command's results.
     let encoded = result
-        .get("results")?
-        .as_array()?
-        .last()?
-        .get("returnValues")?
-        .as_array()?
-        .first()?
-        .as_array()?
-        .first()?;
-    Some(Ok(decode_return_value(encoded)?))
+        .get("results")
+        .ok_or(RpcError::Unavailable)?
+        .as_array()
+        .ok_or(RpcError::Unavailable)?
+        .last()
+        .ok_or(RpcError::Unavailable)?
+        .get("returnValues")
+        .ok_or(RpcError::Unavailable)?
+        .as_array()
+        .ok_or(RpcError::Unavailable)?
+        .first()
+        .ok_or(RpcError::Unavailable)?
+        .as_array()
+        .ok_or(RpcError::Unavailable)?
+        .first()
+        .ok_or(RpcError::Unavailable)?;
+    Ok(Ok(
+        decode_return_value(encoded).ok_or(RpcError::Unavailable)?
+    ))
 }
 
 /// A `devInspect` return value arrives either as an array of byte numbers or as

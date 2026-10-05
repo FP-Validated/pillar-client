@@ -164,8 +164,28 @@ impl AptosUlnPayloadBuilder {
     }
 }
 
+/// The two Aptos ULN V2 oracles a vId-less proposal may target, each with the Aptos
+/// EndpointV1 id its packets must name: upstream's `getAptosV1OracleAddress` for mainnet and
+/// testnet. Any other destination identity is refused.
+const APTOS_ULN_V2_ORACLES: [(&str, u64); 2] = [
+    (
+        "0xc2846ea05319c339b3b52186ceae40b43d4e9cf6c7350336c3eb0b351d9394eb",
+        108,
+    ),
+    (
+        "0x8ab85d94bf34808386b3ce0f9516db74d2b6d2f1166aa48f75ca641f3adb6c63",
+        10_108,
+    ),
+];
+
 #[async_trait]
 impl UlnV2PayloadBuilder for AptosUlnPayloadBuilder {
+    /// Upstream signs `hashPropose(lookupHash, confirmations, expiration)` for the destination's
+    /// V1 oracle (`gasolinaSdk/aptos/index.ts:35-73`), the lookup hash being the native hash of
+    /// `getFeatherProof(2, emitter, packet)`, i.e. of the bare V1 packet, since Aptos's inbound
+    /// config is always utils version 2 (`lz-v1-sdk/src/aptos/aptos.ts:592-596`). Served only for
+    /// an EVM-sent ULN V2 packet to `aptos` whose oracle and EndpointV1 id are one of the pinned
+    /// pairs; a vId is upstream's own 500.
     async fn build_uln_v2_verify_payload(
         &self,
         sent_event: &LzSentEvent,
@@ -173,37 +193,59 @@ impl UlnV2PayloadBuilder for AptosUlnPayloadBuilder {
         expiration: i64,
         v_id: String,
     ) -> Result<HashCallDataResult, AppCoreError> {
-        // `lookupHash` and `blockData` used to be read straight out of
-        // `sent_event.extra`, a `#[serde(flatten)]` map with open keys, and fed
-        // into `aptos_hash_propose` — the same shape as the `extra.packetHeader`
-        // / `extra.payloadHash` defect that was removed from
-        // `compute_lz_packet_v1_proof_from_event`. It was harmless only because
-        // no resolver writes those two keys, so the branch always errored on the
-        // first lookup. Nothing here can derive them from the packet either: the
-        // V1 oracle `propose` hash covers a block lookup, not the packet. So the
-        // capability is refused rather than left trusting an open map, and a
-        // caller-influenced value can no longer reach the signing key.
-        //
-        // `BadRequest`, not `Internal`. Both selectors that land here -
-        // `dstChainName` and `ulnSendVersion` - are caller-supplied, so an
-        // `Internal` made every V2-to-Aptos request a deterministic 5xx that any
-        // client could trigger at will. That is the same defect this audit fixed
-        // in `PillarApp::check_chain_name_availability`: an unsupported
-        // caller-chosen combination is a malformed request, not a server fault,
-        // and misclassifying it lets a client drive the 5xx rate that
-        // availability alerting keys on.
-        //
-        // Note for the reader: `build_uln_v2_verify_payload_from_hash_info` and
-        // `aptos_hash_propose` now have no production caller. The runtime V2
-        // builder types its `payload_builder` as `EvmUlnPayloadBuilder`
-        // (`uln_v2_builder.rs`), so the derived Feather/MPT path goes to
-        // `evm_v2.rs`, never here. They are kept because they encode the upstream
-        // propose layout and are covered by the parity tests; the 32-byte pin on
-        // `lookupHash` guards them if anything ever routes to this builder again.
-        let _ = (sent_event, block_confirmation, expiration, v_id);
-        Err(AppCoreError::BadRequest(
-            "ULN V2 verification is not available on the Aptos family: the propose lookup hash is not derivable from the packet".to_string(),
-        ))
+        if !v_id.is_empty() {
+            return Err(AppCoreError::Internal(
+                "VId is not supported on aptos yet".to_string(),
+            ));
+        }
+        let refuse = |reason: &str| {
+            AppCoreError::BadRequest(format!(
+                "ULN V2 verification without a vId is served only for an EVM-sent ULN V2 \
+                 packet to the pinned Aptos oracle: {reason}"
+            ))
+        };
+        let pathway = &sent_event.lz_message_id.pathway_id;
+        if pathway.dst_chain_name != "aptos" {
+            return Err(refuse("the destination is not aptos"));
+        }
+        if uln_send_version_string(&sent_event.lz_message_id.uln_send_version)? != "V2" {
+            return Err(refuse("the packet was not sent on ULN V2"));
+        }
+        let oracle = &self.contracts_for_event(sent_event)?.v1_oracle;
+        let endpoint_v1_id = APTOS_ULN_V2_ORACLES
+            .iter()
+            .find(|(pinned, _)| pinned.eq_ignore_ascii_case(oracle))
+            .map(|(_, eid)| *eid)
+            .ok_or_else(|| refuse("the configured oracle is not a pinned one"))?;
+        if extra_u64(sent_event, "dstEid")? != endpoint_v1_id {
+            return Err(refuse(
+                "the packet does not name this oracle's Aptos EndpointV1 id",
+            ));
+        }
+        let receiver = crate::abi::decode_hex_bytes(&crate::packet::pathway_extra_string(
+            sent_event, "receiver",
+        )?)?;
+        if receiver.len() != 32 {
+            return Err(refuse("the receiver is not a 32-byte Aptos account"));
+        }
+        let sender = crate::abi::decode_hex_bytes(&crate::packet::pathway_extra_string(
+            sent_event, "sender",
+        )?)?;
+        if sender.len() != 20 {
+            return Err(refuse("the sender is not a 20-byte EVM address"));
+        }
+        let packet = crate::packet::build_evm_lz_v1_packet_payload_v2_from_event(sent_event)?;
+        let lookup_hash = crate::packet::native_hash_by_chain_name(&packet, "aptos")?;
+        self.build_uln_v2_verify_payload_from_hash_info(
+            sent_event,
+            UlnV2HashInfo {
+                lookup_hash: lookup_hash.clone(),
+                block_data: lookup_hash,
+            },
+            block_confirmation,
+            expiration,
+            &v_id,
+        )
     }
 }
 

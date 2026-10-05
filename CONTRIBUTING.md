@@ -10,27 +10,26 @@ public issue. Follow the private reporting process in `SECURITY.md`.
 
 ## Before you open a pull request
 
+CI pins Rust 1.98.1 for fmt, Clippy, tests and the release build, and checks the
+minimum supported version declared as `rust-version` in `Cargo.toml` (1.94.1).
+Use the same toolchains; a newer compiler can add lints that CI does not see:
+
 ```bash
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace --locked
+rustup toolchain install 1.98.1 --component rustfmt --component clippy
+rustup toolchain install 1.94.1
+
+cargo +1.98.1 fmt --all --check
+cargo +1.98.1 clippy --workspace --all-targets -- -D warnings
+cargo +1.98.1 test --workspace --locked
+cargo +1.94.1 check --workspace --locked --all-targets
 cargo audit
 cargo deny check
 ```
 
-CI runs the same set, plus a build against the MSRV in `rust-version`
-(`Cargo.toml`) and a container build that asserts the binary refuses to start
-without required configuration. Keep `Cargo.lock` in the commit that changes a
-dependency.
-
-Run clippy on the **latest stable** toolchain, not whatever you happen to have
-installed. CI uses latest stable with `-D warnings`, so a new release that adds
-a lint will fail a pull request that passes on an older compiler:
-
-```bash
-rustup update stable
-cargo +stable clippy --workspace --all-targets -- -D warnings
-```
+CI runs the same set with `RUSTFLAGS="-D warnings"`, plus a container build that
+asserts the binary refuses to start without required configuration. Keep
+`Cargo.lock` in the commit that changes a dependency. Tests marked `#[ignore]` are
+opt-in and not part of CI; `AUDIT.md` describes how to run them.
 
 ## Rules that reviewers will hold you to
 

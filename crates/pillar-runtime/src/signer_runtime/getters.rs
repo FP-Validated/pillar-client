@@ -48,11 +48,24 @@ impl LocalMnemonicSignerGetter {
         })
     }
 
-    fn record_error(&self) {
-        let metrics = self.metrics.clone();
-        tokio::spawn(async move {
-            metrics.lock().await.record_signer_error("local_mnemonic");
-        });
+    async fn observe<T>(
+        &self,
+        result: Result<T, pillar_signer::SignerError>,
+        operation: &'static str,
+    ) -> Result<T, pillar_signer::SignerError> {
+        if let Err(error) = &result {
+            if !matches!(
+                error,
+                pillar_signer::SignerError::Admission(_) | pillar_signer::SignerError::Audit(_)
+            ) {
+                self.metrics
+                    .lock()
+                    .await
+                    .record_signer_error("local_mnemonic");
+                tracing::error!(target: "pillar_runtime", backend = "local_mnemonic", operation, "signer operation failed");
+            }
+        }
+        result
     }
 
     pub async fn get_signer_info(
@@ -64,26 +77,22 @@ impl LocalMnemonicSignerGetter {
             .chain_type_by_chain_name
             .get(chain_name)
             .ok_or_else(|| format!("No chain type for {chain_name}"))?;
-        let raw_signer = self
+        let result = self
             .signer_factory
             .get_adapter(chain_type, wallet_name)
+            .await;
+        let raw_signer = self
+            .observe(result, "public_key")
             .await
-            .map_err(|error| {
-                self.record_error();
-                tracing::error!(target: "pillar_runtime", backend = "local_mnemonic", "signer public-key fetch failed");
-                error.to_string()
-            })?;
-        let signer = PillarSignerAdapterKind::for_chain_type(chain_type, raw_signer, false)
-            .map_err(|error| {
-                self.record_error();
-                tracing::error!(target: "pillar_runtime", backend = "local_mnemonic", "signer public-key fetch failed");
-                error.to_string()
-            })?;
-        signer.get_signer_info().await.map_err(|error| {
-            self.record_error();
-            tracing::error!(target: "pillar_runtime", backend = "local_mnemonic", "signer public-key fetch failed");
-            error.to_string()
-        })
+            .map_err(|error| error.to_string())?;
+        let result = PillarSignerAdapterKind::for_chain_type(chain_type, raw_signer, false);
+        let signer = self
+            .observe(result, "public_key")
+            .await
+            .map_err(|error| error.to_string())?;
+        self.observe(signer.get_signer_info().await, "public_key")
+            .await
+            .map_err(|error| error.to_string())
     }
 
     pub async fn signer_info_map(
@@ -159,12 +168,21 @@ impl KmsSignerGetter {
         })
     }
 
-    fn record_error(&self) {
-        let metrics = self.metrics.clone();
-        let backend = self.backend;
-        tokio::spawn(async move {
-            metrics.lock().await.record_signer_error(backend);
-        });
+    async fn observe<T>(
+        &self,
+        result: Result<T, pillar_signer::SignerError>,
+        operation: &'static str,
+    ) -> Result<T, pillar_signer::SignerError> {
+        if let Err(error) = &result {
+            if !matches!(
+                error,
+                pillar_signer::SignerError::Admission(_) | pillar_signer::SignerError::Audit(_)
+            ) {
+                self.metrics.lock().await.record_signer_error(self.backend);
+                tracing::error!(target: "pillar_runtime", backend = self.backend, operation, "signer operation failed");
+            }
+        }
+        result
     }
 
     pub async fn get_signer_info(
@@ -176,26 +194,22 @@ impl KmsSignerGetter {
             .chain_type_by_chain_name
             .get(chain_name)
             .ok_or_else(|| format!("No chain type for {chain_name}"))?;
-        let raw_signer = self
+        let result = self
             .signer_factory
             .get_adapter(chain_type, wallet_name)
+            .await;
+        let raw_signer = self
+            .observe(result, "public_key")
             .await
-            .map_err(|error| {
-                self.record_error();
-                tracing::error!(target: "pillar_runtime", backend = self.backend, "signer public-key fetch failed");
-                error.to_string()
-            })?;
-        let signer = PillarSignerAdapterKind::for_chain_type(chain_type, raw_signer, true)
-            .map_err(|error| {
-                self.record_error();
-                tracing::error!(target: "pillar_runtime", backend = self.backend, "signer public-key fetch failed");
-                error.to_string()
-            })?;
-        signer.get_signer_info().await.map_err(|error| {
-            self.record_error();
-            tracing::error!(target: "pillar_runtime", backend = self.backend, "signer public-key fetch failed");
-            error.to_string()
-        })
+            .map_err(|error| error.to_string())?;
+        let result = PillarSignerAdapterKind::for_chain_type(chain_type, raw_signer, true);
+        let signer = self
+            .observe(result, "public_key")
+            .await
+            .map_err(|error| error.to_string())?;
+        self.observe(signer.get_signer_info().await, "public_key")
+            .await
+            .map_err(|error| error.to_string())
     }
 
     pub async fn signer_info_map(
@@ -240,11 +254,12 @@ impl SignerGetter for KmsSignerGetter {
         let signer = PillarSignerAdapterKind::for_chain_type(chain_type, raw_signer, true)
             .map_err(|error| AppCoreError::Internal(error.to_string()))?;
         let data = decode_hex_data(data_hex)?;
-        signer.pillar_sign(&data).await.map_err(|error| {
-            self.record_error();
-            tracing::error!(target: "pillar_runtime", backend = self.backend, "signer operation failed");
-            AppCoreError::Internal(error.to_string())
-        })
+        self.observe(signer.pillar_sign(&data).await, "sign")
+            .await
+            .map_err(|error| match error {
+                pillar_signer::SignerError::Admission(error) => AppCoreError::Admission(error),
+                other => AppCoreError::Internal(other.to_string()),
+            })
     }
 }
 
@@ -268,11 +283,12 @@ impl SignerGetter for LocalMnemonicSignerGetter {
         let signer = PillarSignerAdapterKind::for_chain_type(chain_type, raw_signer, false)
             .map_err(|error| AppCoreError::Internal(error.to_string()))?;
         let data = decode_hex_data(data_hex)?;
-        signer.pillar_sign(&data).await.map_err(|error| {
-            self.record_error();
-            tracing::error!(target: "pillar_runtime", backend = "local_mnemonic", "signer operation failed");
-            AppCoreError::Internal(error.to_string())
-        })
+        self.observe(signer.pillar_sign(&data).await, "sign")
+            .await
+            .map_err(|error| match error {
+                pillar_signer::SignerError::Admission(error) => AppCoreError::Admission(error),
+                other => AppCoreError::Internal(other.to_string()),
+            })
     }
 }
 

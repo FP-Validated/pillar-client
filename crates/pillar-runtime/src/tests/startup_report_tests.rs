@@ -4,13 +4,12 @@ use super::*;
 fn startup_report_summarizes_runtime_without_raw_secrets() {
     let vars = HashMap::from([
         (SERVER_PORT.to_string(), "3000".to_string()),
-        (pillar_config::PILLAR_API_AUTH_TOKENS.to_string(), "test-token-0123456789abcdef0123456789".to_string()),
+        (
+            pillar_config::PILLAR_API_AUTH_TOKENS.to_string(),
+            "test-token-0123456789abcdef0123456789".to_string(),
+        ),
         (LZ_PROVIDER_CONFIG_TYPE.to_string(), "LOCAL".to_string()),
         (LZ_ENV.to_string(), "mainnet".to_string()),
-        (
-            pillar_config::LZ_SUPPORTED_ULN_VERSIONS.to_string(),
-            r#"["V2","V301"]"#.to_string(),
-        ),
         (
             pillar_config::PILLAR_IMAGE_VERSION.to_string(),
             "pillar:test".to_string(),
@@ -21,8 +20,15 @@ fn startup_report_summarizes_runtime_without_raw_secrets() {
         ),
         (
             LZ_PROVIDER_CONFIG.to_string(),
-            r#"{"ethereum":{"uris":[{"uri":"https://eth-mainnet.g.alchemy.com/v2/redaction-test-key-0123456789abcdef","headers":{"Authorization":"Bearer raw-token","X-API-Key":"raw-key","x-auth":"custom-raw"}}],"quorum":1},"bsc":{"uris":["https://bsc-rpc.example/path/abcdefghijklmnop"],"quorum":1}}"#
-                .to_string(),
+            providers_json(
+                r#"{"ethereum":{"uris":[{"uri":"https://eth-mainnet.g.alchemy.com/v2/redaction-test-key-0123456789abcdef","headers":{"Authorization":"Bearer raw-token","X-API-Key":"raw-key","x-auth":"custom-raw"}}],"quorum":1},"bsc":{"uris":["https://bsc-rpc.example/path/abcdefghijklmnop"],"quorum":1}}"#,
+            ),
+        ),
+        (
+            LZ_QUORUM_STRATEGY_CONFIG.to_string(),
+            strategy_json(
+                r#"{"ethereum":{"uris":[{"uri":"https://eth-mainnet.g.alchemy.com/v2/redaction-test-key-0123456789abcdef","headers":{"Authorization":"Bearer raw-token","X-API-Key":"raw-key","x-auth":"custom-raw"}}],"quorum":1},"bsc":{"uris":["https://bsc-rpc.example/path/abcdefghijklmnop"],"quorum":1}}"#,
+            ),
         ),
         (SIGNER_TYPE.to_string(), "KMS".to_string()),
         (
@@ -44,7 +50,9 @@ fn startup_report_summarizes_runtime_without_raw_secrets() {
     assert!(text.contains("metrics: enabled"));
     assert!(text.contains("signer: KMS(AWS)"));
     assert!(text.contains("kms_keys: [AWS:...3456]"));
-    assert!(text.contains("ethereum providers=1 quorum=1"));
+    assert!(text.contains(
+        r#"ethereum providers=1 quorum={"allOf":[{"any":1}],"oneOf":[]} single-provider-trust-root entities=[internal/ethereum-0]"#
+    ));
     assert!(text.contains("https://eth-mainnet.g.alchemy.com/<redacted>"));
     assert!(text.contains("Authorization=<redacted>"));
     assert!(text.contains("X-API-Key=<redacted>"));

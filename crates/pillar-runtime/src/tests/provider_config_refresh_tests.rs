@@ -56,28 +56,62 @@ impl JsonRpcTransport for CountingTransport {
     }
 }
 
-/// Hands out one scripted bucket read per refresh.
+fn requested_key(request: &pillar_config::RemoteProviderConfigRequest) -> String {
+    match request {
+        pillar_config::RemoteProviderConfigRequest::S3 { key, .. }
+        | pillar_config::RemoteProviderConfigRequest::GCS { key, .. } => key.clone(),
+    }
+}
+
+/// The bucket object `key` names, rendered from a `{ uris, quorum }` fixture.
+fn bucket_object(fixture: &str, key: &str) -> String {
+    if key == pillar_config::LZ_PROVIDER_CONFIG_REMOTE_KEY {
+        providers_json(fixture)
+    } else {
+        strategy_json(fixture)
+    }
+}
+
+/// Hands out one scripted bucket state per refresh: the n-th read of each object
+/// answers from the n-th entry, so a refresh's two reads always describe one state.
 struct ScriptedLoader {
-    responses: Arc<tokio::sync::Mutex<Vec<Result<String, pillar_config::ConfigError>>>>,
+    script: Vec<Result<String, pillar_config::ConfigError>>,
+    reads: std::sync::Mutex<HashMap<String, usize>>,
+}
+
+impl ScriptedLoader {
+    fn new(script: Vec<Result<String, pillar_config::ConfigError>>) -> Self {
+        Self {
+            script,
+            reads: std::sync::Mutex::new(HashMap::new()),
+        }
+    }
 }
 
 #[async_trait]
 impl pillar_config::RemoteProviderConfigLoader for ScriptedLoader {
     async fn load_provider_config(
         &self,
-        _request: pillar_config::RemoteProviderConfigRequest,
+        request: pillar_config::RemoteProviderConfigRequest,
     ) -> Result<String, pillar_config::ConfigError> {
-        let mut responses = self.responses.lock().await;
-        if responses.is_empty() {
-            return Err(pillar_config::ConfigError::Json(
+        let key = requested_key(&request);
+        let read = {
+            let mut reads = self.reads.lock().unwrap();
+            let count = reads.entry(key.clone()).or_default();
+            *count += 1;
+            *count - 1
+        };
+        match self.script.get(read) {
+            None => Err(pillar_config::ConfigError::Json(
                 "script exhausted".to_string(),
-            ));
+            )),
+            Some(Err(error)) => Err(pillar_config::ConfigError::Json(error.to_string())),
+            Some(Ok(fixture)) => Ok(bucket_object(fixture, &key)),
         }
-        responses.remove(0)
     }
 }
 
-/// Serves one bucket read, then never returns. The shape of a provider endpoint
+/// Serves one bucket state, then never returns. The shape of a provider endpoint
 /// that accepts the connection and stops answering.
 struct HangsAfterFirstReadLoader {
     reads: Arc<std::sync::atomic::AtomicUsize>,
@@ -87,10 +121,11 @@ struct HangsAfterFirstReadLoader {
 impl pillar_config::RemoteProviderConfigLoader for HangsAfterFirstReadLoader {
     async fn load_provider_config(
         &self,
-        _request: pillar_config::RemoteProviderConfigRequest,
+        request: pillar_config::RemoteProviderConfigRequest,
     ) -> Result<String, pillar_config::ConfigError> {
-        if self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
-            return Ok(REPLACEMENT.to_string());
+        // The first refresh reads both objects.
+        if self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 2 {
+            return Ok(bucket_object(REPLACEMENT, &requested_key(&request)));
         }
         std::future::pending().await
     }
@@ -109,11 +144,7 @@ fn runtime_vars() -> HashMap<String, String> {
         (SERVER_PORT.to_string(), "3000".to_string()),
         (LZ_PROVIDER_CONFIG_TYPE.to_string(), "LOCAL".to_string()),
         (LZ_ENV.to_string(), "mainnet".to_string()),
-        (
-            pillar_config::LZ_SUPPORTED_ULN_VERSIONS.to_string(),
-            r#"["V2"]"#.to_string(),
-        ),
-        (LZ_PROVIDER_CONFIG.to_string(), SERVING.to_string()),
+        (LZ_PROVIDER_CONFIG.to_string(), providers_json(SERVING)), (LZ_QUORUM_STRATEGY_CONFIG.to_string(), strategy_json(SERVING)),
         (SIGNER_TYPE.to_string(), "LOCAL_MNEMONIC".to_string()),
         (
             pillar_config::LZ_WALLETS.to_string(),
@@ -174,16 +205,14 @@ where
     T: JsonRpcTransport,
 {
     let mut owner = Some(RemoteProviderConfigOwner::with_loader_for_test(
-        serde_json::from_str(SERVING).unwrap(),
-        Arc::new(ScriptedLoader {
-            responses: Arc::new(tokio::sync::Mutex::new(vec![Ok(REPLACEMENT.to_string())])),
-        }),
+        pillar_config::test_support::provider_configs_from_uris_json(SERVING),
+        Arc::new(ScriptedLoader::new(vec![Ok(REPLACEMENT.to_string())])),
         Some(vec!["bsc".to_string()]),
     ));
     let providers = crate::server_app::serving_provider_snapshot(
         &mut owner,
         &pillar_config::StaticProviderConfig::new(
-            serde_json::from_str(SERVING).unwrap(),
+            pillar_config::test_support::provider_configs_from_uris_json(SERVING),
             Some(&["bsc".to_string()]),
         )
         .unwrap(),
@@ -295,7 +324,7 @@ async fn a_loop_hung_inside_its_work_reports_a_growing_age() {
     let metrics = Arc::new(tokio::sync::Mutex::new(PillarMetrics::new()));
     let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let mut owner = Some(RemoteProviderConfigOwner::with_loader_for_test(
-        serde_json::from_str(SERVING).unwrap(),
+        pillar_config::test_support::provider_configs_from_uris_json(SERVING),
         Arc::new(HangsAfterFirstReadLoader {
             reads: reads.clone(),
         }),
@@ -304,7 +333,7 @@ async fn a_loop_hung_inside_its_work_reports_a_growing_age() {
     let _providers = crate::server_app::serving_provider_snapshot(
         &mut owner,
         &pillar_config::StaticProviderConfig::new(
-            serde_json::from_str(SERVING).unwrap(),
+            pillar_config::test_support::provider_configs_from_uris_json(SERVING),
             Some(&["bsc".to_string()]),
         )
         .unwrap(),
@@ -330,8 +359,9 @@ async fn a_loop_hung_inside_its_work_reports_a_growing_age() {
 
     assert_eq!(
         reads.load(std::sync::atomic::Ordering::SeqCst),
-        2,
-        "the loop must be stuck in its second read, not spinning through more"
+        4,
+        "the loop must be stuck in its second refresh's two object reads, not spinning \
+         through more"
     );
     assert!(
         heartbeat_age(&rendered(&metrics).await, "provider_config_refresh") >= 3_600.0,
@@ -392,14 +422,12 @@ async fn a_failed_construction_leaves_no_loop_behind() {
     // passes. The first thing to object is `StartupReport::from_parts`, which is
     // past the point the loops used to be spawned.
     let providers = crate::provider_snapshot::ProviderSnapshotHandle::new(
-        serde_json::from_str(SERVING).unwrap(),
+        pillar_config::test_support::provider_configs_from_uris_json(SERVING),
         vec!["bsc".to_string(), "ethereum".to_string()],
     );
     let owner = RemoteProviderConfigOwner::with_loader_for_test(
-        serde_json::from_str(SERVING).unwrap(),
-        Arc::new(ScriptedLoader {
-            responses: Arc::new(tokio::sync::Mutex::new(Vec::new())),
-        }),
+        pillar_config::test_support::provider_configs_from_uris_json(SERVING),
+        Arc::new(ScriptedLoader::new(Vec::new())),
         Some(vec!["bsc".to_string()]),
     );
     let error = RuntimeServerApp::from_env_map_with_core_dependencies(
@@ -486,16 +514,14 @@ async fn dropping_the_app_stops_the_loops_from_probing() {
 async fn refresh_outcomes_reach_the_registry_the_app_renders() {
     let metrics = Arc::new(tokio::sync::Mutex::new(PillarMetrics::new()));
     let owner = RemoteProviderConfigOwner::with_loader_for_test(
-        serde_json::from_str(SERVING).unwrap(),
-        Arc::new(ScriptedLoader {
-            responses: Arc::new(tokio::sync::Mutex::new(vec![
-                Ok(REPLACEMENT.to_string()),
-                Ok(UNSIGNABLE.to_string()),
-                Err(pillar_config::ConfigError::Json(
-                    "bucket unreachable".to_string(),
-                )),
-            ])),
-        }),
+        pillar_config::test_support::provider_configs_from_uris_json(SERVING),
+        Arc::new(ScriptedLoader::new(vec![
+            Ok(REPLACEMENT.to_string()),
+            Ok(UNSIGNABLE.to_string()),
+            Err(pillar_config::ConfigError::Json(
+                "bucket unreachable".to_string(),
+            )),
+        ])),
         Some(vec!["bsc".to_string()]),
     );
 
@@ -505,7 +531,7 @@ async fn refresh_outcomes_reach_the_registry_the_app_renders() {
     let providers = crate::server_app::serving_provider_snapshot(
         &mut owner,
         &pillar_config::StaticProviderConfig::new(
-            serde_json::from_str(SERVING).unwrap(),
+            pillar_config::test_support::provider_configs_from_uris_json(SERVING),
             Some(&["bsc".to_string()]),
         )
         .unwrap(),
@@ -545,19 +571,19 @@ async fn refresh_outcomes_reach_the_registry_the_app_renders() {
         "{text}"
     );
 
-    // One that could never sign is refused, and says so under its own label.
+    // A pair that could never sign is refused at load, before it is a candidate.
     tick_one_refresh().await;
     let text = rendered(&app_metrics).await;
     assert!(
-        text.contains(r#"pillar_provider_config_refresh_total{result="rejected"}"#),
+        text.contains(r#"pillar_provider_config_refresh_total{result="error"} 1"#),
         "{text}"
     );
 
-    // A failed read is a third, distinct outcome.
+    // So is a failed read.
     tick_one_refresh().await;
     let text = rendered(&app_metrics).await;
     assert!(
-        text.contains(r#"pillar_provider_config_refresh_total{result="error"}"#),
+        text.contains(r#"pillar_provider_config_refresh_total{result="error"} 2"#),
         "{text}"
     );
 }
@@ -575,17 +601,15 @@ async fn a_refresh_cannot_add_a_chain_the_process_has_no_signer_for() {
 
     let metrics = Arc::new(tokio::sync::Mutex::new(PillarMetrics::new()));
     let owner = RemoteProviderConfigOwner::with_loader_for_test(
-        serde_json::from_str(SERVING).unwrap(),
-        Arc::new(ScriptedLoader {
-            responses: Arc::new(tokio::sync::Mutex::new(vec![Ok(ADDS_A_CHAIN.to_string())])),
-        }),
+        pillar_config::test_support::provider_configs_from_uris_json(SERVING),
+        Arc::new(ScriptedLoader::new(vec![Ok(ADDS_A_CHAIN.to_string())])),
         Some(vec!["bsc".to_string()]),
     );
     let mut owner = Some(owner);
     let providers = crate::server_app::serving_provider_snapshot(
         &mut owner,
         &pillar_config::StaticProviderConfig::new(
-            serde_json::from_str(SERVING).unwrap(),
+            pillar_config::test_support::provider_configs_from_uris_json(SERVING),
             Some(&["bsc".to_string()]),
         )
         .unwrap(),
@@ -656,19 +680,15 @@ async fn a_refresh_that_removes_a_chain_is_refused_and_the_chain_keeps_serving()
     let metrics = Arc::new(tokio::sync::Mutex::new(PillarMetrics::new()));
     let chains = ["bsc".to_string(), "ethereum".to_string()];
     let owner = RemoteProviderConfigOwner::with_loader_for_test(
-        serde_json::from_str(TWO_CHAINS).unwrap(),
-        Arc::new(ScriptedLoader {
-            responses: Arc::new(tokio::sync::Mutex::new(vec![
-                Ok(DROPS_ETHEREUM.to_string()),
-            ])),
-        }),
+        pillar_config::test_support::provider_configs_from_uris_json(TWO_CHAINS),
+        Arc::new(ScriptedLoader::new(vec![Ok(DROPS_ETHEREUM.to_string())])),
         Some(chains.to_vec()),
     );
     let mut owner = Some(owner);
     let providers = crate::server_app::serving_provider_snapshot(
         &mut owner,
         &pillar_config::StaticProviderConfig::new(
-            serde_json::from_str(TWO_CHAINS).unwrap(),
+            pillar_config::test_support::provider_configs_from_uris_json(TWO_CHAINS),
             Some(&chains),
         )
         .unwrap(),
@@ -684,7 +704,13 @@ async fn a_refresh_that_removes_a_chain_is_refused_and_the_chain_keeps_serving()
         pillar_config::LZ_AVAILABLE_CHAIN_NAMES.to_string(),
         "bsc,ethereum".to_string(),
     );
-    vars.insert(LZ_PROVIDER_CONFIG.to_string(), TWO_CHAINS.to_string());
+    vars.extend([
+        (LZ_PROVIDER_CONFIG.to_string(), providers_json(TWO_CHAINS)),
+        (
+            LZ_QUORUM_STRATEGY_CONFIG.to_string(),
+            strategy_json(TWO_CHAINS),
+        ),
+    ]);
     let app = RuntimeServerApp::from_env_map_with_core_dependencies(
         vars,
         AlwaysOkTransport,
@@ -740,9 +766,9 @@ impl RefreshesDuringProbeTransport {
         if !self.armed.swap(false, std::sync::atomic::Ordering::SeqCst) {
             return;
         }
-        let candidate = self
-            .serving
-            .candidate(serde_json::from_str(self.next.as_ref()).unwrap());
+        let candidate = self.serving.candidate(
+            pillar_config::test_support::provider_configs_from_uris_json(self.next.as_ref()),
+        );
         self.serving.publish(candidate);
     }
 
@@ -796,7 +822,7 @@ async fn readiness_answers_from_one_generation_when_a_refresh_lands_mid_probe() 
     let providers = crate::server_app::serving_provider_snapshot(
         &mut owner,
         &pillar_config::StaticProviderConfig::new(
-            serde_json::from_str(TWO_CHAINS).unwrap(),
+            pillar_config::test_support::provider_configs_from_uris_json(TWO_CHAINS),
             Some(&chains),
         )
         .unwrap(),
@@ -824,7 +850,13 @@ async fn readiness_answers_from_one_generation_when_a_refresh_lands_mid_probe() 
         pillar_config::LZ_AVAILABLE_CHAIN_NAMES.to_string(),
         "bsc,ethereum".to_string(),
     );
-    vars.insert(LZ_PROVIDER_CONFIG.to_string(), TWO_CHAINS.to_string());
+    vars.extend([
+        (LZ_PROVIDER_CONFIG.to_string(), providers_json(TWO_CHAINS)),
+        (
+            LZ_QUORUM_STRATEGY_CONFIG.to_string(),
+            strategy_json(TWO_CHAINS),
+        ),
+    ]);
     let app = RuntimeServerApp::from_env_map_with_core_dependencies(
         vars,
         transport.clone(),
@@ -890,7 +922,7 @@ async fn a_health_probe_straddling_a_refresh_does_not_rank_the_replaced_endpoint
     let providers = crate::server_app::serving_provider_snapshot(
         &mut owner,
         &pillar_config::StaticProviderConfig::new(
-            serde_json::from_str(SERVING_ONE).unwrap(),
+            pillar_config::test_support::provider_configs_from_uris_json(SERVING_ONE),
             Some(&chains),
         )
         .unwrap(),
@@ -916,7 +948,13 @@ async fn a_health_probe_straddling_a_refresh_does_not_rank_the_replaced_endpoint
         pillar_config::LZ_AVAILABLE_CHAIN_NAMES.to_string(),
         "bsc".to_string(),
     );
-    vars.insert(LZ_PROVIDER_CONFIG.to_string(), SERVING_ONE.to_string());
+    vars.extend([
+        (LZ_PROVIDER_CONFIG.to_string(), providers_json(SERVING_ONE)),
+        (
+            LZ_QUORUM_STRATEGY_CONFIG.to_string(),
+            strategy_json(SERVING_ONE),
+        ),
+    ]);
     let _app = RuntimeServerApp::from_env_map_with_core_dependencies(
         vars,
         transport,

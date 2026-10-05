@@ -505,6 +505,92 @@ mod tests {
         );
     }
 
+    /// TON testnet delivery, observed 2026-10-05: Arbitrum Sepolia(40231) ->
+    /// TON testnet(40343), nonce 11, delivered to `UlnConnection`
+    /// `0:6E3B2005A1064F8127D1F49A64826DF527E3B2FB910C05EF7FB2A64DE26914EC` by
+    /// tx `478hRGVfe1W6n5DYF/4Lac88wAuAXHpTke528y41j5k=` (lt 37929840000001,
+    /// in_msg opcode `0xf9d37b80` from its `Uln`). The fields equal the source
+    /// `PacketSent` in arbsep tx
+    /// `0x3f37e425bdaae89c058ee8743ec5b8c2d8f905123ad2909c87b44f1533d948eb`.
+    pub(crate) const TESTNET_PACKET_SRC_EID: u32 = 40_231;
+    pub(crate) const TESTNET_PACKET_SENDER: &str = "0x7e90aea98be5b65ae8b24ae039b2ae47f3a860b2";
+    pub(crate) const TESTNET_PACKET_DST_EID: u32 = 40_343;
+    pub(crate) const TESTNET_PACKET_RECEIVER: &str =
+        "0x39c94d079b88b42077295ac29c38c4ece01cd5793850b0064d8afe4ce995a9bf";
+    pub(crate) const TESTNET_PACKET_NONCE: u64 = 11;
+    pub(crate) const TESTNET_PACKET_GUID: &str =
+        "0xcd391f93bf58e490165e0f77a89a91e07bfbce108aace8dff6debfd26ed2b4c0";
+    pub(crate) const TESTNET_PACKET_MESSAGE: &str = "0x00030000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000b5ef3";
+    /// The packet argument the testnet `UlnConnection` answered `VERIFIED` for,
+    /// taken from its own inbound `MdObj` (toncenter BOC, no CRC flag).
+    pub(crate) const TESTNET_DELIVERED_PACKET_BOC: &str = "te6ccgECAwEAAQIAAqcAAAAAUGFja2V0k/8k/9YV7gZ7/////////////////////////////////AAAAAAAAAAvNOR+Tv1jkkBZeD3eompHge/vOEIqs6N/23r/SbtK0wIBAgDnAAAAAAAAcGF0aFFe4F+1J+4Ke/////////////////////////////////wAAnScAAAAAAAAAAAAAAAB+kK6pi+W2WuiySuA5sq5H86hgsgAAnZc5yU0Hm4i0IHcpWsKcOMTs4BzVeThQsAZNiv5M6ZWpv4AZAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC17z";
+
+    #[test]
+    fn rebuilds_the_testnet_delivered_packet_cell() {
+        let path = build_lz_path(
+            TESTNET_PACKET_SRC_EID,
+            &hex_to_be32(TESTNET_PACKET_SENDER).unwrap(),
+            TESTNET_PACKET_DST_EID,
+            &hex_to_be32(TESTNET_PACKET_RECEIVER).unwrap(),
+        )
+        .unwrap();
+        let packet = build_lz_packet(
+            path,
+            TESTNET_PACKET_MESSAGE,
+            TESTNET_PACKET_NONCE,
+            &hex_to_be32(TESTNET_PACKET_GUID).unwrap(),
+        )
+        .unwrap();
+        let delivered = super::super::cell::boc_from_base64(TESTNET_DELIVERED_PACKET_BOC).unwrap();
+        assert_eq!(packet, delivered);
+        assert_eq!(
+            repr_hash_hex(&packet).unwrap(),
+            "c4784a9e9404c529626b448d0dc38b0cd24fe5f6b137d630f6689ba3cf57bbb8"
+        );
+    }
+
+    /// The testnet `UlnManager` from the generated deployment table must derive
+    /// the deployed `UlnConnection` and `Uln` of the delivered pathway; both
+    /// accounts' code hashes equal the pinned `UlnConnection` / `Uln` cells.
+    #[test]
+    fn derives_the_testnet_uln_connection_from_the_configured_uln_manager() {
+        let uln_manager = pillar_config::ton_deployment_address("testnet", "UlnManager").unwrap();
+        assert_eq!(
+            uln_manager,
+            "EQC0tTlvumGHvKzMHPODV7ARp3DLIV4P_zXeZ-SQ7MO0kCMC"
+        );
+        let code = TonContractCodeCells {
+            uln: pillar_config::ton_code_cell("Uln").unwrap().to_string(),
+            uln_connection: pillar_config::ton_code_cell("UlnConnection")
+                .unwrap()
+                .to_string(),
+        };
+        let targets = ton_payload_signed_targets(&TonPayloadSignedRequest {
+            src_eid: TESTNET_PACKET_SRC_EID,
+            dst_eid: TESTNET_PACKET_DST_EID,
+            sender: TESTNET_PACKET_SENDER,
+            receiver: TESTNET_PACKET_RECEIVER,
+            guid: TESTNET_PACKET_GUID,
+            nonce: TESTNET_PACKET_NONCE,
+            message: TESTNET_PACKET_MESSAGE,
+            uln_manager_address: uln_manager,
+            code: &code,
+        })
+        .unwrap();
+        assert_eq!(
+            targets.uln_connection_address,
+            "EQBuOyAFoQZPgSfR9Jpkgm31J-Oy-5EMBe9_sqZN4mkU7AYo"
+        );
+        assert_eq!(
+            targets.uln_address,
+            "EQCaoxMQ3rv1HIJXXM9vhbQxA8dZ0FNAmW1R1-YzWGDGDqyT"
+        );
+        assert_eq!(
+            hex::encode(targets.packet_hash_be),
+            "c4784a9e9404c529626b448d0dc38b0cd24fe5f6b137d630f6689ba3cf57bbb8"
+        );
+    }
+
     #[test]
     fn committable_view_signed_states_match_ts_mapping() {
         // VERIFIABLE(1), VERIFIED(2), VERIFIED-executed(3) count as signed.

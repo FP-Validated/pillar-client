@@ -10,7 +10,7 @@ use crate::chain_address::{
     bytes_to_hex, compress_ecdsa_public_key, ethers_hash_message, evm_address_from_public_key,
     evm_signer_info_public_key, ton_public_key_cell_hash, ChainAddress,
 };
-use crate::types::{ChainType, SeedKind, SignatureType, SignerError};
+use crate::types::{ChainType, KmsProvider, SeedKind, SignatureType, SignerError};
 
 #[derive(Clone)]
 pub struct EvmChain;
@@ -43,6 +43,27 @@ impl ChainAddress for EvmAddressChain {
 
     fn signer_info_public_key<'a>(&self, public_key: &'a [u8], is_kms: bool) -> &'a [u8] {
         evm_signer_info_public_key(public_key, is_kms)
+    }
+}
+
+/// Upstream `GasolinaCantonSignerAdapter`: a raw ECDSA signature over the raw
+/// digest, no recovery-id transformation, and the provider's public key with
+/// its first byte dropped, whatever its shape, as both address and signer-info
+/// key (TS 1.2.66: `gasolina-signer-adapter/src/canton/index.ts:15-23`,
+/// `gasolinaSignerAdapter.ts:59-66`).
+#[derive(Clone)]
+pub struct CantonChain;
+
+impl ChainAddress for CantonChain {
+    fn signer_address(&self, public_key: &[u8]) -> Result<String, SignerError> {
+        public_key
+            .split_first()
+            .map(|(_, rest)| format!("0x{}", bytes_to_hex(rest)))
+            .ok_or_else(|| SignerError::Message("empty Canton signer public key".to_string()))
+    }
+
+    fn signer_info_public_key<'a>(&self, public_key: &'a [u8], _is_kms: bool) -> &'a [u8] {
+        public_key.get(1..).unwrap_or_default()
     }
 }
 
@@ -87,29 +108,25 @@ impl ChainAddress for AptosChain {
 pub struct SolanaChain;
 
 impl ChainAddress for SolanaChain {
-    // The address is the X coordinate, and it has to be X whatever shape the provider
-    // returned the key in. Upstream reads the first 32 bytes with no prefix handling
-    // (`gasolina-signer-adapter/src/solana/index.ts:9-11`), which is only correct
-    // because its Azure adapter hands back a bare 64-byte `X||Y`
-    // (`azureKmsSignerAdapter.ts:185-187`). This crate's Azure adapter returns
-    // SEC1-uncompressed `04||X||Y` instead (`azure/adapter.rs:163-166`), so copying
-    // upstream's slice published `04 || X[..31]` — a real, different Solana address
-    // (`KhLrwX6F…` instead of the registered `EboBSUoo…`), which is the same class of
-    // defect LayerZero reported on 2026-07-10 for the TypeScript service. The
-    // registered key is the authority, not upstream's slice: it sits at offset 17 of
-    // the mainnet DVN config account `EqkXVEeapm7JqrS1W3AGeN5ZwCRLDUHtr1XY9TuVr4rD`
-    // and is pinned by `solana_address_matches_the_registered_mainnet_dvn_key`.
+    // Upstream's Solana adapter answers `base58(publicKey.subarray(0, 32))`
+    // (`gasolina-signer-adapter/src/solana/index.ts:9-11`) over the 65-byte SEC1 key every
+    // 1.2.66 signer hands it (mnemonic, AWS and GCP SPKI), i.e. `base58(04 || X[..31])`. The
+    // DVN verifies the 64-byte `X || Y` (`signer-info.publicKey`), never this string, so the
+    // address is only a response representation. A bare `X || Y` is normalized to SEC1 first.
     fn signer_address(&self, public_key: &[u8]) -> Result<String, SignerError> {
-        // Derive from the same canonical bytes `/signer-info` advertises, so the
-        // address and the published public key can never disagree again.
-        let public_key = solana_signer_info_public_key(public_key);
-        if public_key.len() < 32 {
-            return Err(SignerError::Message(format!(
-                "Solana public key must be at least 32 bytes, got {}",
-                public_key.len()
-            )));
-        }
-        Ok(bs58::encode(&public_key[..32]).into_string())
+        self.signer_address_for_provider(public_key, None)
+    }
+
+    // An Azure key answers base58(X), the key registered for the mainnet DVN (`ded0f97`);
+    // 1.2.66 has no Azure adapter, so the upstream slice above does not bind it.
+    fn signer_address_for_provider(
+        &self,
+        public_key: &[u8],
+        kms_provider: Option<KmsProvider>,
+    ) -> Result<String, SignerError> {
+        let sec1 = solana_sec1_public_key(public_key)?;
+        let start = usize::from(kms_provider == Some(KmsProvider::Azure));
+        Ok(bs58::encode(&sec1[start..start + 32]).into_string())
     }
 
     fn private_key_signature_type(&self, is_kms: bool) -> SignatureType {
@@ -120,19 +137,29 @@ impl ChainAddress for SolanaChain {
         }
     }
 
-    fn signer_info_public_key<'a>(&self, public_key: &'a [u8], is_kms: bool) -> &'a [u8] {
-        if is_kms {
-            solana_signer_info_public_key(public_key)
-        } else {
-            public_key
+    // Upstream drops the first byte of the provider's key (`gasolinaSignerAdapter.ts:61-66`),
+    // which on SEC1 leaves `X || Y`.
+    fn signer_info_public_key<'a>(&self, public_key: &'a [u8], _is_kms: bool) -> &'a [u8] {
+        match public_key {
+            [0x04, body @ ..] if body.len() == 64 => body,
+            _ => public_key,
         }
     }
 }
 
-fn solana_signer_info_public_key(public_key: &[u8]) -> &[u8] {
-    match public_key {
-        [0x04, body @ ..] if body.len() == 64 => body,
-        _ => public_key,
+/// The secp256k1 key as 65-byte SEC1 `04 || X || Y`; a bare 64-byte `X || Y` gains the prefix.
+fn solana_sec1_public_key(public_key: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>, SignerError> {
+    match public_key.len() {
+        65 if public_key[0] == 0x04 => Ok(std::borrow::Cow::Borrowed(public_key)),
+        64 => {
+            let mut sec1 = Vec::with_capacity(65);
+            sec1.push(0x04);
+            sec1.extend_from_slice(public_key);
+            Ok(std::borrow::Cow::Owned(sec1))
+        }
+        other => Err(SignerError::Message(format!(
+            "Solana signer public key must be a 65-byte SEC1 or 64-byte X||Y secp256k1 key, got {other} bytes"
+        ))),
     }
 }
 

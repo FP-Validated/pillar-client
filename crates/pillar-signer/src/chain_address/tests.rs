@@ -7,23 +7,6 @@ use crate::types::{
     PublicKeyRequest, RawSignerAdapter, SeedKind, SignRequest, SignatureType, SignerError,
 };
 
-#[derive(Default)]
-struct MockRawSigner {
-    sign_requests: Mutex<Vec<SignRequest>>,
-}
-
-#[async_trait]
-impl RawSignerAdapter for MockRawSigner {
-    async fn sign(&self, request: SignRequest) -> Result<Vec<u8>, SignerError> {
-        self.sign_requests.lock().await.push(request);
-        Ok(vec![0xab, 0xcd])
-    }
-
-    async fn get_public_key(&self, _request: PublicKeyRequest) -> Result<Vec<u8>, SignerError> {
-        Ok((1u8..=33).collect())
-    }
-}
-
 struct EvmPublicKeySigner {
     sign_requests: Mutex<Vec<SignRequest>>,
     public_key: Vec<u8>,
@@ -80,21 +63,23 @@ fn ecdsa_public_key_b() -> Vec<u8> {
 
 #[tokio::test]
 async fn solana_uses_ed25519_for_non_kms_and_ecdsa_for_kms() {
-    let raw = Arc::new(MockRawSigner::default());
-    let signer = PillarSignerAdapter::new(raw.clone(), SolanaChain, false);
-    signer.pillar_sign(&[1]).await.unwrap();
-    assert_eq!(
-        raw.sign_requests.lock().await[0].private_key_signature_type,
-        SignatureType::Ed25519
-    );
-
-    let raw = Arc::new(MockRawSigner::default());
-    let signer = PillarSignerAdapter::new(raw.clone(), SolanaChain, true);
-    signer.pillar_sign(&[1]).await.unwrap();
-    assert_eq!(
-        raw.sign_requests.lock().await[0].private_key_signature_type,
-        SignatureType::Ecdsa
-    );
+    for (is_kms, expected) in [
+        (false, SignatureType::Ed25519),
+        (true, SignatureType::Ecdsa),
+    ] {
+        let mut sec1 = vec![0x04];
+        sec1.extend_from_slice(&solana_test_key_xy());
+        let raw = Arc::new(EvmPublicKeySigner {
+            sign_requests: Mutex::new(Vec::new()),
+            public_key: sec1,
+        });
+        let signer = PillarSignerAdapter::new(raw.clone(), SolanaChain, is_kms);
+        signer.pillar_sign(&[1]).await.unwrap();
+        assert_eq!(
+            raw.sign_requests.lock().await[0].private_key_signature_type,
+            expected
+        );
+    }
 }
 
 #[tokio::test]
@@ -290,169 +275,77 @@ async fn evm_address_only_chains_do_not_hash_or_transform_signatures() {
     assert!(!requests[0].transform_recovery_id);
 }
 
-#[test]
-fn solana_address_is_base58_first_32_public_key_bytes() {
-    let public_key = (1u8..=33).collect::<Vec<_>>();
-    assert_eq!(
-        SolanaChain.signer_address(&public_key).unwrap(),
-        "4wBqpZM9xaSheZzJSMawUKKwhdpChKbZ5eu5ky4Vigw"
-    );
-}
-
-/// The provider's key shape must not change the address. This crate's Azure
-/// adapter returns SEC1-uncompressed `04||X||Y` while upstream's returns a bare
-/// `X||Y`, and reading the first 32 bytes of the former published
-/// `04 || X[..31]` — a different address than the one registered on chain.
-#[test]
-fn solana_address_ignores_the_provider_key_shape() {
-    let sec1 = ecdsa_public_key_a();
-    let bare = &sec1[1..];
-    assert_eq!(
-        SolanaChain.signer_address(&sec1).unwrap(),
-        SolanaChain.signer_address(bare).unwrap(),
-        "SEC1-uncompressed and bare X||Y must yield the same Solana address"
-    );
-    assert_eq!(
-        SolanaChain.signer_address(&sec1).unwrap(),
-        "9pjvUx5h2dQUrj76Gqmwe24PXPHW3eWFGBuUgVW5BVPS"
-    );
-}
-
-/// The registered mainnet DVN key, read from chain rather than assumed: the
-/// 64 bytes at offset 17 of the Solana DVN config account
-/// `EqkXVEeapm7JqrS1W3AGeN5ZwCRLDUHtr1XY9TuVr4rD` (owner
-/// `9U6MUTuH9XZFoP993kq3We6gu95NbJhNM82cdpbpyF9n`), captured 2026-09-04. This is
-/// the value LayerZero verifies against, so the address this service advertises
-/// has to match it byte for byte.
-#[test]
-fn solana_address_matches_the_registered_mainnet_dvn_key() {
-    let registered = hex::decode(concat!(
+fn solana_test_key_xy() -> Vec<u8> {
+    hex::decode(concat!(
         "ca11e4b7d37870aca2ace4d5dee1dd296e6d76c7ff757c648d41f1e65d495d74",
         "0897f8edc07fea309c99494ab3f2115c27f1f8aca0d0843ce485e6266ed351f1"
     ))
-    .unwrap();
-    let expected = "EboBSUoobiqt7JYcH46ro7TGBjtE2vczKnUmsiWy6Ffy";
-    assert_eq!(SolanaChain.signer_address(&registered).unwrap(), expected);
-
-    // The same key as this crate's Azure adapter hands it over.
-    let mut sec1 = vec![0x04];
-    sec1.extend_from_slice(&registered);
-    assert_eq!(SolanaChain.signer_address(&sec1).unwrap(), expected);
+    .unwrap()
 }
 
-/// The defect was invisible from the response alone: `publicKey` went through
-/// the prefix stripper while `address` did not, so the advertised key looked
-/// correct next to a wrong address. Assert the two agree at the adapter, which
-/// is the surface `/signer-info` actually serves.
-#[tokio::test]
-async fn solana_signer_info_address_is_the_advertised_public_key() {
-    let mut sec1 = vec![0x04];
-    sec1.extend_from_slice(
-        &hex::decode(concat!(
-            "ca11e4b7d37870aca2ace4d5dee1dd296e6d76c7ff757c648d41f1e65d495d74",
-            "0897f8edc07fea309c99494ab3f2115c27f1f8aca0d0843ce485e6266ed351f1"
-        ))
-        .unwrap(),
-    );
-    let raw = Arc::new(EvmPublicKeySigner {
-        sign_requests: Mutex::new(Vec::new()),
-        public_key: sec1,
-    });
-    let info = PillarSignerAdapter::new(raw, SolanaChain, true)
-        .get_signer_info()
-        .await
-        .unwrap();
-    let advertised = hex::decode(info.public_key.trim_start_matches("0x")).unwrap();
-    assert_eq!(advertised.len(), 64, "advertised key must be bare X||Y");
-    assert_eq!(
-        info.address,
-        bs58::encode(&advertised[..32]).into_string(),
-        "the address must be base58 of the advertised key's X coordinate"
-    );
-    assert_eq!(info.address, "EboBSUoobiqt7JYcH46ro7TGBjtE2vczKnUmsiWy6Ffy");
-}
-
+/// 1.2.66 answers `base58(publicKey.subarray(0, 32))` over the SEC1 key its signers return
+/// (`gasolina-signer-adapter/src/solana/index.ts:9-11`), so the address starts with `04`.
 #[test]
-fn solana_address_of_a_bare_azure_coordinate_pair_is_the_x_coordinate() {
-    // Azure hands back `x || y` with no prefix (`azureKmsSignerAdapter.ts:170-172`),
-    // so there the first 32 bytes really are X.
+fn solana_address_is_base58_of_the_first_32_sec1_bytes() {
+    let mut sec1 = vec![0x04];
+    sec1.extend_from_slice(&solana_test_key_xy());
     assert_eq!(
-        SolanaChain
-            .signer_address(&ecdsa_public_key_a()[1..])
+        SolanaChain.signer_address(&sec1).unwrap(),
+        "KhLrwX6FuKJfNtoxn2meHYBxKjvazGPHbfMdmx78HZ6"
+    );
+    assert_eq!(
+        bs58::decode("KhLrwX6FuKJfNtoxn2meHYBxKjvazGPHbfMdmx78HZ6")
+            .into_vec()
             .unwrap(),
-        "9pjvUx5h2dQUrj76Gqmwe24PXPHW3eWFGBuUgVW5BVPS"
+        sec1[..32]
+    );
+}
+
+/// A bare `X || Y` (the shape some KMS providers return) is the same key, so it yields the
+/// same address once given its SEC1 prefix.
+#[test]
+fn solana_address_of_a_bare_key_equals_its_sec1_form() {
+    let bare = solana_test_key_xy();
+    let mut sec1 = vec![0x04];
+    sec1.extend_from_slice(&bare);
+    assert_eq!(
+        SolanaChain.signer_address(&bare).unwrap(),
+        SolanaChain.signer_address(&sec1).unwrap()
     );
 }
 
 #[test]
-fn solana_signer_info_preserves_first_coordinate_byte_for_azure_uncompressed_key() {
-    let mut public_key = vec![0x04, 0xca];
-    public_key.extend(0x11u8..=0x4f);
-
-    assert_eq!(
-        SolanaChain.signer_info_public_key(&public_key, true),
-        &public_key[1..]
-    );
+fn solana_address_refuses_keys_that_are_not_secp256k1_points() {
+    for key in [vec![0x04; 33], vec![0x02; 65], Vec::new()] {
+        assert!(
+            SolanaChain.signer_address(&key).is_err(),
+            "{} bytes",
+            key.len()
+        );
+    }
 }
 
+/// `/signer-info` serves `X || Y` whatever the provider's shape or signer kind
+/// (`gasolinaSignerAdapter.ts:61-66` drops the SEC1 prefix), next to the 1.2.66 address.
 #[tokio::test]
-async fn solana_signer_info_preserves_raw_coordinate_bytes_without_sec1_prefix() {
-    let upstream_public_key = hex::decode(concat!(
-        "11e4b7d37870aca2ace4d5dee1dd296e6d76c7ff757c648d41f1e65d495d7408",
-        "97f8edc07fea309c99494ab3f2115c27f1f8aca0d0843ce485e6266ed351f1"
-    ))
-    .unwrap();
-    let mut live_azure_public_key = Vec::with_capacity(65);
-    live_azure_public_key.push(0xca);
-    live_azure_public_key.extend_from_slice(&upstream_public_key);
-    let raw = Arc::new(EvmPublicKeySigner {
-        sign_requests: Mutex::new(Vec::new()),
-        public_key: live_azure_public_key,
-    });
-    let signer = PillarSignerAdapter::new(raw, SolanaChain, true);
-
-    let signer_info = signer.get_signer_info().await.unwrap();
-
-    assert_eq!(
-        signer_info.address,
-        "EboBSUoobiqt7JYcH46ro7TGBjtE2vczKnUmsiWy6Ffy"
-    );
-    assert_eq!(
-        signer_info.public_key,
-        format!("0xca{}", bytes_to_hex(&upstream_public_key))
-    );
-}
-
-#[tokio::test]
-async fn solana_signer_info_preserves_all_64_azure_coordinate_bytes() {
-    let upstream_public_key = hex::decode(concat!(
-        "ca11e4b7d37870aca2ace4d5dee1dd296e6d76c7ff757c648d41f1e65d495d",
-        "740897f8edc07fea309c99494ab3f2115c27f1f8aca0d0843ce485e6266ed351f1"
-    ))
-    .unwrap();
-    let mut live_azure_public_key = Vec::with_capacity(65);
-    live_azure_public_key.push(0x04);
-    live_azure_public_key.extend_from_slice(&upstream_public_key);
-    let raw = Arc::new(EvmPublicKeySigner {
-        sign_requests: Mutex::new(Vec::new()),
-        public_key: live_azure_public_key,
-    });
-    let signer = PillarSignerAdapter::new(raw, SolanaChain, true);
-
-    let signer_info = signer.get_signer_info().await.unwrap();
-
-    // Must equal the bare-coordinate case above: the provider's key shape cannot
-    // move the address. This assertion previously expected
-    // `KhLrwX6FuKJfNtoxn2meHYBxKjvazGPHbfMdmx78HZ6`, which is
-    // `base58(04 || X[..31])` and not the key registered at offset 17 of the
-    // mainnet DVN config account - the live service advertised it until
-    // 2026-09-04.
-    assert_eq!(
-        signer_info.address,
-        "EboBSUoobiqt7JYcH46ro7TGBjtE2vczKnUmsiWy6Ffy"
-    );
-    assert_eq!(
-        signer_info.public_key,
-        format!("0x{}", bytes_to_hex(&upstream_public_key))
-    );
+async fn solana_signer_info_serves_x_and_y_next_to_the_upstream_address() {
+    let bare = solana_test_key_xy();
+    let mut sec1 = vec![0x04];
+    sec1.extend_from_slice(&bare);
+    for (key, is_kms) in [
+        (sec1.clone(), true),
+        (sec1.clone(), false),
+        (bare.clone(), true),
+    ] {
+        let raw = Arc::new(EvmPublicKeySigner {
+            sign_requests: Mutex::new(Vec::new()),
+            public_key: key,
+        });
+        let info = PillarSignerAdapter::new(raw, SolanaChain, is_kms)
+            .get_signer_info()
+            .await
+            .unwrap();
+        assert_eq!(info.public_key, format!("0x{}", bytes_to_hex(&bare)));
+        assert_eq!(info.address, "KhLrwX6FuKJfNtoxn2meHYBxKjvazGPHbfMdmx78HZ6");
+    }
 }

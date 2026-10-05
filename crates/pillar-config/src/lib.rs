@@ -1,14 +1,20 @@
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, env, fs, path::Path};
+use std::{collections::HashMap, env, fs};
 use url::{Host, Url};
 use zeroize::Zeroizing;
 
+mod execution;
+mod generated_chain_metadata;
 mod generated_layerzero_environment;
 mod generated_layerzero_evm;
+mod generated_layerzero_legacy_chain_ids;
 mod generated_ton_layerzero;
 pub mod provider_validation;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
+pub use execution::{AuditConfig, ExecutionLimits};
 
 #[cfg(test)]
 mod provider_validation_tests;
@@ -22,12 +28,14 @@ pub const LZ_ENV: &str = "LAYERZERO_ENVIRONMENT";
 pub const LZ_CDK_DEPLOY_REGION: &str = "LAYERZERO_CDK_DEPLOY_REGION";
 pub const LZ_DEBUG_MODE: &str = "LAYERZERO_DEBUG_MODE";
 pub const LZ_AVAILABLE_CHAIN_NAMES: &str = "LAYERZERO_AVAILABLE_CHAIN_NAMES";
-pub const LZ_SUPPORTED_ULN_VERSIONS: &str = "LAYERZERO_SUPPORTED_ULN_VERSIONS";
 pub const LZ_PROVIDER_CONFIG_TYPE: &str = "PROVIDER_CONFIG_TYPE";
 pub const LZ_PROVIDER_CONFIG: &str = "LAYERZERO_PROVIDER_CONFIG";
 pub const LZ_PROVIDER_CONFIG_FILE_PATH: &str = "LAYERZERO_PROVIDER_CONFIG_FILE_PATH";
+pub const LZ_QUORUM_STRATEGY_CONFIG: &str = "LAYERZERO_QUORUM_STRATEGY_CONFIG";
+pub const LZ_QUORUM_STRATEGY_CONFIG_FILE_PATH: &str = "LAYERZERO_QUORUM_STRATEGY_CONFIG_FILE_PATH";
 pub const LZ_PROVIDER_BUCKET: &str = "CONFIG_BUCKET_NAME";
-pub const LZ_PROVIDER_CONFIG_REMOTE_KEY: &str = "providers.json";
+pub const LZ_PROVIDER_CONFIG_REMOTE_KEY: &str = "providers-v2.json";
+pub const LZ_QUORUM_STRATEGY_REMOTE_KEY: &str = "quorum-strategy.json";
 pub const EXTRA_CONTEXT_REQUEST_URL: &str = "EXTRA_CONTEXT_REQUEST_URL";
 pub const EXTRA_CONTEXT_REQUEST_AUTH_TOKEN: &str = "EXTRA_CONTEXT_REQUEST_AUTH_TOKEN";
 pub const EXTRA_CONTEXT_AWS_LAMBDA_NAME: &str = "EXTRA_CONTEXT_AWS_LAMBDA_NAME";
@@ -63,6 +71,7 @@ pub const PILLAR_PUBLIC_SIGN_ROUTES: &str = "PILLAR_PUBLIC_SIGN_ROUTES";
 pub const PILLAR_API_AUTH_ENABLED: &str = "PILLAR_API_AUTH_ENABLED";
 pub const PILLAR_MAX_CONNECTIONS: &str = "PILLAR_MAX_CONNECTIONS";
 pub const PILLAR_SHUTDOWN_GRACE_SECONDS: &str = "PILLAR_SHUTDOWN_GRACE_SECONDS";
+pub const PILLAR_SHUTDOWN_WITHDRAWAL_SECONDS: &str = "PILLAR_SHUTDOWN_WITHDRAWAL_SECONDS";
 
 pub const ENV_VAR_NAMES: &[(&str, &str)] = &[
     ("LZ_WALLETS", LZ_WALLETS),
@@ -76,10 +85,14 @@ pub const ENV_VAR_NAMES: &[(&str, &str)] = &[
     ("LZ_CDK_DEPLOY_REGION", LZ_CDK_DEPLOY_REGION),
     ("LZ_DEBUG_MODE", LZ_DEBUG_MODE),
     ("LZ_AVAILABLE_CHAIN_NAMES", LZ_AVAILABLE_CHAIN_NAMES),
-    ("LZ_SUPPORTED_ULN_VERSIONS", LZ_SUPPORTED_ULN_VERSIONS),
     ("LZ_PROVIDER_CONFIG_TYPE", LZ_PROVIDER_CONFIG_TYPE),
     ("LZ_PROVIDER_CONFIG", LZ_PROVIDER_CONFIG),
     ("LZ_PROVIDER_CONFIG_FILE_PATH", LZ_PROVIDER_CONFIG_FILE_PATH),
+    ("LZ_QUORUM_STRATEGY_CONFIG", LZ_QUORUM_STRATEGY_CONFIG),
+    (
+        "LZ_QUORUM_STRATEGY_CONFIG_FILE_PATH",
+        LZ_QUORUM_STRATEGY_CONFIG_FILE_PATH,
+    ),
     ("LZ_PROVIDER_BUCKET", LZ_PROVIDER_BUCKET),
     ("EXTRA_CONTEXT_REQUEST_URL", EXTRA_CONTEXT_REQUEST_URL),
     (
@@ -104,6 +117,10 @@ pub const ENV_VAR_NAMES: &[(&str, &str)] = &[
     (
         "PILLAR_SHUTDOWN_GRACE_SECONDS",
         PILLAR_SHUTDOWN_GRACE_SECONDS,
+    ),
+    (
+        "PILLAR_SHUTDOWN_WITHDRAWAL_SECONDS",
+        PILLAR_SHUTDOWN_WITHDRAWAL_SECONDS,
     ),
 ];
 
@@ -138,7 +155,6 @@ pub struct RuntimeConfig {
     pub provider_config_type: ProviderConfigType,
     pub environment: Option<String>,
     pub available_chain_names: Option<Vec<String>>,
-    pub supported_uln_versions: Vec<String>,
     pub debug_mode: bool,
     pub extra_context_request_url: Option<String>,
     pub extra_context_request_auth_token: Option<String>,
@@ -149,6 +165,9 @@ pub struct RuntimeConfig {
     pub public_sign_routes: bool,
     pub max_connections: usize,
     pub shutdown_grace_seconds: u64,
+    pub shutdown_withdrawal: std::time::Duration,
+    pub execution_limits: ExecutionLimits,
+    pub audit: Option<AuditConfig>,
 }
 
 /// Rendered in place of a secret. Shared so a reader can grep one spelling.
@@ -170,7 +189,6 @@ impl std::fmt::Debug for RuntimeConfig {
             .field("provider_config_type", &self.provider_config_type)
             .field("environment", &self.environment)
             .field("available_chain_names", &self.available_chain_names)
-            .field("supported_uln_versions", &self.supported_uln_versions)
             .field("debug_mode", &self.debug_mode)
             .field("extra_context_request_url", &self.extra_context_request_url)
             .field(
@@ -190,6 +208,9 @@ impl std::fmt::Debug for RuntimeConfig {
             .field("public_sign_routes", &self.public_sign_routes)
             .field("max_connections", &self.max_connections)
             .field("shutdown_grace_seconds", &self.shutdown_grace_seconds)
+            .field("shutdown_withdrawal", &self.shutdown_withdrawal)
+            .field("execution_limits", &self.execution_limits)
+            .field("audit_enabled", &self.audit.is_some())
             .finish()
     }
 }
@@ -208,12 +229,12 @@ pub enum ConfigError {
     InvalidMaxConnections(String),
     #[error("Invalid PILLAR_SHUTDOWN_GRACE_SECONDS: {0}")]
     InvalidShutdownGraceSeconds(String),
+    #[error("Invalid PILLAR_SHUTDOWN_WITHDRAWAL_SECONDS: {0}")]
+    InvalidShutdownWithdrawalSeconds(String),
+    #[error("{0}")]
+    Execution(String),
     #[error("Unknown provider config type: {0}")]
     InvalidProviderConfigType(String),
-    #[error("Invalid {LZ_SUPPORTED_ULN_VERSIONS}: {0}")]
-    InvalidSupportedUlnVersions(String),
-    #[error("No ULN versions provided")]
-    NoSupportedUlnVersions,
     #[error("Unsupported provider config type: {0}")]
     UnsupportedProviderConfigType(String),
     #[error("{0}")]
@@ -347,15 +368,12 @@ pub fn layerzero_available_chain_names(environment: &str) -> Result<Vec<String>,
 
 pub fn layerzero_rollout_block_reason(environment: &str, chain_name: &str) -> Option<&'static str> {
     match (environment, chain_name) {
-        ("mainnet" | "testnet", "stellar") => {
-            Some("Stellar deployment addresses require operator and on-chain confirmation")
-        }
         ("testnet", "moninet") => {
             Some("moninet-testnet deployment addresses require operator and on-chain confirmation")
         }
         // Every chain-native payload-signed observer has read a real verdict for
         // a genuinely delivered packet, using that message's own on-chain
-        // arguments — but only on **mainnet**:
+        // arguments, first on **mainnet**:
         //
         // * TON: `committableView` on the deployed `UlnConnection`, whose packet
         //   came from that contract's inbound `MdObj` message.
@@ -366,18 +384,16 @@ pub fn layerzero_rollout_block_reason(environment: &str, chain_name: &str) -> Op
         // Sui and IOTA were then proven on their testnets the same way, against
         // those deployments' own packages and objects.
         //
-        // TON testnet is different, and not for want of capability: it has no
-        // `UlnConnection` at all. Sweeping 800 transactions across both testnet
-        // `uln` contracts turns up only managers and a price-feed proxy, so no
-        // pathway has ever been opened there and there is no delivered message
-        // whose verdict could be read. It stays fail-closed until one exists.
-        //
-        // Established by a live read against testnet TON and Sui providers.
-        // That evidence lives outside this repository; the committed check is
-        // the fail-closed behaviour asserted by the tests below.
-        ("testnet", "ton") => {
-            Some("no UlnConnection exists on TON testnet, so no delivered packet can be observed")
-        }
+        // TON testnet now has the same kind of evidence: an Arbitrum Sepolia ->
+        // TON testnet packet (nonce 11) delivered to the deployed `UlnConnection`
+        // `0:6E3B…14EC`, whose `committableView` answered `VERIFIED`. The tests
+        // `derives_the_testnet_uln_connection_from_the_configured_uln_manager`,
+        // `rebuilds_the_testnet_delivered_packet_cell` and
+        // `runtime_rpc_validation_checks_send_the_testnet_packet_and_reject_its_verified_state`
+        // replay it offline. The gate stays until the owner decides the rollout.
+        ("testnet", "ton") => Some(
+            "TON testnet payload-signed checks are proven by offline fixtures only; rollout awaits an operator decision",
+        ),
         _ => None,
     }
 }
@@ -461,6 +477,16 @@ where
                     .unwrap_or_default(),
             )
         })?;
+    let shutdown_grace = std::time::Duration::from_secs(shutdown_grace_seconds);
+    let shutdown_withdrawal = match optional(&map, PILLAR_SHUTDOWN_WITHDRAWAL_SECONDS) {
+        None => std::time::Duration::from_secs(5).min(shutdown_grace / 5),
+        Some(value) => value
+            .parse::<u64>()
+            .ok()
+            .map(std::time::Duration::from_secs)
+            .filter(|withdrawal| *withdrawal < shutdown_grace)
+            .ok_or(ConfigError::InvalidShutdownWithdrawalSeconds(value))?,
+    };
     let provider_config_type = ProviderConfigType::parse(required(&map, LZ_PROVIDER_CONFIG_TYPE)?)?;
     let extra_context_request_url = optional(&map, EXTRA_CONTEXT_REQUEST_URL);
     let extra_context_request_auth_token = optional(&map, EXTRA_CONTEXT_REQUEST_AUTH_TOKEN);
@@ -479,19 +505,11 @@ where
         .map(|value| value.split(',').map(str::to_string).collect::<Vec<_>>());
     let available_chain_names =
         layerzero_operational_chain_names(&environment, requested_chain_names.as_deref())?;
-    let supported_uln_versions_raw = required(&map, LZ_SUPPORTED_ULN_VERSIONS)?;
-    let supported_uln_versions = serde_json::from_str::<Vec<String>>(supported_uln_versions_raw)
-        .map_err(|error| ConfigError::InvalidSupportedUlnVersions(error.to_string()))?;
-    if supported_uln_versions.is_empty() {
-        return Err(ConfigError::NoSupportedUlnVersions);
-    }
-
     Ok(RuntimeConfig {
         server_port,
         provider_config_type,
         environment: Some(environment),
         available_chain_names: Some(available_chain_names),
-        supported_uln_versions,
         debug_mode: optional(&map, LZ_DEBUG_MODE).as_deref() == Some("true"),
         extra_context_request_url,
         extra_context_request_auth_token,
@@ -502,6 +520,9 @@ where
         public_sign_routes: optional(&map, PILLAR_PUBLIC_SIGN_ROUTES).as_deref() == Some("true"),
         max_connections,
         shutdown_grace_seconds,
+        shutdown_withdrawal,
+        execution_limits: ExecutionLimits::from_map(&map).map_err(ConfigError::Execution)?,
+        audit: AuditConfig::from_map(&map).map_err(ConfigError::Execution)?,
     })
 }
 
@@ -820,8 +841,10 @@ const STATIC_CHAIN_TYPE_NAMES: &[(&str, &str)] = &[
     ("abstract", "EVM"),
     ("adi", "EVM"),
     ("adiri", "EVM"),
+    ("alpen", "EVM"),
     ("amoy", "EVM"),
     ("animechain", "EVM"),
+    ("anubis", "EVM"),
     ("ape", "EVM"),
     ("apexfusionnexus", "EVM"),
     ("aptos", "APTOS"),
@@ -856,6 +879,7 @@ const STATIC_CHAIN_TYPE_NAMES: &[(&str, &str)] = &[
     ("bsc", "EVM"),
     ("camp", "EVM"),
     ("canto", "EVM"),
+    ("canton", "CANTON"),
     ("cathay", "EVM"),
     ("celo", "EVM"),
     ("chiliz", "EVM"),
@@ -906,6 +930,7 @@ const STATIC_CHAIN_TYPE_NAMES: &[(&str, &str)] = &[
     ("gunz", "EVM"),
     ("gunzilla", "EVM"),
     ("harmony", "EVM"),
+    ("hashkey", "EVM"),
     ("hedera", "EVM"),
     ("hemi", "EVM"),
     ("holesky", "EVM"),
@@ -951,6 +976,7 @@ const STATIC_CHAIN_TYPE_NAMES: &[(&str, &str)] = &[
     ("masa", "EVM"),
     ("megaeth", "EVM"),
     ("megaeth2", "EVM"),
+    ("memecore", "EVM"),
     ("memecoreformicarium", "EVM"),
     ("meritcircle", "EVM"),
     ("merlin", "EVM"),
@@ -984,6 +1010,7 @@ const STATIC_CHAIN_TYPE_NAMES: &[(&str, &str)] = &[
     ("opbnb", "EVM"),
     ("opencampus", "EVM"),
     ("openledger", "EVM"),
+    ("opn", "EVM"),
     ("optimism", "EVM"),
     ("optsep", "EVM"),
     ("orderly", "EVM"),
@@ -1083,6 +1110,25 @@ const STATIC_CHAIN_TYPE_NAMES: &[(&str, &str)] = &[
     ("zorasep", "EVM"),
 ];
 
+/// lz-definitions' `getNetworkForChainId(id).chainName` for every id it accepts:
+/// a ULN v1 chain id (endpoint id minus 100) or any endpoint id, on any stage.
+pub fn layerzero_legacy_chain_name(id: u32) -> Option<&'static str> {
+    let table = generated_layerzero_legacy_chain_ids::LZ_LEGACY_CHAIN_NAME_BY_ID;
+    table
+        .binary_search_by_key(&id, |(candidate, _)| *candidate)
+        .ok()
+        .map(|index| table[index].1)
+}
+
+/// Upstream's `chainMetadataConfigGetter.getMaxEthGetLogsBlockRange(chain)` on an
+/// environment; `None` where its chain metadata has no entry.
+pub fn max_eth_get_logs_block_range(environment: &str, chain_name: &str) -> Option<u32> {
+    generated_chain_metadata::CHAIN_MAX_ETH_GET_LOGS_BLOCK_RANGE
+        .iter()
+        .find(|(env, chain, _)| *env == environment && *chain == chain_name)
+        .map(|(_, _, range)| *range)
+}
+
 pub fn static_chain_type_name(chain_name: &str) -> Result<&'static str, ConfigError> {
     STATIC_CHAIN_TYPE_NAMES
         .binary_search_by_key(&chain_name, |(name, _)| *name)
@@ -1160,9 +1206,15 @@ pub fn layerzero_chain_name_by_evm_endpoint_id(
     let environment = canonical_lz_environment(environment)?;
     let mut out = HashMap::new();
     for chain_name in chain_names {
-        for endpoint_version in ["V1", "V2"] {
-            let endpoint_id =
-                layerzero_evm_endpoint_id_for_version(chain_name, environment, endpoint_version)?;
+        out.insert(
+            layerzero_evm_endpoint_id_for_version(chain_name, environment, "V2")?,
+            chain_name.clone(),
+        );
+        // Chains launched after ULN v1 (e.g. testnet `alpen`, lz-definitions 3.1.15) have no
+        // EndpointV1 id at all.
+        if let Ok(endpoint_id) =
+            layerzero_evm_endpoint_id_for_version(chain_name, environment, "V1")
+        {
             out.insert(endpoint_id, chain_name.clone());
         }
     }
@@ -1255,11 +1307,118 @@ pub enum ProviderUri {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// One chain's `rpc` provider pool: each URI with the `(category, entity)` it votes as, and
+/// the resolved strategy a response's voters must satisfy. Built only from a validated
+/// providers-v2 / quorum-strategy pair (or the `test-support` constructor).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderConfig {
     pub uris: Vec<ProviderUri>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub quorum: Option<u64>,
+    pub voters: Vec<provider_validation::ProviderVoter>,
+    pub strategy: provider_validation::QuorumStrategy,
+    /// The chain's `sequencer` entries, which only Canton reads (upstream takes the first).
+    pub sequencer: Vec<ProviderUri>,
+}
+
+impl ProviderConfig {
+    pub fn new(
+        uris: Vec<ProviderUri>,
+        voters: Vec<provider_validation::ProviderVoter>,
+        strategy: provider_validation::QuorumStrategy,
+    ) -> Result<Self, String> {
+        let config = Self {
+            uris,
+            voters,
+            strategy,
+            sequencer: Vec::new(),
+        };
+        config.validate()?;
+        Ok(config)
+    }
+
+    pub fn with_sequencer(mut self, sequencer: Vec<ProviderUri>) -> Self {
+        self.sequencer = sequencer;
+        self
+    }
+
+    /// The invariants every request-time quorum relies on. Rechecked at dispatch so a
+    /// hand-built value cannot weaken them.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.uris.is_empty() {
+            return Err("no provider URI".to_string());
+        }
+        if self.voters.len() != self.uris.len() {
+            return Err(format!(
+                "{} voters for {} provider URIs",
+                self.voters.len(),
+                self.uris.len()
+            ));
+        }
+        let resolved = self
+            .strategy
+            .all_of
+            .iter()
+            .chain(&self.strategy.one_of)
+            .flat_map(|requirement| requirement.values())
+            .all(|quorum| matches!(quorum, provider_validation::Quorum::Count(_)));
+        if !resolved {
+            return Err("strategy still contains an unresolved \"max\"".to_string());
+        }
+        // A strategy met by no voters at all asks for a signature without provider agreement.
+        if provider_validation::is_strategy_satisfiable(
+            &std::collections::BTreeMap::new(),
+            &self.strategy,
+        ) {
+            return Err(format!(
+                "strategy {} requires no provider agreement",
+                provider_validation::canonical_strategy_key(&self.strategy)
+            ));
+        }
+        if !provider_validation::is_strategy_satisfiable(
+            &provider_validation::voter_entities(&self.voters),
+            &self.strategy,
+        ) {
+            return Err(format!(
+                "strategy {} is not satisfiable by the configured entities",
+                provider_validation::canonical_strategy_key(&self.strategy)
+            ));
+        }
+        Ok(())
+    }
+
+    /// Whether one entity alone can satisfy the strategy, i.e. a single trust root.
+    pub fn single_entity_trust_root(&self) -> bool {
+        self.voters.iter().any(|voter| {
+            provider_validation::is_strategy_satisfiable(
+                &provider_validation::voter_entities([voter]),
+                &self.strategy,
+            )
+        })
+    }
+
+    /// Every URI its own entity under `{ allOf: [{ any: quorum }] }`: `quorum` agreeing
+    /// URIs, the semantics test fixtures are written against.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn with_distinct_entities(uris: Vec<ProviderUri>, quorum: u64) -> Self {
+        let voters = (0..uris.len())
+            .map(|index| provider_validation::ProviderVoter {
+                category: provider_validation::PROVIDER_CATEGORY_INTERNAL.to_string(),
+                entity: format!("entity-{index}"),
+            })
+            .collect();
+        let strategy = provider_validation::QuorumStrategy {
+            all_of: vec![std::collections::BTreeMap::from([(
+                provider_validation::PROVIDER_CATEGORY_ANY.to_string(),
+                provider_validation::Quorum::Count(quorum),
+            )])],
+            one_of: Vec::new(),
+        };
+        Self {
+            uris,
+            voters,
+            strategy,
+            sequencer: Vec::new(),
+        }
+    }
 }
 
 pub type ProviderConfigs = IndexMap<String, ProviderConfig>;
@@ -1365,6 +1524,67 @@ pub trait RemoteProviderConfigLoader: Send + Sync {
     ) -> Result<String, ConfigError>;
 }
 
+/// The two bucket objects one remote generation is built from. Both are fetched for every
+/// load and validated together, so a generation never pairs one poll's providers with
+/// another's strategy (upstream `S3ProviderConfig`, `providerConfig/index.ts:131-152`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteProviderSource {
+    pub providers: RemoteProviderConfigRequest,
+    pub strategy: RemoteProviderConfigRequest,
+}
+
+impl RemoteProviderSource {
+    pub fn from_env_map(
+        vars: &HashMap<String, String>,
+        provider_config_type: &ProviderConfigType,
+    ) -> Result<Option<Self>, ConfigError> {
+        let request = |key: &str| -> Result<Option<RemoteProviderConfigRequest>, ConfigError> {
+            Ok(match provider_config_type {
+                ProviderConfigType::LOCAL => None,
+                ProviderConfigType::S3 => Some(RemoteProviderConfigRequest::S3 {
+                    bucket: required(vars, LZ_PROVIDER_BUCKET)?.to_string(),
+                    key: key.to_string(),
+                    region: Some(
+                        optional(vars, LZ_CDK_DEPLOY_REGION)
+                            .unwrap_or_else(|| "us-east-1".to_string()),
+                    ),
+                }),
+                ProviderConfigType::GCS => Some(RemoteProviderConfigRequest::GCS {
+                    bucket: required(vars, LZ_PROVIDER_BUCKET)?.to_string(),
+                    key: key.to_string(),
+                    project_id: required(vars, GCP_PROJECT_ID)?.to_string(),
+                    region: "us-east1".to_string(),
+                }),
+            })
+        };
+        let (Some(providers), Some(strategy)) = (
+            request(LZ_PROVIDER_CONFIG_REMOTE_KEY)?,
+            request(LZ_QUORUM_STRATEGY_REMOTE_KEY)?,
+        ) else {
+            return Ok(None);
+        };
+        Ok(Some(Self {
+            providers,
+            strategy,
+        }))
+    }
+
+    pub async fn load(
+        &self,
+        loader: &(impl RemoteProviderConfigLoader + ?Sized),
+        required_chain_names: Option<&[String]>,
+    ) -> Result<StaticProviderConfig, ConfigError> {
+        let (providers, strategy) = futures::join!(
+            loader.load_provider_config(self.providers.clone()),
+            loader.load_provider_config(self.strategy.clone()),
+        );
+        StaticProviderConfig::from_v2(&providers?, &strategy?, required_chain_names)
+    }
+}
+
+/// LOCAL pairs a providers file with a strategy file and inline JSON with inline JSON, as
+/// upstream's bootstrap does (`boostrapConfig/index.ts:286-305`); either half missing is a
+/// startup error.
 pub fn provider_config_from_env_map(
     vars: &HashMap<String, String>,
     provider_config_type: &ProviderConfigType,
@@ -1372,16 +1592,25 @@ pub fn provider_config_from_env_map(
 ) -> Result<StaticProviderConfig, ConfigError> {
     match provider_config_type {
         ProviderConfigType::LOCAL => {
+            let read = |path: &str| {
+                fs::read_to_string(path).map_err(|error| ConfigError::Io(error.to_string()))
+            };
             if let Some(file_path) = optional(vars, LZ_PROVIDER_CONFIG_FILE_PATH) {
-                let raw = fs::read_to_string(file_path)
-                    .map_err(|error| ConfigError::Io(error.to_string()))?;
-                let provider_config = serde_json::from_str::<ProviderConfigs>(&raw)
-                    .map_err(|error| ConfigError::Json(error.to_string()))?;
-                StaticProviderConfig::new(provider_config, required_chain_names)
+                let providers = read(&file_path)?;
+                provider_validation::reject_legacy_provider_config(&providers)?;
+                let strategy_path = required(vars, LZ_QUORUM_STRATEGY_CONFIG_FILE_PATH)?;
+                StaticProviderConfig::from_v2(
+                    &providers,
+                    &read(strategy_path)?,
+                    required_chain_names,
+                )
             } else if let Some(raw) = optional(vars, LZ_PROVIDER_CONFIG) {
-                let provider_config = serde_json::from_str::<ProviderConfigs>(&raw)
-                    .map_err(|error| ConfigError::Json(error.to_string()))?;
-                StaticProviderConfig::new(provider_config, required_chain_names)
+                provider_validation::reject_legacy_provider_config(&raw)?;
+                StaticProviderConfig::from_v2(
+                    &raw,
+                    required(vars, LZ_QUORUM_STRATEGY_CONFIG)?,
+                    required_chain_names,
+                )
             } else {
                 Err(ConfigError::MissingLocalProviderConfig)
             }
@@ -1399,38 +1628,9 @@ pub async fn provider_config_from_env_map_async(
     required_chain_names: Option<&[String]>,
     remote_loader: &impl RemoteProviderConfigLoader,
 ) -> Result<StaticProviderConfig, ConfigError> {
-    match provider_config_type {
-        ProviderConfigType::LOCAL => {
-            provider_config_from_env_map(vars, provider_config_type, required_chain_names)
-        }
-        ProviderConfigType::S3 => {
-            let raw = remote_loader
-                .load_provider_config(RemoteProviderConfigRequest::S3 {
-                    bucket: required(vars, LZ_PROVIDER_BUCKET)?.to_string(),
-                    key: LZ_PROVIDER_CONFIG_REMOTE_KEY.to_string(),
-                    region: Some(
-                        optional(vars, LZ_CDK_DEPLOY_REGION)
-                            .unwrap_or_else(|| "us-east-1".to_string()),
-                    ),
-                })
-                .await?;
-            let provider_config = serde_json::from_str::<ProviderConfigs>(&raw)
-                .map_err(|error| ConfigError::Json(error.to_string()))?;
-            StaticProviderConfig::new(provider_config, required_chain_names)
-        }
-        ProviderConfigType::GCS => {
-            let raw = remote_loader
-                .load_provider_config(RemoteProviderConfigRequest::GCS {
-                    bucket: required(vars, LZ_PROVIDER_BUCKET)?.to_string(),
-                    key: LZ_PROVIDER_CONFIG_REMOTE_KEY.to_string(),
-                    project_id: required(vars, GCP_PROJECT_ID)?.to_string(),
-                    region: "us-east1".to_string(),
-                })
-                .await?;
-            let provider_config = serde_json::from_str::<ProviderConfigs>(&raw)
-                .map_err(|error| ConfigError::Json(error.to_string()))?;
-            StaticProviderConfig::new(provider_config, required_chain_names)
-        }
+    match RemoteProviderSource::from_env_map(vars, provider_config_type)? {
+        Some(source) => source.load(remote_loader, required_chain_names).await,
+        None => provider_config_from_env_map(vars, provider_config_type, required_chain_names),
     }
 }
 
@@ -1454,6 +1654,18 @@ impl StaticProviderConfig {
         }
         Ok(Self { provider_config })
     }
+
+    /// Validates a providers-v2 / quorum-strategy pair and restricts it to the roster.
+    pub fn from_v2(
+        providers_raw: &str,
+        strategy_raw: &str,
+        required_chain_names: Option<&[String]>,
+    ) -> Result<Self, ConfigError> {
+        Self::new(
+            provider_validation::provider_configs_from_v2(providers_raw, strategy_raw)?,
+            required_chain_names,
+        )
+    }
 }
 
 impl ProviderConfigGetter for StaticProviderConfig {
@@ -1463,36 +1675,6 @@ impl ProviderConfigGetter for StaticProviderConfig {
 
     fn get_provider_configs(&self) -> &ProviderConfigs {
         &self.provider_config
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FileProviderConfig {
-    inner: StaticProviderConfig,
-}
-
-impl FileProviderConfig {
-    pub fn create(
-        file_path: impl AsRef<Path>,
-        required_chain_names: Option<&[String]>,
-    ) -> Result<Self, ConfigError> {
-        let raw =
-            fs::read_to_string(file_path).map_err(|error| ConfigError::Io(error.to_string()))?;
-        let provider_config = serde_json::from_str::<ProviderConfigs>(&raw)
-            .map_err(|error| ConfigError::Json(error.to_string()))?;
-        Ok(Self {
-            inner: StaticProviderConfig::new(provider_config, required_chain_names)?,
-        })
-    }
-}
-
-impl ProviderConfigGetter for FileProviderConfig {
-    fn get_provider_config(&self, chain_name: &str) -> Option<&ProviderConfig> {
-        self.inner.get_provider_config(chain_name)
-    }
-
-    fn get_provider_configs(&self) -> &ProviderConfigs {
-        self.inner.get_provider_configs()
     }
 }
 
@@ -1520,10 +1702,26 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use tempfile::NamedTempFile;
 
+    /// Answers each bucket key with its own body, as a bucket holding both objects would.
     #[derive(Clone)]
     struct RecordingRemoteProviderConfigLoader {
-        raw: String,
+        providers: String,
+        strategy: String,
         calls: Arc<Mutex<Vec<RemoteProviderConfigRequest>>>,
+    }
+
+    impl RecordingRemoteProviderConfigLoader {
+        fn from_uris_json(
+            fixture: &str,
+            calls: Arc<Mutex<Vec<RemoteProviderConfigRequest>>>,
+        ) -> Self {
+            let (providers, strategy) = test_support::providers_v2_from_uris_json(fixture);
+            Self {
+                providers,
+                strategy,
+                calls,
+            }
+        }
     }
 
     #[async_trait]
@@ -1532,19 +1730,44 @@ mod tests {
             &self,
             request: RemoteProviderConfigRequest,
         ) -> Result<String, ConfigError> {
+            let key = match &request {
+                RemoteProviderConfigRequest::S3 { key, .. }
+                | RemoteProviderConfigRequest::GCS { key, .. } => key.clone(),
+            };
             self.calls.lock().unwrap().push(request);
-            Ok(self.raw.clone())
+            match key.as_str() {
+                LZ_PROVIDER_CONFIG_REMOTE_KEY => Ok(self.providers.clone()),
+                LZ_QUORUM_STRATEGY_REMOTE_KEY => Ok(self.strategy.clone()),
+                other => Err(ConfigError::RemoteProviderConfig(format!(
+                    "no object {other}"
+                ))),
+            }
         }
+    }
+
+    fn inline_v2_env(fixture: &str) -> HashMap<String, String> {
+        let (providers, strategy) = test_support::providers_v2_from_uris_json(fixture);
+        HashMap::from([
+            (LZ_PROVIDER_CONFIG.to_string(), providers),
+            (LZ_QUORUM_STRATEGY_CONFIG.to_string(), strategy),
+        ])
+    }
+
+    fn sorted_requests(calls: &Arc<Mutex<Vec<RemoteProviderConfigRequest>>>) -> Vec<String> {
+        let mut keys = calls
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|request| format!("{request:?}"))
+            .collect::<Vec<_>>();
+        keys.sort();
+        keys
     }
 
     #[test]
     fn preserves_env_var_names() {
         assert_eq!(LZ_WALLETS, "LAYERZERO_WALLETS");
         assert_eq!(LZ_AVAILABLE_CHAIN_NAMES, "LAYERZERO_AVAILABLE_CHAIN_NAMES");
-        assert_eq!(
-            LZ_SUPPORTED_ULN_VERSIONS,
-            "LAYERZERO_SUPPORTED_ULN_VERSIONS"
-        );
         assert_eq!(LZ_PROVIDER_CONFIG_TYPE, "PROVIDER_CONFIG_TYPE");
         assert_eq!(LZ_PROVIDER_BUCKET, "CONFIG_BUCKET_NAME");
         assert_eq!(LZ_KMS_CLOUD_TYPE, "KMS_CLOUD_TYPE");
@@ -1579,6 +1802,11 @@ mod tests {
         assert!(mainnet.iter().any(|chain_name| chain_name == "movement"));
         assert!(mainnet.iter().any(|chain_name| chain_name == "iotal1"));
         assert!(!mainnet.iter().any(|chain_name| chain_name == "bb1"));
+        assert!(layerzero_chain_capabilities("mainnet")
+            .unwrap()
+            .iter()
+            .any(|capability| capability.chain_name == "canton" && capability.status == "ACTIVE"));
+        assert!(mainnet.iter().any(|chain_name| chain_name == "canton"));
         assert_eq!(
             mainnet
                 .iter()
@@ -1611,9 +1839,9 @@ mod tests {
             ]),
         )
         .unwrap();
-        // Sui and IOTA read a real verdict in both environments. TON only has a
-        // mainnet deployment carrying traffic, so its testnet stays blocked.
-        assert_eq!(mainnet, vec!["ethereum", "ton", "sui", "iotal1"]);
+        // Sui and IOTA read a real verdict in both environments. TON testnet has
+        // one too, but stays blocked until the operator decides its rollout.
+        assert_eq!(mainnet, vec!["ethereum", "ton", "sui", "iotal1", "stellar"]);
         for chain_name in ["ton", "sui", "iotal1"] {
             assert!(layerzero_rollout_block_reason("mainnet", chain_name).is_none());
         }
@@ -1621,8 +1849,8 @@ mod tests {
             assert!(layerzero_rollout_block_reason("testnet", chain_name).is_none());
         }
         assert!(layerzero_rollout_block_reason("testnet", "ton").is_some());
-        assert!(layerzero_rollout_block_reason("mainnet", "stellar").is_some());
-        assert!(layerzero_rollout_block_reason("testnet", "stellar").is_some());
+        assert!(layerzero_rollout_block_reason("mainnet", "stellar").is_none());
+        assert!(layerzero_rollout_block_reason("testnet", "stellar").is_none());
 
         let testnet = layerzero_operational_chain_names(
             "testnet",
@@ -1633,13 +1861,12 @@ mod tests {
             ]),
         )
         .unwrap();
-        assert_eq!(testnet, vec!["bsc"]);
+        assert_eq!(testnet, vec!["bsc", "stellar"]);
         assert!(layerzero_rollout_block_reason("testnet", "moninet").is_some());
-        assert!(layerzero_rollout_block_reason("mainnet", "stellar").is_some());
     }
 
     #[test]
-    fn environment_capability_preserves_raw_status_and_source_line() {
+    fn environment_capability_preserves_raw_status() {
         let movement = layerzero_chain_capabilities("testnet")
             .unwrap()
             .into_iter()
@@ -1648,7 +1875,6 @@ mod tests {
             })
             .unwrap();
         assert_eq!(movement.status, "ACTIVE");
-        assert_eq!(movement.source_line, 662);
     }
 
     #[test]
@@ -1657,17 +1883,17 @@ mod tests {
             IndexMap::from([
                 (
                     "extra".to_string(),
-                    ProviderConfig {
-                        uris: vec![ProviderUri::Uri("https://extra.example".to_string())],
-                        quorum: Some(1),
-                    },
+                    ProviderConfig::with_distinct_entities(
+                        vec![ProviderUri::Uri("https://extra.example".to_string())],
+                        1,
+                    ),
                 ),
                 (
                     "ethereum".to_string(),
-                    ProviderConfig {
-                        uris: vec![ProviderUri::Uri("https://eth.example".to_string())],
-                        quorum: Some(1),
-                    },
+                    ProviderConfig::with_distinct_entities(
+                        vec![ProviderUri::Uri("https://eth.example".to_string())],
+                        1,
+                    ),
                 ),
             ]),
             Some(&["ethereum".to_string()]),
@@ -1690,7 +1916,6 @@ mod tests {
             (PILLAR_API_AUTH_TOKENS, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             (LZ_PROVIDER_CONFIG_TYPE, "LOCAL"),
             (LZ_ENV, "mainnet"),
-            (LZ_SUPPORTED_ULN_VERSIONS, r#"["V2","V301"]"#),
             (LZ_AVAILABLE_CHAIN_NAMES, "ethereum,bsc,avalanche"),
             (LZ_DEBUG_MODE, "true"),
             (EXTRA_CONTEXT_REQUEST_URL, "https://example.test"),
@@ -1700,7 +1925,6 @@ mod tests {
         assert_eq!(cfg.server_port, 3000);
         assert_eq!(cfg.provider_config_type, ProviderConfigType::LOCAL);
         assert_eq!(cfg.environment.as_deref(), Some("mainnet"));
-        assert_eq!(cfg.supported_uln_versions, vec!["V2", "V301"]);
         assert_eq!(
             cfg.available_chain_names.unwrap(),
             vec!["avalanche", "bsc", "ethereum"]
@@ -1715,7 +1939,6 @@ mod tests {
             (PILLAR_API_AUTH_TOKENS, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             (LZ_PROVIDER_CONFIG_TYPE, "LOCAL"),
             (LZ_ENV, "mainnet"),
-            (LZ_SUPPORTED_ULN_VERSIONS, r#"["V2","V301"]"#),
             (EXTRA_CONTEXT_REQUEST_AUTH_TOKEN, "token"),
         ])
         .unwrap_err();
@@ -1726,39 +1949,11 @@ mod tests {
             (PILLAR_API_AUTH_TOKENS, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             (LZ_PROVIDER_CONFIG_TYPE, "LOCAL"),
             (LZ_ENV, "mainnet"),
-            (LZ_SUPPORTED_ULN_VERSIONS, r#"["V2","V301"]"#),
             (EXTRA_CONTEXT_REQUEST_URL, "https://example.test"),
             (EXTRA_CONTEXT_AWS_LAMBDA_NAME, "extra-context"),
         ])
         .unwrap_err();
         assert_eq!(http_and_lambda, ConfigError::ConflictingExtraContext);
-    }
-    #[test]
-    fn runtime_config_requires_supported_uln_versions() {
-        let error = load_from_map([
-            (SERVER_PORT, "3000"),
-            (PILLAR_API_AUTH_TOKENS, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-            (LZ_PROVIDER_CONFIG_TYPE, "LOCAL"),
-            (LZ_ENV, "mainnet"),
-        ])
-        .unwrap_err();
-        assert_eq!(
-            error,
-            ConfigError::MissingEnv("LAYERZERO_SUPPORTED_ULN_VERSIONS")
-        );
-    }
-
-    #[test]
-    fn runtime_config_rejects_empty_supported_uln_versions() {
-        let error = load_from_map([
-            (SERVER_PORT, "3000"),
-            (PILLAR_API_AUTH_TOKENS, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
-            (LZ_PROVIDER_CONFIG_TYPE, "LOCAL"),
-            (LZ_ENV, "mainnet"),
-            ("LAYERZERO_SUPPORTED_ULN_VERSIONS", "[]"),
-        ])
-        .unwrap_err();
-        assert_eq!(error.to_string(), "No ULN versions provided");
     }
 
     #[test]
@@ -1779,7 +1974,6 @@ mod tests {
             (PILLAR_API_AUTH_TOKENS, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             (LZ_PROVIDER_CONFIG_TYPE, "LOCAL"),
             (LZ_ENV, "mainnet"),
-            (LZ_SUPPORTED_ULN_VERSIONS, r#"["V2","V301"]"#),
             ("PILLAR_IMAGE_VERSION", "pillar-test-version"),
             (LZ_AVAILABLE_CHAIN_NAMES, " ethereum ,,bsc "),
         ])
@@ -1798,7 +1992,6 @@ mod tests {
             (PILLAR_API_AUTH_TOKENS, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             (LZ_PROVIDER_CONFIG_TYPE, "LOCAL"),
             (LZ_ENV, environment),
-            (LZ_SUPPORTED_ULN_VERSIONS, r#"["V2","V301"]"#),
             (EXTRA_CONTEXT_REQUEST_URL, url),
             (EXTRA_CONTEXT_REQUEST_AUTH_TOKEN, "extra-context-token"),
         ]
@@ -1896,7 +2089,6 @@ mod tests {
             (PILLAR_API_AUTH_TOKENS, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             (LZ_PROVIDER_CONFIG_TYPE, "LOCAL"),
             (LZ_ENV, "mainnet"),
-            (LZ_SUPPORTED_ULN_VERSIONS, r#"["V2","V301"]"#),
             (LZ_AVAILABLE_CHAIN_NAMES, " ethereum ,,bsc "),
         ])
         .unwrap();
@@ -1907,51 +2099,49 @@ mod tests {
     #[tokio::test]
     async fn runtime_config_parity_supports_local_s3_and_gcs_sources() {
         let local = provider_config_from_env_map(
-            &HashMap::from([(
-                LZ_PROVIDER_CONFIG.to_string(),
-                r#"{"ethereum":{"uris":["https://rpc.example"],"quorum":1}}"#.to_string(),
-            )]),
+            &inline_v2_env(r#"{"ethereum":{"uris":["https://rpc.example"],"quorum":1}}"#),
             &ProviderConfigType::LOCAL,
             Some(&["ethereum".to_string()]),
         )
         .unwrap();
-        assert_eq!(
-            local.get_provider_config("ethereum").unwrap().quorum,
-            Some(1)
-        );
+        assert_eq!(local.get_provider_config("ethereum").unwrap().uris.len(), 1);
 
-        let file = NamedTempFile::new().unwrap();
-        std::fs::write(
-            file.path(),
+        let (providers, strategy) = test_support::providers_v2_from_uris_json(
             r#"{"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#,
-        )
-        .unwrap();
+        );
+        let providers_file = NamedTempFile::new().unwrap();
+        let strategy_file = NamedTempFile::new().unwrap();
+        std::fs::write(providers_file.path(), providers).unwrap();
+        std::fs::write(strategy_file.path(), strategy).unwrap();
         let local_file = provider_config_from_env_map(
-            &HashMap::from([(
-                LZ_PROVIDER_CONFIG_FILE_PATH.to_string(),
-                file.path().to_string_lossy().to_string(),
-            )]),
+            &HashMap::from([
+                (
+                    LZ_PROVIDER_CONFIG_FILE_PATH.to_string(),
+                    providers_file.path().to_string_lossy().to_string(),
+                ),
+                (
+                    LZ_QUORUM_STRATEGY_CONFIG_FILE_PATH.to_string(),
+                    strategy_file.path().to_string_lossy().to_string(),
+                ),
+            ]),
             &ProviderConfigType::LOCAL,
             Some(&["bsc".to_string()]),
         )
         .unwrap();
-        assert_eq!(
-            local_file.get_provider_config("bsc").unwrap().quorum,
-            Some(1)
-        );
+        assert_eq!(local_file.get_provider_config("bsc").unwrap().uris.len(), 1);
 
-        for (provider_config_type, vars, expected_request) in [
+        for (provider_config_type, vars, request) in [
             (
                 ProviderConfigType::S3,
                 HashMap::from([(
                     LZ_PROVIDER_BUCKET.to_string(),
                     "provider-bucket".to_string(),
                 )]),
-                RemoteProviderConfigRequest::S3 {
+                (|key: &str| RemoteProviderConfigRequest::S3 {
                     bucket: "provider-bucket".to_string(),
-                    key: "providers.json".to_string(),
+                    key: key.to_string(),
                     region: Some("us-east-1".to_string()),
-                },
+                }) as fn(&str) -> RemoteProviderConfigRequest,
             ),
             (
                 ProviderConfigType::GCS,
@@ -1962,19 +2152,19 @@ mod tests {
                     ),
                     (GCP_PROJECT_ID.to_string(), "gcp-project".to_string()),
                 ]),
-                RemoteProviderConfigRequest::GCS {
+                |key: &str| RemoteProviderConfigRequest::GCS {
                     bucket: "provider-bucket".to_string(),
-                    key: "providers.json".to_string(),
+                    key: key.to_string(),
                     project_id: "gcp-project".to_string(),
                     region: "us-east1".to_string(),
                 },
             ),
         ] {
             let calls = Arc::new(Mutex::new(Vec::new()));
-            let loader = RecordingRemoteProviderConfigLoader {
-                raw: r#"{"ethereum":{"uris":["https://rpc.example"],"quorum":1}}"#.to_string(),
-                calls: calls.clone(),
-            };
+            let loader = RecordingRemoteProviderConfigLoader::from_uris_json(
+                r#"{"ethereum":{"uris":["https://rpc.example"],"quorum":1}}"#,
+                calls.clone(),
+            );
             let remote = provider_config_from_env_map_async(
                 &vars,
                 &provider_config_type,
@@ -1984,18 +2174,23 @@ mod tests {
             .await
             .unwrap();
             assert_eq!(
-                remote.get_provider_config("ethereum").unwrap().quorum,
-                Some(1)
+                remote.get_provider_config("ethereum").unwrap().uris.len(),
+                1
             );
-            assert_eq!(calls.lock().unwrap().as_slice(), &[expected_request]);
+            let mut expected = vec![
+                format!("{:?}", request(LZ_PROVIDER_CONFIG_REMOTE_KEY)),
+                format!("{:?}", request(LZ_QUORUM_STRATEGY_REMOTE_KEY)),
+            ];
+            expected.sort();
+            assert_eq!(sorted_requests(&calls), expected);
         }
     }
 
     fn provider_configs() -> ProviderConfigs {
         ProviderConfigs::from([(
             "ethereum".to_string(),
-            ProviderConfig {
-                uris: vec![
+            ProviderConfig::with_distinct_entities(
+                vec![
                     ProviderUri::Uri("https://rpc.example".to_string()),
                     ProviderUri::UriWithHeaders {
                         uri: "https://rpc-with-headers.example".to_string(),
@@ -2005,8 +2200,8 @@ mod tests {
                         )]),
                     },
                 ],
-                quorum: Some(1),
-            },
+                1,
+            ),
         )])
     }
 
@@ -2090,8 +2285,8 @@ mod tests {
         let getter =
             StaticProviderConfig::new(provider_configs(), Some(&["ethereum".to_string()])).unwrap();
         assert_eq!(
-            getter.get_provider_config("ethereum").unwrap().quorum,
-            Some(1)
+            getter.get_provider_config("ethereum").unwrap().uris.len(),
+            2
         );
         assert!(getter.get_provider_config("bsc").is_none());
         assert_eq!(getter.get_provider_configs().len(), 1);
@@ -2099,7 +2294,12 @@ mod tests {
 
     #[test]
     fn static_chain_type_name_matches_typescript_core_chain_families() {
-        assert_eq!(STATIC_CHAIN_TYPE_NAMES.len(), 265);
+        assert!(
+            STATIC_CHAIN_TYPE_NAMES
+                .windows(2)
+                .all(|pair| pair[0].0 < pair[1].0),
+            "static_chain_type_name binary-searches this table"
+        );
         assert_eq!(static_chain_type_name("ethereum").unwrap(), "EVM");
         assert_eq!(static_chain_type_name("bsc").unwrap(), "EVM");
         assert_eq!(static_chain_type_name("aptos").unwrap(), "APTOS");
@@ -2133,7 +2333,6 @@ mod tests {
 
     #[test]
     fn layerzero_evm_endpoint_ids_match_common_v2_networks() {
-        assert_eq!(generated_layerzero_evm::LZ_EVM_ENDPOINT_IDS.len(), 853);
         assert_eq!(
             layerzero_evm_endpoint_id("ethereum", "mainnet").unwrap(),
             30_101
@@ -2175,10 +2374,6 @@ mod tests {
 
     #[test]
     fn layerzero_evm_contracts_match_static_deployment_config() {
-        assert_eq!(
-            generated_layerzero_evm::LZ_EVM_DEPLOYMENT_ADDRESSES.len(),
-            3911
-        );
         let ethereum = layerzero_evm_contracts("ethereum", "mainnet").unwrap();
         // The V1 endpoint, needed for pathways whose `dstEid` is a V1 endpoint
         // id. Not every chain has one, so the field is optional.
@@ -2247,60 +2442,57 @@ mod tests {
     }
 
     #[test]
-    fn file_provider_config_reads_json_from_disk() {
-        let file = NamedTempFile::new().unwrap();
-        std::fs::write(
-            file.path(),
-            r#"{"ethereum":{"uris":["https://rpc.example"],"quorum":1}}"#,
-        )
-        .unwrap();
-        let getter =
-            FileProviderConfig::create(file.path(), Some(&["ethereum".to_string()])).unwrap();
-        assert_eq!(
-            getter.get_provider_config("ethereum").unwrap().uris.len(),
-            1
-        );
-    }
-
-    #[test]
     fn local_provider_config_from_env_matches_ts_bootstrap_order() {
         let getter = provider_config_from_env_map(
-            &HashMap::from([(
-                LZ_PROVIDER_CONFIG.to_string(),
-                r#"{"ethereum":{"uris":["https://rpc.example"],"quorum":1}}"#.to_string(),
-            )]),
+            &inline_v2_env(r#"{"ethereum":{"uris":["https://rpc.example"],"quorum":1}}"#),
             &ProviderConfigType::LOCAL,
             Some(&["ethereum".to_string()]),
         )
         .unwrap();
         assert_eq!(
-            getter.get_provider_config("ethereum").unwrap().quorum,
-            Some(1)
+            getter.get_provider_config("ethereum").unwrap().uris.len(),
+            1
         );
 
-        let file = NamedTempFile::new().unwrap();
-        std::fs::write(
-            file.path(),
+        let (providers, strategy) = test_support::providers_v2_from_uris_json(
             r#"{"bsc":{"uris":["https://bsc-rpc-a.example","https://bsc-rpc-b.example"],"quorum":2}}"#,
-        )
-        .unwrap();
+        );
+        let providers_file = NamedTempFile::new().unwrap();
+        let strategy_file = NamedTempFile::new().unwrap();
+        std::fs::write(providers_file.path(), providers).unwrap();
+        std::fs::write(strategy_file.path(), strategy).unwrap();
+        let mut vars = inline_v2_env(r#"{"ethereum":{"uris":["https://rpc.example"],"quorum":1}}"#);
+        vars.insert(
+            LZ_PROVIDER_CONFIG_FILE_PATH.to_string(),
+            providers_file.path().to_string_lossy().to_string(),
+        );
+        // The file path wins, and it pairs only with the strategy *file*.
+        assert_eq!(
+            provider_config_from_env_map(
+                &vars,
+                &ProviderConfigType::LOCAL,
+                Some(&["bsc".to_string()])
+            )
+            .unwrap_err(),
+            ConfigError::MissingEnv(LZ_QUORUM_STRATEGY_CONFIG_FILE_PATH)
+        );
+        vars.insert(
+            LZ_QUORUM_STRATEGY_CONFIG_FILE_PATH.to_string(),
+            strategy_file.path().to_string_lossy().to_string(),
+        );
         let getter = provider_config_from_env_map(
-            &HashMap::from([
-                (
-                    LZ_PROVIDER_CONFIG.to_string(),
-                    r#"{"ethereum":{"uris":["https://rpc.example"],"quorum":1}}"#.to_string(),
-                ),
-                (
-                    LZ_PROVIDER_CONFIG_FILE_PATH.to_string(),
-                    file.path().to_string_lossy().to_string(),
-                ),
-            ]),
+            &vars,
             &ProviderConfigType::LOCAL,
             Some(&["bsc".to_string()]),
         )
         .unwrap();
         assert!(getter.get_provider_config("ethereum").is_none());
-        assert_eq!(getter.get_provider_config("bsc").unwrap().quorum, Some(2));
+        let bsc = getter.get_provider_config("bsc").unwrap();
+        assert_eq!(bsc.uris.len(), 2);
+        assert_eq!(
+            provider_validation::canonical_strategy_key(&bsc.strategy),
+            r#"{"allOf":[{"any":2}],"oneOf":[]}"#
+        );
     }
 
     #[test]
@@ -2308,6 +2500,27 @@ mod tests {
         let err = provider_config_from_env_map(&HashMap::new(), &ProviderConfigType::LOCAL, None)
             .unwrap_err();
         assert_eq!(err, ConfigError::MissingLocalProviderConfig);
+
+        let mut vars = inline_v2_env(r#"{"ethereum":{"uris":["https://rpc.example"],"quorum":1}}"#);
+        vars.remove(LZ_QUORUM_STRATEGY_CONFIG);
+        assert_eq!(
+            provider_config_from_env_map(&vars, &ProviderConfigType::LOCAL, None).unwrap_err(),
+            ConfigError::MissingEnv(LZ_QUORUM_STRATEGY_CONFIG),
+            "a providers file without its strategy must not load"
+        );
+
+        // An unmigrated deployment carries only the old inline map: it is told why.
+        let legacy_only = HashMap::from([(
+            LZ_PROVIDER_CONFIG.to_string(),
+            r#"{"ethereum":{"uris":["https://rpc.example"],"quorum":1}}"#.to_string(),
+        )]);
+        assert_eq!(
+            provider_config_from_env_map(&legacy_only, &ProviderConfigType::LOCAL, None)
+                .unwrap_err(),
+            ConfigError::ProviderValidation(
+                provider_validation::LEGACY_PROVIDER_CONFIG_ERROR.to_string()
+            )
+        );
     }
 
     #[test]
@@ -2321,12 +2534,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn s3_provider_config_loads_providers_json_like_typescript() {
+    async fn s3_provider_config_loads_providers_and_strategy_like_typescript() {
         let calls = Arc::new(Mutex::new(Vec::new()));
-        let loader = RecordingRemoteProviderConfigLoader {
-            raw: r#"{"ethereum":{"uris":["https://rpc.example"],"quorum":1}}"#.to_string(),
-            calls: calls.clone(),
-        };
+        let loader = RecordingRemoteProviderConfigLoader::from_uris_json(
+            r#"{"ethereum":{"uris":["https://rpc.example"],"quorum":1}}"#,
+            calls.clone(),
+        );
         let getter = provider_config_from_env_map_async(
             &HashMap::from([
                 (
@@ -2349,49 +2562,66 @@ mod tests {
             getter.get_provider_config("ethereum").unwrap().uris,
             vec![ProviderUri::Uri("https://rpc.example".to_string())]
         );
+        let request = |key: &str| {
+            format!(
+                "{:?}",
+                RemoteProviderConfigRequest::S3 {
+                    bucket: "provider-bucket".to_string(),
+                    key: key.to_string(),
+                    region: Some("ap-northeast-2".to_string()),
+                }
+            )
+        };
         assert_eq!(
-            calls.lock().unwrap().as_slice(),
-            &[RemoteProviderConfigRequest::S3 {
-                bucket: "provider-bucket".to_string(),
-                key: "providers.json".to_string(),
-                region: Some("ap-northeast-2".to_string()),
-            }]
+            sorted_requests(&calls),
+            vec![
+                request("providers-v2.json"),
+                request("quorum-strategy.json")
+            ]
         );
     }
 
     #[tokio::test]
-    async fn gcs_provider_config_uses_bucket_project_and_default_key() {
-        let calls = Arc::new(Mutex::new(Vec::new()));
-        let loader = RecordingRemoteProviderConfigLoader {
-            raw: r#"{"bsc":{"uris":["https://bsc-a.example","https://bsc-b.example"],"quorum":2}}"#
-                .to_string(),
-            calls: calls.clone(),
-        };
-        let getter = provider_config_from_env_map_async(
-            &HashMap::from([
-                (
-                    LZ_PROVIDER_BUCKET.to_string(),
-                    "provider-bucket".to_string(),
-                ),
-                (GCP_PROJECT_ID.to_string(), "gcp-project".to_string()),
-            ]),
-            &ProviderConfigType::GCS,
-            Some(&["bsc".to_string()]),
-            &loader,
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(getter.get_provider_config("bsc").unwrap().quorum, Some(2));
-        assert_eq!(
-            calls.lock().unwrap().as_slice(),
-            &[RemoteProviderConfigRequest::GCS {
-                bucket: "provider-bucket".to_string(),
-                key: "providers.json".to_string(),
-                project_id: "gcp-project".to_string(),
-                region: "us-east1".to_string(),
-            }]
+    async fn remote_provider_config_rejects_a_load_missing_either_object() {
+        struct OneObject(&'static str, String);
+        #[async_trait]
+        impl RemoteProviderConfigLoader for OneObject {
+            async fn load_provider_config(
+                &self,
+                request: RemoteProviderConfigRequest,
+            ) -> Result<String, ConfigError> {
+                match request {
+                    RemoteProviderConfigRequest::S3 { key, .. } if key == self.0 => {
+                        Ok(self.1.clone())
+                    }
+                    _ => Err(ConfigError::RemoteProviderConfig("NoSuchKey".to_string())),
+                }
+            }
+        }
+        let (providers, strategy) = test_support::providers_v2_from_uris_json(
+            r#"{"ethereum":{"uris":["https://rpc.example"],"quorum":1}}"#,
         );
+        let vars = HashMap::from([(
+            LZ_PROVIDER_BUCKET.to_string(),
+            "provider-bucket".to_string(),
+        )]);
+        for loader in [
+            OneObject(LZ_PROVIDER_CONFIG_REMOTE_KEY, providers),
+            OneObject(LZ_QUORUM_STRATEGY_REMOTE_KEY, strategy),
+        ] {
+            let error = provider_config_from_env_map_async(
+                &vars,
+                &ProviderConfigType::S3,
+                Some(&["ethereum".to_string()]),
+                &loader,
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(
+                error,
+                ConfigError::RemoteProviderConfig("NoSuchKey".to_string())
+            );
+        }
     }
 
     fn wallet_json() -> &'static str {
@@ -2633,10 +2863,6 @@ mod auth_config_tests {
             (LZ_PROVIDER_CONFIG_TYPE.to_string(), "LOCAL".to_string()),
             (LZ_ENV.to_string(), "mainnet".to_string()),
             (
-                LZ_SUPPORTED_ULN_VERSIONS.to_string(),
-                r#"["V2","V301"]"#.to_string(),
-            ),
-            (
                 PILLAR_API_AUTH_TOKENS.to_string(),
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ),
@@ -2758,6 +2984,62 @@ mod auth_config_tests {
             load_from_map(base(&[(PILLAR_SHUTDOWN_GRACE_SECONDS, "bad")])),
             Err(ConfigError::InvalidShutdownGraceSeconds(_))
         ));
+    }
+
+    #[test]
+    fn shutdown_withdrawal_defaults_to_a_fifth_of_grace_capped_at_five_seconds() {
+        use std::time::Duration;
+        let withdrawal = |vars: &[(&str, &str)]| {
+            load_from_map(base(vars)).map(|config| config.shutdown_withdrawal)
+        };
+        assert_eq!(withdrawal(&[]).unwrap(), Duration::from_secs(5));
+        for (grace, expected) in [
+            ("1", Duration::from_millis(200)),
+            ("10", Duration::from_secs(2)),
+            ("25", Duration::from_secs(5)),
+            ("100", Duration::from_secs(5)),
+        ] {
+            assert_eq!(
+                withdrawal(&[(PILLAR_SHUTDOWN_GRACE_SECONDS, grace)]).unwrap(),
+                expected,
+                "grace {grace}"
+            );
+        }
+        assert_eq!(
+            withdrawal(&[(PILLAR_SHUTDOWN_WITHDRAWAL_SECONDS, "0")]).unwrap(),
+            Duration::ZERO
+        );
+        assert_eq!(
+            withdrawal(&[(PILLAR_SHUTDOWN_WITHDRAWAL_SECONDS, "24")]).unwrap(),
+            Duration::from_secs(24)
+        );
+        for (grace, bad) in [
+            ("25", "25"),
+            ("25", "26"),
+            ("25", "-1"),
+            ("25", "1.5"),
+            ("25", "x"),
+            ("1", "1"),
+        ] {
+            assert!(
+                matches!(
+                    withdrawal(&[
+                        (PILLAR_SHUTDOWN_GRACE_SECONDS, grace),
+                        (PILLAR_SHUTDOWN_WITHDRAWAL_SECONDS, bad),
+                    ]),
+                    Err(ConfigError::InvalidShutdownWithdrawalSeconds(_))
+                ),
+                "grace {grace} withdrawal {bad}"
+            );
+        }
+        assert_eq!(
+            withdrawal(&[
+                (PILLAR_SHUTDOWN_GRACE_SECONDS, "1"),
+                (PILLAR_SHUTDOWN_WITHDRAWAL_SECONDS, "0"),
+            ])
+            .unwrap(),
+            Duration::ZERO
+        );
     }
 
     #[test]

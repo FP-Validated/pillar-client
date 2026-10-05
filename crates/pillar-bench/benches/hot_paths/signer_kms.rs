@@ -2,8 +2,8 @@ use crate::common::{must, tokio_runtime};
 use async_trait::async_trait;
 use criterion::Criterion;
 use pillar_signer::{
-    AwsKmsClient, AwsKmsRawSignerAdapter, RawSignerAdapter, SeedKind, SignRequest, SignatureType,
-    SignerError,
+    AwsKmsClient, AwsKmsRawSignerAdapter, AwsPublicKey, RawSignerAdapter, SeedKind, SignRequest,
+    SignatureType, SignerError,
 };
 use std::{hint::black_box, sync::Arc, time::Duration};
 
@@ -55,7 +55,7 @@ impl AwsKmsClient for DelayedAwsKmsClient {
         Ok(vec![0xef; 64])
     }
 
-    async fn get_public_key_der(&self, _key_id: &str) -> Result<Vec<u8>, SignerError> {
+    async fn get_public_key_der(&self, _key_id: &str) -> Result<AwsPublicKey, SignerError> {
         Err(SignerError::Message(
             "public key is not used by the Ed25519 latency benchmark".to_string(),
         ))

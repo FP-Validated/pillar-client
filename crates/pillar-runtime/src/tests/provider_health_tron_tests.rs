@@ -4,16 +4,13 @@ use super::*;
 async fn provider_health_probes_tron_json_rpc_block_number_like_typescript() {
     let getter = StaticProviderConfig::new(indexmap::IndexMap::from([(
         "tron".to_string(),
-        ProviderConfig {
-            uris: vec![ProviderUri::UriWithHeaders {
-                uri: "https://tron-rpc.example/jsonrpc?tron-web-url=https%3A%2F%2Ftron-web.example&tron-api-key=secret-token&keep=true".to_string(),
-                headers: HashMap::from([
-                    ("x-extra".to_string(), "yes".to_string()),
-                    ("Authorization".to_string(), "Basic dXNlcjpwYXNz".to_string()),
-                ]),
-            }],
-            quorum: Some(1),
-        },
+        ProviderConfig::with_distinct_entities(vec![ProviderUri::UriWithHeaders {
+            uri: "https://tron-rpc.example/jsonrpc?tron-web-url=https%3A%2F%2Ftron-web.example&tron-api-key=secret-token&keep=true".to_string(),
+            headers: HashMap::from([
+                ("x-extra".to_string(), "yes".to_string()),
+                ("Authorization".to_string(), "Basic dXNlcjpwYXNz".to_string()),
+            ]),
+        }], 1),
     )]), Some(&["tron".to_string()]))
         .unwrap();
     let calls = Arc::new(Mutex::new(Vec::new()));
@@ -45,7 +42,7 @@ async fn provider_health_probes_tron_json_rpc_block_number_like_typescript() {
         HashMap::from([("tron".to_string(), "TRON".to_string())]),
     );
 
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
 
     assert!(report["tron"].healthy);
     assert_eq!(report["tron"].checked_at_unix_ms, 8888);
@@ -93,13 +90,13 @@ async fn provider_health_matches_real_trongrid_mainnet_response_shape() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "tron".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri(
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri(
                     "https://api.trongrid.io/jsonrpc?tron-web-url=https%3A%2F%2Fapi.trongrid.io"
                         .to_string(),
                 )],
-                quorum: Some(1),
-            },
+                1,
+            ),
         )]),
         Some(&["tron".to_string()]),
     )
@@ -135,7 +132,7 @@ async fn provider_health_matches_real_trongrid_mainnet_response_shape() {
         HashMap::from([("tron".to_string(), "TRON".to_string())]),
     );
 
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
 
     assert!(report["tron"].healthy);
     let json_rpc_entry = &report["tron"].providers[0];
@@ -157,12 +154,12 @@ async fn provider_health_marks_tron_unhealthy_when_block_number_probe_fails() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "tron".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri(
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri(
                     "https://tron-rpc.example/jsonrpc".to_string(),
                 )],
-                quorum: Some(1),
-            },
+                1,
+            ),
         )]),
         Some(&["tron".to_string()]),
     )
@@ -187,7 +184,7 @@ async fn provider_health_marks_tron_unhealthy_when_block_number_probe_fails() {
         HashMap::from([("tron".to_string(), "TRON".to_string())]),
     );
 
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
 
     assert!(!report["tron"].healthy);
     assert!(report["tron"].providers.iter().any(|entry| {

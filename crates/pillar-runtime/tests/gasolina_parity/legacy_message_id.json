@@ -1,0 +1,1519 @@
+{
+ "_provenance": {
+  "producedBy": "gasolina-audit 385006b apps/gasolina/src/app/app.ts App.signRequestV1 (signRequestV2 replaced by an echo) over @layerzerolabs/lz-definitions 3.1.2; Node 26.7.0 locally, upstream image pins node:22.17.1",
+  "generator": "scripts/gasolina-parity/emit-legacy-message-id-golden.ts (output after @@GOLDEN@@ maps 1:1 to `cases`)",
+  "numbers": "\"NaN\" and \"-0\" spell the JavaScript values JSON cannot carry"
+ },
+ "cases": {
+  "src v1Eid": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "dst v1Eid": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "101",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 101,
+     "srcChainName": "ethereum",
+     "dstChainName": "ethereum",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "src v1ChainId": {
+   "lzMessageId": {
+    "srcChainId": "1",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 1,
+     "dstEid": 102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "dst v1ChainId": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "1",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 1,
+     "srcChainName": "ethereum",
+     "dstChainName": "ethereum",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "src v2Eid": {
+   "lzMessageId": {
+    "srcChainId": "30101",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 30101,
+     "dstEid": 102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "dst v2Eid": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "30101",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 30101,
+     "srcChainName": "ethereum",
+     "dstChainName": "ethereum",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "src testnetV1Eid": {
+   "lzMessageId": {
+    "srcChainId": "10102",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 10102,
+     "dstEid": 102,
+     "srcChainName": "bsc",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "dst testnetV1Eid": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "10102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 10102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "src testnetV2Eid": {
+   "lzMessageId": {
+    "srcChainId": "40161",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 40161,
+     "dstEid": 102,
+     "srcChainName": "sepolia",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "dst testnetV2Eid": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "40161",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 40161,
+     "srcChainName": "ethereum",
+     "dstChainName": "sepolia",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "src sandboxGap": {
+   "lzMessageId": {
+    "srcChainId": "20101",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: 20101"
+   }
+  },
+  "dst sandboxGap": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "20101",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: 20101"
+   }
+  },
+  "src zero": {
+   "lzMessageId": {
+    "srcChainId": "0",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: 0"
+   }
+  },
+  "dst zero": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "0",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: 0"
+   }
+  },
+  "src unknownLarge": {
+   "lzMessageId": {
+    "srcChainId": "999999",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: 999999"
+   }
+  },
+  "dst unknownLarge": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "999999",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: 999999"
+   }
+  },
+  "src hex": {
+   "lzMessageId": {
+    "srcChainId": "0x65",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "dst hex": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "0x65",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 101,
+     "srcChainName": "ethereum",
+     "dstChainName": "ethereum",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "src hexUpper": {
+   "lzMessageId": {
+    "srcChainId": "0X66",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 102,
+     "dstEid": 102,
+     "srcChainName": "bsc",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "dst hexUpper": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "0X66",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "src trailingText": {
+   "lzMessageId": {
+    "srcChainId": "101abc",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "dst trailingText": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "101abc",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 101,
+     "srcChainName": "ethereum",
+     "dstChainName": "ethereum",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "src leadingSpace": {
+   "lzMessageId": {
+    "srcChainId": " 102",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 102,
+     "dstEid": 102,
+     "srcChainName": "bsc",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "dst leadingSpace": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": " 102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "src leadingTabNewline": {
+   "lzMessageId": {
+    "srcChainId": "\t\n109",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 109,
+     "dstEid": 102,
+     "srcChainName": "polygon",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "dst leadingTabNewline": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "\t\n109",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 109,
+     "srcChainName": "ethereum",
+     "dstChainName": "polygon",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "src leadingNbsp": {
+   "lzMessageId": {
+    "srcChainId": " 110",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 110,
+     "dstEid": 102,
+     "srcChainName": "arbitrum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "dst leadingNbsp": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": " 110",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 110,
+     "srcChainName": "ethereum",
+     "dstChainName": "arbitrum",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "src exponent": {
+   "lzMessageId": {
+    "srcChainId": "1e2",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 1,
+     "dstEid": 102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "dst exponent": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "1e2",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 1,
+     "srcChainName": "ethereum",
+     "dstChainName": "ethereum",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "src decimal": {
+   "lzMessageId": {
+    "srcChainId": "101.7",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "dst decimal": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "101.7",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 101,
+     "srcChainName": "ethereum",
+     "dstChainName": "ethereum",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "src negative": {
+   "lzMessageId": {
+    "srcChainId": "-101",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: -101"
+   }
+  },
+  "dst negative": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "-101",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: -101"
+   }
+  },
+  "src negativeZero": {
+   "lzMessageId": {
+    "srcChainId": "-0",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: 0"
+   }
+  },
+  "dst negativeZero": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "-0",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: 0"
+   }
+  },
+  "src plusSign": {
+   "lzMessageId": {
+    "srcChainId": "+102",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 102,
+     "dstEid": 102,
+     "srcChainName": "bsc",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "dst plusSign": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "+102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "src empty": {
+   "lzMessageId": {
+    "srcChainId": "",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: NaN"
+   }
+  },
+  "dst empty": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: NaN"
+   }
+  },
+  "src letters": {
+   "lzMessageId": {
+    "srcChainId": "abc",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: NaN"
+   }
+  },
+  "dst letters": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "abc",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: NaN"
+   }
+  },
+  "src hugeDigits": {
+   "lzMessageId": {
+    "srcChainId": "123456789012345678901234567890",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: 1.2345678901234568e+29"
+   }
+  },
+  "dst hugeDigits": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "123456789012345678901234567890",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: 1.2345678901234568e+29"
+   }
+  },
+  "src hugeHex": {
+   "lzMessageId": {
+    "srcChainId": "0x55a7f61f29e432b2b8265d8",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: 1.6568299202320263e+27"
+   }
+  },
+  "dst hugeHex": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "0x55a7f61f29e432b2b8265d8",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: 1.6568299202320263e+27"
+   }
+  },
+  "src hugeHexTie": {
+   "lzMessageId": {
+    "srcChainId": "0x20000000000001800000001",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: 6.189700196426903e+26"
+   }
+  },
+  "dst hugeHexTie": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "0x20000000000001800000001",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: 6.189700196426903e+26"
+   }
+  },
+  "src number": {
+   "lzMessageId": {
+    "srcChainId": 101,
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "dst number": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": 101,
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 101,
+     "srcChainName": "ethereum",
+     "dstChainName": "ethereum",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "src numberFloat": {
+   "lzMessageId": {
+    "srcChainId": 101.9,
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "dst numberFloat": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": 101.9,
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 101,
+     "srcChainName": "ethereum",
+     "dstChainName": "ethereum",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "src numberHuge": {
+   "lzMessageId": {
+    "srcChainId": 1e+21,
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 1,
+     "dstEid": 102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "dst numberHuge": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": 1e+21,
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 1,
+     "srcChainName": "ethereum",
+     "dstChainName": "ethereum",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "src numberNegative": {
+   "lzMessageId": {
+    "srcChainId": -5,
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: -5"
+   }
+  },
+  "dst numberNegative": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": -5,
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: -5"
+   }
+  },
+  "src boolean": {
+   "lzMessageId": {
+    "srcChainId": true,
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: NaN"
+   }
+  },
+  "dst boolean": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": true,
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: NaN"
+   }
+  },
+  "src array": {
+   "lzMessageId": {
+    "srcChainId": [
+     "102"
+    ],
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 102,
+     "dstEid": 102,
+     "srcChainName": "bsc",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "dst array": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": [
+     "102"
+    ],
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "src arrayTwo": {
+   "lzMessageId": {
+    "srcChainId": [
+     "102",
+     "103"
+    ],
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 102,
+     "dstEid": 102,
+     "srcChainName": "bsc",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "dst arrayTwo": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": [
+     "102",
+     "103"
+    ],
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "src object": {
+   "lzMessageId": {
+    "srcChainId": {
+     "a": 1
+    },
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: NaN"
+   }
+  },
+  "dst object": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": {
+     "a": 1
+    },
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: NaN"
+   }
+  },
+  "src nullValue": {
+   "lzMessageId": {
+    "srcChainId": null,
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Cannot read properties of null (reading 'toString')"
+   }
+  },
+  "dst nullValue": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": null,
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Cannot read properties of null (reading 'toString')"
+   }
+  },
+  "src missing": {
+   "lzMessageId": {
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Cannot read properties of undefined (reading 'toString')"
+   }
+  },
+  "dst missing": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Cannot read properties of undefined (reading 'toString')"
+   }
+  },
+  "src ownToString": {
+   "lzMessageId": {
+    "srcChainId": {
+     "toString": 1
+    },
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Cannot convert object to primitive value"
+   }
+  },
+  "dst ownToString": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": {
+     "toString": 1
+    },
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Cannot convert object to primitive value"
+   }
+  },
+  "src arrayOfOwnToString": {
+   "lzMessageId": {
+    "srcChainId": [
+     {
+      "toString": 1
+     }
+    ],
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Cannot convert object to primitive value"
+   }
+  },
+  "dst arrayOfOwnToString": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": [
+     {
+      "toString": 1
+     }
+    ],
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Cannot convert object to primitive value"
+   }
+  },
+  "src arrayWithNull": {
+   "lzMessageId": {
+    "srcChainId": [
+     null,
+     "102"
+    ],
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: NaN"
+   }
+  },
+  "dst arrayWithNull": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": [
+     null,
+     "102"
+    ],
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: NaN"
+   }
+  },
+  "both invalid": {
+   "lzMessageId": {
+    "srcChainId": "abc",
+    "dstChainId": null,
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: NaN"
+   }
+  },
+  "src unknown dst null": {
+   "lzMessageId": {
+    "srcChainId": "20101",
+    "dstChainId": null,
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: 20101"
+   }
+  },
+  "src null dst unknown": {
+   "lzMessageId": {
+    "srcChainId": null,
+    "dstChainId": "20101",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "error": "Cannot read properties of null (reading 'toString')"
+   }
+  },
+  "invalid id before missing nonce": {
+   "lzMessageId": {
+    "srcChainId": "x",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd"
+   },
+   "result": {
+    "error": "Invariant failed: Invalid endpointId: NaN"
+   }
+  },
+  "numberNonce": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "stringNonce": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": "7"
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "stringNonceText": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": "7abc"
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "floatNonce": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": 7.9
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 7
+   }
+  },
+  "hexNonce": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": "0x10"
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 16
+   }
+  },
+  "negativeNonce": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": -3
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": -3
+   }
+  },
+  "nanNonce": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": "abc"
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": "NaN"
+   }
+  },
+  "bigNonce": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": "18446744073709551615"
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 18446744073709552000
+   }
+  },
+  "nullNonce": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": null
+   },
+   "result": {
+    "error": "Cannot read properties of null (reading 'toString')"
+   }
+  },
+  "missingNonce": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd"
+   },
+   "result": {
+    "error": "Cannot read properties of undefined (reading 'toString')"
+   }
+  },
+  "arrayNonce": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": [
+     8
+    ]
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": 8
+   }
+  },
+  "objectNonce": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": {
+     "a": 1
+    }
+   },
+   "result": {
+    "pathwayId": {
+     "srcEid": 101,
+     "dstEid": 102,
+     "srcChainName": "ethereum",
+     "dstChainName": "bsc",
+     "sender": "0xs",
+     "receiver": "0xd"
+    },
+    "nonce": "NaN"
+   }
+  },
+  "ownToStringNonce": {
+   "lzMessageId": {
+    "srcChainId": "101",
+    "dstChainId": "102",
+    "srcUAAddress": "0xs",
+    "dstUAAddress": "0xd",
+    "nonce": {
+     "toString": 1
+    }
+   },
+   "result": {
+    "error": "requestInput.lzMessageId.nonce.toString is not a function"
+   }
+  }
+ }
+}

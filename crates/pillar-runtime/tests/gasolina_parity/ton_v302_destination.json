@@ -1,0 +1,91 @@
+{
+  "producedBy": {
+    "upstream": "gasolina-audit snapshot 1.2.66",
+    "emitter": "emit-ton-v302-destination.ts",
+    "emitterSha256": "e2702c2f66bb8e09901390b3200efe45d95217efbcb928814d89268f1967b359"
+  },
+  "input": {
+    "sender": "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "receiver": "0x2222222222222222222222222222222222222222222222222222222222222222",
+    "guid": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "message": "0xc0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ffee",
+    "nonce": 4242,
+    "blockConfirmation": 15,
+    "expiration": 1760000000,
+    "dvnAddress": "0x3333333333333333333333333333333333333333333333333333333333333333"
+  },
+  "vectors": [
+    {
+      "environment": "mainnet",
+      "chainName": "ton",
+      "srcEid": 30101,
+      "dstEid": 30343,
+      "vId": "343",
+      "ulnManagerAddress": "EQAGtSsRq69lvx_0fFfokLpK1qdaaIWbvlpRwfxFGVTFTLrH",
+      "deprecatedUlnManagerAddress": "EQAVBkV0biW-VIbrOy9dmLRMazJGl8SNSV0Fn5b8nT7DaMIn",
+      "derived": {
+        "ulnAddress": "EQAXRMTd2d1IW72G7U71RuGNiP2M2NfQp5U69W667far3CYo",
+        "ulnConnectionAddress": "EQCzj5Qbg9RKsOi68Wr4nLn7sgC3mWghnCJqxKjglbPqX1qP"
+      },
+      "implementationBranch": {
+        "name": "not-deployed/not-a-proxy",
+        "implementationAddress": "EQAzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM7SN",
+        "modeledFrom": "lz-ton-contracts getImplementationContract not-deployed/not-a-proxy branch: parseTonAddress(dvnAddress)"
+      },
+      "built": {
+        "hashCallData": "33d46c5502da45befd36e9d70653ea609cdf6823cb3f27d4b665446d241a1630",
+        "targetContract": "0x1744c4ddd9dd485bbd86ed4ef546e18d88fd8cd8d7d0a7953af56ebaedf6abdc",
+        "ulnCallDataBoc": "b5ee9c724101030100dc000197000000004d644164647293ff2057bffffffffffffffffffffffffffffffffffffffffffffffffffffffffffece3e506e0f512ac3a2ebc5abe272e7eec802de65a0867089ab12a38256cfa97e01016700556c6e566572696679615ee4ffcffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc000000000000424a0200a700000000417474657374815ed897bffffffffffffffffffffffffffffffffffffffffffffffffffffffffffcdc590705619f4483b934379a0b5cdfc75581224ef5e7c2efaef335052240a340000000000000003ebfbba6cd",
+        "dvnCallDataBoc": "b5ee9c72410204010001570001ef65786563506172616d73815ee4ffc625ed4a7b82befffffffffffffffffffffffffffffffffffffffffffffccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc00000001a39de002652abd385d1313776775216ef61bb53bd51b863623f633635f429e54ebd5baebb7daaf72010197000000004d644164647293ff2057bffffffffffffffffffffffffffffffffffffffffffffffffffffffffffece3e506e0f512ac3a2ebc5abe272e7eec802de65a0867089ab12a38256cfa97e02016700556c6e566572696679615ee4ffcffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc000000000000424a0300a700000000417474657374815ed897bffffffffffffffffffffffffffffffffffffffffffffffffffffffffffcdc590705619f4483b934379a0b5cdfc75581224ef5e7c2efaef335052240a340000000000000003ef8328f47",
+        "packetHash": "371641c15867d120ee4d0de682d737f1d5604893bd79f0bbebbccd41489028d0"
+      },
+      "missingDvnAddress": {
+        "errorClass": "TypeError",
+        "message": "Cannot read properties of undefined (reading 'startsWith')",
+        "stackFrames": [
+          "at parseTonAddress (/private/tmp/gasolina-run/work/migrated/offchain-monorepo/packages/common-ton/src/utils.ts:227:17)",
+          "at getImplementationContract (/private/tmp/gasolina-run/work/migrated/offchain-monorepo/packages/contracts/lz-ton-contracts/src/index.ts:572:27)",
+          "at GasolinaTonSdk.buildULNV3VerifyPayload (/private/tmp/gasolina-run/work/migrated/offchain-monorepo/apps/gasolina/src/app/sdks/gasolinaSdk/ton/index.ts:138:23)",
+          "at main (/private/tmp/gasolina-run/work/migrated/offchain-monorepo/apps/gasolina/parity-v18-ton-v302/emit-ton-v302-destination.ts:47:15)"
+        ],
+        "providerGetStateCalls": 0
+      }
+    },
+    {
+      "environment": "sandbox",
+      "chainName": "ton",
+      "srcEid": 50121,
+      "dstEid": 50343,
+      "vId": "20343",
+      "ulnManagerAddress": "EQCqYYyLq8A0G0nvkanAQZmt0rS970PvvRN6tfai9VevLYQd",
+      "deprecatedUlnManagerAddress": "EQBMpYbK5U_dHEU2no0lRgnheoCxNqqsL_9asZ_BM0_Y_1H9",
+      "derived": {
+        "ulnAddress": "EQDRvusN5SGA5l-GbiKC7M62xyn5v7dj2OKKm6B6tHXbqetg",
+        "ulnConnectionAddress": "EQA8fzVmJcTGxlQl9icddc9UeEjsyZ5jniltpVfkUsPvTxnI"
+      },
+      "implementationBranch": {
+        "name": "not-deployed/not-a-proxy",
+        "implementationAddress": "EQAzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM7SN",
+        "modeledFrom": "lz-ton-contracts getImplementationContract not-deployed/not-a-proxy branch: parseTonAddress(dvnAddress)"
+      },
+      "built": {
+        "hashCallData": "5225a0e3976c2e89da697697c094a4372027349639c24d509cf83d26fb51be70",
+        "targetContract": "0xd1beeb0de52180e65f866e2282ecceb6c729f9bfb763d8e28a9ba07ab475dba9",
+        "ulnCallDataBoc": "b5ee9c724101030100dc000197000000004d644164647293ff2057bffffffffffffffffffffffffffffffffffffffffffffffffffffffffffcf1fcd59897131b195097d89c75d73d51e123b326798e78a5b6955f914b0fbd3e01016700556c6e566572696679615ee4ffcffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc000000000000424a0200a700000000417474657374815ed897bffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe60e9f27deaf242c44c23944b656d6a94882c7f3fd1602aa90ab9c85e83ca8b74000000000000003e5d85969c",
+        "dvnCallDataBoc": "b5ee9c72410204010001570001ef65786563506172616d73815ee4ffc625ed4a7b82befffffffffffffffffffffffffffffffffffffffffffffccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc00000001a39de002652abd3b46fbac37948603997e19b88a0bb33adb1ca7e6fedd8f638a2a6e81ead1d76ea6010197000000004d644164647293ff2057bffffffffffffffffffffffffffffffffffffffffffffffffffffffffffcf1fcd59897131b195097d89c75d73d51e123b326798e78a5b6955f914b0fbd3e02016700556c6e566572696679615ee4ffcffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc000000000000424a0300a700000000417474657374815ed897bffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe60e9f27deaf242c44c23944b656d6a94882c7f3fd1602aa90ab9c85e83ca8b74000000000000003e89c178e7",
+        "packetHash": "983a7c9f7abc90b11308e512d95b5aa5220b1fcff4580aaa42ae7217a0f2a2dd"
+      },
+      "missingDvnAddress": {
+        "errorClass": "TypeError",
+        "message": "Cannot read properties of undefined (reading 'startsWith')",
+        "stackFrames": [
+          "at parseTonAddress (/private/tmp/gasolina-run/work/migrated/offchain-monorepo/packages/common-ton/src/utils.ts:227:17)",
+          "at getImplementationContract (/private/tmp/gasolina-run/work/migrated/offchain-monorepo/packages/contracts/lz-ton-contracts/src/index.ts:572:27)",
+          "at GasolinaTonSdk.buildULNV3VerifyPayload (/private/tmp/gasolina-run/work/migrated/offchain-monorepo/apps/gasolina/src/app/sdks/gasolinaSdk/ton/index.ts:138:23)",
+          "at main (/private/tmp/gasolina-run/work/migrated/offchain-monorepo/apps/gasolina/parity-v18-ton-v302/emit-ton-v302-destination.ts:47:15)"
+        ],
+        "providerGetStateCalls": 0
+      }
+    }
+  ]
+}

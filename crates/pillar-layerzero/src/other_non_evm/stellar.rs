@@ -128,11 +128,14 @@ impl UlnV3PayloadBuilder for StellarUlnPayloadBuilder {
         v_id: String,
         dvn_address: Option<&str>,
     ) -> Result<HashCallDataResult, AppCoreError> {
-        let dvn_address = dvn_address.ok_or_else(|| {
-            AppCoreError::BadRequest(
-                "Stellar: DVN Address is required for verify payload".to_string(),
-            )
-        })?;
+        // Upstream `new Error(...)` on `!dvnAddress` (`gasolinaSdk/stellar/index.ts:143-147`): a 500.
+        let dvn_address = dvn_address
+            .filter(|address| !address.is_empty())
+            .ok_or_else(|| {
+                AppCoreError::Internal(
+                    "Stellar: DVN Address is required for verify payload".to_string(),
+                )
+            })?;
         let proof = proof_from_event(sent_event)?;
         let vid = v_id
             .parse::<u32>()

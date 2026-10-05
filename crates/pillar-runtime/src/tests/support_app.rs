@@ -71,17 +71,10 @@ pub(super) async fn runtime_app_with_core() -> RuntimeServerApp<RecordingTranspo
                 (LZ_PROVIDER_CONFIG_TYPE.to_string(), "LOCAL".to_string()),
                 (LZ_ENV.to_string(), "mainnet".to_string()),
                 (
-                    pillar_config::LZ_SUPPORTED_ULN_VERSIONS.to_string(),
-                    r#"["V2","V301"]"#.to_string(),
-                ),
-                (
                     pillar_config::LZ_AVAILABLE_CHAIN_NAMES.to_string(),
                     "ethereum,bsc".to_string(),
                 ),
-                (
-                    LZ_PROVIDER_CONFIG.to_string(),
-                    r#"{"ethereum":{"uris":["https://eth-rpc.example"],"quorum":1},"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#.to_string(),
-                ),
+                (LZ_PROVIDER_CONFIG.to_string(), providers_json(r#"{"ethereum":{"uris":["https://eth-rpc.example"],"quorum":1},"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#)), (LZ_QUORUM_STRATEGY_CONFIG.to_string(), strategy_json(r#"{"ethereum":{"uris":["https://eth-rpc.example"],"quorum":1},"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#)),
             ]),
             transport,
             || 777,

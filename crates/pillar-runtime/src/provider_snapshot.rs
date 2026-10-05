@@ -38,7 +38,7 @@
 //! [`candidate`]: ProviderSnapshotHandle::candidate
 
 use crate::provider_health::ProviderRankTracker;
-use crate::provider_health::{plan_dispatch, required_provider_quorum, DispatchEntry};
+use crate::provider_health::{plan_dispatch, required_provider_quorum, DispatchEntry, QuorumRule};
 use pillar_config::{ProviderConfig, ProviderConfigs};
 use pillar_core::AppCoreError;
 use std::sync::{Arc, RwLock};
@@ -107,7 +107,7 @@ impl RuntimeProviderSnapshot {
     ) -> Result<ChainDispatch<'a>, AppCoreError> {
         let config = self.provider_config(chain_name)?;
         let quorum = required_provider_quorum(config, chain_name)?;
-        let plan = plan_dispatch(rank_tracker, chain_name, &config.uris, quorum).await?;
+        let plan = plan_dispatch(rank_tracker, chain_name, quorum).await?;
         Ok(ChainDispatch {
             config,
             quorum,
@@ -119,7 +119,7 @@ impl RuntimeProviderSnapshot {
 /// One chain's dispatch decision, all of it from a single generation.
 pub(crate) struct ChainDispatch<'a> {
     pub(crate) config: &'a ProviderConfig,
-    pub(crate) quorum: usize,
+    pub(crate) quorum: QuorumRule<'a>,
     pub(crate) plan: Vec<DispatchEntry<'a>>,
 }
 
@@ -354,13 +354,12 @@ mod tests {
             .map(|(chain_name, uris, quorum)| {
                 (
                     (*chain_name).to_string(),
-                    ProviderConfig {
-                        uris: uris
-                            .iter()
+                    ProviderConfig::with_distinct_entities(
+                        uris.iter()
                             .map(|uri| ProviderUri::Uri((*uri).to_string()))
                             .collect(),
-                        quorum: *quorum,
-                    },
+                        quorum.unwrap_or(1),
+                    ),
                 )
             })
             .collect()
@@ -415,7 +414,10 @@ mod tests {
 
         let snapshot = handle.load();
         let dispatch = snapshot.dispatch(&tracker, "bsc").await.unwrap();
-        assert_eq!(dispatch.quorum, 2);
+        assert_eq!(
+            dispatch.quorum.describe(),
+            r#"{"allOf":[{"any":2}],"oneOf":[]}"#
+        );
         assert_eq!(dispatch.config.uris.len(), 2);
 
         // A generation that narrows the URI list narrows the quorum with it,
@@ -423,7 +425,10 @@ mod tests {
         let snapshot =
             handle.publish(handle.candidate(configs(&[("bsc", &["https://bsc-9"], Some(1))])));
         let dispatch = snapshot.dispatch(&tracker, "bsc").await.unwrap();
-        assert_eq!(dispatch.quorum, 1);
+        assert_eq!(
+            dispatch.quorum.describe(),
+            r#"{"allOf":[{"any":1}],"oneOf":[]}"#
+        );
         assert_eq!(dispatch.config.uris.len(), 1);
     }
 
@@ -459,6 +464,35 @@ mod tests {
         assert_eq!(
             handle.load().provider_config("bsc").unwrap().uris,
             vec![ProviderUri::Uri("https://bsc-2".to_string())]
+        );
+    }
+
+    /// The strategy and entity labels belong to the generation, so a refresh that only
+    /// tightens the quorum cannot reach a request already running.
+    #[tokio::test]
+    async fn a_request_keeps_its_quorum_strategy_when_a_refresh_changes_only_the_strategy() {
+        let uris = &["https://bsc-1", "https://bsc-2"][..];
+        let handle = ProviderSnapshotHandle::new(
+            configs(&[("bsc", uris, Some(1))]),
+            vec!["bsc".to_string()],
+        );
+        let tracker = ProviderRankTracker::new();
+
+        let pinned = handle
+            .pin_for_request(async {
+                handle.publish(handle.candidate(configs(&[("bsc", uris, Some(2))])));
+                let snapshot = handle.load();
+                let dispatch = snapshot.dispatch(&tracker, "bsc").await.unwrap();
+                dispatch.quorum.describe()
+            })
+            .await;
+
+        assert_eq!(pinned, r#"{"allOf":[{"any":1}],"oneOf":[]}"#);
+        let snapshot = handle.load();
+        let dispatch = snapshot.dispatch(&tracker, "bsc").await.unwrap();
+        assert_eq!(
+            dispatch.quorum.describe(),
+            r#"{"allOf":[{"any":2}],"oneOf":[]}"#
         );
     }
 

@@ -39,10 +39,10 @@ async fn runtime_evm_read_payload_resolver_caps_process_wide_rpc_concurrency() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "bsc".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://bsc-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://bsc-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["bsc".to_string()]),
     )

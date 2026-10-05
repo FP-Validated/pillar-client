@@ -36,3 +36,7 @@ spki.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 zeroize.workspace = true
+google-cloud-gax.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

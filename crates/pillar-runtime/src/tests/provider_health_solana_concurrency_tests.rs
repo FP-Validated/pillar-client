@@ -5,10 +5,10 @@ async fn provider_health_marks_solana_unhealthy_when_slot_probe_fails() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "solana".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["solana".to_string()]),
     )
@@ -24,7 +24,7 @@ async fn provider_health_marks_solana_unhealthy_when_slot_probe_fails() {
         HashMap::from([("solana".to_string(), "SOLANA".to_string())]),
     );
 
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
 
     assert!(!report["solana"].healthy);
     assert_eq!(
@@ -39,13 +39,13 @@ async fn provider_health_concurrency_probes_solana_fallbacks_without_serial_dela
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "solana".to_string(),
-            ProviderConfig {
-                uris: vec![
+            ProviderConfig::with_distinct_entities(
+                vec![
                     ProviderUri::Uri("https://solana-primary.example".to_string()),
                     ProviderUri::Uri("https://solana-fallback.example".to_string()),
                 ],
-                quorum: Some(1),
-            },
+                1,
+            ),
         )]),
         Some(&["solana".to_string()]),
     )
@@ -64,7 +64,7 @@ async fn provider_health_concurrency_probes_solana_fallbacks_without_serial_dela
     );
 
     let started_at = std::time::Instant::now();
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
     let elapsed = started_at.elapsed();
 
     assert!(
@@ -85,13 +85,13 @@ async fn provider_ordering_preserves_solana_primary_then_fallback_visibility() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "solana".to_string(),
-            ProviderConfig {
-                uris: vec![
+            ProviderConfig::with_distinct_entities(
+                vec![
                     ProviderUri::Uri("https://solana-primary.example".to_string()),
                     ProviderUri::Uri("https://solana-fallback.example".to_string()),
                 ],
-                quorum: Some(1),
-            },
+                1,
+            ),
         )]),
         Some(&["solana".to_string()]),
     )
@@ -111,7 +111,7 @@ async fn provider_ordering_preserves_solana_primary_then_fallback_visibility() {
         HashMap::from([("solana".to_string(), "SOLANA".to_string())]),
     );
 
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
 
     assert!(!report["solana"].healthy);
     let mut urls: Vec<_> = report["solana"]

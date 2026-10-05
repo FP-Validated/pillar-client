@@ -118,14 +118,10 @@ where
     if chain_names.iter().any(|chain_name| chain_name == "stellar") {
         let address = stellar_uln_302_for_environment(environment)?;
         non_evm_builder_chain_names.insert("stellar".to_string());
-        // Every other chain trusts the pinned upstream table. Stellar cannot:
-        // the pinned ids were confirmed on chain to be a superseded generation,
-        // and this id is hashed into the attestation rather than merely
-        // addressed by it, so a build would emit an attestation no live
-        // verifier reads. Refuse per request rather than at assembly, so one
-        // unconfirmed chain does not stop the service serving the others.
-        // Derived from the disagreement rather than hardcoded, so re-pinning
-        // the table above reopens the chain with no further change here.
+        // The pinned table is upstream 1.2.66's own getter, and the id is hashed
+        // into the attestation. LayerZero's published deployment is compared as an
+        // integrity check: a disagreement refuses per request, so one unconfirmed
+        // chain does not stop the service serving the others.
         let unconfirmed = stellar_uln_302_published_for_environment(environment)
             .filter(|published| *published != address)
             .map(|published| ConfigError::UnconfirmedDeploymentGeneration {
@@ -179,6 +175,18 @@ where
                 ton_unsupported,
             );
         }
+    }
+    if chain_names.iter().any(|chain_name| chain_name == "canton") {
+        non_evm_builder_chain_names.insert("canton".to_string());
+        let canton_payload_builder = Arc::new(pillar_layerzero::CantonUlnPayloadBuilder::new(
+            canton_uln_302(),
+        ));
+        routed_payload_builder = routed_payload_builder.with_chain_builder(
+            "canton",
+            canton_payload_builder.clone(),
+            canton_payload_builder.clone(),
+            canton_payload_builder,
+        );
     }
     routed_payload_builder = routed_payload_builder.with_unsupported_non_evm_destinations(
         unsupported_layerzero_destination_chains(chain_names, &non_evm_builder_chain_names)?,

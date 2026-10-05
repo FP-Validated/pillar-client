@@ -25,7 +25,10 @@ impl AwsKmsClient for MockAwsKmsClient {
         key_id: &str,
         digest: &[u8],
     ) -> Result<Vec<u8>, SignerError> {
-        assert_eq!(key_id, self.key_id);
+        assert_eq!(
+            key_id,
+            format!("arn:aws:kms:us-east-1:111122223333:key/{}", self.key_id)
+        );
         self.ecdsa_digests.lock().await.push(digest.to_vec());
         let (signature, _) = self
             .ecdsa_signing_key
@@ -35,15 +38,21 @@ impl AwsKmsClient for MockAwsKmsClient {
     }
 
     async fn sign_ed25519_raw(&self, key_id: &str, message: &[u8]) -> Result<Vec<u8>, SignerError> {
-        assert_eq!(key_id, self.key_id);
+        assert!(
+            key_id == self.key_id
+                || key_id == format!("arn:aws:kms:us-east-1:111122223333:key/{}", self.key_id)
+        );
         self.ed25519_messages.lock().await.push(message.to_vec());
         Ok(self.ed25519_signature.clone())
     }
 
-    async fn get_public_key_der(&self, key_id: &str) -> Result<Vec<u8>, SignerError> {
+    async fn get_public_key_der(&self, key_id: &str) -> Result<AwsPublicKey, SignerError> {
         assert_eq!(key_id, self.key_id);
         *self.public_key_calls.lock().await += 1;
-        Ok(self.public_key_der.clone())
+        Ok(AwsPublicKey {
+            key_id: format!("arn:aws:kms:us-east-1:111122223333:key/{}", self.key_id),
+            der: self.public_key_der.clone(),
+        })
     }
 }
 
@@ -200,4 +209,37 @@ async fn aws_kms_factory_uses_secret_name_as_key_id_and_rejects_other_providers(
         Err(err) => err,
     };
     assert_eq!(err, SignerError::UnsupportedKmsProvider(KmsProvider::Gcp));
+}
+
+#[tokio::test]
+async fn aws_solana_signer_info_keeps_the_upstream_sec1_slice_address() {
+    let x_y = hex::decode(concat!(
+        "ca11e4b7d37870aca2ace4d5dee1dd296e6d76c7ff757c648d41f1e65d495d74",
+        "0897f8edc07fea309c99494ab3f2115c27f1f8aca0d0843ce485e6266ed351f1"
+    ))
+    .unwrap();
+    let mut sec1 = vec![0x04];
+    sec1.extend_from_slice(&x_y);
+    let client = Arc::new(MockAwsKmsClient {
+        key_id: "aws-solana-key".to_string(),
+        ecdsa_signing_key: EcdsaSigningKey::from_slice(&[24u8; 32]).unwrap(),
+        public_key_der: secp256k1_spki_der(&sec1),
+        ed25519_signature: vec![0xee; 64],
+        public_key_calls: Mutex::new(0),
+        ecdsa_digests: Mutex::new(Vec::new()),
+        ed25519_messages: Mutex::new(Vec::new()),
+    });
+    let adapter = AwsKmsRawSignerAdapter::new("aws-solana-key".to_string(), client);
+    let info = crate::chain_address::PillarSignerAdapterKind::for_chain_type(
+        ChainType::Solana,
+        Arc::new(adapter),
+        true,
+    )
+    .unwrap()
+    .get_signer_info()
+    .await
+    .unwrap();
+
+    assert_eq!(info.address, "KhLrwX6FuKJfNtoxn2meHYBxKjvazGPHbfMdmx78HZ6");
+    assert_eq!(info.public_key, format!("0x{}", hex::encode(&x_y)));
 }

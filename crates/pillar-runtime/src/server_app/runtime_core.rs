@@ -73,8 +73,7 @@ where
                 AwsSdkLambdaInvokeClient::from_region(Some(region)).await?,
             ));
         }
-        let legacy_chain_name_resolver =
-            RuntimeLegacyChainNameResolver::new(chain_name_by_eid.clone());
+        let legacy_chain_name_resolver = RuntimeLegacyChainNameResolver;
         let uln_v2_payload_builder = RuntimeEvmUlnV2PayloadBuilder::new(
             &providers,
             transport.clone(),
@@ -101,7 +100,6 @@ where
             .map_err(|error| error.to_string())?,
             runtime_v_id_by_chain_name(&environment, &available_chain_names)
                 .map_err(|error| error.to_string())?,
-            &runtime_config.supported_uln_versions,
         );
 
         Self::from_env_map_with_core_dependencies(

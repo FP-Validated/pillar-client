@@ -1,0 +1,10 @@
+{
+ "method": "POST",
+ "url": "https://mainnet.movementnetwork.xyz/v1/view",
+ "headers": {
+  "accept": "application/json",
+  "content-type": "application/json"
+ },
+ "body": "{\"function\":\"0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c::endpoint::get_config\",\"type_arguments\":[],\"arguments\":[\"0x2222222222222222222222222222222222222222222222222222222222222222\",\"0xc33752e0220faf79e45385dd73fb28d681dcd9f1569a1480725507c1f3c3aba9\",\"30101\",\"3\"]}",
+ "utc": "2026-10-04T10:58:21Z"
+}

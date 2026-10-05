@@ -42,9 +42,14 @@ impl AzureKmsClient for MockHedgedAzureKmsClient {
     async fn get_ec_public_key_coordinates(
         &self,
         key_id: &AzureKmsKeyId,
-    ) -> Result<(Vec<u8>, Vec<u8>), SignerError> {
+    ) -> Result<AzureEcPublicKey, SignerError> {
         assert_eq!(key_id, &self.key_id);
-        Ok((vec![0x11; 32], vec![0x22; 32]))
+        Ok(AzureEcPublicKey {
+            key_id: key_id.clone(),
+            reference: "test-key".into(),
+            x: vec![0x11; 32],
+            y: vec![0x22; 32],
+        })
     }
 }
 
@@ -64,10 +69,15 @@ async fn azure_kms_sign_hedge_retries_immediately_after_first_failure() {
     };
     let digest = [0x88u8; 32];
 
-    let signature =
-        sign_azure_es256k_digest_with_hedge(&client, &key_id, &digest, Duration::from_secs(60))
-            .await
-            .unwrap();
+    let signature = sign_azure_es256k_digest_with_hedge(
+        &client,
+        &key_id,
+        "test-key",
+        &digest,
+        Duration::from_secs(60),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(signature, vec![0xab; 64]);
     assert_eq!(client.sign_digests.lock().await.len(), 2);
@@ -89,10 +99,15 @@ async fn azure_kms_sign_hedge_uses_second_attempt_when_first_is_slow() {
     };
     let digest = [0x99u8; 32];
 
-    let signature =
-        sign_azure_es256k_digest_with_hedge(&client, &key_id, &digest, Duration::from_millis(1))
-            .await
-            .unwrap();
+    let signature = sign_azure_es256k_digest_with_hedge(
+        &client,
+        &key_id,
+        "test-key",
+        &digest,
+        Duration::from_millis(1),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(signature, vec![0xcd; 64]);
     assert_eq!(client.sign_digests.lock().await.len(), 2);

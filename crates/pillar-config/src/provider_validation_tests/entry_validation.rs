@@ -1,5 +1,6 @@
 use super::*;
 
+// Upstream providerValidate.test.ts › validateProviderEntry › “returns no errors for a valid entry”.
 #[test]
 fn returns_no_errors_for_a_valid_entry() {
     let known_entities = BTreeSet::from(["operator".to_string(), "alchemy".to_string()]);
@@ -14,6 +15,7 @@ fn returns_no_errors_for_a_valid_entry() {
     assert!(errors.is_empty());
 }
 
+// Upstream providerValidate.test.ts › validateProviderEntry › “returns one error per missing required field, excluding the prefix”.
 #[test]
 fn returns_one_error_per_missing_required_field_excluding_the_prefix() {
     let known_entities = BTreeSet::from(["operator".to_string(), "alchemy".to_string()]);
@@ -24,6 +26,7 @@ fn returns_one_error_per_missing_required_field_excluding_the_prefix() {
     assert!(errors.iter().all(|message| !message.starts_with("chain ")));
 }
 
+// Upstream providerValidate.test.ts › validateProviderEntry › “flags an unknown entity”.
 #[test]
 fn flags_an_unknown_entity() {
     let known_entities = BTreeSet::from(["operator".to_string(), "alchemy".to_string()]);

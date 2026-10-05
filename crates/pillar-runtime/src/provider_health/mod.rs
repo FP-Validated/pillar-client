@@ -1,9 +1,6 @@
 use crate::validation::ExpirationValidRange;
 use async_trait::async_trait;
-use futures::{
-    future::{join_all, BoxFuture},
-    StreamExt,
-};
+use futures::{future::BoxFuture, StreamExt, TryStreamExt};
 use pillar_config::{redact_url, ProviderConfigGetter, ProviderUri};
 use pillar_core::{
     AppCoreError, ChainProviderHealthReport, LzMessageId, LzSentEvent, ProviderHealthEntry,
@@ -20,8 +17,9 @@ use pillar_layerzero::{
     decode_evm_receive_library_result, decode_evm_uint64_result,
     decode_evm_uln_config_confirmations, decode_evm_uln_v2_app_config,
     decode_evm_verification_state, evm_hash_lookup_is_confirmed,
-    evm_uln_version_from_receive_library, EvmReceiveContracts, EvmUlnProof, EvmVerificationState,
-    UlnV2HashInfo, ULN_VERSION_READ_V1002, ULN_VERSION_V301, ULN_VERSION_V302,
+    evm_uln_version_for_receive_routing, evm_uln_version_from_receive_library, EvmReceiveContracts,
+    EvmUlnProof, EvmVerificationState, UlnV2HashInfo, ULN_VERSION_READ_V1002, ULN_VERSION_V2,
+    ULN_VERSION_V301, ULN_VERSION_V302,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -43,10 +41,12 @@ mod quorum;
 mod rank;
 #[cfg(test)]
 mod read_time_marker_resolver;
+mod rpc_context;
 mod source;
 mod source_probes;
 mod ton;
 mod transport;
+pub(crate) use rpc_context::rpc_scope;
 mod tron;
 mod types;
 mod uri_common;
@@ -71,8 +71,10 @@ pub(crate) use read_time_marker_resolver::resolve_evm_timestamps;
 pub(crate) use source::provider_health_snapshot_from_report;
 pub use source::RpcProviderHealthSource;
 pub(crate) use ton::*;
+pub(crate) use transport::{is_http_not_found, provider_response};
 pub use transport::{
     AwsLambdaInvokeClient, AwsSdkLambdaInvokeClient, JsonRpcTransport, ReqwestJsonRpcTransport,
+    RpcError,
 };
 pub(crate) use tron::*;
 pub(crate) use types::*;

@@ -1,5 +1,6 @@
 use super::*;
 
+// Upstream providerValidate.test.ts › checkStrategyConfig › “passes when strategy is satisfiable”.
 #[test]
 fn passes_when_strategy_is_satisfiable() {
     let file = providers(BTreeMap::new());
@@ -13,6 +14,7 @@ fn passes_when_strategy_is_satisfiable() {
     assert!(check_strategy_config(&file, &strategy).is_ok());
 }
 
+// Upstream providerValidate.test.ts › checkStrategyConfig › “throws when default strategy is missing”.
 #[test]
 fn throws_when_default_strategy_is_missing() {
     let file = providers(BTreeMap::new());
@@ -20,6 +22,7 @@ fn throws_when_default_strategy_is_missing() {
     assert!(err.to_string().contains(r#"missing required "default""#));
 }
 
+// Upstream providerValidate.test.ts › checkStrategyConfig › “throws when allOf is unsatisfiable”.
 #[test]
 fn throws_when_all_of_is_unsatisfiable() {
     let file = ProvidersFileV2 {
@@ -47,6 +50,7 @@ fn throws_when_all_of_is_unsatisfiable() {
     assert!(err.to_string().contains("not satisfiable"));
 }
 
+// Upstream providerValidate.test.ts › checkStrategyConfig › “throws when no oneOf alternative is satisfiable”.
 #[test]
 fn throws_when_no_one_of_alternative_is_satisfiable() {
     let file = ProvidersFileV2 {
@@ -74,6 +78,7 @@ fn throws_when_no_one_of_alternative_is_satisfiable() {
     assert!(err.to_string().contains("not satisfiable"));
 }
 
+// Upstream providerValidate.test.ts › checkStrategyConfig › “uses endpoint-specific strategy over default”.
 #[test]
 fn uses_endpoint_specific_strategy_over_default() {
     let file = ProvidersFileV2 {
@@ -106,6 +111,7 @@ fn uses_endpoint_specific_strategy_over_default() {
     assert!(check_strategy_config(&file, &strategy).is_ok());
 }
 
+// Upstream providerValidate.test.ts › checkStrategyConfig › “aggregates errors across multiple chains”.
 #[test]
 fn aggregates_errors_across_multiple_chains() {
     let file = ProvidersFileV2 {

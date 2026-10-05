@@ -116,18 +116,22 @@ const PAYLOAD_SIGNED_FAMILIES: &[FamilyRead] = &[
         first_read: Some("getAddressInformation"),
     },
     FamilyRead {
-        // The one family this port does not read. Upstream calls
-        // `ulnClient.confirmations` plus the `uln_verifiable` view; this port
-        // has no Soroban read path, so it refuses instead of guessing. Left
-        // unread AND unrefused it would fall through to the EVM branch, whose
-        // "no attestation found" answer is "not signed" - the exact reading
-        // that lets a payload be signed twice.
         chain_name: "stellar",
         dst_eid: 30_600,
-        receiver: EVM_RECEIVER,
-        verifier: "0x3333333333333333333333333333333333333333",
-        upstream: "apps/gasolina/src/app/sdks/gasolinaSdk/stellar/index.ts:112-185",
-        first_read: None,
+        receiver: WORD_RECEIVER,
+        verifier: "0x3333333333333333333333333333333333333333333333333333333333333333",
+        upstream: "packages/sdks/lz-v2-sdk/src/uln/stellar/index.ts:110-206 hasPayloadSigned",
+        first_read: Some("simulateTransaction"),
+    },
+    FamilyRead {
+        // Upstream reads Uln302 through the sequencer read client of the chain's
+        // `sequencer` provider entry, not through its `rpc` pool.
+        chain_name: "canton",
+        dst_eid: 30_567,
+        receiver: WORD_RECEIVER,
+        verifier: "0x3333333333333333333333333333333333333333333333333333333333333333",
+        upstream: "packages/sdks/lz-v2-sdk/src/uln/canton/index.ts:1005-1069 getUlnConfig",
+        first_read: Some("https://canton-sequencer.example/vapp"),
     },
 ];
 
@@ -180,17 +184,26 @@ fn family_sent_event(row: &FamilyRead) -> LzSentEvent {
 async fn payload_signed_family_table_covers_every_destination_the_dispatch_reaches() {
     for row in PAYLOAD_SIGNED_FAMILIES {
         let recorder = FirstReadRecorder::default();
+        // Canton's ledger URI must carry upstream's required parameters; its reads go
+        // to the sequencer entry the other families ignore.
+        let ledger_parameters = if row.chain_name == "canton" {
+            "/?admin-api=admin:5002&wallet-url=https://wallet.example"
+        } else {
+            ""
+        };
+        let config = ProviderConfig::with_distinct_entities(
+            vec![ProviderUri::Uri(format!(
+                "https://{}-rpc.example{ledger_parameters}",
+                row.chain_name
+            ))],
+            1,
+        )
+        .with_sequencer(vec![ProviderUri::UriWithHeaders {
+            uri: format!("https://{}-sequencer.example", row.chain_name),
+            headers: HashMap::from([("authorization".to_string(), "Bearer t".to_string())]),
+        }]);
         let getter = StaticProviderConfig::new(
-            IndexMap::from([(
-                row.chain_name.to_string(),
-                ProviderConfig {
-                    uris: vec![ProviderUri::Uri(format!(
-                        "https://{}-rpc.example",
-                        row.chain_name
-                    ))],
-                    quorum: Some(1),
-                },
-            )]),
+            IndexMap::from([(row.chain_name.to_string(), config)]),
             Some(&[row.chain_name.to_string()]),
         )
         .unwrap();
@@ -235,8 +248,8 @@ async fn payload_signed_family_table_covers_every_destination_the_dispatch_reach
                 );
                 let error = outcome.expect_err("an unread destination must refuse");
                 assert!(
-                    format!("{error}").contains("unavailable"),
-                    "{}: refusal must say the read is unavailable, got {error}",
+                    format!("{error}").contains("not implemented"),
+                    "{}: refusal must say the read is not implemented, got {error}",
                     row.chain_name
                 );
             }
@@ -262,6 +275,7 @@ fn payload_signed_family_table_names_every_non_evm_destination() {
     // is the only place a destination can be given a non-EVM read.
     let mut dispatched = vec![
         "solana", "aptos", "initia", "movement", "starknet", "ton", "sui", "iotal1", "stellar",
+        "canton",
     ];
     dispatched.sort_unstable();
 
@@ -288,7 +302,9 @@ fn payload_signed_family_table_names_every_non_evm_destination() {
 #[tokio::test]
 async fn payload_signed_reads_never_let_failed_providers_form_a_majority() {
     for row in PAYLOAD_SIGNED_FAMILIES {
-        if row.first_read.is_none() {
+        // Canton reads one sequencer whose answers its committee signs, not an `rpc`
+        // quorum; `canton_sequencer_tests` covers how those answers are refused.
+        if row.first_read.is_none() || row.chain_name == "canton" {
             continue;
         }
         let recorder = FirstReadRecorder::default();
@@ -299,10 +315,7 @@ async fn payload_signed_reads_never_let_failed_providers_form_a_majority() {
         let getter = StaticProviderConfig::new(
             IndexMap::from([(
                 row.chain_name.to_string(),
-                ProviderConfig {
-                    uris,
-                    quorum: Some(2),
-                },
+                ProviderConfig::with_distinct_entities(uris, 2),
             )]),
             Some(&[row.chain_name.to_string()]),
         )

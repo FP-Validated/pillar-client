@@ -37,7 +37,7 @@ async fn move_packet_sent_resolver_decodes_trusted_aptos_event() {
         src_eid: 30_500,
         sender: "0x1111111111111111111111111111111111111111111111111111111111111111".to_string(),
         dst_eid: 30_101,
-        receiver: "0x2222222222222222222222222222222222222222222222222222222222222222".to_string(),
+        receiver: "0x0000000000000000000000002222222222222222222222222222222222222222".to_string(),
         guid: "0x3333333333333333333333333333333333333333333333333333333333333333".to_string(),
         message: "0xdeadbeef".to_string(),
     })
@@ -46,10 +46,10 @@ async fn move_packet_sent_resolver_decodes_trusted_aptos_event() {
         "version": "7",
         "success": true,
         "events": [{
-            "type": format!("{endpoint}::endpoint_v2::channels::PacketSent"),
+            "type": format!("{endpoint}::channels::PacketSent"),
             "data": {
                 "encoded_packet": format!("0x{}", hex::encode(packet)),
-                "options": "0x0102",
+                "options": "0x00030100110100000000000000000000000000030d40",
                 "send_library": "0x4444"
             }
         }]
@@ -57,10 +57,10 @@ async fn move_packet_sent_resolver_decodes_trusted_aptos_event() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "aptos".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://aptos.example/".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://aptos.example/".to_string())],
+                1,
+            ),
         )]),
         None,
     )
@@ -76,8 +76,7 @@ async fn move_packet_sent_resolver_decodes_trusted_aptos_event() {
                 (30_101, "ethereum".to_string()),
                 (30_500, "aptos".to_string()),
             ]),
-            uln_version_by_send_library_address_by_chain_name: HashMap::new(),
-            trusted_packet_emitters_by_chain_name: HashMap::new(),
+            packet_sent_bindings_by_chain_name: HashMap::new(),
             trusted_solana_endpoint_program_ids: HashSet::new(),
             trusted_solana_send_library_addresses: HashSet::new(),
             trusted_starknet_endpoint_addresses: HashSet::new(),
@@ -87,6 +86,8 @@ async fn move_packet_sent_resolver_decodes_trusted_aptos_event() {
                 "aptos".to_string(),
                 HashSet::from([endpoint.to_string()]),
             )]),
+            aptos_v1_source: None,
+            max_eth_get_logs_block_range_by_chain_name: HashMap::new(),
         },
     );
     let request = LzMessageId {
@@ -104,9 +105,7 @@ async fn move_packet_sent_resolver_decodes_trusted_aptos_event() {
                 ),
                 (
                     "receiver".to_string(),
-                    Value::from(
-                        "0x2222222222222222222222222222222222222222222222222222222222222222",
-                    ),
+                    Value::from("0x2222222222222222222222222222222222222222"),
                 ),
             ]),
         },
@@ -120,8 +119,14 @@ async fn move_packet_sent_resolver_decodes_trusted_aptos_event() {
     assert_eq!(event.lz_message_id.pathway_id.src_chain_name, "aptos");
     assert_eq!(event.lz_message_id.pathway_id.dst_chain_name, "ethereum");
     assert_eq!(event.lz_message_id.nonce, 7);
-    assert_eq!(event.extra["options"], "0x0102");
-    assert_eq!(event.extra["sendLibrary"], "0x4444");
+    assert_eq!(
+        event.extra["options"],
+        json!({"lzReceive": {"gas": "200000", "value": "0"}, "ordered": false})
+    );
+    assert_eq!(
+        event.extra["sendLibrary"],
+        "0x0000000000000000000000000000000000000000000000000000000000004444"
+    );
 }
 
 #[tokio::test]
@@ -132,7 +137,7 @@ async fn source_chain_parity_decodes_trusted_movement_event() {
         src_eid: 30_325,
         sender: "0x1111111111111111111111111111111111111111111111111111111111111111".to_string(),
         dst_eid: 30_101,
-        receiver: "0x2222222222222222222222222222222222222222222222222222222222222222".to_string(),
+        receiver: "0x0000000000000000000000002222222222222222222222222222222222222222".to_string(),
         guid: "0x3333333333333333333333333333333333333333333333333333333333333333".to_string(),
         message: "0xdeadbeef".to_string(),
     })
@@ -141,10 +146,10 @@ async fn source_chain_parity_decodes_trusted_movement_event() {
         "version": "7",
         "success": true,
         "events": [{
-            "type": format!("{endpoint}::endpoint_v2::channels::PacketSent"),
+            "type": format!("{endpoint}::channels::PacketSent"),
             "data": {
                 "encoded_packet": format!("0x{}", hex::encode(packet)),
-                "options": "0x0102",
+                "options": "0x00030100110100000000000000000000000000030d40",
                 "send_library": "0x4444"
             }
         }]
@@ -152,10 +157,10 @@ async fn source_chain_parity_decodes_trusted_movement_event() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "movement".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://movement.example/".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://movement.example/".to_string())],
+                1,
+            ),
         )]),
         None,
     )
@@ -171,8 +176,7 @@ async fn source_chain_parity_decodes_trusted_movement_event() {
                 (30_101, "ethereum".to_string()),
                 (30_325, "movement".to_string()),
             ]),
-            uln_version_by_send_library_address_by_chain_name: HashMap::new(),
-            trusted_packet_emitters_by_chain_name: HashMap::new(),
+            packet_sent_bindings_by_chain_name: HashMap::new(),
             trusted_solana_endpoint_program_ids: HashSet::new(),
             trusted_solana_send_library_addresses: HashSet::new(),
             trusted_starknet_endpoint_addresses: HashSet::new(),
@@ -182,6 +186,8 @@ async fn source_chain_parity_decodes_trusted_movement_event() {
                 "movement".to_string(),
                 HashSet::from([endpoint.to_string()]),
             )]),
+            aptos_v1_source: None,
+            max_eth_get_logs_block_range_by_chain_name: HashMap::new(),
         },
     );
     let request = LzMessageId {
@@ -199,9 +205,7 @@ async fn source_chain_parity_decodes_trusted_movement_event() {
                 ),
                 (
                     "receiver".to_string(),
-                    Value::from(
-                        "0x2222222222222222222222222222222222222222222222222222222222222222",
-                    ),
+                    Value::from("0x2222222222222222222222222222222222222222"),
                 ),
             ]),
         },
@@ -212,8 +216,14 @@ async fn source_chain_parity_decodes_trusted_movement_event() {
     let event = resolver.get_lz_sent_event("0xtx", &request).await.unwrap();
     assert_eq!(event.lz_message_id.pathway_id.src_chain_name, "movement");
     assert_eq!(event.lz_message_id.pathway_id.dst_chain_name, "ethereum");
-    assert_eq!(event.extra["options"], "0x0102");
-    assert_eq!(event.extra["sendLibrary"], "0x4444");
+    assert_eq!(
+        event.extra["options"],
+        json!({"lzReceive": {"gas": "200000", "value": "0"}, "ordered": false})
+    );
+    assert_eq!(
+        event.extra["sendLibrary"],
+        "0x0000000000000000000000000000000000000000000000000000000000004444"
+    );
 }
 
 #[tokio::test]
@@ -222,14 +232,14 @@ async fn evm_packet_sent_resolver_returns_after_unambiguous_quorum() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "ethereum".to_string(),
-            ProviderConfig {
-                uris: vec![
+            ProviderConfig::with_distinct_entities(
+                vec![
                     ProviderUri::Uri("https://rpc-a.example".to_string()),
                     ProviderUri::Uri("https://rpc-b.example".to_string()),
                     ProviderUri::Uri("https://rpc-slow.example".to_string()),
                 ],
-                quorum: Some(2),
-            },
+                2,
+            ),
         )]),
         None,
     )
@@ -280,13 +290,13 @@ async fn evm_packet_sent_resolver_decodes_endpoint_v2_receipt_log() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "ethereum".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::UriWithHeaders {
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::UriWithHeaders {
                     uri: "https://eth-rpc.example".to_string(),
                     headers: HashMap::from([("x-api-key".to_string(), "secret".to_string())]),
                 }],
-                quorum: Some(1),
-            },
+                1,
+            ),
         )]),
         Some(&["ethereum".to_string()]),
     )
@@ -316,7 +326,8 @@ async fn evm_packet_sent_resolver_decodes_endpoint_v2_receipt_log() {
         sent_event.extra["guid"],
         "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     );
-    assert_eq!(sent_event.extra["options"], "0x1234");
+    // `0x1234` is options type 0x1234, which upstream's `Options.fromOptions` decodes to nothing.
+    assert_eq!(sent_event.extra["options"], json!({"ordered": false}));
     assert_eq!(
         sent_event.extra["sendLibrary"],
         "0x3333333333333333333333333333333333333333"
@@ -359,14 +370,14 @@ async fn evm_packet_sent_resolver_requires_receipt_quorum() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "ethereum".to_string(),
-            ProviderConfig {
-                uris: vec![
+            ProviderConfig::with_distinct_entities(
+                vec![
                     ProviderUri::Uri("https://forged.example".to_string()),
                     ProviderUri::Uri("https://honest-a.example".to_string()),
                     ProviderUri::Uri("https://honest-b.example".to_string()),
                 ],
-                quorum: Some(2),
-            },
+                2,
+            ),
         )]),
         Some(&["ethereum".to_string()]),
     )
@@ -405,14 +416,14 @@ async fn evm_packet_sent_resolver_fails_closed_without_receipt_quorum() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "ethereum".to_string(),
-            ProviderConfig {
-                uris: vec![
+            ProviderConfig::with_distinct_entities(
+                vec![
                     ProviderUri::Uri("https://rpc-a.example".to_string()),
                     ProviderUri::Uri("https://rpc-b.example".to_string()),
                     ProviderUri::Uri("https://rpc-c.example".to_string()),
                 ],
-                quorum: Some(2),
-            },
+                2,
+            ),
         )]),
         Some(&["ethereum".to_string()]),
     )
@@ -431,81 +442,52 @@ async fn evm_packet_sent_resolver_fails_closed_without_receipt_quorum() {
     assert!(error.to_string().contains("No receipt quorum"));
 }
 
+/// Upstream filters receipt logs by the trusted endpoint and throws one error -
+/// `Packet does not match lzMessageId` - whether nothing trusted was emitted or
+/// the trusted event belongs to another message (`endpoint/evm/index.ts:205-231`).
+/// Neither case may resolve, and both carry the identity-mismatch class.
 #[tokio::test]
-async fn evm_packet_sent_resolver_rejects_untrusted_event_emitter() {
+async fn evm_resolver_treats_untrusted_emitters_and_other_messages_as_upstreams_mismatch() {
     let mut forged = packet_sent_endpoint_v2_data();
     forged["logs"][0]["address"] = Value::from("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-    let transport = RecordingTransport {
-        calls: Arc::new(Mutex::new(Vec::new())),
-        responses: Arc::new(Mutex::new(vec![Ok(json!({ "result": forged }))])),
-    };
-    let getter = StaticProviderConfig::new(
-        indexmap::IndexMap::from([(
-            "ethereum".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://rpc.example".to_string())],
-                quorum: Some(1),
-            },
-        )]),
-        Some(&["ethereum".to_string()]),
-    )
-    .unwrap();
-    let resolver = EvmPacketSentResolver::new(
-        &ProviderSnapshotHandle::from_getter(&getter),
-        transport,
-        evm_packet_sent_resolver_config("V302"),
-    );
+    let mut other_nonce = evm_packet_sent_request("V302");
+    other_nonce.nonce += 1;
+    for (receipt, request) in [
+        (forged, evm_packet_sent_request("V302")),
+        (packet_sent_endpoint_v2_data(), other_nonce),
+    ] {
+        let transport = RecordingTransport {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            responses: Arc::new(Mutex::new(vec![Ok(json!({ "result": receipt }))])),
+        };
+        let getter = StaticProviderConfig::new(
+            indexmap::IndexMap::from([(
+                "ethereum".to_string(),
+                ProviderConfig::with_distinct_entities(
+                    vec![ProviderUri::Uri("https://rpc.example".to_string())],
+                    1,
+                ),
+            )]),
+            Some(&["ethereum".to_string()]),
+        )
+        .unwrap();
+        let resolver = EvmPacketSentResolver::new(
+            &ProviderSnapshotHandle::from_getter(&getter),
+            transport,
+            evm_packet_sent_resolver_config("V302"),
+        );
 
-    let error = resolver
-        .get_lz_sent_event("0xtx", &evm_packet_sent_request("V302"))
-        .await
-        .unwrap_err();
+        let error = resolver
+            .get_lz_sent_event("0xtx", &request)
+            .await
+            .unwrap_err();
 
-    assert!(error.to_string().contains("trusted PacketSent emitter"));
-}
-
-#[tokio::test]
-async fn evm_packet_sent_resolver_distinguishes_identity_mismatch_from_untrusted_emitter() {
-    // Trusted emitter, valid PacketSent event — but a pathway identity
-    // (nonce) that doesn't match what was requested. This must not be
-    // reported as an "untrusted emitter" failure; the two causes need
-    // distinct diagnostics.
-    let transport = RecordingTransport {
-        calls: Arc::new(Mutex::new(Vec::new())),
-        responses: Arc::new(Mutex::new(vec![Ok(json!({
-            "result": packet_sent_endpoint_v2_data(),
-        }))])),
-    };
-    let getter = StaticProviderConfig::new(
-        indexmap::IndexMap::from([(
-            "ethereum".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://rpc.example".to_string())],
-                quorum: Some(1),
-            },
-        )]),
-        Some(&["ethereum".to_string()]),
-    )
-    .unwrap();
-    let resolver = EvmPacketSentResolver::new(
-        &ProviderSnapshotHandle::from_getter(&getter),
-        transport,
-        evm_packet_sent_resolver_config("V302"),
-    );
-
-    let mut request = evm_packet_sent_request("V302");
-    request.nonce += 1;
-    let error = resolver
-        .get_lz_sent_event("0xtx", &request)
-        .await
-        .unwrap_err();
-
-    let message = error.to_string();
-    assert!(message.contains("trusted PacketSent emitter"), "{message}");
-    assert!(
-        message.contains("does not match the requested pathway identity"),
-        "{message}"
-    );
+        assert!(
+            matches!(&error, AppCoreError::BadRequest(message)
+                if message.ends_with(pillar_core::PACKET_IDENTITY_MISMATCH_ERROR_SUFFIX)),
+            "{error:?}"
+        );
+    }
 }
 
 #[test]
@@ -527,96 +509,97 @@ fn lz_message_id_match_binds_full_pathway_identity() {
     }
 }
 
+/// Upstream compares sender and receiver with `===` against `formatPathwayId`'s
+/// rendering, so only that exact string matches: the chain-native and padded
+/// spellings LayerZero Scan shows are an upstream 400 and must not match here.
 #[test]
-fn lz_message_id_matches_stellar_strkey_contract_receiver_like_layerzero_scan() {
-    // Real production constant: this StrKey is the Stellar mainnet ULN302
-    // contract address (`STELLAR_ULN_302_MAINNET` in pillar-layerzero), and
-    // its 32-byte payload is `STELLAR_ULN_302_MAINNET_BYTES`. LayerZero Scan
-    // (and any Stellar-aware caller) reports Stellar addresses as StrKey,
-    // never as the raw hex the packet decodes to.
-    let mut expected = evm_packet_sent_request("V302");
-    expected.pathway_id.extra["receiver"] =
-        Value::from("CA5R2JQYRJXFLWHE3XLLIO32HMF4MIDYY2NLWMGYYQDWKU6BTXL7URJI");
-    let mut actual = expected.clone();
-    actual.pathway_id.extra["receiver"] =
-        Value::from("0x3b1d26188a6e55d8e4ddd6b43b7a3b0bc62078c69abb30d8c4076553c19dd7fa");
-    assert!(lz_message_id_matches(&expected, &actual));
+fn lz_message_id_matches_only_upstreams_rendering_of_each_address() {
+    let evm = format!("0x{}{}", "00".repeat(12), "1a".repeat(20));
+    let evm_rendered = format!("0x{}", "1a".repeat(20));
+    let wide = format!("0x{}", "3b".repeat(32));
+    let solana = format!("0x{}", "07".repeat(32));
+    let solana_rendered = bs58::encode(vec![7u8; 32]).into_string();
+    let zero = format!("0x{}", "00".repeat(32));
+    let id = |src: &str, sender: &str, dst: &str, receiver: &str| {
+        let mut id = evm_packet_sent_request("V302");
+        id.pathway_id.src_chain_name = src.to_string();
+        id.pathway_id.dst_chain_name = dst.to_string();
+        id.pathway_id.extra["sender"] = Value::from(sender);
+        id.pathway_id.extra["receiver"] = Value::from(receiver);
+        id
+    };
+    // (event as resolved, request upstream accepts, key, spellings upstream refuses)
+    for (event, accepted, key, refused) in [
+        (
+            id("ethereum", &evm, "aptos", &wide),
+            id("ethereum", &evm_rendered, "aptos", &wide),
+            "sender",
+            vec![
+                evm.clone(),
+                format!("0x{}", "1A".repeat(20)),
+                "1a".repeat(20),
+            ],
+        ),
+        (
+            id("ethereum", &evm, "stellar", &wide),
+            id("ethereum", &evm_rendered, "stellar", &wide),
+            "receiver",
+            vec![
+                "CA5R2JQYRJXFLWHE3XLLIO32HMF4MIDYY2NLWMGYYQDWKU6BTXL7URJI".to_string(),
+                format!("0x{}", "3B".repeat(32)),
+            ],
+        ),
+        (
+            id("ethereum", &evm, "ton", &wide),
+            id("ethereum", &evm_rendered, "ton", &wide),
+            "receiver",
+            vec![format!("0:{}", "3b".repeat(32))],
+        ),
+        (
+            id("ethereum", &evm, "canton", &wide),
+            id("ethereum", &evm_rendered, "canton", &wide),
+            "receiver",
+            vec![
+                format!("0x{}", "3b".repeat(20)),
+                format!("0x{}", "3B".repeat(32)),
+            ],
+        ),
+        (
+            id("solana", &solana, "ethereum", &evm),
+            id("solana", &solana_rendered, "ethereum", &evm_rendered),
+            "sender",
+            vec![solana.clone()],
+        ),
+        (
+            id("aptos", &zero, "ethereum", &evm),
+            id("aptos", &zero, "ethereum", &evm_rendered),
+            "sender",
+            vec!["0x0".to_string(), "0x00".to_string()],
+        ),
+    ] {
+        assert!(
+            lz_message_id_matches(&accepted, &event),
+            "{key}: {accepted:?}"
+        );
+        for alias in refused {
+            let mut request = accepted.clone();
+            request.pathway_id.extra[key] = Value::from(alias.as_str());
+            assert!(!lz_message_id_matches(&request, &event), "{alias}");
+        }
+    }
 }
 
+/// Upstream keeps only the last 20 bytes of an EVM-chain address; two different
+/// 32-byte senders sharing them stay two senders here.
 #[test]
-fn lz_message_id_matches_stellar_strkey_account_sender_like_layerzero_scan() {
-    let mut expected = evm_packet_sent_request("V302");
-    expected.pathway_id.extra["sender"] =
-        Value::from("GAIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCF6M");
-    let mut actual = expected.clone();
-    // The G-account StrKey above encodes 32 bytes of 0x11.
-    actual.pathway_id.extra["sender"] = Value::from(format!("0x{}", "11".repeat(32)).as_str());
-    assert!(lz_message_id_matches(&expected, &actual));
-}
-
-#[test]
-fn lz_message_id_rejects_invalid_stellar_strkey_checksum() {
-    let mut expected = evm_packet_sent_request("V302");
-    // Last character flipped, breaking the CRC16 checksum.
-    expected.pathway_id.extra["receiver"] =
-        Value::from("CA5R2JQYRJXFLWHE3XLLIO32HMF4MIDYY2NLWMGYYQDWKU6BTXL7URJJ");
-    let mut actual = expected.clone();
-    actual.pathway_id.extra["receiver"] =
-        Value::from("0x3b1d26188a6e55d8e4ddd6b43b7a3b0bc62078c69abb30d8c4076553c19dd7fa");
-    assert!(!lz_message_id_matches(&expected, &actual));
-}
-
-#[test]
-fn lz_message_id_matches_ton_raw_address_receiver_like_upstream_fixtures() {
-    // This codebase's own TON payload-builder fixture
-    // (`pillar-layerzero::other_non_evm::ton::SOURCE_VECTOR_DVN`) uses this
-    // exact "raw" `workchain:hex` address form for TON.
-    let mut expected = evm_packet_sent_request("V302");
-    expected.pathway_id.extra["receiver"] =
-        Value::from("0:3333333333333333333333333333333333333333333333333333333333333333");
-    let mut actual = expected.clone();
-    actual.pathway_id.extra["receiver"] = Value::from(format!("0x{}", "33".repeat(32)).as_str());
-    assert!(lz_message_id_matches(&expected, &actual));
-}
-
-#[test]
-fn lz_message_id_matches_ton_friendly_address_sender_like_layerzero_scan() {
-    let mut expected = evm_packet_sent_request("V302");
-    expected.pathway_id.extra["sender"] =
-        Value::from("EQAiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIp3C");
-    let mut actual = expected.clone();
-    actual.pathway_id.extra["sender"] = Value::from(format!("0x{}", "22".repeat(32)).as_str());
-    assert!(lz_message_id_matches(&expected, &actual));
-}
-
-#[test]
-fn lz_message_id_matches_initia_bech32_receiver_like_layerzero_scan() {
-    // Initia is a Cosmos SDK chain: 20-byte account addresses, embedded in
-    // the 32-byte packet field the same way EVM's 20-byte addresses are
-    // (zero-padded), so the existing leading-zero-strip identity compare
-    // handles the width difference.
-    let mut expected = evm_packet_sent_request("V302");
-    expected.pathway_id.extra["receiver"] =
-        Value::from("init1xvenxvenxvenxvenxvenxvenxvenxvenjg92yg");
-    let mut actual = expected.clone();
-    actual.pathway_id.extra["receiver"] = Value::from(format!("0x{}", "33".repeat(20)).as_str());
-    assert!(lz_message_id_matches(&expected, &actual));
-}
-
-#[test]
-fn lz_message_id_matches_move_style_hex_address_across_padding_like_layerzero_scan() {
-    // Aptos, Sui, and Starknet accounts are natively 0x-hex, but real
-    // clients (LayerZero Scan included) often report them without the
-    // packet's full 32-byte zero-padding. No new decode branch is needed
-    // here — the existing leading-zero-strip hex compare already covers it,
-    // the same way it already does for 20-byte EVM addresses.
-    let mut expected = evm_packet_sent_request("V302");
-    expected.pathway_id.extra["receiver"] =
-        Value::from("0x4e65a6e5a409c9fc43ef184a642ceb490fd29b238f99c93e69e5cf11879fdf");
-    let mut actual = expected.clone();
-    actual.pathway_id.extra["receiver"] =
-        Value::from("0x004e65a6e5a409c9fc43ef184a642ceb490fd29b238f99c93e69e5cf11879fdf");
-    assert!(lz_message_id_matches(&expected, &actual));
+fn evm_rendering_refuses_a_non_zero_upper_twelve_bytes() {
+    let mut actual = evm_packet_sent_request("V302");
+    actual.pathway_id.extra["sender"] =
+        Value::from(format!("0x{}{}", "ff".repeat(12), "11".repeat(20)));
+    assert!(!lz_message_id_matches(
+        &evm_packet_sent_request("V302"),
+        &actual
+    ));
 }
 
 #[tokio::test]
@@ -632,10 +615,10 @@ async fn evm_packet_sent_resolver_decodes_legacy_uln_v2_packet_log() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "ethereum".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://eth-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://eth-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["ethereum".to_string()]),
     )
@@ -644,13 +627,10 @@ async fn evm_packet_sent_resolver_decodes_legacy_uln_v2_packet_log() {
     config.chain_name_by_eid.insert(101, "ethereum".to_string());
     config.chain_name_by_eid.insert(102, "bsc".to_string());
     config
-        .uln_version_by_send_library_address_by_chain_name
+        .packet_sent_bindings_by_chain_name
         .get_mut("ethereum")
         .unwrap()
-        .insert(
-            "0x4444444444444444444444444444444444444444".to_string(),
-            "V2".to_string(),
-        );
+        .uln_v2 = Some("0x4444444444444444444444444444444444444444".to_string());
     let resolver = EvmPacketSentResolver::new(
         &ProviderSnapshotHandle::from_getter(&getter),
         transport,
@@ -669,7 +649,16 @@ async fn evm_packet_sent_resolver_decodes_legacy_uln_v2_packet_log() {
         sent_event.extra["packetEmitAddress"],
         "0x4444444444444444444444444444444444444444"
     );
-    assert_eq!(sent_event.extra["options"], "0x");
+    assert!(
+        !sent_event.extra.contains_key("options"),
+        "a ULNv2 Packet carries no options: {:?}",
+        sent_event.extra
+    );
+    assert!(
+        !sent_event.extra.contains_key("guid"),
+        "a ULNv2 Packet has no guid to report: {:?}",
+        sent_event.extra
+    );
 }
 
 #[tokio::test]
@@ -685,23 +674,20 @@ async fn evm_packet_sent_resolver_uses_uln301_log_address_as_send_library() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "ethereum".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://eth-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://eth-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["ethereum".to_string()]),
     )
     .unwrap();
     let mut config = evm_packet_sent_resolver_config("V302");
     config
-        .uln_version_by_send_library_address_by_chain_name
+        .packet_sent_bindings_by_chain_name
         .get_mut("ethereum")
         .unwrap()
-        .insert(
-            "0x4444444444444444444444444444444444444444".to_string(),
-            "V301".to_string(),
-        );
+        .send_uln_301 = Some("0x4444444444444444444444444444444444444444".to_string());
     let resolver = EvmPacketSentResolver::new(
         &ProviderSnapshotHandle::from_getter(&getter),
         transport,
@@ -737,10 +723,10 @@ async fn packet_sent_resolver_decodes_solana_program_return_packet() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "solana".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["solana".to_string()]),
     )
@@ -808,10 +794,10 @@ async fn packet_sent_resolver_matches_base58_solana_sender_like_layerzero_scan()
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "solana".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["solana".to_string()]),
     )
@@ -841,10 +827,10 @@ async fn packet_sent_resolver_rejects_failed_solana_transaction() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "solana".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["solana".to_string()]),
     )
@@ -860,8 +846,12 @@ async fn packet_sent_resolver_rejects_failed_solana_transaction() {
         .await
         .unwrap_err();
 
-    assert!(matches!(error, AppCoreError::BadRequest(_)));
-    assert!(error.to_string().starts_with("Solana transaction failed"));
+    // Upstream's extractor drops a failed transaction and its sdk throws a plain
+    // `Transaction not found` (`common-solana/src/events.ts:55`).
+    assert_eq!(
+        error,
+        AppCoreError::Internal("Transaction not found".to_string())
+    );
 }
 
 #[tokio::test]
@@ -876,10 +866,10 @@ async fn packet_sent_resolver_rejects_untrusted_solana_program_return() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "solana".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["solana".to_string()]),
     )
@@ -895,9 +885,10 @@ async fn packet_sent_resolver_rejects_untrusted_solana_program_return() {
         .await
         .unwrap_err();
 
-    assert!(error
-        .to_string()
-        .contains("trusted Solana PacketSent event"));
+    assert_eq!(
+        error,
+        AppCoreError::Internal("Transaction not found".to_string())
+    );
 }
 
 #[tokio::test]
@@ -918,10 +909,10 @@ async fn packet_sent_resolver_rejects_untrusted_solana_send_library() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "solana".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["solana".to_string()]),
     )
@@ -937,9 +928,10 @@ async fn packet_sent_resolver_rejects_untrusted_solana_send_library() {
         .await
         .unwrap_err();
 
-    assert!(error
-        .to_string()
-        .contains("trusted Solana PacketSent event"));
+    assert_eq!(
+        error,
+        AppCoreError::Internal("Could not find sentEvent that matches lzMessageId".to_string())
+    );
 }
 
 #[tokio::test]
@@ -953,10 +945,10 @@ async fn packet_sent_resolver_rejects_trusted_return_without_packet_sent_event()
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "solana".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["solana".to_string()]),
     )
@@ -972,7 +964,10 @@ async fn packet_sent_resolver_rejects_trusted_return_without_packet_sent_event()
         .await
         .unwrap_err();
 
-    assert!(error.to_string().contains("PacketSent event"));
+    assert_eq!(
+        error,
+        AppCoreError::Internal("Transaction not found".to_string())
+    );
 }
 
 #[tokio::test]
@@ -981,10 +976,10 @@ async fn packet_sent_resolver_derives_solana_chain_and_version_from_packet() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "solana".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["solana".to_string()]),
     )
@@ -1034,10 +1029,10 @@ async fn packet_sent_resolver_skips_solana_program_return_false_positive_packet(
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "solana".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["solana".to_string()]),
     )
@@ -1078,10 +1073,10 @@ async fn an_accepted_refresh_moves_where_the_signing_path_dispatches() {
     let serving = StaticProviderConfig::new(
         pillar_config::ProviderConfigs::from([(
             "ethereum".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://booted.example/".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://booted.example/".to_string())],
+                1,
+            ),
         )]),
         None,
     )
@@ -1113,10 +1108,10 @@ async fn an_accepted_refresh_moves_where_the_signing_path_dispatches() {
 
     let candidate = providers.candidate(pillar_config::ProviderConfigs::from([(
         "ethereum".to_string(),
-        ProviderConfig {
-            uris: vec![ProviderUri::Uri("https://refreshed.example/".to_string())],
-            quorum: Some(1),
-        },
+        ProviderConfig::with_distinct_entities(
+            vec![ProviderUri::Uri("https://refreshed.example/".to_string())],
+            1,
+        ),
     )]));
     providers.publish(candidate);
 
@@ -1150,10 +1145,10 @@ async fn move_quorum_failure_records_a_provider_request_error() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "aptos".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://aptos.example/".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://aptos.example/".to_string())],
+                1,
+            ),
         )]),
         None,
     )
@@ -1206,12 +1201,12 @@ async fn ton_quorum_failure_records_a_provider_request_error() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "ton".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri(
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri(
                     "https://ton.example/?v3-endpoint=https://ton.example/v3".to_string(),
                 )],
-                quorum: Some(1),
-            },
+                1,
+            ),
         )]),
         None,
     )
@@ -1226,7 +1221,8 @@ async fn ton_quorum_failure_records_a_provider_request_error() {
         &ProviderSnapshotHandle::from_getter(&getter),
         RecordingTransport {
             calls: Arc::new(Mutex::new(Vec::new())),
-            responses: Arc::new(Mutex::new(vec![Err("provider unreachable".to_string())])),
+            // One refusal for each of upstream's three trace endpoints.
+            responses: Arc::new(Mutex::new(vec![Err("provider unreachable".to_string()); 3])),
         },
         config,
     )
@@ -1268,16 +1264,16 @@ async fn a_skipped_ton_uri_does_not_count_as_a_quorum_failure() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "ton".to_string(),
-            ProviderConfig {
-                uris: vec![
+            ProviderConfig::with_distinct_entities(
+                vec![
                     ProviderUri::Uri(
                         "https://ton.example/?v3-endpoint=https://ton.example/v3".to_string(),
                     ),
                     // No v3-endpoint: skipped before a future is pushed.
                     ProviderUri::Uri("https://ton-broken.example/".to_string()),
                 ],
-                quorum: Some(1),
-            },
+                1,
+            ),
         )]),
         None,
     )
@@ -1292,7 +1288,9 @@ async fn a_skipped_ton_uri_does_not_count_as_a_quorum_failure() {
         &ProviderSnapshotHandle::from_getter(&getter),
         RecordingTransport {
             calls: Arc::new(Mutex::new(Vec::new())),
-            responses: Arc::new(Mutex::new(vec![Ok(json!({"trace": []}))])),
+            responses: Arc::new(Mutex::new(vec![Ok(
+                json!({"transaction": {"in_msg": null}, "children": []}),
+            )])),
         },
         config,
     )
@@ -1349,10 +1347,10 @@ async fn runtime_evm_resolver_maps_a_read_channel_pathway_like_typescript() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "ethereum".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://eth-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://eth-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["ethereum".to_string()]),
     )
@@ -1417,19 +1415,22 @@ async fn no_non_evm_chain_falls_through_to_the_evm_receipt_decode() {
         let getter = StaticProviderConfig::new(
             indexmap::IndexMap::from([(
                 chain_name.clone(),
-                ProviderConfig {
-                    uris: vec![ProviderUri::Uri(format!("https://{chain_name}.example/"))],
-                    quorum: Some(1),
-                },
+                ProviderConfig::with_distinct_entities(
+                    vec![ProviderUri::Uri(format!("https://{chain_name}.example/"))],
+                    1,
+                ),
             )]),
             Some(std::slice::from_ref(chain_name)),
         )
         .unwrap();
         let calls = Arc::new(Mutex::new(Vec::new()));
         let mut config = evm_packet_sent_resolver_config("V302");
-        config.trusted_packet_emitters_by_chain_name.insert(
+        config.packet_sent_bindings_by_chain_name.insert(
             chain_name.clone(),
-            HashSet::from(["0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".to_string()]),
+            EvmPacketSentBindings {
+                endpoint_v2: "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".to_string(),
+                ..EvmPacketSentBindings::default()
+            },
         );
         let resolver = EvmPacketSentResolver::new(
             &ProviderSnapshotHandle::from_getter(&getter),
@@ -1548,4 +1549,109 @@ fn path_segment_encoding_cannot_shorten_the_request_path() {
             "{id} must survive parsing unchanged"
         );
     }
+}
+
+/// Upstream's Starknet and Stellar endpoint sdks throw `NonRetryableError('Transaction
+/// failed for tx ...')` (a 500) for a failed transaction and `Packet does not match
+/// lzMessageId` (remapped to the 400 `cannot find packet event`) when no trusted
+/// PacketSent matches (`endpoint/starknet/index.ts:210-242`,
+/// `endpoint/stellar/index.ts:263-289`).
+#[tokio::test]
+async fn starknet_and_stellar_resolution_failures_match_upstream() {
+    for (chain, failed, succeeded) in [
+        (
+            "starknet",
+            json!({ "execution_status": "REVERTED", "events": [] }),
+            json!({ "execution_status": "SUCCEEDED", "block_hash": "0x1", "events": [] }),
+        ),
+        (
+            "stellar",
+            json!({ "status": "FAILED" }),
+            json!({ "status": "SUCCESS" }),
+        ),
+    ] {
+        let mut request = evm_packet_sent_request("V302");
+        request.pathway_id.src_chain_name = chain.to_string();
+        for (transaction, expected_mismatch) in [(failed, false), (succeeded, true)] {
+            let transport = RecordingTransport {
+                calls: Arc::new(Mutex::new(Vec::new())),
+                responses: Arc::new(Mutex::new(vec![Ok(json!({ "result": transaction }))])),
+            };
+            let getter = StaticProviderConfig::new(
+                indexmap::IndexMap::from([(
+                    chain.to_string(),
+                    ProviderConfig::with_distinct_entities(
+                        vec![ProviderUri::Uri("https://rpc.example".to_string())],
+                        1,
+                    ),
+                )]),
+                Some(&[chain.to_string()]),
+            )
+            .unwrap();
+            let resolver = EvmPacketSentResolver::new(
+                &ProviderSnapshotHandle::from_getter(&getter),
+                transport,
+                evm_packet_sent_resolver_config("V302"),
+            );
+
+            let error = resolver
+                .get_lz_sent_event("0xtx", &request)
+                .await
+                .unwrap_err();
+
+            if expected_mismatch {
+                assert!(
+                    matches!(&error, AppCoreError::BadRequest(message)
+                        if message.ends_with(pillar_core::PACKET_IDENTITY_MISMATCH_ERROR_SUFFIX)),
+                    "{chain}: {error:?}"
+                );
+            } else {
+                assert_eq!(
+                    error,
+                    AppCoreError::Internal("Transaction failed for tx 0xtx".to_string()),
+                    "{chain}"
+                );
+            }
+        }
+    }
+}
+
+/// A successful Starknet receipt without a block hash is upstream's plain `Error`
+/// (a 500), checked before any event is read (`endpoint/starknet/index.ts:214-216`).
+#[tokio::test]
+async fn starknet_receipt_without_block_hash_fails_like_upstream() {
+    let mut request = evm_packet_sent_request("V302");
+    request.pathway_id.src_chain_name = "starknet".to_string();
+    let transport = RecordingTransport {
+        calls: Arc::new(Mutex::new(Vec::new())),
+        responses: Arc::new(Mutex::new(vec![Ok(
+            json!({ "result": { "execution_status": "SUCCEEDED", "events": [] } }),
+        )])),
+    };
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "starknet".to_string(),
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://rpc.example".to_string())],
+                1,
+            ),
+        )]),
+        Some(&["starknet".to_string()]),
+    )
+    .unwrap();
+    let resolver = EvmPacketSentResolver::new(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        transport,
+        evm_packet_sent_resolver_config("V302"),
+    );
+
+    let error = resolver
+        .get_lz_sent_event("0xtx", &request)
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        AppCoreError::Internal("Block hash not yet populated for tx 0xtx".to_string())
+    );
 }

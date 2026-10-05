@@ -1,4 +1,5 @@
 use super::*;
+use pillar_core::AppCoreError;
 
 #[async_trait]
 impl<T> ServerApp for RuntimeServerApp<T>
@@ -14,7 +15,14 @@ where
             // consumers of it can straddle a refresh.
             return self
                 .providers
-                .pin_for_request(signing_app.sign_request_v1(input))
+                .pin_for_request(async {
+                    self.controls
+                        .scope(
+                            self.providers.generation(),
+                            signing_app.sign_request_v1(input),
+                        )
+                        .await
+                })
                 .await;
         }
         Err(AppError::Internal(
@@ -31,7 +39,14 @@ where
             // consumers of it can straddle a refresh.
             return self
                 .providers
-                .pin_for_request(signing_app.sign_request_v2(input))
+                .pin_for_request(async {
+                    self.controls
+                        .scope(
+                            self.providers.generation(),
+                            signing_app.sign_request_v2(input),
+                        )
+                        .await
+                })
                 .await;
         }
         Err(AppError::Internal(
@@ -41,7 +56,13 @@ where
 
     async fn get_signer_info(&self, chain_name: String) -> Result<Vec<SignerInfo>, AppError> {
         if let Some(signing_app) = &self.signing_app {
-            return signing_app.get_signer_info(chain_name).await;
+            return self
+                .controls
+                .scope(
+                    self.providers.generation(),
+                    signing_app.get_signer_info(chain_name),
+                )
+                .await;
         }
         if self
             .providers
@@ -72,8 +93,11 @@ where
     }
 
     async fn get_provider_health(&self) -> Result<ProviderHealthSnapshot, AppError> {
-        self.provider_health_cache
-            .read()
+        self.controls
+            .scope(
+                self.providers.generation(),
+                self.provider_health_cache.read(),
+            )
             .await
             .map_err(AppError::Internal)
     }
@@ -101,9 +125,13 @@ where
             return Ok(cached);
         }
         let report = serde_json::to_value(
-            self.provider_health_source
-                .get_provider_health_report()
-                .await,
+            self.controls
+                .scope(
+                    generation,
+                    self.provider_health_source.get_provider_health_report(),
+                )
+                .await
+                .map_err(|error| AppError::from(AppCoreError::from(error)))?,
         )
         .map_err(|error| AppError::Internal(error.to_string()))?;
         self.provider_health_report_cache
@@ -132,8 +160,11 @@ where
         let ready = self
             .providers
             .pin_for_request(async {
-                self.provider_health_cache
-                    .read()
+                self.controls
+                    .scope(
+                        self.providers.generation(),
+                        self.provider_health_cache.read(),
+                    )
                     .await
                     .map(|health| {
                         self.providers
@@ -145,7 +176,7 @@ where
                     .unwrap_or(false)
             })
             .await;
-        if ready {
+        if ready && self.controls.healthy().await {
             pillar_api::ReadinessStatus::Ready
         } else {
             pillar_api::ReadinessStatus::NotReady
@@ -155,5 +186,8 @@ where
         self.signing_app
             .as_ref()
             .and_then(|signing_app| signing_app.metrics())
+    }
+    fn execution_resources(&self) -> Option<Arc<pillar_core::execution::ExecutionResources>> {
+        Some(self.controls.resources.clone())
     }
 }

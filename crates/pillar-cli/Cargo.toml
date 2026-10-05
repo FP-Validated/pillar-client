@@ -17,6 +17,8 @@ hyper-util.workspace = true
 pillar-api = { path = "../pillar-api" }
 pillar-config = { path = "../pillar-config" }
 pillar-runtime = { path = "../pillar-runtime" }
+pillar-core = { path = "../pillar-core" }
+parking_lot.workspace = true
 anyhow.workspace = true
 tokio.workspace = true
 tower.workspace = true
@@ -24,6 +26,9 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+async-trait.workspace = true
+serde_json.workspace = true
+pillar-metrics = { path = "../pillar-metrics" }
 # The connection-ceiling test drives tokio's clock directly. Without this the
 # test only compiles when another crate in the graph happens to enable the
 # feature, so `cargo test -p pillar-cli` alone would fail.

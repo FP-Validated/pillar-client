@@ -42,15 +42,10 @@ async fn runtime_layerzero_matrix_routes_completed_non_evm_builders() {
     assert!(recorder.calls.lock().await.is_empty());
 }
 
-/// A registered destination that refuses is not the same as an unregistered
-/// one. If Stellar were simply left out, the router would fall through to the
-/// default EVM builder and hand back an EVM-shaped attestation for a Stellar
-/// packet - a wrong answer instead of no answer. It must be present and refuse.
 #[tokio::test]
-async fn runtime_layerzero_matrix_refuses_stellar_for_unconfirmed_deployment() {
+async fn runtime_layerzero_matrix_builds_stellar_for_confirmed_deployment() {
     let (hash_builders, recorder) = runtime_matrix_hash_builders(&["ethereum", "stellar"]);
-
-    let error = hash_builders[ULN_VERSION_V302]
+    let result = hash_builders[ULN_VERSION_V302]
         .build_dvn_hash_call_data(
             &matrix_sent_event("stellar", 30_600),
             &message_context(
@@ -59,50 +54,28 @@ async fn runtime_layerzero_matrix_refuses_stellar_for_unconfirmed_deployment() {
             ),
         )
         .await
-        .expect_err("the pinned Stellar deployment is unconfirmed, so it must not build");
-
-    let rendered = format!("{error:?}");
-    // The pinned generation, the published one, and the consequence: an
-    // operator reading this line should not have to find the commit.
-    for needle in [
-        "CA5R2JQYRJXFLWHE3XLLIO32HMF4MIDYY2NLWMGYYQDWKU6BTXL7URJI",
-        "CCV4HEII3UC65THWGSRM2DVIJLB6HS6YMUHDTTHUECX2RHTP5FA2GOBA",
-        "signed over",
-    ] {
-        assert!(
-            rendered.contains(needle),
-            "the refusal must name {needle}, got {rendered}"
-        );
-    }
+        .expect("generation-2 Stellar deployment must build");
+    assert_eq!(
+        result.details["dvnCallData"]["targetContract"],
+        crate::layerzero_runtime::config::stellar_uln_302_for_environment("mainnet").unwrap()
+    );
+    assert_eq!(result.details["ulnCallData"]["methodName"], "verify");
     assert!(recorder.calls.lock().await.is_empty());
 }
 
-/// The reachable case, and the reason the gate lives in the builder rather than
-/// in the already-signed validator.
-///
-/// `PillarApp::sign_request_v2` only runs the payload-signed check when the
-/// request carries a `dvnAddress` (`pillar-core/src/lib.rs:602-609`), and the
-/// validator's own Stellar arm refuses only there. A request without one skips
-/// that arm entirely, so before this gate existed it went all the way to a
-/// signature over the superseded ULN302 id. The refusal must therefore not
-/// depend on `dvnAddress`, and it must be the provenance refusal rather than a
-/// complaint about the missing address.
 #[tokio::test]
-async fn runtime_layerzero_matrix_refuses_stellar_even_without_a_dvn_address() {
+async fn runtime_layerzero_matrix_refuses_stellar_without_dvn_address() {
     let (hash_builders, recorder) = runtime_matrix_hash_builders(&["ethereum", "stellar"]);
-
     let error = hash_builders[ULN_VERSION_V302]
         .build_dvn_hash_call_data(
             &matrix_sent_event("stellar", 30_600),
             &message_context(1_900_000_000, None),
         )
         .await
-        .expect_err("a request without a dvnAddress must not slip past the gate");
-
-    let rendered = format!("{error:?}");
+        .expect_err("upstream requires a Stellar dvnAddress");
     assert!(
-        rendered.contains("stellar deployment for mainnet is unconfirmed"),
-        "the refusal must be about provenance, not about the absent dvnAddress: {rendered}"
+        format!("{error:?}").contains("Stellar: DVN Address is required for verify payload"),
+        "expected missing-DVN refusal, got {error:?}"
     );
     assert!(recorder.calls.lock().await.is_empty());
 }
@@ -124,6 +97,49 @@ async fn source_chain_parity_routes_movement_destination() {
         "c33752e0220faf79e45385dd73fb28d681dcd9f1569a1480725507c1f3c3aba9"
     );
     assert_eq!(result.details["ulnCallData"]["methodName"], "hashPropose");
+    assert!(recorder.calls.lock().await.is_empty());
+}
+
+/// ULN V2 to a Move destination: upstream refuses any vId with its 500. With `skipVId` only
+/// an EVM-sent packet to the pinned Aptos oracle's EndpointV1 id is served; these EndpointV2
+/// ids and the other Move chains are refused before any hash.
+#[tokio::test]
+async fn move_destinations_refuse_uln_v2_without_dialling() {
+    let (hash_builders, recorder) =
+        runtime_matrix_hash_builders(&["ethereum", "aptos", "initia", "movement"]);
+
+    for (chain_name, dst_eid) in [("aptos", 30_108), ("initia", 30_326), ("movement", 30_325)] {
+        let mut sent_event = matrix_sent_event(chain_name, dst_eid);
+        sent_event.lz_message_id.uln_send_version = Value::from("V2");
+
+        let error = hash_builders["V2"]
+            .build_dvn_hash_call_data(&sent_event, &message_context(1_900_000_000, None))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error,
+            AppCoreError::Internal("VId is not supported on aptos yet".to_string()),
+            "{chain_name}"
+        );
+
+        let error = hash_builders["V2"]
+            .build_dvn_hash_call_data(
+                &sent_event,
+                &SigningContext::Message {
+                    expiration: 1_900_000_000,
+                    skip_v_id: Some(true),
+                    dvn_address: None,
+                    block_confirmation: 64,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, AppCoreError::BadRequest(message)
+                if message.starts_with("ULN V2 verification without a vId is served only")),
+            "{chain_name}: {error}"
+        );
+    }
     assert!(recorder.calls.lock().await.is_empty());
 }
 
@@ -206,7 +222,17 @@ const HASH_MATRIX_CASES: &[HashMatrixCase] = &[
     // `runtime_layerzero_matrix_refuses_stellar_for_unconfirmed_deployment`.
 ];
 
-fn runtime_matrix_hash_builders(
+pub(super) fn runtime_matrix_hash_builders(
+    chain_names: &[&str],
+) -> (
+    HashMap<String, Arc<dyn HashCallDataBuilder>>,
+    Arc<RuntimeLayerZeroRecorder>,
+) {
+    runtime_hash_builders_for("mainnet", chain_names)
+}
+
+pub(super) fn runtime_hash_builders_for(
+    environment: &str,
     chain_names: &[&str],
 ) -> (
     HashMap<String, Arc<dyn HashCallDataBuilder>>,
@@ -219,10 +245,10 @@ fn runtime_matrix_hash_builders(
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "ethereum".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://eth-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://eth-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["ethereum".to_string()]),
     )
@@ -236,7 +262,7 @@ fn runtime_matrix_hash_builders(
     let parts = runtime_layerzero_parts_from_evm_config(
         &ProviderSnapshotHandle::from_getter(&getter),
         transport,
-        "mainnet",
+        environment,
         &chain_names
             .iter()
             .copied()
@@ -256,9 +282,62 @@ fn runtime_matrix_hash_builders(
         parts.uln_v3_payload_builder,
         parts.uln_read_v1_payload_builder,
         parts.read_payload_resolver,
-        test_v_ids("mainnet"),
+        test_v_ids(environment),
     );
     (hash_builders, recorder)
+}
+
+pub(super) fn runtime_ton_hash_builders_for(
+    environment: &str,
+    transport: RecordingTransport,
+) -> HashMap<String, Arc<dyn HashCallDataBuilder>> {
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([
+            (
+                "ethereum".to_string(),
+                ProviderConfig::with_distinct_entities(
+                    vec![ProviderUri::Uri("https://eth-rpc.example".to_string())],
+                    1,
+                ),
+            ),
+            (
+                "ton".to_string(),
+                ProviderConfig::with_distinct_entities(
+                    vec![ProviderUri::Uri("https://ton-rpc.example".to_string())],
+                    1,
+                ),
+            ),
+        ]),
+        Some(&["ethereum".to_string(), "ton".to_string()]),
+    )
+    .unwrap();
+    let recorder = Arc::new(RuntimeLayerZeroRecorder::default());
+    let checks = Arc::new(FixedValidationChecks {
+        current_timestamp: 777,
+        calls: Arc::new(Mutex::new(Vec::new())),
+        ranges: Arc::new(Mutex::new(Vec::new())),
+    });
+    let parts = runtime_layerzero_parts_from_evm_config(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        transport,
+        environment,
+        &["ethereum".to_string(), "ton".to_string()],
+        RuntimeLayerZeroDependencyInputs {
+            uln_v2_payload_builder: recorder.clone(),
+            read_payload_resolver: recorder.clone(),
+            validation_checks: checks,
+            legacy_chain_name_resolver: Arc::new(FixedChainResolver),
+            metrics: Arc::new(tokio::sync::Mutex::new(pillar_metrics::PillarMetrics::new())),
+        },
+    )
+    .unwrap();
+    build_hash_call_data_builders(
+        parts.uln_v2_payload_builder,
+        parts.uln_v3_payload_builder,
+        parts.uln_read_v1_payload_builder,
+        parts.read_payload_resolver,
+        test_v_ids(environment),
+    )
 }
 
 fn message_context(expiration: i64, dvn_address: Option<&str>) -> SigningContext {
@@ -270,7 +349,7 @@ fn message_context(expiration: i64, dvn_address: Option<&str>) -> SigningContext
     }
 }
 
-fn matrix_sent_event(dst_chain_name: &str, dst_eid: u64) -> LzSentEvent {
+pub(super) fn matrix_sent_event(dst_chain_name: &str, dst_eid: u64) -> LzSentEvent {
     let guid = match dst_eid {
         30_300 => "0x559a5d9fef2142274e3bcb7db1047d80d607a60233dd4eaef69a04f6685abb78",
         30_500 => "0xa6bdeeafd6cfa10490474502c323d26d0145f1db96a133623f469c840f45a6af",

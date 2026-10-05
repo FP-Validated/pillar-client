@@ -1,0 +1,1 @@
+{"message":"parse arguments[2] failed, expect integer<u8>, caused by error: invalid type: string \"0\", expected u8","error_code":"invalid_input","vm_error_code":null}

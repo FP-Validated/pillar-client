@@ -121,6 +121,7 @@ where
         blocks: ReadBlocks<'_>,
     ) -> Result<String, AppCoreError> {
         let chain_name = self.chain_name_for_eid(target_eid)?;
+        crate::provider_health::rpc_scope(chain_name, async {
         let block_number =
             self.block_number_for_marker(chain_name, marker, blocks.resolved_markers)?;
         let pin = blocks
@@ -149,21 +150,20 @@ where
                     Ok(_permit) => {
                         eth_call_at_block(transport, url, headers, &to, &call_data, block).await
                     }
-                    Err(_) => Err(AppCoreError::Internal(
-                        "ReadV1002 RPC admission closed".to_string(),
-                    )),
+                    Err(_) => Err(AppCoreError::Admission(pillar_core::execution::BudgetError::Closed)),
                 };
                 (index, observation)
             });
         }
-        let mut accumulator = ExactQuorumAccumulator::new(provider_config.uris.len(), quorum);
+        let mut accumulator = ExactQuorumAccumulator::new(quorum, 0..provider_config.uris.len());
         while let Some((index, observation)) = requests.next().await {
-            accumulator.record(index, observation.ok().map(|value| (value.clone(), value)));
+            accumulator.record_result(index, observation.map(|value| Some((value.clone(), value))).map_err(RpcError::from))?;
             if let Some(result) = accumulator.unambiguous_result() {
                 return Ok(result);
             }
         }
         accumulator.finish("ReadV1002 eth_call")
+        }).await
     }
 
     async fn resolve_request_payload(

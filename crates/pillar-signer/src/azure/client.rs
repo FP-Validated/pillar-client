@@ -5,9 +5,15 @@ use azure_security_keyvault_keys::{
     KeyClient as AzureKeyClient,
 };
 
-use crate::azure::AzureKmsKeyId;
+use crate::azure::{parse_azure_kms_key_id, AzureKmsKeyId};
 use crate::types::SignerError;
 
+pub struct AzureEcPublicKey {
+    pub key_id: AzureKmsKeyId,
+    pub reference: String,
+    pub x: Vec<u8>,
+    pub y: Vec<u8>,
+}
 #[async_trait]
 pub trait AzureKmsClient: Send + Sync + 'static {
     async fn sign_es256k_digest(
@@ -19,7 +25,7 @@ pub trait AzureKmsClient: Send + Sync + 'static {
     async fn get_ec_public_key_coordinates(
         &self,
         key_id: &AzureKmsKeyId,
-    ) -> Result<(Vec<u8>, Vec<u8>), SignerError>;
+    ) -> Result<AzureEcPublicKey, SignerError>;
 }
 
 pub struct AzureKeyVaultKmsClient {
@@ -60,6 +66,17 @@ impl AzureKmsClient for AzureKeyVaultKmsClient {
             .map_err(|error| SignerError::Message(error.to_string()))?
             .into_model()
             .map_err(|error| SignerError::Message(error.to_string()))?;
+        if let Some(reference) = response.kid.as_deref() {
+            if parse_azure_kms_key_id(reference)? != *key_id {
+                return Err(SignerError::Message(
+                    "Azure Key Vault: signing key identity changed".into(),
+                ));
+            }
+        } else if pillar_core::audit::enabled() {
+            return Err(SignerError::Message(
+                "durable audit: Azure signing key identity missing".into(),
+            ));
+        }
         response
             .result
             .ok_or_else(|| SignerError::Message("Azure Key Vault: sign() failed".to_string()))
@@ -68,7 +85,7 @@ impl AzureKmsClient for AzureKeyVaultKmsClient {
     async fn get_ec_public_key_coordinates(
         &self,
         key_id: &AzureKmsKeyId,
-    ) -> Result<(Vec<u8>, Vec<u8>), SignerError> {
+    ) -> Result<AzureEcPublicKey, SignerError> {
         let key = self
             .client
             .get_key(
@@ -88,6 +105,21 @@ impl AzureKmsClient for AzureKeyVaultKmsClient {
                 key_id.display()
             ))
         })?;
+        let reference = jwk.kid.ok_or_else(|| {
+            SignerError::Message("Azure Key Vault: effective key version missing".into())
+        })?;
+        let resolved = parse_azure_kms_key_id(&reference)?;
+        if resolved.version.is_none()
+            || resolved.name != key_id.name
+            || key_id
+                .version
+                .as_ref()
+                .is_some_and(|version| Some(version) != resolved.version.as_ref())
+        {
+            return Err(SignerError::Message(
+                "Azure Key Vault: public key identity changed".into(),
+            ));
+        }
         let x = jwk.x.ok_or_else(|| {
             SignerError::Message(format!(
                 "Azure Key Vault: cannot find P-256K public key coordinates for {}",
@@ -100,6 +132,11 @@ impl AzureKmsClient for AzureKeyVaultKmsClient {
                 key_id.display()
             ))
         })?;
-        Ok((x, y))
+        Ok(AzureEcPublicKey {
+            key_id: resolved,
+            reference,
+            x,
+            y,
+        })
     }
 }

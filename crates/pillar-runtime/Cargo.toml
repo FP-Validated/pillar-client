@@ -34,6 +34,8 @@ pillar-signer = { path = "../pillar-signer" }
 google-cloud-storage.workspace = true
 hex.workspace = true
 indexmap.workspace = true
+num-bigint.workspace = true
+k256.workspace = true
 reqwest.workspace = true
 ripemd.workspace = true
 serde.workspace = true
@@ -43,9 +45,17 @@ serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 zeroize.workspace = true
+tokio-postgres.workspace = true
+tokio-postgres-rustls.workspace = true
+rustls.workspace = true
+webpki-roots.workspace = true
 
 [dev-dependencies]
+pillar-config = { path = "../pillar-config", features = ["test-support"] }
+axum.workspace = true
 url.workspace = true
+tower.workspace = true
+tracing-subscriber.workspace = true
 # `tokio::time::advance` for the provider-config age tests: paused-clock only,
 # never compiled into the binary.
 tokio = { workspace = true, features = ["test-util"] }

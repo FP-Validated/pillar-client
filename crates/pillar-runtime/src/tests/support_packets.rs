@@ -69,15 +69,11 @@ pub(super) fn evm_read_packet_sent_request() -> LzMessageId {
                 ("dstEid".to_string(), Value::from(30_101)),
                 (
                     "sender".to_string(),
-                    Value::from(
-                        "0x0000000000000000000000001111111111111111111111111111111111111111",
-                    ),
+                    Value::from("0x1111111111111111111111111111111111111111"),
                 ),
                 (
                     "receiver".to_string(),
-                    Value::from(
-                        "0x0000000000000000000000002222222222222222222222222222222222222222",
-                    ),
+                    Value::from("0x2222222222222222222222222222222222222222"),
                 ),
             ]),
         },
@@ -140,19 +136,17 @@ pub(super) fn evm_packet_sent_resolver_config(version: &str) -> EvmPacketSentRes
             (30_184, "base".to_string()),
             (30_367, "hyperliquid".to_string()),
         ]),
-        uln_version_by_send_library_address_by_chain_name: HashMap::from([(
+        packet_sent_bindings_by_chain_name: HashMap::from([(
             "ethereum".to_string(),
-            HashMap::from([(
-                "0x3333333333333333333333333333333333333333".to_string(),
-                version.to_string(),
-            )]),
-        )]),
-        trusted_packet_emitters_by_chain_name: HashMap::from([(
-            "ethereum".to_string(),
-            HashSet::from([
-                "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".to_string(),
-                "0x4444444444444444444444444444444444444444".to_string(),
-            ]),
+            EvmPacketSentBindings {
+                endpoint_v2: "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".to_string(),
+                endpoint_v2_send_library_versions: HashMap::from([(
+                    "0x3333333333333333333333333333333333333333".to_string(),
+                    version.to_string(),
+                )]),
+                send_uln_301: None,
+                uln_v2: None,
+            },
         )]),
         trusted_solana_endpoint_program_ids: HashSet::from([
             "76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6".to_string(),
@@ -164,6 +158,8 @@ pub(super) fn evm_packet_sent_resolver_config(version: &str) -> EvmPacketSentRes
         trusted_stellar_endpoint_addresses: HashSet::new(),
         trusted_ton_packet_emitters_by_chain_name: HashMap::new(),
         trusted_move_packet_emitters_by_chain_name: HashMap::new(),
+        aptos_v1_source: None,
+        max_eth_get_logs_block_range_by_chain_name: HashMap::new(),
     }
 }
 
@@ -177,15 +173,11 @@ pub(super) fn evm_packet_sent_request(uln_version: &str) -> LzMessageId {
                 ("dstEid".to_string(), Value::from(30_102)),
                 (
                     "sender".to_string(),
-                    Value::from(
-                        "0x0000000000000000000000001111111111111111111111111111111111111111",
-                    ),
+                    Value::from("0x1111111111111111111111111111111111111111"),
                 ),
                 (
                     "receiver".to_string(),
-                    Value::from(
-                        "0x0000000000000000000000002222222222222222222222222222222222222222",
-                    ),
+                    Value::from("0x2222222222222222222222222222222222222222"),
                 ),
             ]),
         },
@@ -260,15 +252,11 @@ pub(super) fn solana_packet_sent_request() -> LzMessageId {
                 ("dstEid".to_string(), Value::from(30_367)),
                 (
                     "sender".to_string(),
-                    Value::from(
-                        "0x07d14aef03aacfde37c37ac84805f0265d8936e95426b86af95b082f5a567f00",
-                    ),
+                    Value::from("XWxJJE6Dq8EgdnhMWYU587f7St4HJuWbBHPstV2GtKR"),
                 ),
                 (
                     "receiver".to_string(),
-                    Value::from(
-                        "0x0000000000000000000000004e41cfc3f3b19e29e323d2c36f8f202a1e151daf",
-                    ),
+                    Value::from("0x4e41cfc3f3b19e29e323d2c36f8f202a1e151daf"),
                 ),
             ]),
         },
@@ -287,15 +275,11 @@ pub(super) fn solana_false_positive_packet_request() -> LzMessageId {
                 ("dstEid".to_string(), Value::from(30_184)),
                 (
                     "sender".to_string(),
-                    Value::from(
-                        "0x1d724ce93b79bd557d70972315a0bab2a150919cba30923212f978acc4d8dc16",
-                    ),
+                    Value::from("2ywur16TTn1L5zJwu3G2AzTbKowEWnZreAmXgpCM3JJh"),
                 ),
                 (
                     "receiver".to_string(),
-                    Value::from(
-                        "0x000000000000000000000000940a319b75861014a220d9c6c144d108552b089b",
-                    ),
+                    Value::from("0x940a319b75861014a220d9c6c144d108552b089b"),
                 ),
             ]),
         },

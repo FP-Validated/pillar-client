@@ -5,7 +5,8 @@ mod kind;
 
 pub use base::{ChainAddress, PillarSignerAdapter, SignerInfo};
 pub use chains::{
-    AptosChain, EvmAddressChain, EvmChain, InitiaChain, PlainChain, SolanaChain, SuiChain, TonChain,
+    AptosChain, CantonChain, EvmAddressChain, EvmChain, InitiaChain, PlainChain, SolanaChain,
+    SuiChain, TonChain,
 };
 pub use kind::PillarSignerAdapterKind;
 

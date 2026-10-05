@@ -1,0 +1,122 @@
+//! Upstream's own Starknet source resolution (`EndpointV2StarknetSdk.getLZSentEvent`,
+//! `scripts/gasolina-parity/emit-starknet-source-events.ts`,
+//! `tests/gasolina_parity/starknet_source_events.json`) replayed through this resolver with the
+//! production starknet configuration.
+
+use super::move_source_events_tests::outcome_of;
+use super::*;
+
+const FIXTURE: &str = include_str!("../../tests/gasolina_parity/starknet_source_events.json");
+
+/// Pillar-stricter, not parity: upstream matches the identity alone, and the call data is built
+/// for the requested version, so a `V301` request for a `V302` packet is refused.
+const PILLAR_STRICTER: &[&str] = &["V301 request"];
+
+#[derive(Clone)]
+struct ScriptedStarknet {
+    receipt: Value,
+}
+
+#[async_trait]
+impl JsonRpcTransport for ScriptedStarknet {
+    async fn post_json(
+        &self,
+        _: String,
+        _: HashMap<String, String>,
+        body: Value,
+    ) -> Result<Value, String> {
+        assert_eq!(body["method"], "starknet_getTransactionReceipt");
+        Ok(json!({"jsonrpc": "2.0", "id": 1, "result": self.receipt}))
+    }
+
+    async fn get_json(&self, url: String, _: HashMap<String, String>) -> Result<Value, String> {
+        Err(format!("unexpected GET {url}"))
+    }
+}
+
+fn scripted_resolver(
+    environment: &str,
+    receipt: &Value,
+) -> EvmPacketSentResolver<ScriptedStarknet> {
+    let names = ["starknet".to_string(), "ethereum".to_string()];
+    let config = runtime_evm_layerzero_config(environment, &names).unwrap();
+    let providers = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "starknet".to_string(),
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://starknet.example/".to_string())],
+                1,
+            ),
+        )]),
+        Some(&["starknet".to_string()]),
+    )
+    .unwrap();
+    EvmPacketSentResolver::new(
+        &ProviderSnapshotHandle::from_getter(&providers),
+        ScriptedStarknet {
+            receipt: receipt.clone(),
+        },
+        config.packet_sent_resolver_config,
+    )
+}
+
+fn is_identity_mismatch(result: &Result<LzSentEvent, AppCoreError>) -> bool {
+    matches!(
+        result,
+        Err(AppCoreError::BadRequest(text)) if text.contains(pillar_core::PACKET_IDENTITY_MISMATCH_ERROR_SUFFIX)
+    )
+}
+
+#[tokio::test]
+async fn starknet_source_events_match_gasolina() {
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let environment = fixture["environment"].as_str().unwrap();
+    let tx_hash = fixture["txHash"].as_str().unwrap();
+    let mut mismatches = Vec::new();
+    let (mut exact, mut stricter_refused, mut dst_name_refused) = (0, 0, 0);
+    for scenario in fixture["scenarios"].as_array().unwrap() {
+        let name = scenario["name"].as_str().unwrap();
+        let theirs = &scenario["outcome"];
+        let request: LzMessageId = serde_json::from_value(scenario["request"].clone()).unwrap();
+        let result = scripted_resolver(environment, &scenario["receipt"])
+            .get_lz_sent_event(tx_hash, &request)
+            .await;
+        let difference = if PILLAR_STRICTER.contains(&name) {
+            assert!(theirs.get("event").is_some(), "{name}");
+            assert!(is_identity_mismatch(&result), "{name}: {result:?}");
+            stricter_refused += 1;
+            continue;
+        } else if theirs["error"] == "Packet does not match lzMessageId" {
+            (!is_identity_mismatch(&result)).then(|| format!("upstream 400, ours {result:?}"))
+        } else {
+            outcome_of(&result, theirs)
+        };
+        match difference {
+            Some(difference) => mismatches.push(format!("{name}: {difference}")),
+            None => exact += 1,
+        }
+        // Pillar-stricter, not parity: upstream would resolve these with any destination name.
+        if result.is_ok() {
+            let mut renamed = request.clone();
+            renamed.pathway_id.dst_chain_name = "starknet".to_string();
+            let renamed = scripted_resolver(environment, &scenario["receipt"])
+                .get_lz_sent_event(tx_hash, &renamed)
+                .await;
+            assert!(is_identity_mismatch(&renamed), "{name}: {renamed:?}");
+            dst_name_refused += 1;
+        }
+    }
+    assert!(
+        mismatches.is_empty(),
+        "{} mismatches:\n{}",
+        mismatches.len(),
+        mismatches.join("\n")
+    );
+    assert_eq!(
+        exact + stricter_refused,
+        23,
+        "every upstream scenario is replayed"
+    );
+    assert_eq!(stricter_refused, PILLAR_STRICTER.len());
+    assert_eq!(dst_name_refused, 7);
+}

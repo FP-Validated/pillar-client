@@ -12,13 +12,19 @@ workspace = true
 
 [dependencies]
 async-trait.workspace = true
+futures.workspace = true
 indexmap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 url.workspace = true
 zeroize.workspace = true
+pillar-core = { path = "../pillar-core" }
 
 [dev-dependencies]
 tokio.workspace = true
 tempfile = "3"
+
+[features]
+# Fixture constructors for dependent crates' tests; never enabled by a production build.
+test-support = []

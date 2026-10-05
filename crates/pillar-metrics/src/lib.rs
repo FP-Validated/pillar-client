@@ -4,7 +4,9 @@ use pillar_core::{SignStageObserver, SignStageStatus};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+mod http_accounting;
 mod primitives;
+pub use http_accounting::{normalized_method, HttpOutcomeGuard};
 
 use primitives::{normalize_path, CounterMetric, DerivedAgeGauge, GaugeMetric, HistogramMetric};
 
@@ -27,6 +29,9 @@ pub struct PillarMetrics {
     background_task_heartbeat_age_seconds: DerivedAgeGauge,
     signer_errors_total: CounterMetric,
     provider_request_errors_total: CounterMetric,
+    http_accounting: http_accounting::HttpAccounting,
+    execution: Option<Arc<pillar_core::execution::ExecutionResources>>,
+    audit_health: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
 
 pub struct PillarMetricsStageObserver {
@@ -68,6 +73,9 @@ impl Default for PillarMetrics {
 impl PillarMetrics {
     pub fn new() -> Self {
         Self {
+            http_accounting: http_accounting::HttpAccounting::default(),
+            execution: None,
+            audit_health: None,
             http_requests_total: CounterMetric::new(
                 "pillar_http_requests_total",
                 "Total HTTP requests handled by Pillar.",
@@ -96,7 +104,7 @@ impl PillarMetrics {
             ),
             background_task_heartbeat_age_seconds: DerivedAgeGauge::keyed(
                 "pillar_background_task_heartbeat_age_seconds",
-                "Seconds since each Pillar background loop last completed an iteration.",
+                "Seconds since each Pillar background loop began its last iteration.",
                 "task",
             ),
             signer_errors_total: CounterMetric::new(
@@ -113,6 +121,21 @@ impl PillarMetrics {
                 "Source-event resolution failures by chain and kind in Pillar; kind=quorum means provider quorum was not reached.",
             ),
         }
+    }
+
+    pub fn begin_http_request(
+        &mut self,
+        method: &str,
+        path: &str,
+        context: pillar_core::execution::RequestContext,
+    ) -> HttpOutcomeGuard {
+        self.http_accounting.begin(method, path, context)
+    }
+    pub fn attach_execution(&mut self, resources: Arc<pillar_core::execution::ExecutionResources>) {
+        self.execution = Some(resources);
+    }
+    pub fn attach_audit(&mut self, health: Option<Arc<std::sync::atomic::AtomicBool>>) {
+        self.audit_health = health;
     }
 
     pub fn record_http_request(
@@ -210,6 +233,67 @@ impl PillarMetrics {
         lines.extend(self.build_info.render());
         lines.extend(self.http_requests_total.render());
         lines.extend(self.http_request_duration_seconds.render());
+        lines.extend(self.http_accounting.render());
+        lines.push(
+            "# HELP pillar_signing_audit_enabled Whether durable signing audit is configured."
+                .into(),
+        );
+        lines.push("# TYPE pillar_signing_audit_enabled gauge".into());
+        lines.push(format!(
+            "pillar_signing_audit_enabled {}",
+            u8::from(self.audit_health.is_some())
+        ));
+        lines.push("# HELP pillar_signing_audit_ready Last observed durable store connectivity and retained-evidence capacity.".into());
+        lines.push("# TYPE pillar_signing_audit_ready gauge".into());
+        lines.push(format!(
+            "pillar_signing_audit_ready {}",
+            u8::from(
+                self.audit_health
+                    .as_ref()
+                    .is_some_and(|health| health.load(std::sync::atomic::Ordering::Acquire))
+            )
+        ));
+        if let Some(resources) = &self.execution {
+            lines.push("# HELP pillar_admission_total Registered resource operations by terminal outcome; local rejections are not upstream faults.".into());
+            lines.push("# TYPE pillar_admission_total counter".into());
+            lines.push("# HELP pillar_admission_active Currently held resource permits.".into());
+            lines.push("# TYPE pillar_admission_active gauge".into());
+            lines.push("# HELP pillar_admission_waiting Queued resource registrations, including quiet-lane reservations.".into());
+            lines.push("# TYPE pillar_admission_waiting gauge".into());
+            lines.push("# HELP pillar_admission_started_total Registered resource operations, excluding skipped speculative hedges.".into());
+            lines.push("# TYPE pillar_admission_started_total counter".into());
+            lines.push("# HELP pillar_kms_hedge_skipped_total Speculative KMS calls skipped without waiting or provider execution.".into());
+            lines.push("# TYPE pillar_kms_hedge_skipped_total counter".into());
+            for (name, budget) in [
+                ("sign", &resources.signing),
+                ("rpc", &resources.rpc),
+                ("kms", &resources.kms),
+            ] {
+                let totals = budget.totals();
+                lines.push(format!(
+                    "pillar_admission_active{{budget=\"{name}\"}} {}",
+                    totals.active
+                ));
+                lines.push(format!(
+                    "pillar_admission_waiting{{budget=\"{name}\"}} {}",
+                    totals.waiting
+                ));
+                lines.push(format!(
+                    "pillar_admission_started_total{{budget=\"{name}\"}} {}",
+                    totals.started
+                ));
+                for outcome in pillar_core::execution::Outcome::ALL {
+                    lines.push(format!(
+                        "pillar_admission_total{{budget=\"{name}\",outcome=\"{}\"}} {}",
+                        outcome.as_str(),
+                        totals.outcomes[outcome as usize]
+                    ));
+                }
+                if name == "kms" {
+                    lines.push(format!("pillar_kms_hedge_skipped_total {}", totals.skipped));
+                }
+            }
+        }
         lines.extend(self.sign_stage_duration_seconds.render());
         lines.extend(self.provider_config_refresh_total.render());
         lines.extend(self.provider_config_age_seconds.render());

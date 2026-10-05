@@ -38,7 +38,18 @@ pub struct LzPacketV1 {
 pub struct EvmPacketSent {
     pub packet: LzPacketV1,
     pub options: String,
-    pub send_library: Option<String>,
+    pub kind: EvmPacketSentKind,
+}
+
+/// Which contract interface's event was decoded; each is emitted by exactly one contract.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EvmPacketSentKind {
+    /// EndpointV2 `PacketSent(bytes,bytes,address)`, naming its send library.
+    EndpointV2 { send_library: String },
+    /// SendUln301 `PacketSent(bytes,bytes,uint256,uint256)`.
+    SendUln301,
+    /// UltraLightNodeV2 `Packet(bytes)`.
+    UltraLightNodeV2,
 }
 
 pub fn build_evm_lz_v1_packet_payload_v2(
@@ -101,6 +112,86 @@ pub fn derive_evm_feather_hash_info(
 ) -> Result<UlnV2HashInfo, AppCoreError> {
     let packet_payload = build_evm_lz_v1_packet_payload_v2_from_event(sent_event)?;
     let proof = build_evm_feather_proof(packet_emit_address, &packet_payload)?;
+    let hash =
+        native_hash_by_chain_name(&proof, &sent_event.lz_message_id.pathway_id.dst_chain_name)?;
+    Ok(UlnV2HashInfo {
+        lookup_hash: hash.clone(),
+        block_data: hash,
+    })
+}
+
+/// An Aptos LayerZero V1 packet (`@layerzerolabs/lz-aptos-sdk-v1` `encodePacket`):
+/// nonce (u64) ‖ src chain id (u16) ‖ src address (32) ‖ dst chain id (u16) ‖ dst address
+/// (the destination's width) ‖ payload, big-endian.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AptosV1Packet {
+    pub nonce: u64,
+    pub src_chain_id: u16,
+    pub src_address: Vec<u8>,
+    pub dst_chain_id: u16,
+    pub dst_address: Vec<u8>,
+    pub payload: Vec<u8>,
+}
+
+pub fn encode_aptos_v1_packet(packet: &AptosV1Packet) -> Vec<u8> {
+    let mut out = Vec::with_capacity(
+        12 + packet.src_address.len() + packet.dst_address.len() + packet.payload.len(),
+    );
+    out.extend_from_slice(&packet.nonce.to_be_bytes());
+    out.extend_from_slice(&packet.src_chain_id.to_be_bytes());
+    out.extend_from_slice(&packet.src_address);
+    out.extend_from_slice(&packet.dst_chain_id.to_be_bytes());
+    out.extend_from_slice(&packet.dst_address);
+    out.extend_from_slice(&packet.payload);
+    out
+}
+
+/// `decodePacket(buf, dstAddressSize)`; the destination's width is asked for by its chain id.
+pub fn decode_aptos_v1_packet(
+    bytes: &[u8],
+    dst_address_size: impl Fn(u16) -> usize,
+) -> Result<AptosV1Packet, AppCoreError> {
+    let short =
+        || AppCoreError::Internal(format!("Aptos V1 packet too short: {} bytes", bytes.len()));
+    let take = |from: usize, len: usize| bytes.get(from..from + len).ok_or_else(short);
+    let nonce = u64::from_be_bytes(take(0, 8)?.try_into().map_err(|_| short())?);
+    let src_chain_id = u16::from_be_bytes(take(8, 2)?.try_into().map_err(|_| short())?);
+    let src_address = take(10, 32)?.to_vec();
+    let dst_chain_id = u16::from_be_bytes(take(42, 2)?.try_into().map_err(|_| short())?);
+    let width = dst_address_size(dst_chain_id);
+    let dst_address = take(44, width)?.to_vec();
+    Ok(AptosV1Packet {
+        nonce,
+        src_chain_id,
+        src_address,
+        dst_chain_id,
+        dst_address,
+        payload: bytes[44 + width..].to_vec(),
+    })
+}
+
+/// Upstream's Aptos `FeatherProofBuilder.deriveHash` for utils version 1: the destination's
+/// native hash of `bytes32(emitter) ‖ encodePacket(packet)` (`lz-v1-sdk/src/aptos/proofBuilders.ts`).
+pub fn derive_aptos_feather_hash_info(
+    sent_event: &LzSentEvent,
+    packet_emit_address: &str,
+) -> Result<UlnV2HashInfo, AppCoreError> {
+    let eid = |key: &str| {
+        u16::try_from(extra_u64(sent_event, key)?)
+            .map_err(|_| AppCoreError::Internal(format!("{key} is not an Aptos V1 chain id")))
+    };
+    let packet = AptosV1Packet {
+        nonce: sent_event.lz_message_id.nonce,
+        src_chain_id: eid("srcEid")?,
+        src_address: decode_hex_bytes(&pathway_extra_string(sent_event, "sender")?)?,
+        dst_chain_id: eid("dstEid")?,
+        dst_address: decode_hex_bytes(&pathway_extra_string(sent_event, "receiver")?)?,
+        payload: decode_hex_bytes(&sent_event.message)?,
+    };
+    let proof = build_evm_feather_proof(
+        packet_emit_address,
+        &format!("0x{}", hex::encode(encode_aptos_v1_packet(&packet))),
+    )?;
     let hash =
         native_hash_by_chain_name(&proof, &sent_event.lz_message_id.pathway_id.dst_chain_name)?;
     Ok(UlnV2HashInfo {
@@ -221,9 +312,12 @@ pub fn compute_lz_packet_v1_proof(packet: &LzPacketV1) -> Result<EvmUlnProof, Ap
     })
 }
 
+/// `dst_address_size` names the destination address width for a ULN V1 chain id, as upstream's
+/// `decodeRawPayloadV2` asks `getAddressSizeInBytes(getChainName(dstChainId))`.
 pub fn decode_evm_packet_sent_log(
     topics: &[String],
     data: &str,
+    dst_address_size: &dyn Fn(u32) -> usize,
 ) -> Result<EvmPacketSent, AppCoreError> {
     let topic0 = topics
         .first()
@@ -234,9 +328,9 @@ pub fn decode_evm_packet_sent_log(
         LEGACY_ULN_V2_PACKET_TOPIC => {
             let encoded_payload = abi_dynamic_bytes(&data, 0, 1)?;
             Ok(EvmPacketSent {
-                packet: decode_evm_legacy_packet_v2_payload(&encoded_payload)?,
+                packet: decode_evm_legacy_packet_v2_payload(&encoded_payload, dst_address_size)?,
                 options: "0x".to_string(),
-                send_library: None,
+                kind: EvmPacketSentKind::UltraLightNodeV2,
             })
         }
         ENDPOINT_V2_PACKET_SENT_TOPIC => {
@@ -246,7 +340,7 @@ pub fn decode_evm_packet_sent_log(
             Ok(EvmPacketSent {
                 packet: decode_lz_packet_v1(&format!("0x{}", hex::encode(encoded_payload)))?,
                 options: format!("0x{}", hex::encode(options)),
-                send_library: Some(send_library),
+                kind: EvmPacketSentKind::EndpointV2 { send_library },
             })
         }
         ULN_301_PACKET_SENT_TOPIC => {
@@ -255,7 +349,7 @@ pub fn decode_evm_packet_sent_log(
             Ok(EvmPacketSent {
                 packet: decode_lz_packet_v1(&format!("0x{}", hex::encode(encoded_payload)))?,
                 options: format!("0x{}", hex::encode(options)),
-                send_library: None,
+                kind: EvmPacketSentKind::SendUln301,
             })
         }
         _ => Err(AppCoreError::Internal(
@@ -264,9 +358,15 @@ pub fn decode_evm_packet_sent_log(
     }
 }
 
-pub fn decode_evm_legacy_packet_v2_payload(payload: &[u8]) -> Result<LzPacketV1, AppCoreError> {
+/// `decodeRawPayloadV2` (`lz-v1-sdk/src/evm/decoders/index.ts:34-66`): nonce, source chain id,
+/// the 20-byte EVM sender, destination chain id, then a destination address of the width that
+/// chain uses, then the message.
+pub fn decode_evm_legacy_packet_v2_payload(
+    payload: &[u8],
+    dst_address_size: &dyn Fn(u32) -> usize,
+) -> Result<LzPacketV1, AppCoreError> {
     const EVM_ADDRESS_LEN: usize = 20;
-    const MIN_LEN: usize = 8 + 2 + EVM_ADDRESS_LEN + 2 + EVM_ADDRESS_LEN;
+    const MIN_LEN: usize = 8 + 2 + EVM_ADDRESS_LEN + 2;
     if payload.len() < MIN_LEN {
         return Err(AppCoreError::Internal(format!(
             "invalid legacy packet payload length: {}",
@@ -293,7 +393,13 @@ pub fn decode_evm_legacy_packet_v2_payload(payload: &[u8]) -> Result<LzPacketV1,
             .map_err(|_| AppCoreError::Internal("invalid legacy packet dstEid".to_string()))?,
     ) as u32;
     let receiver_start = dst_eid_end;
-    let receiver_end = receiver_start + EVM_ADDRESS_LEN;
+    let receiver_end = receiver_start + dst_address_size(dst_eid);
+    if payload.len() < receiver_end {
+        return Err(AppCoreError::Internal(format!(
+            "invalid legacy packet payload length: {}",
+            payload.len()
+        )));
+    }
     Ok(LzPacketV1 {
         nonce,
         src_eid,

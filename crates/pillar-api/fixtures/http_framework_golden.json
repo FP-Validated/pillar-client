@@ -1,0 +1,2813 @@
+{
+ "_provenance": {
+  "upstream": "gasolina-audit 1.2.66 (manifest sha256 8ad87eb6...; archive comment 213cd500...), apps/gasolina/src/bootstrap.ts:startServer on Express 5.1.0 / body-parser 2.2.2 / iconv-lite 0.7.2",
+  "generator": "scripts/gasolina-parity/emit-http-framework-golden.ts (in-process: the bootstrap's listen is captured and each request is handed to the Express application, no socket)",
+  "run": "emit-http-framework-golden-5-20261004T232002Z",
+  "supersedes": "the 385006b capture (Express 4.21 / body-parser 1.20.3 / extended qs), kept in git history",
+  "bodies": "answer.body null: Express's HTML error page, whose stack trace is host-specific, or upstream's stub 200 body; only the status is compared",
+  "requestBody": "{text} UTF-8, {hex} exact bytes, {pad: n} {\"pad\":\"a\"*n}, {gzip|deflate: spec} that spec compressed (only its inflated content matters)"
+ },
+ "cases": {
+  "POST / noContentType": {
+   "method": "POST",
+   "path": "/",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 500,
+    "body": {
+     "statusCode": 500,
+     "body": "Cannot read properties of undefined (reading 'body')"
+    }
+   }
+  },
+  "POST / textPlain": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "text/plain",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 500,
+    "body": {
+     "statusCode": 500,
+     "body": "Cannot read properties of undefined (reading 'body')"
+    }
+   }
+  },
+  "POST / plusJson": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/merge-patch+json",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 500,
+    "body": {
+     "statusCode": 500,
+     "body": "Cannot read properties of undefined (reading 'body')"
+    }
+   }
+  },
+  "POST / emptyJson": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "text": ""
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter srcTxHash"
+    }
+   }
+  },
+  "POST / latin1Charset": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=latin1",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 415,
+    "body": null
+   }
+  },
+  "POST / latin1Empty": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=latin1",
+   "contentEncoding": null,
+   "body": {
+    "text": ""
+   },
+   "answer": {
+    "status": 415,
+    "body": null
+   }
+  },
+  "POST / duplicateCharsetLastWins": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=utf-8; charset=latin1",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 415,
+    "body": null
+   }
+  },
+  "POST / emptyCharset": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=\"\"",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / bomObject": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "text": "﻿{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / rawString": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "text": "\"x\""
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST / rawNull": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "text": "null"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST / rawNumber": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "text": "5"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST / malformed": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "text": "{"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST / envelopeString": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"body\":\"\\\"x\\\"\"}"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter srcTxHash"
+    }
+   }
+  },
+  "POST / envelopeNull": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"body\":\"null\"}"
+   },
+   "answer": {
+    "status": 500,
+    "body": {
+     "statusCode": 500,
+     "body": "Cannot read properties of null (reading 'srcTxHash')"
+    }
+   }
+  },
+  "POST / envelopeNumber": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"body\":\"5\"}"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter srcTxHash"
+    }
+   }
+  },
+  "POST / envelopeArray": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"body\":\"[]\"}"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter srcTxHash"
+    }
+   }
+  },
+  "POST / tooLarge": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "pad": 102400
+   },
+   "answer": {
+    "status": 413,
+    "body": null
+   }
+  },
+  "POST / tooLargeNoContentType": {
+   "method": "POST",
+   "path": "/",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": {
+    "pad": 102400
+   },
+   "answer": {
+    "status": 500,
+    "body": {
+     "statusCode": 500,
+     "body": "Cannot read properties of undefined (reading 'body')"
+    }
+   }
+  },
+  "POST / deflateEmptyBody": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "deflate",
+   "body": {
+    "text": ""
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST / tooLargeLatin1": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=latin1",
+   "contentEncoding": null,
+   "body": {
+    "pad": 102400
+   },
+   "answer": {
+    "status": 415,
+    "body": null
+   }
+  },
+  "POST / brotliEncoding": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "br",
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST / identityEncoding": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "Identity",
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / emptyEncoding": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "",
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / duplicateEncoding": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": [
+    "identity",
+    "identity"
+   ],
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 415,
+    "body": null
+   }
+  },
+  "POST / gzipLabelledPlain": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST / deflateLabelledPlain": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "deflate",
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST / tooLargeBrotli": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "br",
+   "body": {
+    "pad": 102400
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST / gzipValid": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "hex": "1f8b0800000000000013ab562a2e4a0ea9f0482cce50b25232a828a950d251caa9f24d2d2e4e4c4ff54c51b2aa562acdc90b4ecd4b094b2d2acecccf53b2520a3bbcf251d39a0ff3673428d5d6020099a4ad5c42000000"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / gzipUpperCase": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "GZIP",
+   "body": {
+    "hex": "1f8b0800000000000013ab562a2e4a0ea9f0482cce50b25232a828a950d251caa9f24d2d2e4e4c4ff54c51b2aa562acdc90b4ecd4b094b2d2acecccf53b2520a3bbcf251d39a0ff3673428d5d6020099a4ad5c42000000"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / deflateValid": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "deflate",
+   "body": {
+    "hex": "789cab562a2e4a0ea9f0482cce50b25232a828a950d251caa9f24d2d2e4e4c4ff54c51b2aa562acdc90b4ecd4b094b2d2acecccf53b2520a3bbcf251d39a0ff3673428d5d6020013c619db"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / deflateRaw": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "deflate",
+   "body": {
+    "hex": "ab562a2e4a0ea9f0482cce50b25232a828a950d251caa9f24d2d2e4e4c4ff54c51b2aa562acdc90b4ecd4b094b2d2acecccf53b2520a3bbcf251d39a0ff3673428d5d60200"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST / gzipMultiMember": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "hex": "1f8b0800000000000013ab562a2e4a0ea9f0482cce50b25232a828a950d251caa9f24d2d2e4e4c4ff54c51020004608ec8210000001f8b0800000000000013b3aa562acdc90b4ecd4b094b2d2acecccf53b2520a3bbcf251d39a0ff3673428d5d6020013c0db9621000000"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / gzipTrailingGarbage": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "hex": "1f8b0800000000000013ab562a2e4a0ea9f0482cce50b25232a828a950d251caa9f24d2d2e4e4c4ff54c51b2aa562acdc90b4ecd4b094b2d2acecccf53b2520a3bbcf251d39a0ff3673428d5d6020099a4ad5c4200000067617262616765"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST / deflateTrailingGarbage": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "deflate",
+   "body": {
+    "hex": "789cab562a2e4a0ea9f0482cce50b25232a828a950d251caa9f24d2d2e4e4c4ff54c51b2aa562acdc90b4ecd4b094b2d2acecccf53b2520a3bbcf251d39a0ff3673428d5d6020013c619db67617262616765"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / deflateTruncatedTrailer": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "deflate",
+   "body": {
+    "hex": "789cab562a2e4a0ea9f0482cce50b25232a828a950d251caa9f24d2d2e4e4c4ff54c51b2aa562acdc90b4ecd4b094b2d2acecccf53b2520a3bbcf251d39a0ff3673428d5d60200"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST / deflateHeaderOnly": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "deflate",
+   "body": {
+    "hex": "789c"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST / deflateTruncatedValidV1": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "deflate",
+   "body": {
+    "hex": "789c558eb10ec2301043ffc5f30d6d1990b2555d606083ee210924a24d502e9522aafe3b4a2b106cf693efec191cd5391f245b085439651086d7c930cbbb396a88b9243a2b9d2f0e755583a039fda206041fbc32107b2af94bdb6a1d0df3fa94b78b7fa8b110ae43508f2ef89b8ba34c2e78889a60f2d3c58f6d768469f0bd89bc02f4a56ddc067e77db229637"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST / deflateCompleteValidV1": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "deflate",
+   "body": {
+    "hex": "789c558eb10ec2301043ffc5f30d6d1990b2555d606083ee210924a24d502e9522aafe3b4a2b106cf693efec191cd5391f245b085439651086d7c930cbbb396a88b9243a2b9d2f0e755583a039fda206041fbc32107b2af94bdb6a1d0df3fa94b78b7fa8b110ae43508f2ef89b8ba34c2e78889a60f2d3c58f6d768469f0bd89bc02f4a56ddc067e77db229637987b424b"
+   },
+   "answer": {
+    "status": 200,
+    "body": null
+   }
+  },
+  "POST / gzipTrailingZeros": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "hex": "1f8b0800000000000013ab562a2e4a0ea9f0482cce50b25232a828a950d251caa9f24d2d2e4e4c4ff54c51b2aa562acdc90b4ecd4b094b2d2acecccf53b2520a3bbcf251d39a0ff3673428d5d6020099a4ad5c420000000000000000000000"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / gzipTrailingZeroThenText": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "hex": "1f8b0800000000000013ab562a2e4a0ea9f0482cce50b25232a828a950d251caa9f24d2d2e4e4c4ff54c51b2aa562acdc90b4ecd4b094b2d2acecccf53b2520a3bbcf251d39a0ff3673428d5d6020099a4ad5c42000000004142"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / gzipMemberThenZeros": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "hex": "1f8b0800000000000013ab562a2e4a0ea9f0482cce50b25232a828a950d251caa9f24d2d2e4e4c4ff54c51020004608ec8210000001f8b0800000000000013b3aa562acdc90b4ecd4b094b2d2acecccf53b2520a3bbcf251d39a0ff3673428d5d6020013c0db9621000000000000"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / gzipTruncated": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "hex": "1f8b0800000000000013ab562a2e4a0ea9f0482c"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST / gzipEmptyBody": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "text": ""
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST / gzipOfEmpty": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "hex": "1f8b080000000000001303000000000000000000"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter srcTxHash"
+    }
+   }
+  },
+  "POST / gzipWithBom": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "hex": "1f8b08000000000000137bbf7b7fb55271517248854762718692959241454985928e524e956f6a7171627aaa678a9255b552694e5e706a5e4a586a5171667e9e929552d8e1958f9ad67c983fa341a9b61600b687d92045000000"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / gzipUtf16le": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=utf-16le",
+   "contentEncoding": "gzip",
+   "body": {
+    "hex": "1f8b08000000000000132dcc310ac2401000c0798a6c6d612dd86b61a5a40fe650219c9053380cf9910f4a65ef2f04b11f66148ac1c951b5d52a2ec25a58a9eeaab0147a4f7b4951b4ce929dee2747e1a1971d2459a7910c8aab9bfcdf1a1fafc566f60e93c9171d11a6dc7a000000"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / gzipInflatesAtLimit": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "gzip": {
+     "pad": 102390
+    }
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter srcTxHash"
+    }
+   }
+  },
+  "POST / gzipInflatesOverLimit": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "gzip": {
+     "pad": 102391
+    }
+   },
+   "answer": {
+    "status": 413,
+    "body": null
+   }
+  },
+  "POST / gzipBomb": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "gzip": {
+     "pad": 4194304
+    }
+   },
+   "answer": {
+    "status": 413,
+    "body": null
+   }
+  },
+  "POST / deflateInflatesOverLimit": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": "deflate",
+   "body": {
+    "deflate": {
+     "pad": 102391
+    }
+   },
+   "answer": {
+    "status": 413,
+    "body": null
+   }
+  },
+  "POST / gzipUnknownUtfLabel": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=utf-32",
+   "contentEncoding": "gzip",
+   "body": {
+    "hex": "1f8b0800000000000013ab562a2e4a0ea9f0482cce50b25232a828a950d251caa9f24d2d2e4e4c4ff54c51b2aa562acdc90b4ecd4b094b2d2acecccf53b2520a3bbcf251d39a0ff3673428d5d6020099a4ad5c42000000"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST / utf16leBom": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=utf-16le",
+   "contentEncoding": null,
+   "body": {
+    "hex": "fffe7b00220073007200630054007800480061007300680022003a002200300078007400780022002c0022006c007a004d006500730073006100670065004900640022003a007b00220075006c006e00530065006e006400560065007200730069006f006e0022003a0022005600e900ac203dd800de22007d007d00"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / utf16leNoBom": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=utf-16le",
+   "contentEncoding": null,
+   "body": {
+    "hex": "7b00220073007200630054007800480061007300680022003a002200300078007400780022002c0022006c007a004d006500730073006100670065004900640022003a007b00220075006c006e00530065006e006400560065007200730069006f006e0022003a0022005600e900ac203dd800de22007d007d00"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / utf16leOddTrailingByte": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=utf-16le",
+   "contentEncoding": null,
+   "body": {
+    "hex": "7b00220073007200630054007800480061007300680022003a002200300078007400780022002c0022006c007a004d006500730073006100670065004900640022003a007b00220075006c006e00530065006e006400560065007200730069006f006e0022003a0022005600e900ac203dd800de22007d007d0020"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / utf16beBom": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=utf-16be",
+   "contentEncoding": null,
+   "body": {
+    "hex": "feff007b00220073007200630054007800480061007300680022003a002200300078007400780022002c0022006c007a004d006500730073006100670065004900640022003a007b00220075006c006e00530065006e006400560065007200730069006f006e0022003a0022005600e920acd83dde000022007d007d"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / utf16beNoBom": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=UTF-16BE",
+   "contentEncoding": null,
+   "body": {
+    "hex": "007b00220073007200630054007800480061007300680022003a002200300078007400780022002c0022006c007a004d006500730073006100670065004900640022003a007b00220075006c006e00530065006e006400560065007200730069006f006e0022003a0022005600e920acd83dde000022007d007d"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / utf16DetectBeBom": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=utf-16",
+   "contentEncoding": null,
+   "body": {
+    "hex": "feff007b00220073007200630054007800480061007300680022003a002200300078007400780022002c0022006c007a004d006500730073006100670065004900640022003a007b00220075006c006e00530065006e006400560065007200730069006f006e0022003a0022005600e920acd83dde000022007d007d"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / utf16DetectLeBom": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=utf-16",
+   "contentEncoding": null,
+   "body": {
+    "hex": "fffe7b00220073007200630054007800480061007300680022003a002200300078007400780022002c0022006c007a004d006500730073006100670065004900640022003a007b00220075006c006e00530065006e006400560065007200730069006f006e0022003a0022005600e900ac203dd800de22007d007d00"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / utf16DetectBeHeuristic": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=utf-16",
+   "contentEncoding": null,
+   "body": {
+    "hex": "007b00220073007200630054007800480061007300680022003a002200300078007400780022002c0022006c007a004d006500730073006100670065004900640022003a007b00220075006c006e00530065006e006400560065007200730069006f006e0022003a0022005600e920acd83dde000022007d007d"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / utf16DetectLeHeuristic": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=utf-16",
+   "contentEncoding": null,
+   "body": {
+    "hex": "7b00220073007200630054007800480061007300680022003a002200300078007400780022002c0022006c007a004d006500730073006100670065004900640022003a007b00220075006c006e00530065006e006400560065007200730069006f006e0022003a0022005600e900ac203dd800de22007d007d00"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / utf16DetectShort": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=utf-16",
+   "contentEncoding": null,
+   "body": {
+    "hex": "7b0020007d00"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter srcTxHash"
+    }
+   }
+  },
+  "POST / utf16DashedLabel": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=\"utf-16-le\"",
+   "contentEncoding": null,
+   "body": {
+    "hex": "7b00220073007200630054007800480061007300680022003a002200300078007400780022002c0022006c007a004d006500730073006100670065004900640022003a007b00220075006c006e00530065006e006400560065007200730069006f006e0022003a0022005600e900ac203dd800de22007d007d00"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / utf8YearSuffix": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=\"utf-8:1990\"",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\",\"lzMessageId\":{\"ulnSendVersion\":\"Vé€😀\"}}"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / utf7": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=utf-7",
+   "contentEncoding": null,
+   "body": {
+    "hex": "2b4148734149672d7372635478486173682b4143492d3a2b4143492d307874782b4143492d2c2b4143492d6c7a4d65737361676549642b4143492d3a2b4148734149672d756c6e53656e6456657273696f6e2b4143492d3a2b4143492d562b414f6b67724e673933674141496742394148302d"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / utf7Plus": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=UTF-7",
+   "contentEncoding": null,
+   "body": {
+    "hex": "7b22737263547848617368223a2230787478222c226c7a4d6573736167654964223a7b22756c6e53656e6456657273696f6e223a22612b2d622b414f6b227d7d"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / utf7HighByte": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=utf-7",
+   "contentEncoding": null,
+   "body": {
+    "hex": "7b22737263547848617368223a2230787478222c226c7a4d6573736167654964223a7b22756c6e53656e6456657273696f6e223a2278e9227d7d"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / utf7Imap": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=utf-7-imap",
+   "contentEncoding": null,
+   "body": {
+    "hex": "7b22737263547848617368223a2230787478222c226c7a4d6573736167654964223a7b22756c6e53656e6456657273696f6e223a225626414f6b67724e67393367412d227d7d"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / utf7RunBom": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=utf-7",
+   "contentEncoding": null,
+   "body": {
+    "hex": "7b22737263547848617368223a2230787478222c226c7a4d6573736167654964223a7b22756c6e53656e6456657273696f6e223a22782b2f76382d79227d7d"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / utf7LeadingRunBom": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=utf-7",
+   "contentEncoding": null,
+   "body": {
+    "hex": "7b2b2f76382d22737263547848617368223a2230787478222c226c7a4d6573736167654964223a7b22756c6e53656e6456657273696f6e223a227a227d7d"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / utf7RunAtEnd": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=utf-7",
+   "contentEncoding": null,
+   "body": {
+    "hex": "7b22737263547848617368223a2230787478222c226c7a4d6573736167654964223a7b22756c6e53656e6456657273696f6e223a2277227d7d2b41414141414141412f7638"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST / utf9TooLarge": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=utf-9",
+   "contentEncoding": null,
+   "body": {
+    "pad": 102400
+   },
+   "answer": {
+    "status": 413,
+    "body": null
+   }
+  },
+  "POST / utf32Unknown": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=utf-32",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST / utf9Unknown": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json; charset=utf-9",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 415,
+    "body": null
+   }
+  },
+  "POST / invalidUtf8": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "hex": "7b22737263547848617368223a2230787478222c226c7a4d6573736167654964223a7b22756c6e53656e6456657273696f6e223a2256ffe282227d7d"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST / echoUtf8": {
+   "method": "POST",
+   "path": "/",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\",\"lzMessageId\":{\"ulnSendVersion\":\"Vé€😀\"}}"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Missing required parameter expiration"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign noContentType": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 500,
+    "body": {
+     "statusCode": 500,
+     "body": "Cannot read properties of undefined (reading 'body')"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign textPlain": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "text/plain",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 500,
+    "body": {
+     "statusCode": 500,
+     "body": "Cannot read properties of undefined (reading 'body')"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign plusJson": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/merge-patch+json",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 500,
+    "body": {
+     "statusCode": 500,
+     "body": "Cannot read properties of undefined (reading 'body')"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign emptyJson": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "text": ""
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign latin1Charset": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=latin1",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 415,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign latin1Empty": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=latin1",
+   "contentEncoding": null,
+   "body": {
+    "text": ""
+   },
+   "answer": {
+    "status": 415,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign duplicateCharsetLastWins": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=utf-8; charset=latin1",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 415,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign emptyCharset": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=\"\"",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign bomObject": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "text": "﻿{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign rawString": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "text": "\"x\""
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign rawNull": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "text": "null"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign rawNumber": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "text": "5"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign malformed": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "text": "{"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign envelopeString": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"body\":\"\\\"x\\\"\"}"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Expected object, received string"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign envelopeNull": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"body\":\"null\"}"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Expected object, received null"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign envelopeNumber": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"body\":\"5\"}"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Expected object, received number"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign envelopeArray": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"body\":\"[]\"}"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Expected object, received array"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign tooLarge": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "pad": 102400
+   },
+   "answer": {
+    "status": 413,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign tooLargeNoContentType": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": {
+    "pad": 102400
+   },
+   "answer": {
+    "status": 500,
+    "body": {
+     "statusCode": 500,
+     "body": "Cannot read properties of undefined (reading 'body')"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign deflateEmptyBody": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "deflate",
+   "body": {
+    "text": ""
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign tooLargeLatin1": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=latin1",
+   "contentEncoding": null,
+   "body": {
+    "pad": 102400
+   },
+   "answer": {
+    "status": 415,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign brotliEncoding": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "br",
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign identityEncoding": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "Identity",
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign emptyEncoding": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "",
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign duplicateEncoding": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": [
+    "identity",
+    "identity"
+   ],
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 415,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign gzipLabelledPlain": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign deflateLabelledPlain": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "deflate",
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign tooLargeBrotli": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "br",
+   "body": {
+    "pad": 102400
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign gzipValid": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "hex": "1f8b0800000000000013ab562a2e4a0ea9f0482cce50b25232a828a950d251caa9f24d2d2e4e4c4ff54c51b2aa562acdc90b4ecd4b094b2d2acecccf53b2520a3bbcf251d39a0ff3673428d5d6020099a4ad5c42000000"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'Vé€😀', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign gzipUpperCase": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "GZIP",
+   "body": {
+    "hex": "1f8b0800000000000013ab562a2e4a0ea9f0482cce50b25232a828a950d251caa9f24d2d2e4e4c4ff54c51b2aa562acdc90b4ecd4b094b2d2acecccf53b2520a3bbcf251d39a0ff3673428d5d6020099a4ad5c42000000"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'Vé€😀', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign deflateValid": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "deflate",
+   "body": {
+    "hex": "789cab562a2e4a0ea9f0482cce50b25232a828a950d251caa9f24d2d2e4e4c4ff54c51b2aa562acdc90b4ecd4b094b2d2acecccf53b2520a3bbcf251d39a0ff3673428d5d6020013c619db"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'Vé€😀', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign deflateRaw": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "deflate",
+   "body": {
+    "hex": "ab562a2e4a0ea9f0482cce50b25232a828a950d251caa9f24d2d2e4e4c4ff54c51b2aa562acdc90b4ecd4b094b2d2acecccf53b2520a3bbcf251d39a0ff3673428d5d60200"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign gzipMultiMember": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "hex": "1f8b0800000000000013ab562a2e4a0ea9f0482cce50b25232a828a950d251caa9f24d2d2e4e4c4ff54c51020004608ec8210000001f8b0800000000000013b3aa562acdc90b4ecd4b094b2d2acecccf53b2520a3bbcf251d39a0ff3673428d5d6020013c0db9621000000"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'Vé€😀', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign gzipTrailingGarbage": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "hex": "1f8b0800000000000013ab562a2e4a0ea9f0482cce50b25232a828a950d251caa9f24d2d2e4e4c4ff54c51b2aa562acdc90b4ecd4b094b2d2acecccf53b2520a3bbcf251d39a0ff3673428d5d6020099a4ad5c4200000067617262616765"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign deflateTrailingGarbage": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "deflate",
+   "body": {
+    "hex": "789cab562a2e4a0ea9f0482cce50b25232a828a950d251caa9f24d2d2e4e4c4ff54c51b2aa562acdc90b4ecd4b094b2d2acecccf53b2520a3bbcf251d39a0ff3673428d5d6020013c619db67617262616765"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'Vé€😀', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign deflateTruncatedTrailer": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "deflate",
+   "body": {
+    "hex": "789cab562a2e4a0ea9f0482cce50b25232a828a950d251caa9f24d2d2e4e4c4ff54c51b2aa562acdc90b4ecd4b094b2d2acecccf53b2520a3bbcf251d39a0ff3673428d5d60200"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign deflateHeaderOnly": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "deflate",
+   "body": {
+    "hex": "789c"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign deflateTruncatedValidV1": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "deflate",
+   "body": {
+    "hex": "789c558eb10ec2301043ffc5f30d6d1990b2555d606083ee210924a24d502e9522aafe3b4a2b106cf693efec191cd5391f245b085439651086d7c930cbbb396a88b9243a2b9d2f0e755583a039fda206041fbc32107b2af94bdb6a1d0df3fa94b78b7fa8b110ae43508f2ef89b8ba34c2e78889a60f2d3c58f6d768469f0bd89bc02f4a56ddc067e77db229637"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign deflateCompleteValidV1": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "deflate",
+   "body": {
+    "hex": "789c558eb10ec2301043ffc5f30d6d1990b2555d606083ee210924a24d502e9522aafe3b4a2b106cf693efec191cd5391f245b085439651086d7c930cbbb396a88b9243a2b9d2f0e755583a039fda206041fbc32107b2af94bdb6a1d0df3fa94b78b7fa8b110ae43508f2ef89b8ba34c2e78889a60f2d3c58f6d768469f0bd89bc02f4a56ddc067e77db229637987b424b"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign gzipTrailingZeros": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "hex": "1f8b0800000000000013ab562a2e4a0ea9f0482cce50b25232a828a950d251caa9f24d2d2e4e4c4ff54c51b2aa562acdc90b4ecd4b094b2d2acecccf53b2520a3bbcf251d39a0ff3673428d5d6020099a4ad5c420000000000000000000000"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'Vé€😀', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign gzipTrailingZeroThenText": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "hex": "1f8b0800000000000013ab562a2e4a0ea9f0482cce50b25232a828a950d251caa9f24d2d2e4e4c4ff54c51b2aa562acdc90b4ecd4b094b2d2acecccf53b2520a3bbcf251d39a0ff3673428d5d6020099a4ad5c42000000004142"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'Vé€😀', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign gzipMemberThenZeros": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "hex": "1f8b0800000000000013ab562a2e4a0ea9f0482cce50b25232a828a950d251caa9f24d2d2e4e4c4ff54c51020004608ec8210000001f8b0800000000000013b3aa562acdc90b4ecd4b094b2d2acecccf53b2520a3bbcf251d39a0ff3673428d5d6020013c0db9621000000000000"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'Vé€😀', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign gzipTruncated": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "hex": "1f8b0800000000000013ab562a2e4a0ea9f0482c"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign gzipEmptyBody": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "text": ""
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign gzipOfEmpty": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "hex": "1f8b080000000000001303000000000000000000"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign gzipWithBom": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "hex": "1f8b08000000000000137bbf7b7fb55271517248854762718692959241454985928e524e956f6a7171627aaa678a9255b552694e5e706a5e4a586a5171667e9e929552d8e1958f9ad67c983fa341a9b61600b687d92045000000"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'Vé€😀', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign gzipUtf16le": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=utf-16le",
+   "contentEncoding": "gzip",
+   "body": {
+    "hex": "1f8b08000000000000132dcc310ac2401000c0798a6c6d612dd86b61a5a40fe650219c9053380cf9910f4a65ef2f04b11f66148ac1c951b5d52a2ec25a58a9eeaab0147a4f7b4951b4ce929dee2747e1a1971d2459a7910c8aab9bfcdf1a1fafc566f60e93c9171d11a6dc7a000000"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'Vé€😀', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign gzipInflatesAtLimit": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "gzip": {
+     "pad": 102390
+    }
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign gzipInflatesOverLimit": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "gzip": {
+     "pad": 102391
+    }
+   },
+   "answer": {
+    "status": 413,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign gzipBomb": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "gzip",
+   "body": {
+    "gzip": {
+     "pad": 4194304
+    }
+   },
+   "answer": {
+    "status": 413,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign deflateInflatesOverLimit": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": "deflate",
+   "body": {
+    "deflate": {
+     "pad": 102391
+    }
+   },
+   "answer": {
+    "status": 413,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign gzipUnknownUtfLabel": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=utf-32",
+   "contentEncoding": "gzip",
+   "body": {
+    "hex": "1f8b0800000000000013ab562a2e4a0ea9f0482cce50b25232a828a950d251caa9f24d2d2e4e4c4ff54c51b2aa562acdc90b4ecd4b094b2d2acecccf53b2520a3bbcf251d39a0ff3673428d5d6020099a4ad5c42000000"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign utf16leBom": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=utf-16le",
+   "contentEncoding": null,
+   "body": {
+    "hex": "fffe7b00220073007200630054007800480061007300680022003a002200300078007400780022002c0022006c007a004d006500730073006100670065004900640022003a007b00220075006c006e00530065006e006400560065007200730069006f006e0022003a0022005600e900ac203dd800de22007d007d00"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'Vé€😀', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign utf16leNoBom": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=utf-16le",
+   "contentEncoding": null,
+   "body": {
+    "hex": "7b00220073007200630054007800480061007300680022003a002200300078007400780022002c0022006c007a004d006500730073006100670065004900640022003a007b00220075006c006e00530065006e006400560065007200730069006f006e0022003a0022005600e900ac203dd800de22007d007d00"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'Vé€😀', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign utf16leOddTrailingByte": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=utf-16le",
+   "contentEncoding": null,
+   "body": {
+    "hex": "7b00220073007200630054007800480061007300680022003a002200300078007400780022002c0022006c007a004d006500730073006100670065004900640022003a007b00220075006c006e00530065006e006400560065007200730069006f006e0022003a0022005600e900ac203dd800de22007d007d0020"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'Vé€😀', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign utf16beBom": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=utf-16be",
+   "contentEncoding": null,
+   "body": {
+    "hex": "feff007b00220073007200630054007800480061007300680022003a002200300078007400780022002c0022006c007a004d006500730073006100670065004900640022003a007b00220075006c006e00530065006e006400560065007200730069006f006e0022003a0022005600e920acd83dde000022007d007d"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'Vé€😀', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign utf16beNoBom": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=UTF-16BE",
+   "contentEncoding": null,
+   "body": {
+    "hex": "007b00220073007200630054007800480061007300680022003a002200300078007400780022002c0022006c007a004d006500730073006100670065004900640022003a007b00220075006c006e00530065006e006400560065007200730069006f006e0022003a0022005600e920acd83dde000022007d007d"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'Vé€😀', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign utf16DetectBeBom": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=utf-16",
+   "contentEncoding": null,
+   "body": {
+    "hex": "feff007b00220073007200630054007800480061007300680022003a002200300078007400780022002c0022006c007a004d006500730073006100670065004900640022003a007b00220075006c006e00530065006e006400560065007200730069006f006e0022003a0022005600e920acd83dde000022007d007d"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'Vé€😀', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign utf16DetectLeBom": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=utf-16",
+   "contentEncoding": null,
+   "body": {
+    "hex": "fffe7b00220073007200630054007800480061007300680022003a002200300078007400780022002c0022006c007a004d006500730073006100670065004900640022003a007b00220075006c006e00530065006e006400560065007200730069006f006e0022003a0022005600e900ac203dd800de22007d007d00"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'Vé€😀', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign utf16DetectBeHeuristic": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=utf-16",
+   "contentEncoding": null,
+   "body": {
+    "hex": "007b00220073007200630054007800480061007300680022003a002200300078007400780022002c0022006c007a004d006500730073006100670065004900640022003a007b00220075006c006e00530065006e006400560065007200730069006f006e0022003a0022005600e920acd83dde000022007d007d"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'Vé€😀', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign utf16DetectLeHeuristic": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=utf-16",
+   "contentEncoding": null,
+   "body": {
+    "hex": "7b00220073007200630054007800480061007300680022003a002200300078007400780022002c0022006c007a004d006500730073006100670065004900640022003a007b00220075006c006e00530065006e006400560065007200730069006f006e0022003a0022005600e900ac203dd800de22007d007d00"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'Vé€😀', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign utf16DetectShort": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=utf-16",
+   "contentEncoding": null,
+   "body": {
+    "hex": "7b0020007d00"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign utf16DashedLabel": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=\"utf-16-le\"",
+   "contentEncoding": null,
+   "body": {
+    "hex": "7b00220073007200630054007800480061007300680022003a002200300078007400780022002c0022006c007a004d006500730073006100670065004900640022003a007b00220075006c006e00530065006e006400560065007200730069006f006e0022003a0022005600e900ac203dd800de22007d007d00"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'Vé€😀', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign utf8YearSuffix": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=\"utf-8:1990\"",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\",\"lzMessageId\":{\"ulnSendVersion\":\"Vé€😀\"}}"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'Vé€😀', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign utf7": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=utf-7",
+   "contentEncoding": null,
+   "body": {
+    "hex": "2b4148734149672d7372635478486173682b4143492d3a2b4143492d307874782b4143492d2c2b4143492d6c7a4d65737361676549642b4143492d3a2b4148734149672d756c6e53656e6456657273696f6e2b4143492d3a2b4143492d562b414f6b67724e673933674141496742394148302d"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'Vé€😀', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign utf7Plus": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=UTF-7",
+   "contentEncoding": null,
+   "body": {
+    "hex": "7b22737263547848617368223a2230787478222c226c7a4d6573736167654964223a7b22756c6e53656e6456657273696f6e223a22612b2d622b414f6b227d7d"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'a+bé', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign utf7HighByte": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=utf-7",
+   "contentEncoding": null,
+   "body": {
+    "hex": "7b22737263547848617368223a2230787478222c226c7a4d6573736167654964223a7b22756c6e53656e6456657273696f6e223a2278e9227d7d"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'x�', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign utf7Imap": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=utf-7-imap",
+   "contentEncoding": null,
+   "body": {
+    "hex": "7b22737263547848617368223a2230787478222c226c7a4d6573736167654964223a7b22756c6e53656e6456657273696f6e223a225626414f6b67724e67393367412d227d7d"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'Vé€😀', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign utf7RunBom": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=utf-7",
+   "contentEncoding": null,
+   "body": {
+    "hex": "7b22737263547848617368223a2230787478222c226c7a4d6573736167654964223a7b22756c6e53656e6456657273696f6e223a22782b2f76382d79227d7d"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'xy', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign utf7LeadingRunBom": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=utf-7",
+   "contentEncoding": null,
+   "body": {
+    "hex": "7b2b2f76382d22737263547848617368223a2230787478222c226c7a4d6573736167654964223a7b22756c6e53656e6456657273696f6e223a227a227d7d"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'z', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign utf7RunAtEnd": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=utf-7",
+   "contentEncoding": null,
+   "body": {
+    "hex": "7b22737263547848617368223a2230787478222c226c7a4d6573736167654964223a7b22756c6e53656e6456657273696f6e223a2277227d7d2b41414141414141412f7638"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign utf9TooLarge": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=utf-9",
+   "contentEncoding": null,
+   "body": {
+    "pad": 102400
+   },
+   "answer": {
+    "status": 413,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign utf32Unknown": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=utf-32",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 400,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign utf9Unknown": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json; charset=utf-9",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\"}"
+   },
+   "answer": {
+    "status": 415,
+    "body": null
+   }
+  },
+  "POST /v2/resolve-and-sign invalidUtf8": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "hex": "7b22737263547848617368223a2230787478222c226c7a4d6573736167654964223a7b22756c6e53656e6456657273696f6e223a2256ffe282227d7d"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'V��', Required, Required"
+    }
+   }
+  },
+  "POST /v2/resolve-and-sign echoUtf8": {
+   "method": "POST",
+   "path": "/v2/resolve-and-sign",
+   "contentType": "application/json",
+   "contentEncoding": null,
+   "body": {
+    "text": "{\"srcTxHash\":\"0xtx\",\"lzMessageId\":{\"ulnSendVersion\":\"Vé€😀\"}}"
+   },
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid request: Required, Required, Invalid enum value. Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002', received 'Vé€😀', Required, Required"
+    }
+   }
+  },
+  "GET /signer-info none": {
+   "method": "GET",
+   "path": "/signer-info",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid input - Missing chainName query parameter"
+    }
+   }
+  },
+  "GET /signer-info empty": {
+   "method": "GET",
+   "path": "/signer-info?chainName=",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid input - Missing chainName query parameter"
+    }
+   }
+  },
+  "GET /signer-info bare": {
+   "method": "GET",
+   "path": "/signer-info?chainName",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid input - Missing chainName query parameter"
+    }
+   }
+  },
+  "GET /signer-info plain": {
+   "method": "GET",
+   "path": "/signer-info?chainName=ethereum",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 200,
+    "body": null
+   }
+  },
+  "GET /signer-info caseDiffers": {
+   "method": "GET",
+   "path": "/signer-info?chainName=ETHEREUM",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Chain ETHEREUM is not supported"
+    }
+   }
+  },
+  "GET /signer-info unknown": {
+   "method": "GET",
+   "path": "/signer-info?chainName=solana",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Chain solana is not supported"
+    }
+   }
+  },
+  "GET /signer-info repeated": {
+   "method": "GET",
+   "path": "/signer-info?chainName=ethereum&chainName=bsc",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Chain ethereum,bsc is not supported"
+    }
+   }
+  },
+  "GET /signer-info repeatedSame": {
+   "method": "GET",
+   "path": "/signer-info?chainName=ethereum&chainName=ethereum",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Chain ethereum,ethereum is not supported"
+    }
+   }
+  },
+  "GET /signer-info bareThenValue": {
+   "method": "GET",
+   "path": "/signer-info?chainName&chainName=bsc",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Chain ,bsc is not supported"
+    }
+   }
+  },
+  "GET /signer-info bracketArray": {
+   "method": "GET",
+   "path": "/signer-info?chainName[]=ethereum",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid input - Missing chainName query parameter"
+    }
+   }
+  },
+  "GET /signer-info bracketArrayTwo": {
+   "method": "GET",
+   "path": "/signer-info?chainName[]=x&chainName[]=y",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid input - Missing chainName query parameter"
+    }
+   }
+  },
+  "GET /signer-info bracketEmpty": {
+   "method": "GET",
+   "path": "/signer-info?chainName[]=",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid input - Missing chainName query parameter"
+    }
+   }
+  },
+  "GET /signer-info indexed": {
+   "method": "GET",
+   "path": "/signer-info?chainName[0]=a&chainName[2]=b",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid input - Missing chainName query parameter"
+    }
+   }
+  },
+  "GET /signer-info indexedSingle": {
+   "method": "GET",
+   "path": "/signer-info?chainName[0]=ethereum",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid input - Missing chainName query parameter"
+    }
+   }
+  },
+  "GET /signer-info indexOverLimit": {
+   "method": "GET",
+   "path": "/signer-info?chainName[21]=x",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid input - Missing chainName query parameter"
+    }
+   }
+  },
+  "GET /signer-info indexAtLimit": {
+   "method": "GET",
+   "path": "/signer-info?chainName[20]=x",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid input - Missing chainName query parameter"
+    }
+   }
+  },
+  "GET /signer-info objectKey": {
+   "method": "GET",
+   "path": "/signer-info?chainName[k]=x",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid input - Missing chainName query parameter"
+    }
+   }
+  },
+  "GET /signer-info nested": {
+   "method": "GET",
+   "path": "/signer-info?chainName[a][b]=c",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid input - Missing chainName query parameter"
+    }
+   }
+  },
+  "GET /signer-info nestedArray": {
+   "method": "GET",
+   "path": "/signer-info?chainName[][]=x",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid input - Missing chainName query parameter"
+    }
+   }
+  },
+  "GET /signer-info plainThenBracket": {
+   "method": "GET",
+   "path": "/signer-info?chainName=ethereum&chainName[]=x",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 200,
+    "body": null
+   }
+  },
+  "GET /signer-info bracketThenPlain": {
+   "method": "GET",
+   "path": "/signer-info?chainName[]=x&chainName=ethereum",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 200,
+    "body": null
+   }
+  },
+  "GET /signer-info objectThenPlain": {
+   "method": "GET",
+   "path": "/signer-info?chainName[k]=x&chainName=ethereum",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 200,
+    "body": null
+   }
+  },
+  "GET /signer-info plainThenObject": {
+   "method": "GET",
+   "path": "/signer-info?chainName=ethereum&chainName[k]=x",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 200,
+    "body": null
+   }
+  },
+  "GET /signer-info arrayThenObject": {
+   "method": "GET",
+   "path": "/signer-info?chainName[]=x&chainName[k]=y",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid input - Missing chainName query parameter"
+    }
+   }
+  },
+  "GET /signer-info encodedKey": {
+   "method": "GET",
+   "path": "/signer-info?chain%4Eame=bsc",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 200,
+    "body": null
+   }
+  },
+  "GET /signer-info bracketedRoot": {
+   "method": "GET",
+   "path": "/signer-info?[chainName]=bsc",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid input - Missing chainName query parameter"
+    }
+   }
+  },
+  "GET /signer-info toStringKey": {
+   "method": "GET",
+   "path": "/signer-info?chainName[toString]=x",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid input - Missing chainName query parameter"
+    }
+   }
+  },
+  "GET /signer-info valueOfKey": {
+   "method": "GET",
+   "path": "/signer-info?chainName[valueOf]=x",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid input - Missing chainName query parameter"
+    }
+   }
+  },
+  "GET /signer-info plus": {
+   "method": "GET",
+   "path": "/signer-info?chainName=bad+name",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Chain bad name is not supported"
+    }
+   }
+  },
+  "GET /signer-info encodedComma": {
+   "method": "GET",
+   "path": "/signer-info?chainName=a%2Cb",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Chain a,b is not supported"
+    }
+   }
+  },
+  "GET /signer-info badPercent": {
+   "method": "GET",
+   "path": "/signer-info?chainName=%E0%A4%A",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Chain �%A is not supported"
+    }
+   }
+  },
+  "GET /signer-info newline": {
+   "method": "GET",
+   "path": "/signer-info?chainName=bad%0Aname",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Chain bad\nname is not supported"
+    }
+   }
+  },
+  "GET /signer-info deep": {
+   "method": "GET",
+   "path": "/signer-info?chainName[a][b][c][d][e][f][g]=x",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid input - Missing chainName query parameter"
+    }
+   }
+  },
+  "GET /signer-info bracketEquals": {
+   "method": "GET",
+   "path": "/signer-info?chainName[a]=b]=c",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid input - Missing chainName query parameter"
+    }
+   }
+  },
+  "GET /signer-info emptyBracketKey": {
+   "method": "GET",
+   "path": "/signer-info?chainName[=x",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid input - Missing chainName query parameter"
+    }
+   }
+  },
+  "GET /signer-info emptyParts": {
+   "method": "GET",
+   "path": "/signer-info?&&chainName=bsc&&",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 200,
+    "body": null
+   }
+  },
+  "GET /signer-info encodedBrackets": {
+   "method": "GET",
+   "path": "/signer-info?chainName=ethereum&chainName%5B%5D=x",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 200,
+    "body": null
+   }
+  },
+  "GET /signer-info encodedBracketsBadPercent": {
+   "method": "GET",
+   "path": "/signer-info?chainName=ethereum&chainName%5B%5D%E0=x",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 200,
+    "body": null
+   }
+  },
+  "GET /signer-info encodedBracketsLower": {
+   "method": "GET",
+   "path": "/signer-info?chainName%5bk%5d=x",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 400,
+    "body": {
+     "statusCode": 400,
+     "body": "Invalid input - Missing chainName query parameter"
+    }
+   }
+  },
+  "GET /signer-info encodedBracketEquals": {
+   "method": "GET",
+   "path": "/signer-info?chainName=ethereum&chainName%5Ba=b%5D=x",
+   "contentType": null,
+   "contentEncoding": null,
+   "body": null,
+   "answer": {
+    "status": 200,
+    "body": null
+   }
+  }
+ }
+}

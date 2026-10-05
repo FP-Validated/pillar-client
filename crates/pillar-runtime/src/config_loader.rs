@@ -4,10 +4,8 @@ use async_trait::async_trait;
 use google_cloud_storage::client::Storage;
 use pillar_config::{
     kms_signer_adapter_factory_options_from_env_map, provider_config_from_env_map_async,
-    ConfigError, ProviderConfigGetter, ProviderConfigs, RemoteProviderConfigLoader,
-    RemoteProviderConfigRequest, RuntimeConfig, SignerSdkFactoryType, StaticProviderConfig,
-    GCP_PROJECT_ID, LZ_CDK_DEPLOY_REGION, LZ_PROVIDER_BUCKET, LZ_PROVIDER_CONFIG_REMOTE_KEY,
-    SIGNER_TYPE,
+    ConfigError, ProviderConfigGetter, RemoteProviderConfigLoader, RemoteProviderConfigRequest,
+    RemoteProviderSource, RuntimeConfig, SignerSdkFactoryType, StaticProviderConfig, SIGNER_TYPE,
 };
 use pillar_metrics::PillarMetrics;
 use std::collections::HashMap;
@@ -126,9 +124,9 @@ pub(crate) struct RemoteProviderConfigOwner {
     /// composition root has computed and validated the startup roster, which
     /// is the ceiling the handle enforces on every later generation, so the
     /// handle cannot exist before that set is known.
-    loaded: ProviderConfigs,
+    loaded: StaticProviderConfig,
     serving: Option<ProviderSnapshotHandle>,
-    request: RemoteProviderConfigRequest,
+    source: RemoteProviderSource,
     required_chain_names: Option<Vec<String>>,
     /// Injected so the refresh loop can be exercised end to end. Production
     /// always gets `AwsRemoteProviderConfigLoader`.
@@ -144,56 +142,20 @@ impl RemoteProviderConfigOwner {
         vars: &HashMap<String, String>,
         runtime_config: &RuntimeConfig,
     ) -> Result<Option<Self>, String> {
-        if matches!(
-            &runtime_config.provider_config_type,
-            pillar_config::ProviderConfigType::LOCAL
-        ) {
+        let Some(source) =
+            RemoteProviderSource::from_env_map(vars, &runtime_config.provider_config_type)
+                .map_err(|error| error.to_string())?
+        else {
             return Ok(None);
-        }
-        let request = match &runtime_config.provider_config_type {
-            pillar_config::ProviderConfigType::S3 => RemoteProviderConfigRequest::S3 {
-                bucket: vars
-                    .get(LZ_PROVIDER_BUCKET)
-                    .filter(|value| !value.is_empty())
-                    .ok_or_else(|| {
-                        format!("Missing required environment variable {LZ_PROVIDER_BUCKET}")
-                    })?
-                    .clone(),
-                key: LZ_PROVIDER_CONFIG_REMOTE_KEY.to_string(),
-                region: Some(
-                    vars.get(LZ_CDK_DEPLOY_REGION)
-                        .cloned()
-                        .unwrap_or_else(|| "us-east-1".to_string()),
-                ),
-            },
-            pillar_config::ProviderConfigType::GCS => RemoteProviderConfigRequest::GCS {
-                bucket: vars
-                    .get(LZ_PROVIDER_BUCKET)
-                    .filter(|value| !value.is_empty())
-                    .ok_or_else(|| {
-                        format!("Missing required environment variable {LZ_PROVIDER_BUCKET}")
-                    })?
-                    .clone(),
-                key: LZ_PROVIDER_CONFIG_REMOTE_KEY.to_string(),
-                project_id: vars
-                    .get(GCP_PROJECT_ID)
-                    .filter(|value| !value.is_empty())
-                    .ok_or_else(|| {
-                        format!("Missing required environment variable {GCP_PROJECT_ID}")
-                    })?
-                    .clone(),
-                region: "us-east1".to_string(),
-            },
-            pillar_config::ProviderConfigType::LOCAL => unreachable!(),
         };
         let required_chain_names = runtime_config.available_chain_names.clone();
         let loader: Arc<dyn RemoteProviderConfigLoader> = Arc::new(AwsRemoteProviderConfigLoader);
-        let snapshot =
-            load_remote_snapshot(&loader, &request, required_chain_names.as_deref()).await?;
+        let loaded =
+            load_remote_snapshot(&loader, &source, required_chain_names.as_deref()).await?;
         Ok(Some(Self {
-            loaded: snapshot.get_provider_configs().clone(),
+            loaded,
             serving: None,
-            request,
+            source,
             required_chain_names,
             loader,
             refresh_task: None,
@@ -233,7 +195,10 @@ impl RemoteProviderConfigOwner {
     fn publish_startup(&mut self, available_chain_names: Vec<String>) -> ProviderSnapshotHandle {
         self.serving
             .get_or_insert_with(|| {
-                ProviderSnapshotHandle::new(self.loaded.clone(), available_chain_names)
+                ProviderSnapshotHandle::new(
+                    self.loaded.get_provider_configs().clone(),
+                    available_chain_names,
+                )
             })
             .clone()
     }
@@ -241,8 +206,7 @@ impl RemoteProviderConfigOwner {
     /// The configuration the composition root computes the startup roster
     /// from. Serving generations are read through the handle, not here.
     pub(crate) fn snapshot(&self) -> Result<StaticProviderConfig, String> {
-        StaticProviderConfig::new(self.loaded.clone(), self.required_chain_names.as_deref())
-            .map_err(|error| error.to_string())
+        Ok(self.loaded.clone())
     }
     /// Starts the refresh loop, recording into the registry `/metrics` renders.
     ///
@@ -256,7 +220,7 @@ impl RemoteProviderConfigOwner {
         if self.refresh_task.is_some() {
             return;
         }
-        let request = self.request.clone();
+        let source = self.source.clone();
         let loader = self.loader.clone();
         let required_chain_names = self.required_chain_names.clone();
         // `available_chain_names` was parsed as `split(',')` without trimming, so
@@ -286,7 +250,7 @@ impl RemoteProviderConfigOwner {
                 // restarting, which is also the only way the signer set it
                 // implies can change.
                 let result =
-                    load_remote_snapshot(&loader, &request, required_chain_names.as_deref()).await;
+                    load_remote_snapshot(&loader, &source, required_chain_names.as_deref()).await;
                 apply_refreshed_snapshot(&serving, &metrics, result, requested_csv.as_deref())
                     .await;
                 // After the work, not before. Stamping on entry would publish a
@@ -305,17 +269,22 @@ impl RemoteProviderConfigOwner {
     /// Builds an owner around an injected loader. Test-only: production always
     /// goes through `from_env_map`, which reads S3 or GCS.
     pub(crate) fn with_loader_for_test(
-        provider_configs: ProviderConfigs,
+        provider_configs: pillar_config::ProviderConfigs,
         loader: Arc<dyn RemoteProviderConfigLoader>,
         required_chain_names: Option<Vec<String>>,
     ) -> Self {
+        let request = |key: &str| RemoteProviderConfigRequest::S3 {
+            bucket: "test-bucket".to_string(),
+            key: key.to_string(),
+            region: None,
+        };
         Self {
-            loaded: provider_configs,
+            loaded: StaticProviderConfig::new(provider_configs, None)
+                .expect("an unrestricted fixture always loads"),
             serving: None,
-            request: RemoteProviderConfigRequest::S3 {
-                bucket: "test-bucket".to_string(),
-                key: "providers.json".to_string(),
-                region: None,
+            source: RemoteProviderSource {
+                providers: request(pillar_config::LZ_PROVIDER_CONFIG_REMOTE_KEY),
+                strategy: request(pillar_config::LZ_QUORUM_STRATEGY_REMOTE_KEY),
             },
             required_chain_names,
             loader,
@@ -402,16 +371,12 @@ fn accept_refreshed_snapshot(
 
 async fn load_remote_snapshot(
     loader: &Arc<dyn RemoteProviderConfigLoader>,
-    request: &RemoteProviderConfigRequest,
+    source: &RemoteProviderSource,
     required_chain_names: Option<&[String]>,
 ) -> Result<StaticProviderConfig, String> {
-    let raw = loader
-        .load_provider_config(request.clone())
+    source
+        .load(loader.as_ref(), required_chain_names)
         .await
-        .map_err(|error| error.to_string())?;
-    let provider_config = serde_json::from_str::<ProviderConfigs>(&raw)
-        .map_err(|error| ConfigError::Json(error.to_string()).to_string())?;
-    StaticProviderConfig::new(provider_config, required_chain_names)
         .map_err(|error| error.to_string())
 }
 
@@ -447,13 +412,35 @@ mod tests {
     }
 
     fn refreshed_snapshot(raw: &str) -> StaticProviderConfig {
-        StaticProviderConfig::new(serde_json::from_str(raw).unwrap(), None).unwrap()
+        StaticProviderConfig::new(
+            pillar_config::test_support::provider_configs_from_uris_json(raw),
+            None,
+        )
+        .unwrap()
+    }
+
+    /// A snapshot the loader would have refused, built past its validation so the
+    /// publish-side gate is what is exercised.
+    fn unvalidated_snapshot(uris: &[&str], quorum: u64) -> StaticProviderConfig {
+        StaticProviderConfig::new(
+            pillar_config::ProviderConfigs::from([(
+                "bsc".to_string(),
+                pillar_config::ProviderConfig::with_distinct_entities(
+                    uris.iter()
+                        .map(|uri| pillar_config::ProviderUri::Uri((*uri).to_string()))
+                        .collect(),
+                    quorum,
+                ),
+            )]),
+            None,
+        )
+        .unwrap()
     }
 
     const SERVING_PROVIDERS: &str = r#"{"bsc":{"uris":["https://bsc-rpc.example"],"quorum":1}}"#;
 
-    fn provider_configs(raw: &str) -> ProviderConfigs {
-        serde_json::from_str(raw).unwrap()
+    fn provider_configs(raw: &str) -> pillar_config::ProviderConfigs {
+        pillar_config::test_support::provider_configs_from_uris_json(raw)
     }
 
     /// The handle a consumer reads, published through a real owner.
@@ -548,21 +535,19 @@ mod tests {
 
     #[tokio::test]
     async fn provider_config_refresh_keeps_the_serving_snapshot_when_the_candidate_cannot_sign() {
-        for (flaw, candidate) in [
-            ("no provider URI", r#"{"bsc":{"uris":[],"quorum":1}}"#),
-            (
-                "a zero quorum",
-                r#"{"bsc":{"uris":["https://poisoned.example"],"quorum":0}}"#,
-            ),
+        for (flaw, uris, quorum) in [
+            ("no provider URI", &[][..], 1),
+            ("a zero quorum", &["https://poisoned.example"][..], 0),
             (
                 "a quorum above the URI count",
-                r#"{"bsc":{"uris":["https://poisoned.example"],"quorum":3}}"#,
+                &["https://poisoned.example"][..],
+                3,
             ),
         ] {
             let serving = owner_serving(SERVING_PROVIDERS);
             let registry = Arc::new(Mutex::new(PillarMetrics::new()));
             let metrics =
-                refresh_with(&serving, &registry, Ok(refreshed_snapshot(candidate))).await;
+                refresh_with(&serving, &registry, Ok(unvalidated_snapshot(uris, quorum))).await;
 
             assert_eq!(
                 serving.load().provider_configs(),
@@ -642,12 +627,7 @@ mod tests {
         );
 
         tokio::time::advance(Duration::from_secs(30)).await;
-        let rendered = refresh_with(
-            &serving,
-            &registry,
-            Ok(refreshed_snapshot(r#"{"bsc":{"uris":[],"quorum":1}}"#)),
-        )
-        .await;
+        let rendered = refresh_with(&serving, &registry, Ok(unvalidated_snapshot(&[], 1))).await;
         assert!(rendered.contains(r#"result="rejected""#), "{rendered}");
         assert_eq!(
             rendered_gauge(&rendered, "pillar_provider_config_age_seconds"),

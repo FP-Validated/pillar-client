@@ -1,0 +1,91 @@
+{
+ "producedBy": {
+  "upstream": "gasolina-audit 1.2.66 (manifest sha256 8ad87eb6...; archive comment 213cd500...)",
+  "encoder": "@stellar/stellar-sdk 16.0.1 (the version in the 1.2.66 lockfile)",
+  "notExecuted": "upstream EndpointV2StellarSdk/UlnStellarSdk need src/generated/*.js bindings absent from the snapshot"
+ },
+ "inputs": {
+  "contracts": {
+   "endpoint": "CCQLLRE5JBAWYCW3KTWOIWLMFDUOKROQVZNSALQMGOSXNW3ERUOWTZGK",
+   "uln": "CCV4HEII3UC65THWGSRM2DVIJLB6HS6YMUHDTTHUECX2RHTP5FA2GOBA",
+   "views": "CBCH6XLCAVY2KPWGJYDY4ATDHMJCNLISINKB5JAOHPAAXZXLTBMU43ZB"
+  },
+  "receiver": "0x1111111111111111111111111111111111111111111111111111111111111111",
+  "sender": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "dvn": "0x2222222222222222222222222222222222222222222222222222222222222222",
+  "srcEid": 30101,
+  "dstEid": 30600,
+  "nonce": 7,
+  "guid": "0x6666666666666666666666666666666666666666666666666666666666666666",
+  "message": "0xdeadbeef",
+  "packetHeader": "0x01000000000000000700007595aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa000077881111111111111111111111111111111111111111111111111111111111111111",
+  "payloadHash": "0x8720584a0f0913fc8b092ffb8bcdfcb096dc6bddde0fe79404b7801e0626dd09"
+ },
+ "calls": {
+  "get_receive_library": "AAAAAaC1xJ1IQWwK21Ts5FlsKOjlRdCuWyAuDDOldttkjR1pAAAAE2dldF9yZWNlaXZlX2xpYnJhcnkAAAAAAgAAABIAAAABEREREREREREREREREREREREREREREREREREREREREREAAAADAAB1lQ==",
+  "is_valid_receive_library": "AAAAAaC1xJ1IQWwK21Ts5FlsKOjlRdCuWyAuDDOldttkjR1pAAAAGGlzX3ZhbGlkX3JlY2VpdmVfbGlicmFyeQAAAAMAAAASAAAAARERERERERERERERERERERERERERERERERERERERERERAAAAAwAAdZUAAAASAAAAATMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMz",
+  "effective_receive_uln_config": "AAAAAavDkQjdBe7M9jSizQ6oSsPjy9hlDjnM9CCvqJ5v6UGjAAAAHGVmZmVjdGl2ZV9yZWNlaXZlX3Vsbl9jb25maWcAAAACAAAAEgAAAAEREREREREREREREREREREREREREREREREREREREREREQAAAAMAAHWV",
+  "confirmations": "AAAAAavDkQjdBe7M9jSizQ6oSsPjy9hlDjnM9CCvqJ5v6UGjAAAADWNvbmZpcm1hdGlvbnMAAAAAAAADAAAAEgAAAAEiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIgAAAA0AAAAg9R2I91J3jSP2vK5oydNuEWq113N9YUzM6gy1UggP590AAAANAAAAIIcgWEoPCRP8iwkv+4vN/LCW3Gvd3g/nlAS3gB4GJt0J",
+  "uln_verifiable": "AAAAAUR/XWIFcaU+xk4HjgJjOxImrRJDVB6kDjvAC+brmFlOAAAADnVsbl92ZXJpZmlhYmxlAAAAAAACAAAADQAAAFEBAAAAAAAAAAcAAHWVqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqoAAHeIEREREREREREREREREREREREREREREREREREREREREREAAAAAAAANAAAAIIcgWEoPCRP8iwkv+4vN/LCW3Gvd3g/nlAS3gB4GJt0J"
+ },
+ "returns": {
+  "defaultLibrary": {
+   "xdr": "AAAAEQAAAAEAAAACAAAADwAAAAppc19kZWZhdWx0AAAAAAAAAAAAAQAAAA8AAAADbGliAAAAABIAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVU=",
+   "native": {
+    "is_default": true,
+    "lib": "CBKVKVKVKVKVKVKVKVKVKVKVKVKVKVKVKVKVKVKVKVKVKVKVKVKVLO6Q"
+   }
+  },
+  "overrideLibrary": {
+   "xdr": "AAAAEQAAAAEAAAACAAAADwAAAAppc19kZWZhdWx0AAAAAAAAAAAAAAAAAA8AAAADbGliAAAAABIAAAABMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM=",
+   "native": {
+    "is_default": false,
+    "lib": "CAZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGGJH"
+   }
+  },
+  "valid": {
+   "xdr": "AAAAAAAAAAE=",
+   "native": true
+  },
+  "invalid": {
+   "xdr": "AAAAAAAAAAA=",
+   "native": false
+  },
+  "config15": {
+   "xdr": "AAAAEQAAAAEAAAAEAAAADwAAAA1jb25maXJtYXRpb25zAAAAAAAABQAAAAAAAAAPAAAADwAAABZvcHRpb25hbF9kdm5fdGhyZXNob2xkAAAAAAADAAAAAAAAAA8AAAANb3B0aW9uYWxfZHZucwAAAAAAABAAAAABAAAAAAAAAA8AAAANcmVxdWlyZWRfZHZucwAAAAAAABAAAAABAAAAAQAAABIAAAABIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+   "native": {
+    "confirmations": "15",
+    "optional_dvn_threshold": 0,
+    "optional_dvns": [],
+    "required_dvns": [
+     "CARCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEVQO"
+    ]
+   }
+  },
+  "noConfirmations": {
+   "xdr": "AAAAAQ==",
+   "native": null
+  },
+  "confirmations14": {
+   "xdr": "AAAABQAAAAAAAAAO",
+   "native": "14"
+  },
+  "confirmations15": {
+   "xdr": "AAAABQAAAAAAAAAP",
+   "native": "15"
+  },
+  "verifying": {
+   "xdr": "AAAAEAAAAAEAAAABAAAADwAAAAlWZXJpZnlpbmcAAAA=",
+   "native": [
+    "Verifying"
+   ]
+  },
+  "verified": {
+   "xdr": "AAAAEAAAAAEAAAABAAAADwAAAAhWZXJpZmllZA==",
+   "native": [
+    "Verified"
+   ]
+  }
+ },
+ "overrideLibraryStrkey": "CAZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGGJH"
+}

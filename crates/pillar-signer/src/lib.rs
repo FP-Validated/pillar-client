@@ -1,6 +1,7 @@
 mod aws;
 mod azure;
 mod chain_address;
+mod effects;
 mod factory;
 mod gcp;
 mod kms_signature;
@@ -8,11 +9,12 @@ mod local_mnemonic;
 mod types;
 
 pub use aws::{
-    AwsKmsClient, AwsKmsRawSignerAdapter, AwsKmsRawSignerAdapterFactory, AwsSdkKmsClient,
+    AwsKmsClient, AwsKmsRawSignerAdapter, AwsKmsRawSignerAdapterFactory, AwsPublicKey,
+    AwsSdkKmsClient,
 };
 pub use azure::{
-    parse_azure_kms_key_id, AzureKeyVaultKmsClient, AzureKmsClient, AzureKmsKeyId,
-    AzureKmsRawSignerAdapter, AzureKmsRawSignerAdapterFactory,
+    parse_azure_kms_key_id, AzureEcPublicKey, AzureKeyVaultKmsClient, AzureKmsClient,
+    AzureKmsKeyId, AzureKmsRawSignerAdapter, AzureKmsRawSignerAdapterFactory,
 };
 pub use chain_address::{
     AptosChain, ChainAddress, EvmAddressChain, EvmChain, InitiaChain, PillarSignerAdapter,

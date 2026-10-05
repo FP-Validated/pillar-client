@@ -102,13 +102,7 @@ where
         let verifier_be = ton_address_to_be32(verifier_address)?;
 
         let quorum = required_provider_quorum(provider_config, dst_chain_name)?;
-        let plan = plan_dispatch(
-            &self.rank_tracker,
-            dst_chain_name,
-            &provider_config.uris,
-            quorum,
-        )
-        .await?;
+        let plan = plan_dispatch(&self.rank_tracker, dst_chain_name, quorum).await?;
 
         let requests = FuturesUnordered::new();
         for DispatchEntry { index, uri, delay } in plan {
@@ -122,20 +116,22 @@ where
                 if !delay.is_zero() {
                     tokio::time::sleep(delay).await;
                 }
-                let observation = observe_ton_payload_signed(
-                    transport,
-                    url,
-                    headers,
-                    TonPayloadSignedObservation {
-                        uln_address: &uln_address,
-                        uln_connection_address: &uln_connection_address,
-                        packet_boc_base64: &packet_boc_base64,
-                        packet_hash_be: &packet_hash_be,
-                        nonce,
-                        verifier_be: &verifier_be,
-                    },
-                )
-                .await;
+                let observation = provider_response(
+                    observe_ton_payload_signed(
+                        transport,
+                        url,
+                        headers,
+                        TonPayloadSignedObservation {
+                            uln_address: &uln_address,
+                            uln_connection_address: &uln_connection_address,
+                            packet_boc_base64: &packet_boc_base64,
+                            packet_hash_be: &packet_hash_be,
+                            nonce,
+                            verifier_be: &verifier_be,
+                        },
+                    )
+                    .await,
+                );
                 (index, observation)
             });
         }
@@ -152,7 +148,7 @@ async fn observe_ton_payload_signed<T>(
     url: String,
     headers: HashMap<String, String>,
     observation: TonPayloadSignedObservation<'_>,
-) -> Option<(String, PayloadSignedValidity)>
+) -> Result<(String, PayloadSignedValidity), RpcError>
 where
     T: JsonRpcTransport,
 {
@@ -173,19 +169,19 @@ where
     // it is a vote, so providers that agree the contract is not active reach a
     // quorum on that fact rather than being confused with providers that never
     // answered.
-    let inactive = || Some(("0".to_string(), PayloadSignedValidity::Missing));
+    let inactive = || Ok(("0".to_string(), PayloadSignedValidity::Missing));
 
     let (connection_storage_boc, connection_storage) =
-        match ton_storage_cell(&transport, &url, headers.clone(), uln_connection_address).await {
+        match ton_storage_cell(&transport, &url, headers.clone(), uln_connection_address).await? {
             TonStorageRead::Cell(boc, cell) => (boc, cell),
             TonStorageRead::Inactive => return inactive(),
-            TonStorageRead::Unavailable => return None,
+            TonStorageRead::Unavailable => return Err(RpcError::Unavailable),
         };
     let (uln_storage_boc, uln_storage) =
-        match ton_storage_cell(&transport, &url, headers.clone(), uln_address).await {
+        match ton_storage_cell(&transport, &url, headers.clone(), uln_address).await? {
             TonStorageRead::Cell(boc, cell) => (boc, cell),
             TonStorageRead::Inactive => return inactive(),
-            TonStorageRead::Unavailable => return None,
+            TonStorageRead::Unavailable => return Err(RpcError::Unavailable),
         };
     // Past this point the inputs are the agreed cells, so a decode failure is
     // deterministic rather than provider-specific: upstream decodes once, after
@@ -193,7 +189,7 @@ where
     // providers failing on the same bytes agree, and providers failing on
     // different bytes do not.
     let undecodable = || {
-        Some((
+        Ok((
             format!("undecodable:{connection_storage_boc}:{uln_storage_boc}"),
             PayloadSignedValidity::Missing,
         ))
@@ -242,7 +238,7 @@ where
     } else {
         PayloadSignedValidity::NotSigned
     };
-    Some((
+    Ok((
         format!("{connection_storage_boc}:{uln_storage_boc}:{state}:{attestation:?}"),
         validity,
     ))
@@ -276,7 +272,7 @@ async fn ton_storage_cell<T>(
     url: &str,
     headers: HashMap<String, String>,
     address: &str,
-) -> TonStorageRead
+) -> Result<TonStorageRead, RpcError>
 where
     T: JsonRpcTransport,
 {
@@ -286,31 +282,31 @@ where
         "method": "getAddressInformation",
         "params": { "address": address },
     });
-    let Ok(response) = transport.post_json(url.to_string(), headers, body).await else {
-        return TonStorageRead::Unavailable;
-    };
+    let response = transport
+        .post_json_scoped(url.to_string(), headers, body)
+        .await?;
     // No `result` at all is a malformed answer, not a statement about the
     // contract; upstream's provider would have rejected.
     let Some(result) = response.get("result") else {
-        return TonStorageRead::Unavailable;
+        return Ok(TonStorageRead::Unavailable);
     };
     let state = result.get("state").and_then(Value::as_str);
     // An uninitialized or frozen contract has no storage to decode, and neither
     // does an active one that reports no data. Both are upstream's `'0'`.
     if !(matches!(state, Some("active")) || state.is_none()) {
-        return TonStorageRead::Inactive;
+        return Ok(TonStorageRead::Inactive);
     }
     let Some(data) = result
         .get("data")
         .and_then(Value::as_str)
         .filter(|data| !data.is_empty())
     else {
-        return TonStorageRead::Inactive;
+        return Ok(TonStorageRead::Inactive);
     };
-    match boc_from_base64(data) {
+    Ok(match boc_from_base64(data) {
         Ok(cell) => TonStorageRead::Cell(data.to_string(), cell),
         Err(_) => TonStorageRead::Unavailable,
-    }
+    })
 }
 
 /// `provider.v2.getView(address, 'committableView', args)`: the returned stack's
@@ -323,7 +319,7 @@ async fn observe_ton_committable_view<T>(
     nonce: u64,
     packet_boc_base64: &str,
     default_receive_config_boc_base64: &str,
-) -> Option<u64>
+) -> Result<u64, RpcError>
 where
     T: JsonRpcTransport,
 {
@@ -342,21 +338,28 @@ where
         },
     });
     let response = transport
-        .post_json(url.to_string(), headers, body)
-        .await
-        .ok()?;
-    let result = response.get("result")?;
+        .post_json_scoped(url.to_string(), headers, body)
+        .await?;
+    let result = response.get("result").ok_or(RpcError::Unavailable)?;
     // `exit_code != 0` means the get-method aborted; there is no state to read.
     if let Some(exit_code) = result.get("exit_code").and_then(Value::as_i64) {
         if exit_code != 0 {
-            return None;
+            return Err(RpcError::Unavailable);
         }
     }
-    let entry = result.get("stack")?.as_array()?.last()?.as_array()?;
-    let value = entry.get(1)?.as_str()?;
+    let entry = result
+        .get("stack")
+        .and_then(Value::as_array)
+        .and_then(|stack| stack.last())
+        .and_then(Value::as_array)
+        .ok_or(RpcError::Unavailable)?;
+    let value = entry
+        .get(1)
+        .and_then(Value::as_str)
+        .ok_or(RpcError::Unavailable)?;
     let trimmed = value.trim();
     match trimmed.strip_prefix("0x") {
-        Some(hex_value) => u64::from_str_radix(hex_value, 16).ok(),
-        None => trimmed.parse::<u64>().ok(),
+        Some(hex_value) => u64::from_str_radix(hex_value, 16).map_err(|_| RpcError::Unavailable),
+        None => trimmed.parse::<u64>().map_err(|_| RpcError::Unavailable),
     }
 }

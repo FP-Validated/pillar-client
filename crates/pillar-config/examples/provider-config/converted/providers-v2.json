@@ -1,0 +1,43 @@
+{
+  "entities": [
+    "operator",
+    "provider-a"
+  ],
+  "chains": {
+    "ethereum": {
+      "rpc": [
+        {
+          "category": "internal",
+          "entity": "operator",
+          "uri": "http://rpc-gateway.operator.example:8545/rpc/ethereum"
+        }
+      ]
+    },
+    "bsc": {
+      "rpc": [
+        {
+          "category": "internal",
+          "entity": "operator",
+          "uri": "http://rpc-gateway.operator.example:8545/rpc/bsc"
+        },
+        {
+          "category": "dedicated_external",
+          "entity": "provider-a",
+          "headers": {
+            "x-api-key": "REPLACE_ME"
+          },
+          "uri": "https://bsc.provider-a.example/v1"
+        }
+      ]
+    },
+    "solana": {
+      "rpc": [
+        {
+          "category": "internal",
+          "entity": "operator",
+          "uri": "http://rpc-gateway.operator.example:8545/rpc/solana"
+        }
+      ]
+    }
+  }
+}

@@ -15,32 +15,35 @@ pub(crate) fn move_provider_uri_parts(
 }
 
 use super::*;
-
-const APTOS_PACKET_SENT_SUFFIXES: [&str; 2] = [
-    "::channels::packetsent",
-    "::endpoint_v2::channels::packetsent",
+const APTOS_V1_ULN301_EMITTERS: [&str; 3] = [
+    "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812",
+    "0x9b4f328857baf5471ffe873471459a75da3aa3db0629f4c1b0ede4d48cf9fac1",
+    "0x1050fe8b6900532a0fc312c1635f3e0bfb1153cc9ef55bc190ce48f0db471514",
 ];
-const INITIA_PACKET_SENT_SUFFIX: &str = "::endpoint_v2::channels::packetsent";
 
 #[derive(Debug, Clone)]
 pub(crate) struct MovePacketSentEvent {
     pub(crate) endpoint_address: String,
     pub(crate) packet: LzPacketV1,
-    pub(crate) options: String,
+    /// Raw options as `0x` hex, or upstream's throw reading them, raised only after the
+    /// destination chain is named, as upstream's object literal orders it.
+    pub(crate) options: Result<String, String>,
     pub(crate) send_library: Option<String>,
+    /// Upstream's `data.send_library ? V302 : V301`, whatever the event token.
+    pub(crate) uln_send_version: String,
+}
+
+/// How upstream's one Aptos-family extractor reads byte fields: hex strings, or for Sui and
+/// IotaL1 `Uint8Array.from` over the parsed JSON (`decoders/index.ts:69-73,116-118`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MoveByteFields {
+    Hex,
+    JsUint8Array,
 }
 
 fn normalize_move_account(address: &str) -> String {
     let value = strip_hex_prefix(address).to_ascii_lowercase();
     format!("0x{value:0>64}")
-}
-
-fn initia_endpoint_event_type(endpoint: &str) -> String {
-    format!(
-        "{}{}",
-        normalize_move_account(endpoint),
-        INITIA_PACKET_SENT_SUFFIX
-    )
 }
 
 fn decode_bytes(value: &Value) -> Option<String> {
@@ -67,91 +70,202 @@ fn decode_bytes(value: &Value) -> Option<String> {
     }
 }
 
-fn decode_event_data(endpoint: &str, data: &Value) -> Option<MovePacketSentEvent> {
-    let encoded_packet = data
-        .get("encoded_packet")
-        .or_else(|| data.get("packet"))
-        .and_then(decode_bytes)?;
-    let packet = decode_lz_packet_v1(&encoded_packet).ok()?;
-    let options = data.get("options").and_then(decode_bytes)?;
+/// JavaScript's `Uint8Array.from(value)` over a parsed JSON field: array elements through
+/// `ToNumber` and `ToUint8`, a string's characters likewise, anything else not iterable.
+pub(crate) fn js_uint8_array_from(value: Option<&Value>) -> Result<Vec<u8>, String> {
+    let to_uint8 = |number: f64| -> u8 {
+        if number.is_finite() {
+            number.trunc().rem_euclid(256.0) as u8
+        } else {
+            0
+        }
+    };
+    let to_number = |value: &Value| -> f64 {
+        match value {
+            Value::Number(number) => number.as_f64().unwrap_or(f64::NAN),
+            Value::Bool(flag) => f64::from(u8::from(*flag)),
+            Value::Null => 0.0,
+            Value::String(text) => {
+                let text = text.trim();
+                if text.is_empty() {
+                    0.0
+                } else if let Some(hex) = text.strip_prefix("0x").or(text.strip_prefix("0X")) {
+                    u64::from_str_radix(hex, 16).map_or(f64::NAN, |number| number as f64)
+                } else if text.bytes().all(|byte| b"0123456789.eE+-".contains(&byte)) {
+                    text.parse().unwrap_or(f64::NAN)
+                } else {
+                    f64::NAN
+                }
+            }
+            Value::Array(_) | Value::Object(_) => f64::NAN,
+        }
+    };
+    match value {
+        None => Err(
+            "undefined is not iterable (cannot read property Symbol(Symbol.iterator))".to_string(),
+        ),
+        Some(Value::Null) => Err(
+            "object null is not iterable (cannot read property Symbol(Symbol.iterator))"
+                .to_string(),
+        ),
+        Some(Value::Array(items)) => {
+            Ok(items.iter().map(|item| to_uint8(to_number(item))).collect())
+        }
+        Some(Value::String(text)) => Ok(text
+            .chars()
+            .map(|character| character.to_digit(10).map_or(0, |digit| digit as u8))
+            .collect()),
+        Some(_) => Ok(Vec::new()),
+    }
+}
+
+/// Upstream's `extractLZEventFromPacketSentEvent` field reads
+/// (`lz-v2-sdk/src/endpoint/aptos/decoders/index.ts:104-148`); an `Err` is its throw.
+pub(crate) fn decode_event_data(
+    endpoint: &str,
+    data: &Value,
+    fields: MoveByteFields,
+) -> Result<MovePacketSentEvent, String> {
+    if data.get("encoded_packet").is_none() && data.get("packet").is_none() {
+        return Err("Both encoded_packet and packet are undefined in the event".to_string());
+    }
+    let encoded_packet = match fields {
+        MoveByteFields::Hex => {
+            let encoded = match (data.get("encoded_packet"), data.get("packet")) {
+                (Some(value), other) if value.is_null() => other.unwrap_or(&Value::Null),
+                (Some(value), _) | (None, Some(value)) => value,
+                (None, None) => &Value::Null,
+            };
+            decode_bytes(encoded)
+                .ok_or_else(|| "PacketSent packet bytes are malformed".to_string())?
+        }
+        MoveByteFields::JsUint8Array => format!(
+            "0x{}",
+            hex::encode(js_uint8_array_from(data.get("encoded_packet"))?)
+        ),
+    };
+    let packet = decode_lz_packet_v1(&encoded_packet).map_err(|error| error.to_string())?;
     let send_library = data
         .get("send_library")
         .and_then(Value::as_str)
+        .filter(|library| !library.is_empty())
         .map(ToString::to_string);
-    Some(MovePacketSentEvent {
+    let options = match fields {
+        MoveByteFields::Hex => data
+            .get("options")
+            .and_then(decode_bytes)
+            .ok_or_else(|| "PacketSent event carries no options".to_string()),
+        MoveByteFields::JsUint8Array => js_uint8_array_from(data.get("options"))
+            .map(|bytes| format!("0x{}", hex::encode(bytes))),
+    };
+    Ok(MovePacketSentEvent {
         endpoint_address: normalize_move_account(endpoint),
         packet,
         options,
+        uln_send_version: if send_library.is_some() {
+            "V302"
+        } else {
+            "V301"
+        }
+        .to_string(),
         send_library,
     })
 }
 
-fn aptos_event_matches(event: &Value, endpoint: &str) -> Option<Value> {
-    let event_type = event.get("type").and_then(Value::as_str)?;
-    let event_type_lower = event_type.to_ascii_lowercase();
-    (normalize_move_account(event_type.split("::").next()?) == normalize_move_account(endpoint)
-        && APTOS_PACKET_SENT_SUFFIXES
-            .iter()
-            .any(|suffix| event_type_lower.ends_with(suffix)))
-    .then(|| event.get("data").cloned())?
+/// Upstream's `getSafeEventToken` (`common-aptos/src/layerzero-v2/events.ts:46-49`,
+/// `common-initia/src/events.ts:40-43`): the first three `::` parts, the account padded to
+/// 32 bytes, all lowercased.
+fn safe_event_token(token: &str) -> (String, String, String) {
+    let mut parts = token.split("::");
+    let mut next = || parts.next().unwrap_or("undefined").to_ascii_lowercase();
+    let (account, module, resource) = (next(), next(), next());
+    (normalize_move_account(&account), module, resource)
 }
 
-fn initia_event_matches(event: &Value, endpoint: &str) -> Option<Value> {
+/// The send version a trusted emitter's `PacketSent` token names: `sending::PacketSent` under the
+/// Aptos V1 ULN301, `channels::PacketSent` under an EndpointV2.
+fn packet_sent_token_version(event_type: &str, endpoint: &str) -> Option<&'static str> {
+    let (emitter, module, resource) = safe_event_token(event_type);
+    if emitter != normalize_move_account(endpoint) || resource != "packetsent" {
+        return None;
+    }
+    let uln301 = APTOS_V1_ULN301_EMITTERS
+        .iter()
+        .any(|address| normalize_move_account(address) == emitter);
+    match (uln301, module.as_str()) {
+        (true, "sending") => Some("V301"),
+        (false, "channels") => Some("V302"),
+        _ => None,
+    }
+}
+
+fn aptos_event_matches(event: &Value, endpoint: &str) -> Option<(Value, &'static str)> {
+    let version = packet_sent_token_version(event.get("type")?.as_str()?, endpoint)?;
+    let data = event.get("data").filter(|data| js_truthy(data))?;
+    Some((data.clone(), version))
+}
+
+/// An Initia `move` event whose `type_tag` names the endpoint's token, with its `data`
+/// attribute parsed; a `data` that is not JSON is upstream's `JSON.parse` throw.
+fn initia_event_matches(event: &Value, endpoint: &str) -> Option<Result<Value, String>> {
     if event.get("type").and_then(Value::as_str) != Some("move") {
         return None;
     }
     let attributes = event.get("attributes")?.as_array()?;
-    let expected = initia_endpoint_event_type(endpoint);
-    let type_tag = attributes
-        .iter()
-        .find(|attribute| attribute.get("key").and_then(Value::as_str) == Some("type_tag"))
-        .and_then(|attribute| attribute.get("value"))
-        .and_then(Value::as_str)?;
-    if normalize_move_account(type_tag.split("::").next()?) != normalize_move_account(endpoint)
-        || !type_tag.to_ascii_lowercase().ends_with(&expected[66..])
+    let values = |key: &'static str| {
+        attributes
+            .iter()
+            .filter(move |attribute| attribute.get("key").and_then(Value::as_str) == Some(key))
+            .filter_map(|attribute| attribute.get("value").and_then(Value::as_str))
+    };
+    if !values("type_tag")
+        .any(|type_tag| packet_sent_token_version(type_tag, endpoint) == Some("V302"))
     {
         return None;
     }
-    let data = attributes
-        .iter()
-        .find(|attribute| attribute.get("key").and_then(Value::as_str) == Some("data"))
-        .and_then(|attribute| attribute.get("value"))
-        .and_then(Value::as_str)?;
-    serde_json::from_str(data).ok()
+    let data = values("data").next()?;
+    Some(serde_json::from_str(data).map_err(|error| format!("Invalid JSON in event data: {error}")))
 }
 
+/// Upstream's `getMatchingEventsInTransaction` over the event token of `token_version`:
+/// every trusted event of that token is extracted, and the first extraction that throws
+/// fails the whole read (`common-aptos`, `common-initia`).
 pub(crate) fn decode_move_packet_sent_events(
     chain_name: &str,
     transaction: &Value,
     trusted_endpoints: &HashSet<String>,
-) -> Vec<MovePacketSentEvent> {
+    token_version: &str,
+) -> Result<Vec<MovePacketSentEvent>, String> {
     let trusted_endpoints = trusted_endpoints
         .iter()
         .map(|endpoint| normalize_move_account(endpoint))
         .collect::<HashSet<_>>();
     let Some(events) = transaction.get("events").and_then(Value::as_array) else {
-        return Vec::new();
-    };
-    let matches_event: fn(&Value, &str) -> Option<Value> = if chain_name == "initia" {
-        initia_event_matches
-    } else {
-        aptos_event_matches
+        return Ok(Vec::new());
     };
     let mut decoded = Vec::new();
     for event in events {
-        let Some((endpoint, data)) = trusted_endpoints.iter().find_map(|endpoint| {
-            matches_event(event, endpoint).map(|data| (endpoint.clone(), data))
-        }) else {
+        let Some((endpoint, data, event_token_version)) =
+            trusted_endpoints.iter().find_map(|endpoint| {
+                let matched = if chain_name == "initia" {
+                    initia_event_matches(event, endpoint).map(|data| (data, "V302"))
+                } else {
+                    aptos_event_matches(event, endpoint).map(|(data, version)| (Ok(data), version))
+                };
+                matched.map(|(data, version)| (endpoint.clone(), data, version))
+            })
+        else {
             continue;
         };
-        if let Some(event) = decode_event_data(&endpoint, &data) {
-            decoded.push(event);
+        if event_token_version != token_version {
+            continue;
         }
+        decoded.push(decode_event_data(&endpoint, &data?, MoveByteFields::Hex)?);
     }
-    decoded
+    Ok(decoded)
 }
-/// `None` when the hash cannot be made into one opaque path segment. The API
-/// boundary already refuses a `srcTxHash` carrying a path metacharacter, but
+/// `None` when the hash cannot be made into one opaque path segment. The core
+/// already refuses a `srcTxHash` carrying a path metacharacter, but
 /// this is the sink, so it refuses too: a spliced `..`, `?` or `#` would
 /// otherwise re-target the request to another path, query or fragment on the
 /// operator's own node, with the provider's configured headers attached.
@@ -213,19 +327,69 @@ fn move_latest_block_url(chain_name: &str, base: &str) -> String {
 /// `None` when `version` cannot be made into one opaque path segment.
 ///
 /// `version` is PROVIDER-controlled: it is read verbatim out of
-/// `transaction["version"]` in the Move node's own response, so the API
-/// boundary's `srcTxHash` shape gate never sees it and the encoding is the only
-/// guard - the same provenance and the same threat model as the `/traces/`
+/// `transaction["version"]` in the Move node's own response, so the core's
+/// `srcTxHash` shape gate never sees it and the encoding is the only
+/// guard - the same provenance and the same threat model as the TON trace `tx_hash`
 /// splice in `validation_readiness.rs`. A provider returning
 /// `"version": "../../admin"` would otherwise produce a path that WHATWG
 /// dot-segment removal collapses onto a different endpoint of that provider,
 /// with its configured headers attached.
-fn move_block_by_version_url(base: &str, version: &str) -> Option<String> {
+pub(crate) fn move_block_by_version_url(base: &str, version: &str) -> Option<String> {
     Some(format!(
         "{}/blocks/by_version/{}?with_transactions=false",
         base.trim_end_matches('/'),
         encode_path_segment(version)?
     ))
+}
+
+/// Aptos REST `transactions/by_version`, the address of a LayerZero V1 (ULNv2) send.
+pub(crate) fn aptos_transaction_by_version_url(base: &str, version: &str) -> Option<String> {
+    Some(format!(
+        "{}/transactions/by_version/{}",
+        base.trim_end_matches('/'),
+        encode_path_segment(version)?
+    ))
+}
+
+/// Aptos REST `accounts/{account}/resource/{type}`.
+pub(crate) fn aptos_account_resource_url(
+    base: &str,
+    account: &str,
+    resource_type: &str,
+) -> Option<String> {
+    Some(format!(
+        "{}/accounts/{}/resource/{}",
+        base.trim_end_matches('/'),
+        encode_path_segment(account)?,
+        encode_path_segment(resource_type)?
+    ))
+}
+
+/// Aptos REST `tables/{handle}/item`; the handle is provider-controlled.
+pub(crate) fn aptos_table_item_url(base: &str, handle: &str) -> Option<String> {
+    Some(format!(
+        "{}/tables/{}/item",
+        base.trim_end_matches('/'),
+        encode_path_segment(handle)?
+    ))
+}
+
+/// The ledger version `BigInt(srcTxHash)` reads: decimal, or `0x` hexadecimal.
+pub(crate) fn aptos_ledger_version(src_tx_hash: &str) -> Result<String, AppCoreError> {
+    let parsed = match src_tx_hash
+        .strip_prefix("0x")
+        .or_else(|| src_tx_hash.strip_prefix("0X"))
+    {
+        Some(hex) if !hex.is_empty() => u128::from_str_radix(hex, 16).ok(),
+        Some(_) => None,
+        None if !src_tx_hash.is_empty() && src_tx_hash.bytes().all(|b| b.is_ascii_digit()) => {
+            src_tx_hash.parse::<u128>().ok()
+        }
+        None => None,
+    };
+    parsed
+        .map(|version| version.to_string())
+        .ok_or_else(|| AppCoreError::Internal(format!("Cannot convert {src_tx_hash} to a BigInt")))
 }
 
 fn unwrap_initia_tx(mut response: Value) -> Value {
@@ -245,14 +409,17 @@ pub(crate) async fn fetch_move_transaction<T>(
     base: String,
     headers: HashMap<String, String>,
     tx_hash: &str,
-) -> Result<Value, String>
+) -> Result<Value, crate::provider_health::RpcError>
 where
     T: JsonRpcTransport,
 {
     let response = transport
-        .get_json(
-            move_tx_url(chain_name, &base, tx_hash)
-                .ok_or_else(|| format!("Unusable transaction hash for {chain_name}"))?,
+        .get_json_scoped(
+            move_tx_url(chain_name, &base, tx_hash).ok_or_else(|| {
+                crate::provider_health::RpcError::Remote(format!(
+                    "Unusable transaction hash for {chain_name}"
+                ))
+            })?,
             headers,
         )
         .await?;
@@ -270,29 +437,41 @@ pub(crate) async fn observe_move_block_confirmations<T>(
     headers: HashMap<String, String>,
     tx_hash: &str,
     required_confirmations: i64,
-) -> BlockConfirmationObservation
+) -> Result<BlockConfirmationObservation, RpcError>
 where
     T: JsonRpcTransport,
 {
     if required_confirmations < 0 {
-        return BlockConfirmationObservation {
+        return Ok(BlockConfirmationObservation {
             validity: BlockConfirmationValidity::InvalidRange,
             current_confirmations: None,
-        };
+        });
     }
-    let Ok(transaction) = fetch_move_transaction(
-        transport.clone(),
-        chain_name,
-        base.clone(),
-        headers.clone(),
-        tx_hash,
-    )
-    .await
-    else {
-        return BlockConfirmationObservation {
-            validity: BlockConfirmationValidity::Missing,
-            current_confirmations: None,
-        };
+    // Upstream's `getBlockByHashOrVersion` (`multiprovider/src/aptos.ts:372-399`): a `0x`
+    // value is a transaction hash, anything else the ledger version a ULNv2 send names.
+    let ledger_version = (chain_name == "aptos" && !tx_hash.starts_with("0x"))
+        .then(|| aptos_ledger_version(tx_hash).unwrap_or_default());
+    let transaction = match ledger_version {
+        Some(_) => Value::Null,
+        None => {
+            let Some(transaction) = provider_response(
+                fetch_move_transaction(
+                    transport.clone(),
+                    chain_name,
+                    base.clone(),
+                    headers.clone(),
+                    tx_hash,
+                )
+                .await,
+            )?
+            else {
+                return Ok(BlockConfirmationObservation {
+                    validity: BlockConfirmationValidity::Missing,
+                    current_confirmations: None,
+                });
+            };
+            transaction
+        }
     };
     let tx_height = if chain_name == "initia" {
         transaction
@@ -305,30 +484,29 @@ where
                     .and_then(|v| v.parse().ok())
             })
     } else {
-        let version = transaction
-            .get("version")
-            .and_then(|value| {
-                value
-                    .as_str()
-                    .map(ToString::to_string)
-                    .or_else(|| value.as_u64().map(|value| value.to_string()))
-            })
-            .unwrap_or_default();
+        let version = ledger_version.clone().unwrap_or_else(|| {
+            transaction
+                .get("version")
+                .and_then(|value| {
+                    value
+                        .as_str()
+                        .map(ToString::to_string)
+                        .or_else(|| value.as_u64().map(|value| value.to_string()))
+                })
+                .unwrap_or_default()
+        });
         // Fail closed when the provider's `version` is not usable as a path
         // segment: no URL is built, so the observation is simply absent and the
         // caller's quorum logic treats it like any other provider that could not
         // answer.
         let Some(url) = move_block_by_version_url(&base, &version) else {
-            return BlockConfirmationObservation {
+            return Ok(BlockConfirmationObservation {
                 validity: BlockConfirmationValidity::Missing,
                 current_confirmations: None,
-            };
+            });
         };
-        transport
-            .get_json(url, headers.clone())
-            .await
-            .ok()
-            .and_then(|block| {
+        provider_response(transport.get_json_scoped(url, headers.clone()).await)?.and_then(
+            |block| {
                 block
                     .get("block_height")
                     .and_then(Value::as_i64)
@@ -339,22 +517,25 @@ where
                             .parse()
                             .ok()
                     })
-            })
+            },
+        )
     };
     let Some(tx_height) = tx_height else {
-        return BlockConfirmationObservation {
+        return Ok(BlockConfirmationObservation {
             validity: BlockConfirmationValidity::Missing,
             current_confirmations: None,
-        };
+        });
     };
-    let Ok(latest) = transport
-        .get_json(move_latest_block_url(chain_name, &base), headers)
-        .await
+    let Some(latest) = provider_response(
+        transport
+            .get_json_scoped(move_latest_block_url(chain_name, &base), headers)
+            .await,
+    )?
     else {
-        return BlockConfirmationObservation {
+        return Ok(BlockConfirmationObservation {
             validity: BlockConfirmationValidity::Missing,
             current_confirmations: None,
-        };
+        });
     };
     let current_height = if chain_name == "initia" {
         latest
@@ -380,16 +561,16 @@ where
             })
     };
     let Some(current_height) = current_height else {
-        return BlockConfirmationObservation {
+        return Ok(BlockConfirmationObservation {
             validity: BlockConfirmationValidity::Missing,
             current_confirmations: None,
-        };
+        });
     };
     if tx_height < 0 || current_height < 0 {
-        return BlockConfirmationObservation {
+        return Ok(BlockConfirmationObservation {
             validity: BlockConfirmationValidity::InvalidRange,
             current_confirmations: None,
-        };
+        });
     }
     let current_confirmations = current_height.saturating_sub(tx_height);
     let validity = if current_confirmations >= required_confirmations {
@@ -403,10 +584,10 @@ where
             receipt_block_number: tx_height,
         }
     };
-    BlockConfirmationObservation {
+    Ok(BlockConfirmationObservation {
         validity,
         current_confirmations: Some(current_confirmations),
-    }
+    })
 }
 
 fn parse_rfc3339_seconds(timestamp: &str) -> Option<i64> {
@@ -444,16 +625,19 @@ pub(crate) async fn observe_move_block_time<T>(
     chain_name: &str,
     base: String,
     headers: HashMap<String, String>,
-) -> Option<i64>
+) -> Result<i64, RpcError>
 where
     T: JsonRpcTransport,
 {
     let response = transport
-        .get_json(move_latest_block_url(chain_name, &base), headers)
-        .await
-        .ok()?;
+        .get_json_scoped(move_latest_block_url(chain_name, &base), headers)
+        .await?;
     if chain_name == "initia" {
-        return parse_rfc3339_seconds(response.pointer("/block/header/time")?.as_str()?);
+        return response
+            .pointer("/block/header/time")
+            .and_then(Value::as_str)
+            .and_then(parse_rfc3339_seconds)
+            .ok_or(RpcError::Unavailable);
     }
     let micros = response
         .get("ledger_timestamp")
@@ -464,8 +648,9 @@ where
                 .and_then(Value::as_str)?
                 .parse()
                 .ok()
-        })?;
-    Some((micros + 999_999) / 1_000_000)
+        })
+        .ok_or(RpcError::Unavailable)?;
+    Ok((micros + 999_999) / 1_000_000)
 }
 
 #[cfg(test)]
@@ -555,7 +740,7 @@ mod tests {
                 "attributes": [
                     {
                         "key": "type_tag",
-                        "value": format!("{endpoint}::endpoint_v2::channels::PacketSent")
+                        "value": format!("{endpoint}::channels::PacketSent")
                     },
                     {"key": "data", "value": data.to_string()}
                 ]
@@ -576,12 +761,23 @@ mod tests {
 
     #[test]
     fn aptos_event_matches_packet_sent_type_and_data() {
-        let endpoint = "0xabc";
+        let endpoint = "0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c";
         let event = &aptos_transaction(endpoint)["events"][0];
         assert_eq!(
-            aptos_event_matches(event, endpoint).unwrap()["options"],
+            aptos_event_matches(event, endpoint).unwrap().0["options"],
             "0x0102"
         );
+        assert_eq!(aptos_event_matches(event, endpoint).unwrap().1, "V302");
+    }
+
+    #[test]
+    fn aptos_v301_emitter_matches_sending_packet_sent() {
+        let endpoint = "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812";
+        let mut transaction = aptos_transaction(endpoint);
+        transaction["events"][0]["type"] =
+            Value::String(format!("{endpoint}::sending::PacketSent"));
+        let event = &transaction["events"][0];
+        assert_eq!(aptos_event_matches(event, endpoint).unwrap().1, "V301");
     }
 
     #[test]
@@ -589,7 +785,7 @@ mod tests {
         let endpoint = "0xabc";
         let event = &initia_transaction(endpoint)["events"][0];
         assert_eq!(
-            initia_event_matches(event, endpoint).unwrap()["options"],
+            initia_event_matches(event, endpoint).unwrap().unwrap()["options"],
             json!([1, 2])
         );
     }
@@ -598,15 +794,21 @@ mod tests {
     fn decodes_aptos_packet_sent_from_trusted_endpoint() {
         let events = decode_move_packet_sent_events(
             "aptos",
-            &aptos_transaction("0xabc"),
-            &HashSet::from(["0x0abc".to_string()]),
-        );
+            &aptos_transaction(
+                "0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c",
+            ),
+            &HashSet::from([
+                "0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c".to_string(),
+            ]),
+            "V302",
+        )
+        .unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].packet.nonce, 7);
         assert_eq!(events[0].packet.src_eid, 30_500);
         assert_eq!(events[0].packet.dst_eid, 30_101);
         assert_eq!(events[0].packet.message, "0xdeadbeef");
-        assert_eq!(events[0].options, "0x0102");
+        assert_eq!(events[0].options.as_deref(), Ok("0x0102"));
         assert_eq!(events[0].send_library.as_deref(), Some("0x4444"));
     }
 
@@ -616,11 +818,13 @@ mod tests {
             "initia",
             &initia_transaction("0xabc"),
             &HashSet::from(["0x0abc".to_string()]),
-        );
+            "V302",
+        )
+        .unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].packet.nonce, 7);
         assert_eq!(events[0].packet.message, "0xdeadbeef");
-        assert_eq!(events[0].options, "0x0102");
+        assert_eq!(events[0].options.as_deref(), Ok("0x0102"));
     }
 
     #[test]
@@ -629,7 +833,9 @@ mod tests {
             "aptos",
             &aptos_transaction("0xabc"),
             &HashSet::from(["0xdef".to_string()]),
+            "V302",
         )
+        .unwrap()
         .is_empty());
     }
 
@@ -639,7 +845,9 @@ mod tests {
             "initia",
             &initia_transaction("0xabc"),
             &HashSet::from(["0xdef".to_string()]),
+            "V302",
         )
+        .unwrap()
         .is_empty());
     }
 
@@ -698,7 +906,8 @@ mod tests {
             "0xtx",
             8,
         )
-        .await;
+        .await
+        .unwrap();
         assert_eq!(observation.current_confirmations, Some(8));
         assert!(matches!(
             observation.validity,
@@ -716,8 +925,39 @@ mod tests {
         assert_eq!(calls[2].0, "https://aptos.example");
     }
 
+    /// A ULNv2 send is named by its ledger version, which upstream's
+    /// `getBlockByHashOrVersion` reads as a block version directly.
+    #[tokio::test]
+    async fn observes_aptos_block_confirmations_by_ledger_version() {
+        let (transport, calls) = transport(vec![
+            Ok(json!({"block_height": "42"})),
+            Ok(json!({"block_height": "45"})),
+        ]);
+        let observation = observe_move_block_confirmations(
+            transport,
+            "aptos",
+            "https://aptos.example".to_string(),
+            HashMap::new(),
+            "26629",
+            8,
+        )
+        .await
+        .unwrap();
+        assert_eq!(observation.current_confirmations, Some(3));
+        assert!(matches!(
+            observation.validity,
+            BlockConfirmationValidity::Insufficient { .. }
+        ));
+        let calls = calls.lock().unwrap();
+        assert_eq!(
+            calls[0].0,
+            "https://aptos.example/blocks/by_version/26629?with_transactions=false"
+        );
+        assert_eq!(calls.len(), 2);
+    }
+
     /// `version` is read verbatim out of the provider's own transaction
-    /// response, so the API boundary's `srcTxHash` shape gate never sees it and
+    /// response, so the core's `srcTxHash` shape gate never sees it and
     /// this sink is the only guard. A provider answering `"../../admin"` must not
     /// get a URL built at all: WHATWG dot-segment removal would collapse
     /// `{base}/blocks/by_version/../../admin` onto a different endpoint of that
@@ -739,7 +979,8 @@ mod tests {
                 "0xtx",
                 8,
             )
-            .await;
+            .await
+            .unwrap();
 
             assert!(
                 matches!(observation.validity, BlockConfirmationValidity::Missing),
@@ -775,7 +1016,8 @@ mod tests {
             "ABC",
             8,
         )
-        .await;
+        .await
+        .unwrap();
         assert_eq!(observation.current_confirmations, Some(8));
         assert!(matches!(
             observation.validity,
@@ -795,8 +1037,9 @@ mod tests {
                 "https://aptos.example/".to_string(),
                 HashMap::new(),
             )
-            .await,
-            Some(1_767_323_045)
+            .await
+            .unwrap(),
+            1_767_323_045
         );
         assert_eq!(calls.lock().unwrap()[0].0, "https://aptos.example");
     }
@@ -813,8 +1056,9 @@ mod tests {
                 "https://initia.example/".to_string(),
                 HashMap::new(),
             )
-            .await,
-            Some(1_767_323_046)
+            .await
+            .unwrap(),
+            1_767_323_046
         );
         assert_eq!(
             calls.lock().unwrap()[0].0,

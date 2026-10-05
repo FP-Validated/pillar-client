@@ -122,190 +122,85 @@ pub(crate) fn lz_message_id_matches(expected: &LzMessageId, actual: &LzMessageId
         && pathway_identity_matches(expected, actual)
 }
 
+/// Upstream's own `lzMessageIdMatches` (`common-model/src/v2/lzMessage.ts:201-218`): eids,
+/// sender, receiver and nonce, without the chain names or the ULN version.
+pub(crate) fn lz_message_identity_matches(expected: &LzMessageId, actual: &LzMessageId) -> bool {
+    expected.nonce == actual.nonce && pathway_identity_matches(expected, actual)
+}
+
+/// Upstream's `lzPathwayIdMatches` (`common-model/src/v2/lzMessage.ts:201-214`):
+/// eids by number and sender/receiver by `===` against the event's addresses as
+/// `formatPathwayId` renders them, the sender in the source chain's encoding and
+/// the receiver in the destination's (`lz-v2-sdk/src/utils/common/index.ts:19-36`).
 fn pathway_identity_matches(expected: &LzMessageId, actual: &LzMessageId) -> bool {
-    ["srcEid", "dstEid"].into_iter().all(|key| {
-        expected.pathway_id.extra.get(key).and_then(Value::as_u64)
-            == actual.pathway_id.extra.get(key).and_then(Value::as_u64)
-            && expected.pathway_id.extra.get(key).is_some()
-            && actual.pathway_id.extra.get(key).is_some()
-    }) && ["sender", "receiver"].into_iter().all(|key| {
-        let Some(expected) = expected.pathway_id.extra.get(key).and_then(Value::as_str) else {
-            return false;
-        };
-        let Some(actual) = actual.pathway_id.extra.get(key).and_then(Value::as_str) else {
-            return false;
-        };
-        match (
-            normalized_address_hex(expected),
-            normalized_address_hex(actual),
-        ) {
-            (Some(expected_hex), Some(actual_hex)) => normalized_hex_identity(&expected_hex)
-                .eq_ignore_ascii_case(normalized_hex_identity(&actual_hex)),
-            _ => expected == actual,
+    let eids_match = ["srcEid", "dstEid"].into_iter().all(|key| {
+        let expected = expected.pathway_id.extra.get(key).and_then(Value::as_u64);
+        expected.is_some() && expected == actual.pathway_id.extra.get(key).and_then(Value::as_u64)
+    });
+    eids_match
+        && [
+            ("sender", &actual.pathway_id.src_chain_name),
+            ("receiver", &actual.pathway_id.dst_chain_name),
+        ]
+        .into_iter()
+        .all(|(key, chain_name)| {
+            let requested = expected.pathway_id.extra.get(key).and_then(Value::as_str);
+            let resolved = actual
+                .pathway_id
+                .extra
+                .get(key)
+                .and_then(Value::as_str)
+                .and_then(|raw| address_encoded_by_chain(chain_name, raw));
+            requested.is_some() && requested == resolved.as_deref()
+        })
+}
+
+/// `JSON.stringify(lzEvent.lzMessageId)` of a resolved event: `formatPathwayId`'s key
+/// order with each address in its chain's rendering (`lz-v2-sdk/src/utils/common/index.ts:19-36`).
+pub(crate) fn resolved_message_id_json(lz_message_id: &LzMessageId) -> String {
+    let pathway = &lz_message_id.pathway_id;
+    let extra = |key: &str| pathway.extra.get(key).cloned().unwrap_or(Value::Null);
+    let address = |key: &str, chain_name: &str| {
+        let raw = extra(key);
+        let raw = raw.as_str().unwrap_or_default();
+        Value::from(address_encoded_by_chain(chain_name, raw).unwrap_or_else(|| raw.to_string()))
+    };
+    format!(
+        r#"{{"pathwayId":{{"srcEid":{},"srcChainName":{},"dstEid":{},"dstChainName":{},"sender":{},"receiver":{}}},"nonce":{},"ulnSendVersion":{}}}"#,
+        pillar_core::js_json(&extra("srcEid")),
+        pillar_core::js_json(&Value::from(pathway.src_chain_name.clone())),
+        pillar_core::js_json(&extra("dstEid")),
+        pillar_core::js_json(&Value::from(pathway.dst_chain_name.clone())),
+        pillar_core::js_json(&address("sender", &pathway.src_chain_name)),
+        pillar_core::js_json(&address("receiver", &pathway.dst_chain_name)),
+        pillar_core::js_number_f64(lz_message_id.nonce as f64),
+        pillar_core::js_json(&lz_message_id.uln_send_version),
+    )
+}
+
+/// Upstream's `getAddressEncodedByChain` (`static-config/src/index.ts:695-729`)
+/// over a hex address the packet carries: Solana is base58, the listed 32-byte
+/// chains are padded lowercase hex, and every other chain is a 20-byte EVM
+/// address. `None` where upstream would throw, and where an EVM rendering would
+/// drop non-zero leading bytes, which upstream (and the destination's
+/// `receiverB20()`) truncate and this service refuses as a policy (SECURITY.md).
+pub(crate) fn address_encoded_by_chain(chain_name: &str, raw: &str) -> Option<String> {
+    let digits = raw.strip_prefix("0x").unwrap_or(raw).to_ascii_lowercase();
+    if digits.len() > 64 || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let padded = format!("{digits:0>64}");
+    match chain_name {
+        "solana" => Some(bs58::encode(hex::decode(&digits).ok()?).into_string()),
+        "aptos" | "movement" | "initia" | "ton" | "sui" | "iotal1" | "starknet" | "stellar"
+        | "canton" => Some(format!("0x{padded}")),
+        _ => {
+            let (leading, address) = padded.split_at(24);
+            leading
+                .bytes()
+                .all(|byte| byte == b'0')
+                .then(|| format!("0x{address}"))
         }
-    })
-}
-
-/// Canonicalizes an address to a bare hex digit string for identity comparison.
-/// Accepts `0x`-prefixed hex (EVM/Move-style addresses), base58-encoded
-/// 32-byte values (Solana public keys), Stellar SEP-0023 StrKey
-/// account/contract addresses, TON "user-friendly" addresses, or Initia
-/// (Cosmos SDK) bech32 addresses — since `LzPacketV1` always decodes
-/// sender/receiver as raw 32-byte hex regardless of the native chain's
-/// address encoding, and real callers (LayerZero Scan included) report
-/// addresses in each chain's native format, not that raw hex.
-fn normalized_address_hex(value: &str) -> Option<String> {
-    if let Some(digits) = value
-        .strip_prefix("0x")
-        .or_else(|| value.strip_prefix("0X"))
-    {
-        return Some(digits.to_string());
-    }
-    if let Some(payload) = decode_stellar_strkey_payload(value) {
-        return Some(hex::encode(payload));
-    }
-    if let Some(payload) = decode_ton_raw_address_payload(value) {
-        return Some(hex::encode(payload));
-    }
-    if let Some(payload) = decode_ton_friendly_address_payload(value) {
-        return Some(hex::encode(payload));
-    }
-    if let Some(payload) = decode_initia_bech32_payload(value) {
-        return Some(hex::encode(payload));
-    }
-    let decoded = bs58::decode(value).into_vec().ok()?;
-    if decoded.len() != 32 {
-        return None;
-    }
-    Some(hex::encode(decoded))
-}
-
-/// Decodes a TON "user-friendly" address (base64/base64url, 48 chars) into
-/// its raw 32-byte account id, verifying the CRC-16/XMODEM checksum and tag
-/// byte. Returns `None` for any other length, tag, or malformed input.
-fn decode_ton_friendly_address_payload(value: &str) -> Option<[u8; 32]> {
-    use base64::Engine;
-    if value.len() != 48 {
-        return None;
-    }
-    let normalized = value.replace('-', "+").replace('_', "/");
-    let decoded = base64::engine::general_purpose::STANDARD
-        .decode(normalized)
-        .ok()?;
-    if decoded.len() != 36 {
-        return None;
-    }
-    let (tag_and_workchain_and_account, checksum) = decoded.split_at(34);
-    let (tag, account_id) = tag_and_workchain_and_account.split_first()?;
-    if !matches!(tag & 0x7f, 0x11 | 0x51) {
-        return None;
-    }
-    let expected_checksum = crc16_xmodem(tag_and_workchain_and_account).to_be_bytes();
-    if checksum != expected_checksum {
-        return None;
-    }
-    account_id[1..].try_into().ok()
-}
-
-/// Decodes a TON "raw" address (`<workchain>:<64 hex chars>`, e.g.
-/// `0:3333...3333`) into its raw 32-byte account id. This is the format
-/// this codebase's own TON fixtures already use (see
-/// `pillar-layerzero::other_non_evm::ton::SOURCE_VECTOR_DVN`).
-fn decode_ton_raw_address_payload(value: &str) -> Option<[u8; 32]> {
-    let (workchain, hash) = value.split_once(':')?;
-    if workchain.is_empty()
-        || !workchain
-            .strip_prefix('-')
-            .unwrap_or(workchain)
-            .bytes()
-            .all(|b| b.is_ascii_digit())
-        || hash.len() != 64
-    {
-        return None;
-    }
-    let decoded = hex::decode(hash).ok()?;
-    decoded.try_into().ok()
-}
-
-/// Decodes an Initia (Cosmos SDK) bech32 address with human-readable prefix
-/// `init` into its raw account-id payload. `LzPacketV1` embeds it the same
-/// way EVM's 20-byte addresses are embedded (zero-padded within the 32-byte
-/// field), so the leading-zero-stripping identity compare handles the width
-/// difference the same way it already does for EVM.
-fn decode_initia_bech32_payload(value: &str) -> Option<Vec<u8>> {
-    let (hrp, payload) = bech32::decode(value).ok()?;
-    if hrp.as_str() != "init" {
-        return None;
-    }
-    Some(payload)
-}
-
-/// Decodes a Stellar SEP-0023 StrKey (`G...` ed25519 account or `C...`
-/// contract address) into its raw 32-byte payload, verifying the CRC16/XModem
-/// checksum. Returns `None` for any other version byte or malformed input.
-fn decode_stellar_strkey_payload(value: &str) -> Option<[u8; 32]> {
-    if value.len() != 56
-        || !value
-            .bytes()
-            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
-    {
-        return None;
-    }
-    let decoded = base32_decode_rfc4648(value)?;
-    let (version_and_payload, checksum) = decoded.split_at(33);
-    let (version, payload) = version_and_payload.split_first()?;
-    if *version != 6 << 3 && *version != 2 << 3 {
-        return None;
-    }
-    let expected_checksum = crc16_xmodem(version_and_payload).to_le_bytes();
-    if checksum != expected_checksum {
-        return None;
-    }
-    payload.try_into().ok()
-}
-
-fn base32_decode_rfc4648(value: &str) -> Option<Vec<u8>> {
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-    let mut bits: u32 = 0;
-    let mut bit_count = 0u32;
-    let mut out = Vec::with_capacity(value.len() * 5 / 8);
-    for byte in value.bytes() {
-        let index = ALPHABET.iter().position(|&c| c == byte)? as u32;
-        bits = (bits << 5) | index;
-        bit_count += 5;
-        if bit_count >= 8 {
-            bit_count -= 8;
-            out.push(((bits >> bit_count) & 0xff) as u8);
-        }
-    }
-    Some(out)
-}
-
-fn crc16_xmodem(data: &[u8]) -> u16 {
-    let mut crc: u16 = 0;
-    for &byte in data {
-        crc ^= (byte as u16) << 8;
-        for _ in 0..8 {
-            crc = if crc & 0x8000 != 0 {
-                (crc << 1) ^ 0x1021
-            } else {
-                crc << 1
-            };
-        }
-    }
-    crc
-}
-
-fn normalized_hex_identity(value: &str) -> &str {
-    let digits = value
-        .strip_prefix("0x")
-        .or_else(|| value.strip_prefix("0X"))
-        .unwrap_or(value);
-    let normalized = digits.trim_start_matches('0');
-    if normalized.is_empty() {
-        "0"
-    } else {
-        normalized
     }
 }
 

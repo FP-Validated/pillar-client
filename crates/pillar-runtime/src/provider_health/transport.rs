@@ -1,6 +1,51 @@
 use super::*;
+use std::future::Future;
 
 const MAX_JSON_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+#[derive(Clone, Debug)]
+pub enum RpcError {
+    Admission(pillar_core::execution::BudgetError),
+    Remote(String),
+    Configuration(&'static str),
+    Unavailable,
+}
+impl std::fmt::Display for RpcError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Admission(error) => error.fmt(f),
+            Self::Remote(error) => f.write_str(error),
+            Self::Configuration(error) => f.write_str(error),
+            Self::Unavailable => f.write_str("provider response unavailable"),
+        }
+    }
+}
+impl From<RpcError> for AppCoreError {
+    fn from(error: RpcError) -> Self {
+        match error {
+            RpcError::Admission(error) => Self::Admission(error),
+            RpcError::Remote(error) => Self::Internal(error),
+            RpcError::Configuration(error) => Self::Internal(error.into()),
+            RpcError::Unavailable => Self::Internal("provider response unavailable".into()),
+        }
+    }
+}
+impl From<AppCoreError> for RpcError {
+    fn from(error: AppCoreError) -> Self {
+        match error {
+            AppCoreError::Admission(error) => Self::Admission(error),
+            AppCoreError::Internal(error) | AppCoreError::BadRequest(error) => Self::Remote(error),
+        }
+    }
+}
+pub(crate) fn provider_response<T, E: Into<RpcError>>(
+    result: Result<T, E>,
+) -> Result<Option<T>, RpcError> {
+    match result.map_err(Into::into) {
+        Ok(value) => Ok(Some(value)),
+        Err(RpcError::Remote(_) | RpcError::Unavailable) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
 
 #[async_trait]
 pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
@@ -16,11 +61,164 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         url: String,
         headers: HashMap<String, String>,
     ) -> Result<Value, String>;
+
+    /// The HTTP status and body text, whatever the status and whether or not the body is
+    /// JSON. Fakes that only answer JSON get a 200 carrying that JSON.
+    async fn post_text(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+        body: Value,
+    ) -> Result<(u16, String), String> {
+        self.post_json(url, headers, body)
+            .await
+            .map(|value| (200, value.to_string()))
+    }
+
+    async fn get_text(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+    ) -> Result<(u16, String), String> {
+        self.get_json(url, headers)
+            .await
+            .map(|value| (200, value.to_string()))
+    }
+
+    /// A form-encoded POST, for the Canton OAuth2 token request. Transports that do not
+    /// implement it refuse, so no token request can succeed by accident.
+    async fn post_form(
+        &self,
+        url: String,
+        _headers: HashMap<String, String>,
+        _body: String,
+    ) -> Result<(u16, String), String> {
+        Err(format!(
+            "form POST is not supported by this transport: {url}"
+        ))
+    }
+
+    async fn post_json_on(
+        &self,
+        chain: &str,
+        url: String,
+        headers: HashMap<String, String>,
+        body: Value,
+    ) -> Result<Value, RpcError> {
+        limited_rpc(chain, self.post_json(url, headers, body)).await
+    }
+    async fn get_json_on(
+        &self,
+        chain: &str,
+        url: String,
+        headers: HashMap<String, String>,
+    ) -> Result<Value, RpcError> {
+        limited_rpc(chain, self.get_json(url, headers)).await
+    }
+    async fn post_json_scoped(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+        body: Value,
+    ) -> Result<Value, RpcError> {
+        let target = rpc_target_for_call()?;
+        limited_rpc(&target, self.post_json(url, headers, body)).await
+    }
+    async fn get_json_scoped(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+    ) -> Result<Value, RpcError> {
+        let target = rpc_target_for_call()?;
+        limited_rpc(&target, self.get_json(url, headers)).await
+    }
+    async fn post_text_scoped(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+        body: Value,
+    ) -> Result<(u16, String), RpcError> {
+        let target = rpc_target_for_call()?;
+        limited_rpc(&target, self.post_text(url, headers, body)).await
+    }
+    async fn get_text_scoped(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+    ) -> Result<(u16, String), RpcError> {
+        let target = rpc_target_for_call()?;
+        limited_rpc(&target, self.get_text(url, headers)).await
+    }
+}
+
+fn rpc_target_for_call() -> Result<Arc<str>, RpcError> {
+    match super::rpc_context::rpc_target() {
+        Some(target) => Ok(target),
+        None if pillar_core::execution::current()
+            .is_some_and(|context| context.resources.is_some()) =>
+        {
+            Err(RpcError::Configuration("RPC target provenance is missing"))
+        }
+        None => Ok(Arc::from("background")),
+    }
+}
+
+async fn limited_rpc<T, F: Future<Output = Result<T, String>>>(
+    chain: &str,
+    future: F,
+) -> Result<T, RpcError> {
+    use pillar_core::execution::{current, within_deadline, Outcome};
+    let mut permit = match current()
+        .and_then(|ctx| ctx.resources.map(|resources| (resources, ctx.source_chain)))
+    {
+        Some((resources, source)) => {
+            let lane = if source
+                .as_deref()
+                .is_some_and(|source| source != "background")
+            {
+                chain
+            } else {
+                "background"
+            };
+            Some(
+                resources
+                    .rpc
+                    .acquire_for(lane, Some(chain))
+                    .await
+                    .map_err(RpcError::Admission)?,
+            )
+        }
+        None => None,
+    };
+    let maximum =
+        if current().is_some_and(|context| context.source_chain.as_deref() == Some("background")) {
+            std::time::Duration::from_secs(2)
+        } else {
+            DEFAULT_RPC_TIMEOUT
+        };
+    let result = within_deadline(maximum, future).await;
+    if let Some(permit) = &mut permit {
+        permit.finish(match &result {
+            Ok(Ok(_)) => Outcome::Success,
+            Ok(Err(_)) => Outcome::Error,
+            Err(_) => Outcome::TimedOut,
+        });
+    }
+    result
+        .map_err(|_| RpcError::Remote("provider response timed out".into()))?
+        .map_err(RpcError::Remote)
 }
 
 #[async_trait]
 pub trait AwsLambdaInvokeClient: Send + Sync + 'static {
     async fn invoke_json(&self, function_name: &str, payload: Value) -> Result<Value, String>;
+    async fn invoke_json_scoped(
+        &self,
+        function_name: &str,
+        payload: Value,
+    ) -> Result<Value, RpcError> {
+        limited_rpc("extra_context", self.invoke_json(function_name, payload)).await
+    }
 }
 
 #[derive(Clone)]
@@ -131,6 +329,82 @@ impl JsonRpcTransport for ReqwestJsonRpcTransport {
             .map_err(|error| error.without_url().to_string())?;
         bounded_json_response(response).await
     }
+
+    async fn post_text(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+        body: Value,
+    ) -> Result<(u16, String), String> {
+        let mut request = self.client.post(url).json(&body);
+        for (key, value) in headers {
+            request = request.header(key, value);
+        }
+        bounded_text_response(request.send().await.map_err(|_| FETCH_FAILED.to_string())?).await
+    }
+
+    async fn get_text(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+    ) -> Result<(u16, String), String> {
+        let mut request = self.client.get(url);
+        for (key, value) in headers {
+            request = request.header(key, value);
+        }
+        bounded_text_response(request.send().await.map_err(|_| FETCH_FAILED.to_string())?).await
+    }
+
+    async fn post_form(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+        body: String,
+    ) -> Result<(u16, String), String> {
+        let mut request = self
+            .client
+            .post(url)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(body);
+        for (key, value) in headers {
+            request = request.header(key, value);
+        }
+        bounded_text_response(request.send().await.map_err(|_| FETCH_FAILED.to_string())?).await
+    }
+}
+
+/// `bounded_json_response`'s refusal of an HTTP 404, which the Aptos REST API returns
+/// for a resource or table item that does not exist.
+pub(crate) fn is_http_not_found(error: &RpcError) -> bool {
+    matches!(error, RpcError::Remote(message) if message.starts_with("Provider returned HTTP 404 "))
+}
+
+/// undici's message for a request that never got a response (`TypeError: fetch failed`).
+pub(crate) const FETCH_FAILED: &str = "fetch failed";
+
+/// `await response.text()`: the body decoded as UTF-8 with replacement and a leading BOM
+/// dropped, under the same byte ceiling as a JSON response.
+async fn bounded_text_response(response: reqwest::Response) -> Result<(u16, String), String> {
+    let status = response.status().as_u16();
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_JSON_RESPONSE_BYTES as u64)
+    {
+        return Err(format!(
+            "Provider JSON response exceeds {MAX_JSON_RESPONSE_BYTES} byte limit"
+        ));
+    }
+    let mut bytes = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_| "terminated".to_string())?;
+        extend_bounded_json(&mut bytes, &chunk)?;
+    }
+    let text = String::from_utf8_lossy(&bytes);
+    Ok((
+        status,
+        text.strip_prefix('\u{feff}').unwrap_or(&text).to_string(),
+    ))
 }
 
 async fn bounded_json_response(response: reqwest::Response) -> Result<Value, String> {

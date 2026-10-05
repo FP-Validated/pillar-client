@@ -1,0 +1,2840 @@
+{
+ "producedBy": {
+  "upstream": "gasolina-audit 1.2.66 (manifest sha256 8ad87eb6...; archive comment 213cd500...)",
+  "entrypoint": "packages/sdks/lz-v2-sdk/src/endpoint/aptos/index.ts:EndpointV2AptosSdk.getLZSentEvent",
+  "synthetic": "transactions and blocks are scripted; accounts, event tokens and extractor are upstream"
+ },
+ "environment": "mainnet",
+ "tokens": {
+  "aptos": {
+   "v302": "0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c::channels::PacketSent",
+   "v301": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::sending::PacketSent",
+   "endpointV2": "0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c"
+  },
+  "movement": {
+   "v302": "0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c::channels::PacketSent",
+   "v301": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::sending::PacketSent",
+   "endpointV2": "0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c"
+  }
+ },
+ "scenarios": [
+  {
+   "chain": "aptos",
+   "name": "V302 match",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c::channels::PacketSent",
+      "data": {
+       "encoded_packet": "0x0100000000000000070000759c0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a000075950000000000000000000000002222222222222222222222222222222222222222091808de76c165a2608747ce1ad6d0e9ccc84867ba55ece16dfb79070361d508deadbeefcafe",
+       "options": "0x00030100110100000000000000000000000000030d40",
+       "send_library": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30108,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "aptos",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "aptos",
+      "txHash": "26629",
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "blockNumber": 777
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcChainName": "aptos",
+       "dstChainName": "ethereum",
+       "srcEid": 30108,
+       "dstEid": 30101,
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V302"
+     },
+     "guid": "0x091808de76c165a2608747ce1ad6d0e9ccc84867ba55ece16dfb79070361d508",
+     "message": "0xdeadbeefcafe",
+     "sendLibrary": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+     "options": {
+      "lzReceive": {
+       "gas": "200000",
+       "value": "0"
+      },
+      "ordered": false
+     }
+    }
+   }
+  },
+  {
+   "chain": "aptos",
+   "name": "V302 native drop",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c::channels::PacketSent",
+      "data": {
+       "encoded_packet": "0x0100000000000000070000759c0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a000075950000000000000000000000002222222222222222222222222222222222222222091808de76c165a2608747ce1ad6d0e9ccc84867ba55ece16dfb79070361d508deadbeefcafe",
+       "options": "0x000301001101000000000000000000000000000186a0010031020000000000000000000000000000000c0000000000000000000000004444444444444444444444444444444444444444",
+       "send_library": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30108,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "aptos",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "aptos",
+      "txHash": "26629",
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "blockNumber": 777
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcChainName": "aptos",
+       "dstChainName": "ethereum",
+       "srcEid": 30108,
+       "dstEid": 30101,
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V302"
+     },
+     "guid": "0x091808de76c165a2608747ce1ad6d0e9ccc84867ba55ece16dfb79070361d508",
+     "message": "0xdeadbeefcafe",
+     "sendLibrary": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+     "options": {
+      "lzReceive": {
+       "gas": "100000",
+       "value": "0"
+      },
+      "ordered": false,
+      "nativeDrop": [
+       {
+        "amount": "12",
+        "receiver": "0x4444444444444444444444444444444444444444"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "chain": "aptos",
+   "name": "V302 second of two",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c::channels::PacketSent",
+      "data": {
+       "encoded_packet": "0x0100000000000000060000759c0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a00007595000000000000000000000000222222222222222222222222222222222222222269dca543f5c352634338cf40db9568a7d0ccb71265eb9fa65eb07e1b7ab07319deadbeefcafe",
+       "options": "0x00030100110100000000000000000000000000030d40",
+       "send_library": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+      }
+     },
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c::channels::PacketSent",
+      "data": {
+       "encoded_packet": "0x0100000000000000070000759c0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a000075950000000000000000000000002222222222222222222222222222222222222222091808de76c165a2608747ce1ad6d0e9ccc84867ba55ece16dfb79070361d508deadbeefcafe",
+       "options": "0x00030100110100000000000000000000000000030d40",
+       "send_library": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30108,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "aptos",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "aptos",
+      "txHash": "26629",
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "blockNumber": 777
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcChainName": "aptos",
+       "dstChainName": "ethereum",
+       "srcEid": 30108,
+       "dstEid": 30101,
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V302"
+     },
+     "guid": "0x091808de76c165a2608747ce1ad6d0e9ccc84867ba55ece16dfb79070361d508",
+     "message": "0xdeadbeefcafe",
+     "sendLibrary": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+     "options": {
+      "lzReceive": {
+       "gas": "200000",
+       "value": "0"
+      },
+      "ordered": false
+     }
+    }
+   }
+  },
+  {
+   "chain": "aptos",
+   "name": "V302 other nonce",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c::channels::PacketSent",
+      "data": {
+       "encoded_packet": "0x0100000000000000060000759c0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a00007595000000000000000000000000222222222222222222222222222222222222222269dca543f5c352634338cf40db9568a7d0ccb71265eb9fa65eb07e1b7ab07319deadbeefcafe",
+       "options": "0x00030100110100000000000000000000000000030d40",
+       "send_library": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30108,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "aptos",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+   ],
+   "outcome": {
+    "error": "Did not find correct PacketSent() event in tx 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   }
+  },
+  {
+   "chain": "aptos",
+   "name": "V302 empty options",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c::channels::PacketSent",
+      "data": {
+       "encoded_packet": "0x0100000000000000070000759c0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a000075950000000000000000000000002222222222222222222222222222222222222222091808de76c165a2608747ce1ad6d0e9ccc84867ba55ece16dfb79070361d508deadbeefcafe",
+       "options": "0x",
+       "send_library": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30108,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "aptos",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+   ],
+   "outcome": {
+    "error": "invalid BigNumber string (argument=\"value\", value=\"0x\", code=INVALID_ARGUMENT, version=bignumber/5.8.0)"
+   }
+  },
+  {
+   "chain": "aptos",
+   "name": "V302 from another module",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x9999999999999999999999999999999999999999999999999999999999999999::channels::PacketSent",
+      "data": {
+       "encoded_packet": "0x0100000000000000070000759c0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a000075950000000000000000000000002222222222222222222222222222222222222222091808de76c165a2608747ce1ad6d0e9ccc84867ba55ece16dfb79070361d508deadbeefcafe",
+       "options": "0x00030100110100000000000000000000000000030d40",
+       "send_library": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30108,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "aptos",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+   ],
+   "outcome": {
+    "error": "Did not find correct PacketSent() event in tx 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   }
+  },
+  {
+   "chain": "aptos",
+   "name": "V302 packet field instead of encoded_packet",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c::channels::PacketSent",
+      "data": {
+       "packet": "0x0100000000000000070000759c0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a000075950000000000000000000000002222222222222222222222222222222222222222091808de76c165a2608747ce1ad6d0e9ccc84867ba55ece16dfb79070361d508deadbeefcafe",
+       "options": "0x00030100110100000000000000000000000000030d40",
+       "send_library": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30108,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "aptos",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "aptos",
+      "txHash": "26629",
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "blockNumber": 777
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcChainName": "aptos",
+       "dstChainName": "ethereum",
+       "srcEid": 30108,
+       "dstEid": 30101,
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V302"
+     },
+     "guid": "0x091808de76c165a2608747ce1ad6d0e9ccc84867ba55ece16dfb79070361d508",
+     "message": "0xdeadbeefcafe",
+     "sendLibrary": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+     "options": {
+      "lzReceive": {
+       "gas": "200000",
+       "value": "0"
+      },
+      "ordered": false
+     }
+    }
+   }
+  },
+  {
+   "chain": "aptos",
+   "name": "V302 without a packet",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c::channels::PacketSent",
+      "data": {
+       "options": "0x00030100110100000000000000000000000000030d40",
+       "send_library": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30108,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "aptos",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+   ],
+   "outcome": {
+    "error": "Both encoded_packet and packet are undefined in the event"
+   }
+  },
+  {
+   "chain": "aptos",
+   "name": "V302 without send_library",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c::channels::PacketSent",
+      "data": {
+       "encoded_packet": "0x0100000000000000070000759c0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a000075950000000000000000000000002222222222222222222222222222222222222222091808de76c165a2608747ce1ad6d0e9ccc84867ba55ece16dfb79070361d508deadbeefcafe",
+       "options": "0x00030100110100000000000000000000000000030d40"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30108,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "aptos",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getTransactionByVersion": "26629"
+    }
+   ],
+   "outcome": {
+    "error": "Cannot read properties of undefined (reading 'data')"
+   }
+  },
+  {
+   "chain": "aptos",
+   "name": "no events",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": []
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30108,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "aptos",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+   ],
+   "outcome": {
+    "error": "Did not find correct PacketSent() event in tx 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   }
+  },
+  {
+   "chain": "aptos",
+   "name": "V301 empty options with executor_v1 adapter params",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::sending::PacketSent",
+      "data": {
+       "encoded_packet": "0x0100000000000000070000759c0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a00000065000000000000000000000000222222222222222222222222222222222222222269376b7d418ee10f49b98b10a3813961f3e43f5f9ec9041b7d1414c117f35242deadbeefcafe",
+       "options": "0x"
+      }
+     },
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v1::RequestEvent",
+      "data": {
+       "guid": "0x29e10f033e137b499b4254e2ab348d0f5994c3d6aae931caabb5b81193a14065",
+       "adapter_params": "0x000100000000000249f0"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30108,
+     "dstEid": 101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "aptos",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V301"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getTransactionByVersion": "26629"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "aptos",
+      "txHash": "26629",
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "blockNumber": 777
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcChainName": "aptos",
+       "dstChainName": "ethereum",
+       "srcEid": 30108,
+       "dstEid": 101,
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V301"
+     },
+     "guid": "0x69376b7d418ee10f49b98b10a3813961f3e43f5f9ec9041b7d1414c117f35242",
+     "message": "0xdeadbeefcafe",
+     "sendLibrary": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812",
+     "options": {
+      "lzReceive": {
+       "gas": "150000",
+       "value": "0"
+      }
+     }
+    }
+   }
+  },
+  {
+   "chain": "aptos",
+   "name": "V301 executor_v1 type 2 native drop",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::sending::PacketSent",
+      "data": {
+       "encoded_packet": "0x0100000000000000070000759c0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a00000065000000000000000000000000222222222222222222222222222222222222222269376b7d418ee10f49b98b10a3813961f3e43f5f9ec9041b7d1414c117f35242deadbeefcafe",
+       "options": "0x"
+      }
+     },
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v1::RequestEvent",
+      "data": {
+       "guid": "0x29e10f033e137b499b4254e2ab348d0f5994c3d6aae931caabb5b81193a14065",
+       "adapter_params": "0x000200000000000249f0000000000000000c4444444444444444444444444444444444444444"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30108,
+     "dstEid": 101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "aptos",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V301"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getTransactionByVersion": "26629"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "aptos",
+      "txHash": "26629",
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "blockNumber": 777
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcChainName": "aptos",
+       "dstChainName": "ethereum",
+       "srcEid": 30108,
+       "dstEid": 101,
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V301"
+     },
+     "guid": "0x69376b7d418ee10f49b98b10a3813961f3e43f5f9ec9041b7d1414c117f35242",
+     "message": "0xdeadbeefcafe",
+     "sendLibrary": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812",
+     "options": {
+      "lzReceive": {
+       "gas": "150000",
+       "value": "0"
+      },
+      "nativeDrop": [
+       {
+        "amount": "12",
+        "receiver": "0x4444444444444444444444444444444444444444"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "chain": "aptos",
+   "name": "V301 executor_v1 type 2 zero amount",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::sending::PacketSent",
+      "data": {
+       "encoded_packet": "0x0100000000000000070000759c0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a00000065000000000000000000000000222222222222222222222222222222222222222269376b7d418ee10f49b98b10a3813961f3e43f5f9ec9041b7d1414c117f35242deadbeefcafe",
+       "options": "0x"
+      }
+     },
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v1::RequestEvent",
+      "data": {
+       "guid": "0x29e10f033e137b499b4254e2ab348d0f5994c3d6aae931caabb5b81193a14065",
+       "adapter_params": "0x000200000000000249f000000000000000004444444444444444444444444444444444444444"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30108,
+     "dstEid": 101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "aptos",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V301"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getTransactionByVersion": "26629"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "aptos",
+      "txHash": "26629",
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "blockNumber": 777
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcChainName": "aptos",
+       "dstChainName": "ethereum",
+       "srcEid": 30108,
+       "dstEid": 101,
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V301"
+     },
+     "guid": "0x69376b7d418ee10f49b98b10a3813961f3e43f5f9ec9041b7d1414c117f35242",
+     "message": "0xdeadbeefcafe",
+     "sendLibrary": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812",
+     "options": {
+      "lzReceive": {
+       "gas": "150000",
+       "value": "0"
+      }
+     }
+    }
+   }
+  },
+  {
+   "chain": "aptos",
+   "name": "V301 executor_v1 type 2 receiver of 32 bytes",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::sending::PacketSent",
+      "data": {
+       "encoded_packet": "0x0100000000000000070000759c0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a00000065000000000000000000000000222222222222222222222222222222222222222269376b7d418ee10f49b98b10a3813961f3e43f5f9ec9041b7d1414c117f35242deadbeefcafe",
+       "options": "0x"
+      }
+     },
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v1::RequestEvent",
+      "data": {
+       "guid": "0x29e10f033e137b499b4254e2ab348d0f5994c3d6aae931caabb5b81193a14065",
+       "adapter_params": "0x000200000000000249f0000000000000000c4444444444444444444444444444444444444444444444444444444444444444"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30108,
+     "dstEid": 101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "aptos",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V301"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getTransactionByVersion": "26629"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "aptos",
+      "txHash": "26629",
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "blockNumber": 777
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcChainName": "aptos",
+       "dstChainName": "ethereum",
+       "srcEid": 30108,
+       "dstEid": 101,
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V301"
+     },
+     "guid": "0x69376b7d418ee10f49b98b10a3813961f3e43f5f9ec9041b7d1414c117f35242",
+     "message": "0xdeadbeefcafe",
+     "sendLibrary": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812",
+     "options": {
+      "lzReceive": {
+       "gas": "150000",
+       "value": "0"
+      }
+     }
+    }
+   }
+  },
+  {
+   "chain": "aptos",
+   "name": "V301 executor_v2 adapter params win over executor_v1",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::sending::PacketSent",
+      "data": {
+       "encoded_packet": "0x0100000000000000070000759c0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a00000065000000000000000000000000222222222222222222222222222222222222222269376b7d418ee10f49b98b10a3813961f3e43f5f9ec9041b7d1414c117f35242deadbeefcafe",
+       "options": "0x"
+      }
+     },
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v2::ExecutorRequested",
+      "data": {
+       "guid": "0x29e10f033e137b499b4254e2ab348d0f5994c3d6aae931caabb5b81193a14065",
+       "adapter_params": "0x000100000000000493e0"
+      }
+     },
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v1::RequestEvent",
+      "data": {
+       "guid": "0x29e10f033e137b499b4254e2ab348d0f5994c3d6aae931caabb5b81193a14065",
+       "adapter_params": "0x000100000000000249f0"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30108,
+     "dstEid": 101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "aptos",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V301"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getTransactionByVersion": "26629"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "aptos",
+      "txHash": "26629",
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "blockNumber": 777
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcChainName": "aptos",
+       "dstChainName": "ethereum",
+       "srcEid": 30108,
+       "dstEid": 101,
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V301"
+     },
+     "guid": "0x69376b7d418ee10f49b98b10a3813961f3e43f5f9ec9041b7d1414c117f35242",
+     "message": "0xdeadbeefcafe",
+     "sendLibrary": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812",
+     "options": {
+      "lzReceive": {
+       "gas": "300000",
+       "value": "0"
+      }
+     }
+    }
+   }
+  },
+  {
+   "chain": "aptos",
+   "name": "V301 event options merged with executor drop",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::sending::PacketSent",
+      "data": {
+       "encoded_packet": "0x0100000000000000070000759c0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a00000065000000000000000000000000222222222222222222222222222222222222222269376b7d418ee10f49b98b10a3813961f3e43f5f9ec9041b7d1414c117f35242deadbeefcafe",
+       "options": "0x000301001101000000000000000000000000000186a0010031020000000000000000000000000000000c0000000000000000000000004444444444444444444444444444444444444444"
+      }
+     },
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v1::RequestEvent",
+      "data": {
+       "guid": "0x29e10f033e137b499b4254e2ab348d0f5994c3d6aae931caabb5b81193a14065",
+       "adapter_params": "0x000200000000000249f0000000000000000c5555555555555555555555555555555555555555"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30108,
+     "dstEid": 101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "aptos",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V301"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getTransactionByVersion": "26629"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "aptos",
+      "txHash": "26629",
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "blockNumber": 777
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcChainName": "aptos",
+       "dstChainName": "ethereum",
+       "srcEid": 30108,
+       "dstEid": 101,
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V301"
+     },
+     "guid": "0x69376b7d418ee10f49b98b10a3813961f3e43f5f9ec9041b7d1414c117f35242",
+     "message": "0xdeadbeefcafe",
+     "sendLibrary": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812",
+     "options": {
+      "lzReceive": {
+       "gas": "250000",
+       "value": "0"
+      },
+      "ordered": false,
+      "nativeDrop": [
+       {
+        "amount": "12",
+        "receiver": "0x5555555555555555555555555555555555555555"
+       },
+       {
+        "amount": "12",
+        "receiver": "0x4444444444444444444444444444444444444444"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "chain": "aptos",
+   "name": "V301 invalid adapter params",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::sending::PacketSent",
+      "data": {
+       "encoded_packet": "0x0100000000000000070000759c0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a00000065000000000000000000000000222222222222222222222222222222222222222269376b7d418ee10f49b98b10a3813961f3e43f5f9ec9041b7d1414c117f35242deadbeefcafe",
+       "options": "0x"
+      }
+     },
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v1::RequestEvent",
+      "data": {
+       "guid": "0x29e10f033e137b499b4254e2ab348d0f5994c3d6aae931caabb5b81193a14065",
+       "adapter_params": "0x0003000000000000000a"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30108,
+     "dstEid": 101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "aptos",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V301"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getTransactionByVersion": "26629"
+    }
+   ],
+   "outcome": {
+    "error": "invalid adapter params"
+   }
+  },
+  {
+   "chain": "aptos",
+   "name": "V301 without executor event",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::sending::PacketSent",
+      "data": {
+       "encoded_packet": "0x0100000000000000070000759c0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a00000065000000000000000000000000222222222222222222222222222222222222222269376b7d418ee10f49b98b10a3813961f3e43f5f9ec9041b7d1414c117f35242deadbeefcafe",
+       "options": "0x"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30108,
+     "dstEid": 101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "aptos",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V301"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getTransactionByVersion": "26629"
+    }
+   ],
+   "outcome": {
+    "error": "Cannot read properties of undefined (reading 'data')"
+   }
+  },
+  {
+   "chain": "movement",
+   "name": "V302 match",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c::channels::PacketSent",
+      "data": {
+       "encoded_packet": "0x010000000000000007000076750a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a000075950000000000000000000000002222222222222222222222222222222222222222f91001b676ff8b850414b202d06df65fd1a1ff11278f907c8fce03df2581230bdeadbeefcafe",
+       "options": "0x00030100110100000000000000000000000000030d40",
+       "send_library": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30325,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "movement",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "movement",
+      "txHash": "26629",
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "blockNumber": 777
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcChainName": "movement",
+       "dstChainName": "ethereum",
+       "srcEid": 30325,
+       "dstEid": 30101,
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V302"
+     },
+     "guid": "0xf91001b676ff8b850414b202d06df65fd1a1ff11278f907c8fce03df2581230b",
+     "message": "0xdeadbeefcafe",
+     "sendLibrary": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+     "options": {
+      "lzReceive": {
+       "gas": "200000",
+       "value": "0"
+      },
+      "ordered": false
+     }
+    }
+   }
+  },
+  {
+   "chain": "movement",
+   "name": "V302 native drop",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c::channels::PacketSent",
+      "data": {
+       "encoded_packet": "0x010000000000000007000076750a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a000075950000000000000000000000002222222222222222222222222222222222222222f91001b676ff8b850414b202d06df65fd1a1ff11278f907c8fce03df2581230bdeadbeefcafe",
+       "options": "0x000301001101000000000000000000000000000186a0010031020000000000000000000000000000000c0000000000000000000000004444444444444444444444444444444444444444",
+       "send_library": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30325,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "movement",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "movement",
+      "txHash": "26629",
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "blockNumber": 777
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcChainName": "movement",
+       "dstChainName": "ethereum",
+       "srcEid": 30325,
+       "dstEid": 30101,
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V302"
+     },
+     "guid": "0xf91001b676ff8b850414b202d06df65fd1a1ff11278f907c8fce03df2581230b",
+     "message": "0xdeadbeefcafe",
+     "sendLibrary": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+     "options": {
+      "lzReceive": {
+       "gas": "100000",
+       "value": "0"
+      },
+      "ordered": false,
+      "nativeDrop": [
+       {
+        "amount": "12",
+        "receiver": "0x4444444444444444444444444444444444444444"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "chain": "movement",
+   "name": "V302 second of two",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c::channels::PacketSent",
+      "data": {
+       "encoded_packet": "0x010000000000000006000076750a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a000075950000000000000000000000002222222222222222222222222222222222222222f4c80fc1350c028bbcad0f8a70ed63b9c87e5b9af6a89b834ec9b73be3fbb4efdeadbeefcafe",
+       "options": "0x00030100110100000000000000000000000000030d40",
+       "send_library": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+      }
+     },
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c::channels::PacketSent",
+      "data": {
+       "encoded_packet": "0x010000000000000007000076750a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a000075950000000000000000000000002222222222222222222222222222222222222222f91001b676ff8b850414b202d06df65fd1a1ff11278f907c8fce03df2581230bdeadbeefcafe",
+       "options": "0x00030100110100000000000000000000000000030d40",
+       "send_library": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30325,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "movement",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "movement",
+      "txHash": "26629",
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "blockNumber": 777
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcChainName": "movement",
+       "dstChainName": "ethereum",
+       "srcEid": 30325,
+       "dstEid": 30101,
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V302"
+     },
+     "guid": "0xf91001b676ff8b850414b202d06df65fd1a1ff11278f907c8fce03df2581230b",
+     "message": "0xdeadbeefcafe",
+     "sendLibrary": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+     "options": {
+      "lzReceive": {
+       "gas": "200000",
+       "value": "0"
+      },
+      "ordered": false
+     }
+    }
+   }
+  },
+  {
+   "chain": "movement",
+   "name": "V302 other nonce",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c::channels::PacketSent",
+      "data": {
+       "encoded_packet": "0x010000000000000006000076750a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a000075950000000000000000000000002222222222222222222222222222222222222222f4c80fc1350c028bbcad0f8a70ed63b9c87e5b9af6a89b834ec9b73be3fbb4efdeadbeefcafe",
+       "options": "0x00030100110100000000000000000000000000030d40",
+       "send_library": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30325,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "movement",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+   ],
+   "outcome": {
+    "error": "Did not find correct PacketSent() event in tx 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   }
+  },
+  {
+   "chain": "movement",
+   "name": "V302 empty options",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c::channels::PacketSent",
+      "data": {
+       "encoded_packet": "0x010000000000000007000076750a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a000075950000000000000000000000002222222222222222222222222222222222222222f91001b676ff8b850414b202d06df65fd1a1ff11278f907c8fce03df2581230bdeadbeefcafe",
+       "options": "0x",
+       "send_library": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30325,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "movement",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+   ],
+   "outcome": {
+    "error": "invalid BigNumber string (argument=\"value\", value=\"0x\", code=INVALID_ARGUMENT, version=bignumber/5.8.0)"
+   }
+  },
+  {
+   "chain": "movement",
+   "name": "V302 from another module",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x9999999999999999999999999999999999999999999999999999999999999999::channels::PacketSent",
+      "data": {
+       "encoded_packet": "0x010000000000000007000076750a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a000075950000000000000000000000002222222222222222222222222222222222222222f91001b676ff8b850414b202d06df65fd1a1ff11278f907c8fce03df2581230bdeadbeefcafe",
+       "options": "0x00030100110100000000000000000000000000030d40",
+       "send_library": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30325,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "movement",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+   ],
+   "outcome": {
+    "error": "Did not find correct PacketSent() event in tx 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   }
+  },
+  {
+   "chain": "movement",
+   "name": "V302 packet field instead of encoded_packet",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c::channels::PacketSent",
+      "data": {
+       "packet": "0x010000000000000007000076750a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a000075950000000000000000000000002222222222222222222222222222222222222222f91001b676ff8b850414b202d06df65fd1a1ff11278f907c8fce03df2581230bdeadbeefcafe",
+       "options": "0x00030100110100000000000000000000000000030d40",
+       "send_library": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30325,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "movement",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "movement",
+      "txHash": "26629",
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "blockNumber": 777
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcChainName": "movement",
+       "dstChainName": "ethereum",
+       "srcEid": 30325,
+       "dstEid": 30101,
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V302"
+     },
+     "guid": "0xf91001b676ff8b850414b202d06df65fd1a1ff11278f907c8fce03df2581230b",
+     "message": "0xdeadbeefcafe",
+     "sendLibrary": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+     "options": {
+      "lzReceive": {
+       "gas": "200000",
+       "value": "0"
+      },
+      "ordered": false
+     }
+    }
+   }
+  },
+  {
+   "chain": "movement",
+   "name": "V302 without a packet",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c::channels::PacketSent",
+      "data": {
+       "options": "0x00030100110100000000000000000000000000030d40",
+       "send_library": "0xc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30325,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "movement",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+   ],
+   "outcome": {
+    "error": "Both encoded_packet and packet are undefined in the event"
+   }
+  },
+  {
+   "chain": "movement",
+   "name": "V302 without send_library",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0xe60045e20fc2c99e869c1c34a65b9291c020cd12a0d37a00a53ac1348af4f43c::channels::PacketSent",
+      "data": {
+       "encoded_packet": "0x010000000000000007000076750a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a000075950000000000000000000000002222222222222222222222222222222222222222f91001b676ff8b850414b202d06df65fd1a1ff11278f907c8fce03df2581230bdeadbeefcafe",
+       "options": "0x00030100110100000000000000000000000000030d40"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30325,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "movement",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getTransactionByVersion": "26629"
+    }
+   ],
+   "outcome": {
+    "error": "Cannot read properties of undefined (reading 'data')"
+   }
+  },
+  {
+   "chain": "movement",
+   "name": "no events",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": []
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30325,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "movement",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+   ],
+   "outcome": {
+    "error": "Did not find correct PacketSent() event in tx 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   }
+  },
+  {
+   "chain": "movement",
+   "name": "V301 empty options with executor_v1 adapter params",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::sending::PacketSent",
+      "data": {
+       "encoded_packet": "0x010000000000000007000076750a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a00000065000000000000000000000000222222222222222222222222222222222222222258e19d1de0b61c8b56c20a6769efc39ed1101eb5b9a2dd1fb054862b0a4b8200deadbeefcafe",
+       "options": "0x"
+      }
+     },
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v1::RequestEvent",
+      "data": {
+       "guid": "0x52ce5c721cec219228adf5262102d141068d20b0fc9c869c0b65166aa9894b29",
+       "adapter_params": "0x000100000000000249f0"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30325,
+     "dstEid": 101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "movement",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V301"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getTransactionByVersion": "26629"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "movement",
+      "txHash": "26629",
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "blockNumber": 777
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcChainName": "movement",
+       "dstChainName": "ethereum",
+       "srcEid": 30325,
+       "dstEid": 101,
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V301"
+     },
+     "guid": "0x58e19d1de0b61c8b56c20a6769efc39ed1101eb5b9a2dd1fb054862b0a4b8200",
+     "message": "0xdeadbeefcafe",
+     "sendLibrary": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812",
+     "options": {
+      "lzReceive": {
+       "gas": "150000",
+       "value": "0"
+      }
+     }
+    }
+   }
+  },
+  {
+   "chain": "movement",
+   "name": "V301 executor_v1 type 2 native drop",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::sending::PacketSent",
+      "data": {
+       "encoded_packet": "0x010000000000000007000076750a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a00000065000000000000000000000000222222222222222222222222222222222222222258e19d1de0b61c8b56c20a6769efc39ed1101eb5b9a2dd1fb054862b0a4b8200deadbeefcafe",
+       "options": "0x"
+      }
+     },
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v1::RequestEvent",
+      "data": {
+       "guid": "0x52ce5c721cec219228adf5262102d141068d20b0fc9c869c0b65166aa9894b29",
+       "adapter_params": "0x000200000000000249f0000000000000000c4444444444444444444444444444444444444444"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30325,
+     "dstEid": 101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "movement",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V301"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getTransactionByVersion": "26629"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "movement",
+      "txHash": "26629",
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "blockNumber": 777
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcChainName": "movement",
+       "dstChainName": "ethereum",
+       "srcEid": 30325,
+       "dstEid": 101,
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V301"
+     },
+     "guid": "0x58e19d1de0b61c8b56c20a6769efc39ed1101eb5b9a2dd1fb054862b0a4b8200",
+     "message": "0xdeadbeefcafe",
+     "sendLibrary": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812",
+     "options": {
+      "lzReceive": {
+       "gas": "150000",
+       "value": "0"
+      },
+      "nativeDrop": [
+       {
+        "amount": "12",
+        "receiver": "0x4444444444444444444444444444444444444444"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "chain": "movement",
+   "name": "V301 executor_v1 type 2 zero amount",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::sending::PacketSent",
+      "data": {
+       "encoded_packet": "0x010000000000000007000076750a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a00000065000000000000000000000000222222222222222222222222222222222222222258e19d1de0b61c8b56c20a6769efc39ed1101eb5b9a2dd1fb054862b0a4b8200deadbeefcafe",
+       "options": "0x"
+      }
+     },
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v1::RequestEvent",
+      "data": {
+       "guid": "0x52ce5c721cec219228adf5262102d141068d20b0fc9c869c0b65166aa9894b29",
+       "adapter_params": "0x000200000000000249f000000000000000004444444444444444444444444444444444444444"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30325,
+     "dstEid": 101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "movement",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V301"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getTransactionByVersion": "26629"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "movement",
+      "txHash": "26629",
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "blockNumber": 777
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcChainName": "movement",
+       "dstChainName": "ethereum",
+       "srcEid": 30325,
+       "dstEid": 101,
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V301"
+     },
+     "guid": "0x58e19d1de0b61c8b56c20a6769efc39ed1101eb5b9a2dd1fb054862b0a4b8200",
+     "message": "0xdeadbeefcafe",
+     "sendLibrary": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812",
+     "options": {
+      "lzReceive": {
+       "gas": "150000",
+       "value": "0"
+      }
+     }
+    }
+   }
+  },
+  {
+   "chain": "movement",
+   "name": "V301 executor_v1 type 2 receiver of 32 bytes",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::sending::PacketSent",
+      "data": {
+       "encoded_packet": "0x010000000000000007000076750a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a00000065000000000000000000000000222222222222222222222222222222222222222258e19d1de0b61c8b56c20a6769efc39ed1101eb5b9a2dd1fb054862b0a4b8200deadbeefcafe",
+       "options": "0x"
+      }
+     },
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v1::RequestEvent",
+      "data": {
+       "guid": "0x52ce5c721cec219228adf5262102d141068d20b0fc9c869c0b65166aa9894b29",
+       "adapter_params": "0x000200000000000249f0000000000000000c4444444444444444444444444444444444444444444444444444444444444444"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30325,
+     "dstEid": 101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "movement",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V301"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getTransactionByVersion": "26629"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "movement",
+      "txHash": "26629",
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "blockNumber": 777
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcChainName": "movement",
+       "dstChainName": "ethereum",
+       "srcEid": 30325,
+       "dstEid": 101,
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V301"
+     },
+     "guid": "0x58e19d1de0b61c8b56c20a6769efc39ed1101eb5b9a2dd1fb054862b0a4b8200",
+     "message": "0xdeadbeefcafe",
+     "sendLibrary": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812",
+     "options": {
+      "lzReceive": {
+       "gas": "150000",
+       "value": "0"
+      }
+     }
+    }
+   }
+  },
+  {
+   "chain": "movement",
+   "name": "V301 executor_v2 adapter params win over executor_v1",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::sending::PacketSent",
+      "data": {
+       "encoded_packet": "0x010000000000000007000076750a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a00000065000000000000000000000000222222222222222222222222222222222222222258e19d1de0b61c8b56c20a6769efc39ed1101eb5b9a2dd1fb054862b0a4b8200deadbeefcafe",
+       "options": "0x"
+      }
+     },
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v2::ExecutorRequested",
+      "data": {
+       "guid": "0x52ce5c721cec219228adf5262102d141068d20b0fc9c869c0b65166aa9894b29",
+       "adapter_params": "0x000100000000000493e0"
+      }
+     },
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v1::RequestEvent",
+      "data": {
+       "guid": "0x52ce5c721cec219228adf5262102d141068d20b0fc9c869c0b65166aa9894b29",
+       "adapter_params": "0x000100000000000249f0"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30325,
+     "dstEid": 101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "movement",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V301"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getTransactionByVersion": "26629"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "movement",
+      "txHash": "26629",
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "blockNumber": 777
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcChainName": "movement",
+       "dstChainName": "ethereum",
+       "srcEid": 30325,
+       "dstEid": 101,
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V301"
+     },
+     "guid": "0x58e19d1de0b61c8b56c20a6769efc39ed1101eb5b9a2dd1fb054862b0a4b8200",
+     "message": "0xdeadbeefcafe",
+     "sendLibrary": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812",
+     "options": {
+      "lzReceive": {
+       "gas": "300000",
+       "value": "0"
+      }
+     }
+    }
+   }
+  },
+  {
+   "chain": "movement",
+   "name": "V301 event options merged with executor drop",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::sending::PacketSent",
+      "data": {
+       "encoded_packet": "0x010000000000000007000076750a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a00000065000000000000000000000000222222222222222222222222222222222222222258e19d1de0b61c8b56c20a6769efc39ed1101eb5b9a2dd1fb054862b0a4b8200deadbeefcafe",
+       "options": "0x000301001101000000000000000000000000000186a0010031020000000000000000000000000000000c0000000000000000000000004444444444444444444444444444444444444444"
+      }
+     },
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v1::RequestEvent",
+      "data": {
+       "guid": "0x52ce5c721cec219228adf5262102d141068d20b0fc9c869c0b65166aa9894b29",
+       "adapter_params": "0x000200000000000249f0000000000000000c5555555555555555555555555555555555555555"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30325,
+     "dstEid": 101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "movement",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V301"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getTransactionByVersion": "26629"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "movement",
+      "txHash": "26629",
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+      "blockNumber": 777
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcChainName": "movement",
+       "dstChainName": "ethereum",
+       "srcEid": 30325,
+       "dstEid": 101,
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V301"
+     },
+     "guid": "0x58e19d1de0b61c8b56c20a6769efc39ed1101eb5b9a2dd1fb054862b0a4b8200",
+     "message": "0xdeadbeefcafe",
+     "sendLibrary": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812",
+     "options": {
+      "lzReceive": {
+       "gas": "250000",
+       "value": "0"
+      },
+      "ordered": false,
+      "nativeDrop": [
+       {
+        "amount": "12",
+        "receiver": "0x5555555555555555555555555555555555555555"
+       },
+       {
+        "amount": "12",
+        "receiver": "0x4444444444444444444444444444444444444444"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "chain": "movement",
+   "name": "V301 invalid adapter params",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::sending::PacketSent",
+      "data": {
+       "encoded_packet": "0x010000000000000007000076750a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a00000065000000000000000000000000222222222222222222222222222222222222222258e19d1de0b61c8b56c20a6769efc39ed1101eb5b9a2dd1fb054862b0a4b8200deadbeefcafe",
+       "options": "0x"
+      }
+     },
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90::executor_v1::RequestEvent",
+      "data": {
+       "guid": "0x52ce5c721cec219228adf5262102d141068d20b0fc9c869c0b65166aa9894b29",
+       "adapter_params": "0x0003000000000000000a"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30325,
+     "dstEid": 101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "movement",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V301"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getTransactionByVersion": "26629"
+    }
+   ],
+   "outcome": {
+    "error": "invalid adapter params"
+   }
+  },
+  {
+   "chain": "movement",
+   "name": "V301 without executor event",
+   "transaction": {
+    "type": "user_transaction",
+    "version": "26629",
+    "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "success": true,
+    "events": [
+     {
+      "guid": {
+       "creation_number": "0",
+       "account_address": "0x0"
+      },
+      "sequence_number": "0",
+      "type": "0x844bec096472b9ca651bfce5e639f8ef92dafb7b4e5a54461dd8c8f5c5231812::sending::PacketSent",
+      "data": {
+       "encoded_packet": "0x010000000000000007000076750a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a00000065000000000000000000000000222222222222222222222222222222222222222258e19d1de0b61c8b56c20a6769efc39ed1101eb5b9a2dd1fb054862b0a4b8200deadbeefcafe",
+       "options": "0x"
+      }
+     }
+    ]
+   },
+   "block": {
+    "block_height": "777",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "first_version": "26000",
+    "last_version": "27000",
+    "block_timestamp": "1700000000000000"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30325,
+     "dstEid": 101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "movement",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V301"
+   },
+   "calls": [
+    {
+     "getTransactionByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getBlockByHashOrVersion": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "getTransactionByVersion": "26629"
+    }
+   ],
+   "outcome": {
+    "error": "Cannot read properties of undefined (reading 'data')"
+   }
+  }
+ ]
+}

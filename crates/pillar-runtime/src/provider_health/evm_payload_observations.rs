@@ -18,87 +18,144 @@ pub(crate) struct EvmPayloadSignedObservation<'a> {
 /// `EndpointV2IdBase` (TS: `packages/common-model/src/utils/index.ts:60`).
 pub(crate) const EVM_ENDPOINT_V2_ID_BASE: u64 = 30_000;
 
-/// What one provider says the receiver's receive library is.
-enum ResolvedReceiveLibrary {
-    Known {
-        address: String,
-        version: &'static str,
-    },
-    /// The endpoint answered, but with a library this service cannot validate
-    /// against - either not a known message library, or a non-default one the
-    /// endpoint itself rejects. Upstream raises `NonRetryableError` here (TS:
-    /// `endpoint/evm/endpointV2.ts:97-101` and `decoders/index.ts:86-88`); the
-    /// equivalent is to refuse, never to fall back to a derived library.
-    Unsupported { address: String },
+/// What one provider says the receiver's receive library is, before any
+/// classification: each caller maps the address with its own table.
+enum ReceiveLibraryAnswer {
+    Valid(String),
+    /// A non-default library the endpoint itself rejects. Upstream raises
+    /// `NonRetryableError("Invalid ULN version for lib: ...")` here (TS 1.2.66:
+    /// `endpoint/evm/endpointV2.ts:81-90`).
+    Invalid(String),
+}
+
+/// Where the endpoint says `oapp` receives from `remote_eid`.
+struct ReceiveLibraryQuery<'a> {
+    contracts: &'a EvmReceiveContracts,
+    oapp: &'a str,
+    remote_eid: u32,
+    dst_eid: u64,
 }
 
 async fn resolve_receive_library<T>(
     transport: &T,
     url: &str,
     headers: &HashMap<String, String>,
-    observation: &EvmPayloadSignedObservation<'_>,
-) -> Result<ResolvedReceiveLibrary, AppCoreError>
+    query: ReceiveLibraryQuery<'_>,
+) -> Result<ReceiveLibraryAnswer, AppCoreError>
 where
     T: JsonRpcTransport,
 {
-    let address = if observation.dst_eid < EVM_ENDPOINT_V2_ID_BASE {
+    if query.dst_eid < EVM_ENDPOINT_V2_ID_BASE {
         // A V2 message addressed to a V1 endpoint. `getReceiveLibraryAddress`
         // takes no source eid and has no default/override split.
-        let endpoint = observation
-            .contracts
-            .endpoint_v1
-            .as_deref()
-            .ok_or_else(|| {
-                AppCoreError::Internal(
-                    "No V1 Endpoint contract configured for the destination chain".to_string(),
-                )
-            })?;
+        let endpoint = query.contracts.endpoint_v1.as_deref().ok_or_else(|| {
+            AppCoreError::Internal(
+                "No V1 Endpoint contract configured for the destination chain".to_string(),
+            )
+        })?;
         let result = eth_call(
             transport.clone(),
             url.to_string(),
             headers.clone(),
             endpoint,
-            &build_evm_v1_get_receive_library_address_call_data(observation.oapp)?,
+            &build_evm_v1_get_receive_library_address_call_data(query.oapp)?,
         )
         .await?;
-        decode_evm_address_result(&result)?
-    } else {
-        let (address, is_default) = decode_evm_receive_library_result(
+        return Ok(ReceiveLibraryAnswer::Valid(decode_evm_address_result(
+            &result,
+        )?));
+    }
+    let (address, is_default) = decode_evm_receive_library_result(
+        &eth_call(
+            transport.clone(),
+            url.to_string(),
+            headers.clone(),
+            &query.contracts.endpoint_v2,
+            &build_evm_get_receive_library_call_data(query.oapp, query.remote_eid)?,
+        )
+        .await?,
+    )?;
+    if !is_default {
+        let valid = decode_evm_bool_result(
             &eth_call(
                 transport.clone(),
                 url.to_string(),
                 headers.clone(),
-                &observation.contracts.endpoint_v2,
-                &build_evm_get_receive_library_call_data(observation.oapp, observation.remote_eid)?,
+                &query.contracts.endpoint_v2,
+                &build_evm_is_valid_receive_library_call_data(
+                    query.oapp,
+                    query.remote_eid,
+                    &address,
+                )?,
             )
             .await?,
         )?;
-        if !is_default {
-            let valid = decode_evm_bool_result(
-                &eth_call(
-                    transport.clone(),
-                    url.to_string(),
-                    headers.clone(),
-                    &observation.contracts.endpoint_v2,
-                    &build_evm_is_valid_receive_library_call_data(
-                        observation.oapp,
-                        observation.remote_eid,
-                        &address,
-                    )?,
-                )
-                .await?,
-            )?;
-            if !valid {
-                return Ok(ResolvedReceiveLibrary::Unsupported { address });
-            }
+        if !valid {
+            return Ok(ReceiveLibraryAnswer::Invalid(address));
         }
-        address
-    };
-
-    match evm_uln_version_from_receive_library(observation.contracts, &address) {
-        Some(version) => Ok(ResolvedReceiveLibrary::Known { address, version }),
-        None => Ok(ResolvedReceiveLibrary::Unsupported { address }),
     }
+    Ok(ReceiveLibraryAnswer::Valid(address))
+}
+
+/// The receiver's receive library as a ULN version, for routing a V2 send
+/// (TS 1.2.66: `endpoint/evm/endpointV1.ts:78-111`, `endpointV2.ts:73-104`).
+/// Only a V1 endpoint knows the legacy UltraLightNodeV2.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ReceiveUlnVersion {
+    Known(&'static str),
+    /// No row of upstream's table matches; upstream throws
+    /// `NonRetryableError("Unsupported ULN version: ...")`.
+    Unsupported(String),
+    Invalid(String),
+}
+
+pub(crate) async fn observe_receive_uln_version<T>(
+    transport: T,
+    url: String,
+    headers: HashMap<String, String>,
+    contracts: &EvmReceiveContracts,
+    oapp: &str,
+    remote_eid: u32,
+    dst_eid: u64,
+) -> Result<(String, ReceiveUlnVersion), AppCoreError>
+where
+    T: JsonRpcTransport,
+{
+    let query = ReceiveLibraryQuery {
+        contracts,
+        oapp,
+        remote_eid,
+        dst_eid,
+    };
+    let (address, version) =
+        match resolve_receive_library(&transport, &url, &headers, query).await? {
+            ReceiveLibraryAnswer::Invalid(address) => {
+                (address.clone(), ReceiveUlnVersion::Invalid(address))
+            }
+            ReceiveLibraryAnswer::Valid(address) => {
+                let legacy = dst_eid < EVM_ENDPOINT_V2_ID_BASE
+                    && !contracts.uln_v2.is_empty()
+                    && strip_hex_prefix(&contracts.uln_v2)
+                        .eq_ignore_ascii_case(strip_hex_prefix(&address));
+                let version = if legacy {
+                    ReceiveUlnVersion::Known(ULN_VERSION_V2)
+                } else {
+                    match evm_uln_version_for_receive_routing(contracts, &address) {
+                        Some(version) => ReceiveUlnVersion::Known(version),
+                        None => ReceiveUlnVersion::Unsupported(address.clone()),
+                    }
+                };
+                (address, version)
+            }
+        };
+    // The quorum agrees on the library address, not only on its version.
+    let address = address.to_lowercase();
+    let key = match &version {
+        ReceiveUlnVersion::Known(version) => format!("{address}:{version}"),
+        ReceiveUlnVersion::Unsupported(_) => format!("unsupported:{address}"),
+        ReceiveUlnVersion::Invalid(_) => format!("invalid:{address}"),
+    };
+    Ok((key, version))
 }
 
 pub(crate) async fn observe_payload_signed<T>(
@@ -106,29 +163,37 @@ pub(crate) async fn observe_payload_signed<T>(
     url: String,
     headers: HashMap<String, String>,
     observation: EvmPayloadSignedObservation<'_>,
-) -> Option<(String, PayloadSignedValidity)>
+) -> Result<(String, PayloadSignedValidity), RpcError>
 where
     T: JsonRpcTransport,
 {
-    // `None` means this provider could not answer, and upstream's rejected
-    // promise never reaches the quorum function either. It must not be folded
-    // into a value: two providers that both failed have agreed on nothing, and
-    // letting them agree would allow a pair of dead endpoints to decide a
-    // request that a healthy endpoint could have answered.
-    let resolved = match resolve_receive_library(&transport, &url, &headers, &observation).await {
-        Ok(resolved) => resolved,
-        Err(_) => return None,
+    let query = ReceiveLibraryQuery {
+        contracts: observation.contracts,
+        oapp: observation.oapp,
+        remote_eid: observation.remote_eid,
+        dst_eid: observation.dst_eid,
     };
-    let (receive_library, receive_version) = match resolved {
-        ResolvedReceiveLibrary::Known { address, version } => (address, version),
-        ResolvedReceiveLibrary::Unsupported { address } => {
-            // Agreed on by every honest provider, so the quorum settles and the
-            // request is refused rather than falling through to a guess.
-            return Some((
+    let resolved = resolve_receive_library(&transport, &url, &headers, query)
+        .await
+        .map_err(RpcError::from)?;
+    let receive_library = match resolved {
+        ReceiveLibraryAnswer::Valid(address) => address,
+        ReceiveLibraryAnswer::Invalid(address) => {
+            return Ok((
                 format!("unsupported:{}", address.to_lowercase()),
                 PayloadSignedValidity::UnsupportedReceiveLibrary,
             ));
         }
+    };
+    let Some(receive_version) =
+        evm_uln_version_from_receive_library(observation.contracts, &receive_library)
+    else {
+        // Agreed on by every honest provider, so the quorum settles and the
+        // request is refused rather than falling through to a guess.
+        return Ok((
+            format!("unsupported:{}", receive_library.to_lowercase()),
+            PayloadSignedValidity::UnsupportedReceiveLibrary,
+        ));
     };
 
     let read = async {
@@ -193,15 +258,15 @@ where
             } else {
                 PayloadSignedValidity::NotSigned
             };
-            Some((
-                format!(
-                    "{}:{receive_version}:{dvn_confirmed}:{inbound_confirmations}:{verification_state:?}",
-                    receive_library.to_lowercase()
-                ),
-                validity,
-            ))
+            Ok((
+            format!(
+                "{}:{receive_version}:{dvn_confirmed}:{inbound_confirmations}:{verification_state:?}",
+                receive_library.to_lowercase()
+            ),
+            validity,
+        ))
         }
-        Err(_) => None,
+        Err(error) => Err(error.into()),
     }
 }
 
@@ -232,7 +297,7 @@ where
     T: JsonRpcTransport,
 {
     let response = transport
-        .post_json(
+        .post_json_scoped(
             url,
             headers,
             json!({
@@ -246,7 +311,7 @@ where
             }),
         )
         .await
-        .map_err(AppCoreError::Internal)?;
+        .map_err(AppCoreError::from)?;
     response
         .get("result")
         .and_then(Value::as_str)

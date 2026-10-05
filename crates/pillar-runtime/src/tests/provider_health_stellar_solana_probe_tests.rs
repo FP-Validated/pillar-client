@@ -5,16 +5,16 @@ async fn provider_health_probes_stellar_latest_ledger_like_typescript() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "stellar".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::UriWithHeaders {
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::UriWithHeaders {
                     uri: "https://stellar-rpc.example".to_string(),
                     headers: HashMap::from([(
                         "authorization".to_string(),
                         "Bearer stellar-token".to_string(),
                     )]),
                 }],
-                quorum: Some(1),
-            },
+                1,
+            ),
         )]),
         Some(&["stellar".to_string()]),
     )
@@ -33,7 +33,7 @@ async fn provider_health_probes_stellar_latest_ledger_like_typescript() {
         HashMap::from([("stellar".to_string(), "STELLAR".to_string())]),
     );
 
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
 
     assert!(report["stellar"].healthy);
     assert_eq!(report["stellar"].checked_at_unix_ms, 5555);
@@ -61,10 +61,10 @@ async fn provider_health_marks_stellar_unhealthy_when_latest_ledger_probe_fails(
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "stellar".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://stellar-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://stellar-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["stellar".to_string()]),
     )
@@ -82,7 +82,7 @@ async fn provider_health_marks_stellar_unhealthy_when_latest_ledger_probe_fails(
         HashMap::from([("stellar".to_string(), "STELLAR".to_string())]),
     );
 
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
 
     assert!(!report["stellar"].healthy);
     assert_eq!(
@@ -97,16 +97,16 @@ async fn provider_health_probes_solana_confirmed_slot_like_typescript() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "solana".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::UriWithHeaders {
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::UriWithHeaders {
                     uri: "https://solana-rpc.example".to_string(),
                     headers: HashMap::from([(
                         "authorization".to_string(),
                         "Bearer token".to_string(),
                     )]),
                 }],
-                quorum: Some(1),
-            },
+                1,
+            ),
         )]),
         Some(&["solana".to_string()]),
     )
@@ -123,7 +123,7 @@ async fn provider_health_probes_solana_confirmed_slot_like_typescript() {
         HashMap::from([("solana".to_string(), "SOLANA".to_string())]),
     );
 
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
 
     assert!(report["solana"].healthy);
     assert_eq!(report["solana"].checked_at_unix_ms, 2222);

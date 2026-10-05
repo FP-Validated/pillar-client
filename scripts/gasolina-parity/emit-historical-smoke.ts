@@ -18,6 +18,9 @@
 // the fixture; chain reads the orchestrator performs (block confirmations, block
 // timestamp, already-signed) are answered by stubs that are named in the output.
 import { Cell } from '@ton/core'
+import express from 'express'
+import { IncomingMessage, ServerResponse } from 'http'
+import { Socket } from 'net'
 import { ethers } from 'ethers'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -29,6 +32,7 @@ import { getVId } from '@monorepo/static-config'
 
 import { GasolinaSdkFactory } from '../src/app/sdks/gasolinaSdk/factory'
 import { App } from '../src/app/app'
+import { startServer } from '../src/bootstrap'
 import { buildHashCallDataBuilder } from '../src/app/hashCallDataBuilder'
 import { hashSentEventMessageForGasolina } from '@monorepo/gasolina-client'
 import { ProtocolType, UlnVersion } from '@monorepo/common-model'
@@ -41,6 +45,37 @@ import type { WalletDefinition } from '@monorepo/wallet-config-models'
 import { EndpointV2EvmSdk } from '@monorepo/lz-v2-sdk/src/endpoint/evm'
 import { EndpointV2EvmSdk as EndpointV2EvmSdkViem } from '@monorepo/lz-v2-sdk/src/endpoint/evm/viemSdk'
 import type { ChainMetadataConfigGetter, LZMessageId } from '@monorepo/common-model'
+
+// Upstream's own HTTP layer (`bootstrap.ts:startServer`) in front of the same App: its
+// `listen` is captured instead of binding a socket, and each request is handed to the
+// Express application in process, so the full `{ status, body }` a caller sees is
+// recorded without a network.
+let application: any
+;(express.application as any).listen = function () {
+    application = this
+    return {}
+}
+const httpAnswer = (app: App, body: string): Promise<{ status: number; body: unknown }> => {
+    startServer(app as any, 0)
+    const { promise, resolve } = Promise.withResolvers<{ status: number; body: unknown }>()
+    const req = new IncomingMessage(new Socket())
+    req.method = 'POST'
+    req.url = '/v2/resolve-and-sign'
+    req.httpVersion = '1.1'
+    req.headers = { host: '127.0.0.1', 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(body)) }
+    const res = new ServerResponse(req)
+    const chunks: Buffer[] = []
+    res.write = ((chunk: any) => (chunks.push(Buffer.from(chunk)), true)) as any
+    res.end = ((chunk?: any) => {
+        if (chunk && typeof chunk !== 'function') chunks.push(Buffer.from(chunk))
+        resolve({ status: res.statusCode, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) })
+        return res
+    }) as any
+    application.handle(req, res, (error?: any) => resolve({ status: error ? 500 : 404, body: null }))
+    req.push(body)
+    req.push(null)
+    return promise
+}
 
 // The service reads these from wallet config; here they are fixed so the Rust port
 // can be handed the identical mnemonic and path and the two signatures compared as
@@ -287,6 +322,7 @@ const buildApp = (
         receipt: unknown
         alreadySigned: boolean
         availableChains?: string[]
+        debugMode?: boolean
     },
 ) => {
     const reads = stubReads(pathway, options.alreadySigned)
@@ -302,26 +338,35 @@ const buildApp = (
     ]
     const chainType = StaticChainConfigs.getChainType(pathway.dstChainName)
     let signerCalls = 0
-    const countingSignerGetter = {
-        getSignerAdapter: async (chainName: string, walletName: string) => {
+    // 1.2.66 signs through `GasolinaSenderFactory.getSignerAdaptersByChainName`
+    // (`app.ts:320-328`), one adapter per wallet definition supporting the chain type.
+    const countingSenderFactory = {
+        getSignerAdaptersByChainName: async (chainName: string) => {
             const adapter = await signerGetter.getSignerAdapter(
                 chainName,
-                walletName,
+                walletNameFor(StaticChainConfigs.getChainType(chainName)),
             )
-            return {
-                gasolinaSign: async (args: { data: Uint8Array }) => {
-                    signerCalls += 1
-                    return adapter.gasolinaSign(args)
+            return [
+                {
+                    gasolinaSign: async (args: { data: Uint8Array }) => {
+                        signerCalls += 1
+                        return adapter.gasolinaSign(args)
+                    },
                 },
-            }
+            ]
         },
+    }
+    // `GasolinaSdkFactory` takes `{ environment, providerGetter }` (`factory.ts:26-31`); only a
+    // TON destination reads its provider, and the replayed state stands in for it.
+    const providerGetter = {
+        getProvider: (chainName: string) =>
+            pathway.family === 'TON' && chainName === pathway.dstChainName
+                ? tonProvidersFor(pathway)
+                : {},
     }
 
     const app = new App({
-        signerAdapterGetter: countingSignerGetter as any,
-        walletsByChainName: {
-            [pathway.dstChainName]: [{ walletName: walletNameFor(chainType) }],
-        },
+        gasolinaSenderFactory: countingSenderFactory as any,
         endpointV2SdkFactory: realEndpointFactory as any,
         rpcSdkFactory: { getSdk: () => reads } as any,
         ulnSdkFactory: { getSdk: () => reads } as any,
@@ -341,16 +386,13 @@ const buildApp = (
                 Object.fromEntries(chains.map((name) => [name, {}])),
         } as any,
         environment: pathway.environment,
-        debugMode: true,
+        debugMode: options.debugMode ?? true,
         maximumExpiration: 60 * 60 * 24 * 7,
         maximumExpirationGracePeriod: 30,
         hashCallDataBuilders: buildHashCallDataBuilder({
             gasolinaSdkFactory: new GasolinaSdkFactory({
                 environment: pathway.environment,
-                providers:
-                    pathway.family === 'TON'
-                        ? { [pathway.dstChainName]: tonProvidersFor(pathway) }
-                        : {},
+                providerGetter: providerGetter as any,
             }),
             endpointV2SdkFactory: realEndpointFactory as any,
             lzSdkFactory: {
@@ -450,6 +492,19 @@ const runPathway = async (pathway: Pathway) => {
         )),
     }
 
+    // The same four runs through upstream's HTTP layer with production `debugMode: false`:
+    // the whole `{ status, body }` a caller receives, untruncated.
+    const httpRequest = JSON.stringify(request)
+    const http: Record<string, unknown> = {}
+    for (const [label, options] of [
+        ['signed', { receipt: pathway.receipt, alreadySigned: false }],
+        ['foreignEmitter', { receipt: withForeignEmitter(pathway), alreadySigned: false }],
+        ['alreadySigned', { receipt: pathway.receipt, alreadySigned: true }],
+        ['unavailableChain', { receipt: pathway.receipt, alreadySigned: false, availableChains: [pathway.srcChainName] }],
+    ] as const) {
+        http[label] = await httpAnswer(buildApp(pathway, { ...options, debugMode: false }).app, httpRequest)
+    }
+
     const { app, signerCalls } = buildApp(pathway, {
         receipt: pathway.receipt,
         alreadySigned: false,
@@ -460,6 +515,8 @@ const runPathway = async (pathway: Pathway) => {
         return {
             ...base,
             ...rejects,
+            httpRequest,
+            http,
             resolver:
                 pathway.environment === 'mainnet'
                     ? 'EndpointV2EvmSdk'
@@ -485,6 +542,8 @@ const runPathway = async (pathway: Pathway) => {
         return {
             ...base,
             ...rejects,
+            httpRequest,
+            http,
             signRequestError: (error as Error).message.slice(0, 400),
         }
     }
@@ -495,11 +554,14 @@ const main = async () => {
     for (const pathway of fixture.pathways) {
         pathways.push(await runPathway(pathway))
     }
+    // Upstream's bootstrap logs its metrics configuration to stdout on import; the result
+    // follows this marker.
     process.stdout.write(
+        '@@SMOKE@@' +
         JSON.stringify(
             {
                 producedBy: {
-                    upstream: 'gasolina-audit',
+                    upstream: 'gasolina-audit 1.2.66 (manifest sha256 8ad87eb6...; archive comment 213cd500...)',
                     entrypoints: [
                         'packages/sdks/lz-v2-sdk/src/endpoint/evm/decoders/index.ts:extractLZEventFromPacketSentEvent',
                         'apps/gasolina/src/app/sdks/gasolinaSdk/factory.ts:GasolinaSdkFactory.getSdk',

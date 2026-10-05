@@ -1,0 +1,91 @@
+{
+ "producedBy": {
+  "upstream": "gasolina-audit 1.2.66 (manifest sha256 8ad87eb6...; archive comment 213cd500...)",
+  "entrypoint": "apps/gasolina/src/app/app.ts:App.validateExpiration"
+ },
+ "now": 1800000000,
+ "maximumExpiration": 604800,
+ "maximumExpirationGracePeriod": 30,
+ "results": [
+  {
+   "expiration": 1799999969,
+   "outcome": "refused",
+   "class": "BadRequestError",
+   "message": "Expiration has already passed: expiration=1799999969, currentTimestamp=1800000000"
+  },
+  {
+   "expiration": 1799999970,
+   "outcome": "accepted"
+  },
+  {
+   "expiration": 1800000000,
+   "outcome": "accepted"
+  },
+  {
+   "expiration": 1800604800,
+   "outcome": "accepted"
+  },
+  {
+   "expiration": 1800604801,
+   "outcome": "refused",
+   "class": "BadRequestError",
+   "message": "expiration is too far in the future: expiration=1800604801, maxAllowed=1800604800"
+  },
+  {
+   "expiration": 1900000000,
+   "outcome": "refused",
+   "class": "BadRequestError",
+   "message": "expiration is too far in the future: expiration=1900000000, maxAllowed=1800604800"
+  }
+ ],
+ "timestampReads": [
+  {
+   "opts": {
+    "validRange": {
+     "min": 1799395169,
+     "max": 1799999999
+    }
+   }
+  },
+  {
+   "opts": {
+    "validRange": {
+     "min": 1799395170,
+     "max": 1800000000
+    }
+   }
+  },
+  {
+   "opts": {
+    "validRange": {
+     "min": 1799395200,
+     "max": 1800000030
+    }
+   }
+  },
+  {
+   "opts": {
+    "validRange": {
+     "min": 1800000000,
+     "max": 1800604830
+    }
+   }
+  },
+  {
+   "opts": {
+    "validRange": {
+     "min": 1800000001,
+     "max": 1800604831
+    }
+   }
+  },
+  {
+   "opts": {
+    "validRange": {
+     "min": 1899395200,
+     "max": 1900000030
+    }
+   }
+  }
+ ]
+}

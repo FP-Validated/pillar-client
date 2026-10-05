@@ -130,9 +130,8 @@ pub fn build_evm_get_uln_config_call_data(
 ///
 /// Upstream narrows with `hexZeroPad(address, 32).slice(-40)`
 /// (`packages/static-config/src/index.ts:723-727`), which silently discards the
-/// leading 12 bytes. This refuses when they are non-zero instead: for a DVN,
-/// truncating an address that was never a zero-padded EVM address means
-/// attesting for a different OApp than the packet names.
+/// leading 12 bytes. This refuses when they are non-zero instead, a policy
+/// stricter than the destination, whose `receiverB20()` truncates too (SECURITY.md).
 pub fn evm_address_from_pathway_value(value: &str) -> Result<String, AppCoreError> {
     let bytes = decode_hex_bytes(value)?;
     match bytes.len() {
@@ -267,6 +266,23 @@ pub fn decode_evm_uint64_result(result: &str) -> Result<u64, AppCoreError> {
 
 pub fn decode_evm_address_result(result: &str) -> Result<String, AppCoreError> {
     abi_address(&decode_hex_bytes(result)?, 0, 1)
+}
+
+/// EIP-55 rendering, the form ethers gives a decoded `address`.
+pub fn evm_checksum_address(address: &str) -> String {
+    let lower = address.trim_start_matches("0x").to_ascii_lowercase();
+    let hash = Keccak256::digest(lower.as_bytes());
+    let mut out = String::with_capacity(lower.len() + 2);
+    out.push_str("0x");
+    for (index, character) in lower.chars().enumerate() {
+        let nibble = (hash[index / 2] >> if index % 2 == 0 { 4 } else { 0 }) & 0x0f;
+        out.push(if nibble >= 8 {
+            character.to_ascii_uppercase()
+        } else {
+            character
+        });
+    }
+    out
 }
 
 /// `(address lib, bool isDefault)`.

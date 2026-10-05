@@ -1,0 +1,1 @@
+{"message":"Table Item not found by Table handle(0x4c4692fa137285d61f5da152e7a2a5385868970331a16a3f72d479038ec564bb), Table key({\"chain_id\":\"10161\",\"addr\":\"0x1111111111111111111111111111111111111111\"}) and Ledger version(11578312052)","error_code":"table_item_not_found","vm_error_code":null}

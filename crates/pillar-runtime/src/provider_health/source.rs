@@ -1,4 +1,11 @@
 use super::*;
+use std::time::Duration;
+
+#[derive(Default)]
+struct HealthObservations {
+    generation: u64,
+    chains: HashMap<String, (u64, bool)>,
+}
 
 #[derive(Clone)]
 pub struct RpcProviderHealthSource<T> {
@@ -6,6 +13,8 @@ pub struct RpcProviderHealthSource<T> {
     pub(super) transport: T,
     pub(super) now_unix_ms: Arc<dyn Fn() -> u64 + Send + Sync>,
     pub(super) chain_type_by_chain_name: HashMap<String, String>,
+    execution: Option<Arc<pillar_core::execution::ExecutionResources>>,
+    observations: Arc<tokio::sync::Mutex<HealthObservations>>,
 }
 
 impl<T> RpcProviderHealthSource<T>
@@ -31,6 +40,8 @@ where
             transport,
             now_unix_ms: Arc::new(now_unix_ms),
             chain_type_by_chain_name,
+            execution: None,
+            observations: Arc::new(tokio::sync::Mutex::new(HealthObservations::default())),
         }
     }
 
@@ -47,21 +58,47 @@ where
             transport,
             now_unix_ms: Arc::new(now_unix_ms),
             chain_type_by_chain_name,
+            execution: None,
+            observations: Arc::new(tokio::sync::Mutex::new(HealthObservations::default())),
         }
     }
 
     pub(crate) fn now_unix_ms(&self) -> Arc<dyn Fn() -> u64 + Send + Sync> {
         self.now_unix_ms.clone()
     }
-    pub async fn get_provider_health_report(&self) -> ProviderHealthReport {
+    pub fn with_execution_resources(
+        mut self,
+        resources: Arc<pillar_core::execution::ExecutionResources>,
+    ) -> Self {
+        self.execution = Some(resources);
+        self
+    }
+    pub async fn get_provider_health_report(&self) -> Result<ProviderHealthReport, RpcError> {
+        use pillar_core::execution::{current, RequestContext};
+        let parent = current();
+        let mut context = RequestContext::background();
+        context.resources = self
+            .execution
+            .clone()
+            .or_else(|| parent.as_ref().and_then(|parent| parent.resources.clone()));
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        context.deadline = Some(
+            parent
+                .and_then(|parent| parent.deadline)
+                .map_or(deadline, |parent| parent.min(deadline)),
+        );
+        context.scope(self.probe_report()).await
+    }
+    async fn probe_report(&self) -> Result<ProviderHealthReport, RpcError> {
         let snapshot = self.providers.load();
-        let provider_configs = snapshot.provider_configs().iter().collect::<Vec<_>>();
-        join_all(
-            provider_configs
-                .into_iter()
-                .map(|(chain_name, config)| async move {
-                    let checked_at_unix_ms = (self.now_unix_ms)();
-                    let providers = match self.chain_type_for_provider_health(chain_name) {
+        let generation = snapshot.generation();
+        let requests = snapshot
+            .provider_configs()
+            .iter()
+            .map(|(chain_name, config)| async move {
+                let checked_at_unix_ms = (self.now_unix_ms)();
+                let providers = crate::provider_health::rpc_scope(chain_name, async {
+                    match self.chain_type_for_provider_health(chain_name) {
                         "EVM" => self.probe_evm_provider_health(config).await,
                         "APTOS" => self.probe_aptos_provider_health(chain_name, config).await,
                         "SOLANA" => self.probe_solana_provider_health(config).await,
@@ -73,23 +110,62 @@ where
                         "TON" => self.probe_ton_provider_health(config).await,
                         "INITIA" => self.probe_initia_provider_health(config).await,
                         "TRON" => self.probe_tron_provider_health(chain_name, config).await,
-                        _ => non_evm_provider_health_entries(chain_name, config),
-                    };
-                    let healthy =
-                        !providers.is_empty() && providers.iter().all(|entry| entry.healthy);
-                    (
-                        chain_name.clone(),
-                        ChainProviderHealthReport {
-                            healthy,
-                            checked_at_unix_ms,
-                            providers,
-                        },
-                    )
-                }),
-        )
-        .await
-        .into_iter()
-        .collect()
+                        _ => Ok(non_evm_provider_health_entries(chain_name, config)),
+                    }
+                })
+                .await?;
+                let observed = providers.iter().all(|entry| entry.observed);
+                let mut observations = self.observations.lock().await;
+                if observations.generation != generation {
+                    observations.generation = generation;
+                    observations.chains.clear();
+                }
+                let measured_healthy = !providers.is_empty()
+                    && providers
+                        .iter()
+                        .filter(|entry| entry.observed)
+                        .all(|entry| entry.healthy);
+                let healthy = measured_healthy
+                    && (observed
+                        || observations
+                            .chains
+                            .get(chain_name)
+                            .is_some_and(|(at, healthy)| {
+                                *healthy
+                                    && checked_at_unix_ms.saturating_sub(*at)
+                                        <= pillar_core::PROVIDER_HEALTH_CACHE_STALE_MS
+                            }));
+                if observed
+                    && observations
+                        .chains
+                        .get(chain_name)
+                        .is_none_or(|(at, _)| checked_at_unix_ms >= *at)
+                {
+                    observations
+                        .chains
+                        .insert(chain_name.clone(), (checked_at_unix_ms, healthy));
+                }
+                Ok::<_, RpcError>((
+                    chain_name.clone(),
+                    ChainProviderHealthReport {
+                        healthy,
+                        checked_at_unix_ms,
+                        providers,
+                    },
+                ))
+            })
+            .collect::<Vec<_>>();
+        Ok(futures::stream::iter(requests)
+            .buffered(
+                pillar_core::execution::current()
+                    .and_then(|context| context.resources)
+                    .and_then(|resources| resources.rpc.lane_capacity("background"))
+                    .unwrap_or(snapshot.provider_configs().len().max(1)),
+            )
+            .try_collect::<Vec<_>>()
+            .await?
+            .into_iter()
+            .collect())
     }
 }
 
@@ -103,7 +179,10 @@ where
     }
 
     async fn get_provider_health(&self) -> Result<ProviderHealthSnapshot, String> {
-        let report = self.get_provider_health_report().await;
+        let report = self
+            .get_provider_health_report()
+            .await
+            .map_err(|error| error.to_string())?;
         Ok(provider_health_snapshot_from_report(&report))
     }
 }
@@ -205,15 +284,12 @@ mod tests {
         let getter = EmptyProbeGetter {
             configs: indexmap::IndexMap::from([(
                 "unsupported-chain".to_string(),
-                ProviderConfig {
-                    uris: Vec::new(),
-                    quorum: Some(1),
-                },
+                ProviderConfig::with_distinct_entities(Vec::new(), 1),
             )]),
         };
         let source = RpcProviderHealthSource::from_getter(&getter, NoopTransport, || 42);
 
-        let report = source.get_provider_health_report().await;
+        let report = source.get_provider_health_report().await.unwrap();
         assert!(!report["unsupported-chain"].healthy);
 
         let snapshot = source.get_provider_health().await.unwrap();

@@ -37,7 +37,7 @@ const lzDefinitionsRoot =
     process.env.LZ_DEFINITIONS_ROOT ??
     path.join(
         sourceRoot,
-        'node_modules/.pnpm/@layerzerolabs+lz-definitions@3.1.2/node_modules/@layerzerolabs/lz-definitions',
+        'node_modules/.pnpm/@layerzerolabs+lz-definitions@3.1.15/node_modules/@layerzerolabs/lz-definitions',
     )
 const outPath = path.join(repoRoot, 'crates/pillar-config/src/generated_layerzero_evm.rs')
 const environments = ['mainnet', 'testnet', 'sandbox']

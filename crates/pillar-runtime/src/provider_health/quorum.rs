@@ -1,56 +1,114 @@
 use super::*;
 use futures::stream::FuturesUnordered;
-use std::collections::BTreeMap;
+use pillar_config::provider_validation::{
+    canonical_strategy_key, is_strategy_satisfiable, is_trivial_strategy,
+    min_providers_for_strategy, order_providers_for_quorum, voter_entities, OrderableProvider,
+};
+use std::collections::{BTreeMap, BTreeSet};
+use std::future::Future;
 
-pub(crate) struct ExactQuorumAccumulator<T> {
-    quorum: usize,
-    total: usize,
-    processed: usize,
+/// What a set of agreeing providers must amount to: the chain's resolved strategy over the
+/// distinct `(category, entity)` pairs those providers vote as. Two URIs of one entity are
+/// one vote (upstream `recordVoteAndCheckQuorum`, `multiFallbackQuorum.ts:107-147`).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct QuorumRule<'a> {
+    config: &'a pillar_config::ProviderConfig,
+}
+
+impl<'a> QuorumRule<'a> {
+    pub(crate) fn is_met_by<'i>(&self, indices: impl IntoIterator<Item = &'i usize>) -> bool {
+        let voters = indices
+            .into_iter()
+            .filter_map(|index| self.config.voters.get(*index));
+        is_strategy_satisfiable(&voter_entities(voters), &self.config.strategy)
+    }
+
+    pub(crate) fn describe(&self) -> String {
+        canonical_strategy_key(&self.config.strategy)
+    }
+
+    pub(crate) fn config(&self) -> &'a pillar_config::ProviderConfig {
+        self.config
+    }
+}
+
+/// Exact-agreement quorum over one dispatched provider set. A response is accepted only
+/// when its voters meet the rule and no other response - recorded or still pending - could
+/// also meet it; otherwise the set is ambiguous and the call fails closed.
+pub(crate) struct ExactQuorumAccumulator<'a, T> {
+    rule: QuorumRule<'a>,
+    pending: BTreeSet<usize>,
     error_count: usize,
-    counts: BTreeMap<String, usize>,
+    deferred: Option<pillar_core::execution::BudgetError>,
+    voters: BTreeMap<String, BTreeSet<usize>>,
     successful: BTreeMap<usize, (String, T)>,
 }
 
-impl<T> ExactQuorumAccumulator<T>
+impl<'a, T> ExactQuorumAccumulator<'a, T>
 where
     T: Clone,
 {
-    pub(crate) fn new(total: usize, quorum: usize) -> Self {
+    /// `dispatched` names the provider indices whose answers will be recorded.
+    pub(crate) fn new(rule: QuorumRule<'a>, dispatched: impl IntoIterator<Item = usize>) -> Self {
         Self {
-            quorum,
-            total,
-            processed: 0,
+            rule,
+            pending: dispatched.into_iter().collect(),
             error_count: 0,
-            counts: BTreeMap::new(),
+            deferred: None,
+            voters: BTreeMap::new(),
             successful: BTreeMap::new(),
         }
     }
 
     pub(crate) fn record(&mut self, index: usize, observation: Option<(String, T)>) {
-        self.processed += 1;
+        self.pending.remove(&index);
         match observation {
             Some((fingerprint, value)) => {
-                *self.counts.entry(fingerprint.clone()).or_default() += 1;
+                self.voters
+                    .entry(fingerprint.clone())
+                    .or_default()
+                    .insert(index);
                 self.successful.insert(index, (fingerprint, value));
             }
             None => self.error_count += 1,
         }
     }
+    pub(crate) fn record_result(
+        &mut self,
+        index: usize,
+        observation: Result<Option<(String, T)>, RpcError>,
+    ) -> Result<(), AppCoreError> {
+        match observation {
+            Ok(observation) => self.record(index, observation),
+            Err(RpcError::Admission(error)) => {
+                self.pending.remove(&index);
+                self.deferred.get_or_insert(error);
+            }
+            Err(RpcError::Remote(_) | RpcError::Unavailable) => self.record(index, None),
+            Err(error) => return Err(error.into()),
+        }
+        Ok(())
+    }
+
+    fn candidates(&self) -> Vec<&String> {
+        self.voters
+            .iter()
+            .filter(|(_, indices)| self.rule.is_met_by(*indices))
+            .map(|(fingerprint, _)| fingerprint)
+            .collect()
+    }
 
     pub(crate) fn unambiguous_result(&self) -> Option<T> {
-        let candidates = self
-            .counts
-            .iter()
-            .filter(|(_, count)| **count >= self.quorum)
-            .map(|(fingerprint, _)| fingerprint)
-            .collect::<Vec<_>>();
+        let candidates = self.candidates();
         let [candidate] = candidates.as_slice() else {
             return None;
         };
-        let remaining = self.total.saturating_sub(self.processed);
-        if remaining >= self.quorum
-            || self.counts.iter().any(|(fingerprint, count)| {
-                *fingerprint != **candidate && count + remaining >= self.quorum
+        // A response not seen yet could still meet the rule from pending providers alone,
+        // or join one already recorded.
+        if self.rule.is_met_by(&self.pending)
+            || self.voters.iter().any(|(fingerprint, indices)| {
+                fingerprint != *candidate
+                    && self.rule.is_met_by(indices.iter().chain(&self.pending))
             })
         {
             return None;
@@ -62,73 +120,63 @@ where
     }
 
     pub(crate) fn finish(self, context: &str) -> Result<T, AppCoreError> {
-        let candidates = self
-            .counts
-            .iter()
-            .filter(|(_, count)| **count >= self.quorum)
-            .map(|(fingerprint, _)| fingerprint)
-            .collect::<Vec<_>>();
-        let [candidate] = candidates.as_slice() else {
-            return Err(AppCoreError::Internal(format!(
+        let incomplete = || {
+            AppCoreError::Internal(format!(
                 "No {context} quorum: response set is ambiguous or incomplete; {} distinct successful responses, {} errors",
-                self.counts.len(),
+                self.voters.len(),
                 self.error_count
-            )));
+            ))
         };
+        let candidates = self.candidates();
+        let [candidate] = candidates.as_slice() else {
+            if candidates.is_empty() && self.voters.len() <= 1 {
+                if let Some(error) = self.deferred {
+                    return Err(AppCoreError::Admission(error));
+                }
+            }
+            return Err(incomplete());
+        };
+        let candidate = (*candidate).clone();
+        let error = incomplete();
         self.successful
             .into_values()
-            .find_map(|(fingerprint, value)| (fingerprint == **candidate).then_some(value))
-            .ok_or_else(|| {
-                AppCoreError::Internal(format!(
-                    "No {context} quorum: response set is ambiguous or incomplete; {} distinct successful responses, {} errors",
-                    self.counts.len(),
-                    self.error_count
-                ))
-            })
+            .find_map(|(fingerprint, value)| (fingerprint == candidate).then_some(value))
+            .ok_or(error)
     }
 }
 
 pub(crate) async fn resolve_provider_quorum<T, F>(
     mut requests: FuturesUnordered<F>,
     total: usize,
-    quorum: usize,
+    quorum: QuorumRule<'_>,
     context: &str,
 ) -> Result<T, AppCoreError>
 where
     T: Clone,
-    F: std::future::Future<Output = (usize, Option<(String, T)>)>,
+    F: Future<Output = (usize, Result<Option<(String, T)>, RpcError>)>,
 {
-    let mut accumulator = ExactQuorumAccumulator::new(total, quorum);
+    let mut accumulator = ExactQuorumAccumulator::new(quorum, 0..total);
     while let Some((index, observation)) = requests.next().await {
-        accumulator.record(index, observation);
+        accumulator.record_result(index, observation)?;
         if let Some(result) = accumulator.unambiguous_result() {
             return Ok(result);
         }
     }
     let result = accumulator.finish(context);
-    if result.is_err() {
+    if result.is_err() && !matches!(result, Err(AppCoreError::Admission(_))) {
         tracing::error!(target: "pillar_runtime", "provider quorum not reached for {context}");
     }
     result
 }
 
-pub(crate) fn required_provider_quorum(
-    config: &pillar_config::ProviderConfig,
+pub(crate) fn required_provider_quorum<'a>(
+    config: &'a pillar_config::ProviderConfig,
     chain_name: &str,
-) -> Result<usize, AppCoreError> {
-    if config.uris.is_empty() {
-        return Err(AppCoreError::Internal(format!(
-            "No provider URI for chain {chain_name}"
-        )));
-    }
-    let quorum = config.quorum.unwrap_or(1).max(1) as usize;
-    if quorum > config.uris.len() {
-        return Err(AppCoreError::Internal(format!(
-            "Provider quorum {quorum} exceeds {} URIs for chain {chain_name}",
-            config.uris.len()
-        )));
-    }
-    Ok(quorum)
+) -> Result<QuorumRule<'a>, AppCoreError> {
+    config.validate().map_err(|error| {
+        AppCoreError::Internal(format!("Provider pool for chain {chain_name}: {error}"))
+    })?;
+    Ok(QuorumRule { config })
 }
 
 /// Matches TS RPC_STALL_TIMEOUT (packages/multiprovider/src/common.ts:19).
@@ -162,48 +210,72 @@ pub(super) fn rank_key_url(chain_name: &str, uri: &pillar_config::ProviderUri) -
     }
 }
 
-/// Orders configured provider URIs by live rank (best first, stable within a
-/// rank tier), rejects immediately when fewer than `quorum` are currently
-/// healthy, and assigns each entry a stagger delay so "extra" providers
-/// beyond `quorum` only actually fire once the leading ones are slow.
-///
-/// Mirrors the upstream `getProvidersWithQuorum` pre-filter and
-/// `multiFallbackQuorum`'s staggered start
-/// (packages/common-utils/src/multiFallbackQuorum.ts:69-106):
-/// `delay = max(rank_position - quorum + 1, 0) * stall_timeout`.
+/// Orders the pool for one call and staggers it, as upstream's `getProvidersWithQuorum`
+/// and `multiFallbackQuorumAsyncCall` do (`multiprovider/src/evm.ts:376-399`,
+/// `common-utils/src/multiFallbackQuorum.ts:183-190,266-269`): refuse when the healthy
+/// providers' entities cannot meet the strategy, rank-order a trivial strategy and
+/// entity-interleave any other, fire the smallest prefix that could meet it at once, then
+/// one more per stall timeout. Unlike upstream, unhealthy providers are kept at the back
+/// rather than dropped, so every configured index is dispatched.
 pub(crate) async fn plan_dispatch<'a>(
     tracker: &ProviderRankTracker,
     chain_name: &str,
-    uris: &'a [pillar_config::ProviderUri],
-    quorum: usize,
+    quorum: QuorumRule<'a>,
 ) -> Result<Vec<DispatchEntry<'a>>, AppCoreError> {
-    let mut ranked = Vec::with_capacity(uris.len());
-    for (index, uri) in uris.iter().enumerate() {
+    let config = quorum.config();
+    let mut ranked = Vec::with_capacity(config.uris.len());
+    for (index, uri) in config.uris.iter().enumerate() {
         let url = rank_key_url(chain_name, uri);
         let rank = tracker.rank_of(chain_name, &url).await;
-        ranked.push((index, uri, rank));
+        ranked.push((index, rank));
     }
-    ranked.sort_by_key(|(_, _, rank)| *rank);
-
-    let healthy = ranked
-        .iter()
-        .filter(|(_, _, rank)| *rank != ProviderRank::Unhealthy)
-        .count();
-    if healthy < quorum {
+    ranked.sort_by_key(|(_, rank)| *rank);
+    let (healthy, unhealthy): (Vec<_>, Vec<_>) = ranked
+        .into_iter()
+        .partition(|(_, rank)| *rank != ProviderRank::Unhealthy);
+    let healthy_indices = healthy.iter().map(|(index, _)| *index).collect::<Vec<_>>();
+    if !quorum.is_met_by(&healthy_indices) {
         return Err(AppCoreError::Internal(format!(
-            "Not enough healthy providers to meet quorum {quorum} for chain {chain_name} \
-             ({healthy} healthy of {} configured)",
-            ranked.len()
+            "Not enough healthy providers to meet quorum {} for chain {chain_name} \
+             ({} healthy of {} configured)",
+            quorum.describe(),
+            healthy.len(),
+            config.uris.len()
         )));
     }
-
-    Ok(ranked
-        .into_iter()
+    let orderable = healthy
+        .iter()
+        .map(|(index, rank)| OrderableProvider {
+            category: config.voters[*index].category.clone(),
+            entity: config.voters[*index].entity.clone(),
+            id: index.to_string(),
+            rank: *rank as i32,
+        })
+        .collect::<Vec<_>>();
+    let ordered = if is_trivial_strategy(&config.strategy) {
+        orderable
+    } else {
+        order_providers_for_quorum(&orderable, &config.strategy)
+    };
+    let first_wave = min_providers_for_strategy(&ordered, &config.strategy).max(1);
+    let order = ordered
+        .iter()
+        .map(|provider| {
+            provider
+                .id
+                .parse::<usize>()
+                .expect("ids are provider indices")
+        })
+        .chain(unhealthy.into_iter().map(|(index, _)| index));
+    Ok(order
         .enumerate()
-        .map(|(position, (index, uri, _))| {
-            let behind = position.saturating_sub(quorum.saturating_sub(1));
-            let delay = DEFAULT_STALL_TIMEOUT * behind as u32;
-            DispatchEntry { index, uri, delay }
+        .map(|(position, index)| {
+            let behind = (position + 1).saturating_sub(first_wave);
+            DispatchEntry {
+                index,
+                uri: &config.uris[index],
+                delay: DEFAULT_STALL_TIMEOUT * behind as u32,
+            }
         })
         .collect())
 }
@@ -213,9 +285,55 @@ mod tests {
     use super::*;
     use std::time::{Duration, Instant};
 
+    fn pool(uris: Vec<pillar_config::ProviderUri>, quorum: u64) -> pillar_config::ProviderConfig {
+        pillar_config::ProviderConfig::with_distinct_entities(uris, quorum)
+    }
+
+    fn uris(n: usize) -> Vec<pillar_config::ProviderUri> {
+        (0..n)
+            .map(|i| pillar_config::ProviderUri::Uri(format!("https://rpc-{i}.example")))
+            .collect()
+    }
+
+    /// `(category, entity)` per URI under `strategy`, through the production validator.
+    fn entity_pool(
+        voters: &[(&str, &str)],
+        strategy: pillar_config::provider_validation::QuorumStrategy,
+    ) -> pillar_config::ProviderConfig {
+        pillar_config::ProviderConfig::new(
+            uris(voters.len()),
+            voters
+                .iter()
+                .map(
+                    |(category, entity)| pillar_config::provider_validation::ProviderVoter {
+                        category: category.to_string(),
+                        entity: entity.to_string(),
+                    },
+                )
+                .collect(),
+            strategy,
+        )
+        .unwrap()
+    }
+
+    fn any(n: u64) -> pillar_config::provider_validation::QuorumStrategy {
+        pillar_config::provider_validation::QuorumStrategy {
+            all_of: vec![BTreeMap::from([(
+                "any".to_string(),
+                pillar_config::provider_validation::Quorum::Count(n),
+            )])],
+            one_of: Vec::new(),
+        }
+    }
+
+    fn rule(config: &pillar_config::ProviderConfig) -> QuorumRule<'_> {
+        required_provider_quorum(config, "test").unwrap()
+    }
+
     #[test]
     fn exact_quorum_rejects_multiple_candidates() {
-        let mut accumulator = ExactQuorumAccumulator::new(4, 2);
+        let config = pool(uris(4), 2);
+        let mut accumulator = ExactQuorumAccumulator::new(rule(&config), 0..4);
         accumulator.record(0, Some(("a".to_string(), 1)));
         accumulator.record(1, Some(("a".to_string(), 1)));
         accumulator.record(2, Some(("b".to_string(), 2)));
@@ -223,6 +341,104 @@ mod tests {
 
         let error = accumulator.finish("test").unwrap_err();
         assert!(error.to_string().contains("ambiguous or incomplete"));
+    }
+
+    #[test]
+    fn agreeing_urls_of_one_entity_are_one_vote() {
+        let config = entity_pool(
+            &[
+                ("shared_external", "alchemy"),
+                ("shared_external", "alchemy"),
+                ("internal", "operator"),
+            ],
+            any(2),
+        );
+        let mut accumulator = ExactQuorumAccumulator::new(rule(&config), 0..3);
+        accumulator.record(0, Some(("a".to_string(), 1)));
+        accumulator.record(1, Some(("a".to_string(), 1)));
+        assert_eq!(
+            accumulator.unambiguous_result(),
+            None,
+            "two alchemy URLs agreeing are one entity, not a quorum of two"
+        );
+        accumulator.record(2, Some(("b".to_string(), 2)));
+        assert!(accumulator
+            .finish("test")
+            .unwrap_err()
+            .to_string()
+            .contains("ambiguous or incomplete"));
+
+        let mut accumulator = ExactQuorumAccumulator::new(rule(&config), 0..3);
+        accumulator.record(0, Some(("a".to_string(), 1)));
+        accumulator.record(2, Some(("a".to_string(), 1)));
+        assert_eq!(accumulator.unambiguous_result(), Some(1));
+    }
+
+    #[test]
+    fn a_category_requirement_is_met_only_by_that_category() {
+        let strategy = pillar_config::provider_validation::QuorumStrategy {
+            all_of: vec![BTreeMap::from([(
+                "internal".to_string(),
+                pillar_config::provider_validation::Quorum::Count(1),
+            )])],
+            one_of: Vec::new(),
+        };
+        let config = entity_pool(
+            &[("internal", "operator"), ("shared_external", "alchemy")],
+            strategy,
+        );
+        let mut accumulator = ExactQuorumAccumulator::new(rule(&config), 0..2);
+        accumulator.record(1, Some(("external".to_string(), 1)));
+        accumulator.record(0, None);
+        assert!(
+            accumulator.finish("test").is_err(),
+            "no internal vote, no quorum"
+        );
+    }
+
+    #[test]
+    fn an_early_answer_waits_while_pending_entities_could_form_another_quorum() {
+        let config = entity_pool(
+            &[
+                ("internal", "operator"),
+                ("shared_external", "alchemy"),
+                ("shared_external", "quicknode"),
+                ("shared_external", "ankr"),
+            ],
+            any(2),
+        );
+        let mut accumulator = ExactQuorumAccumulator::new(rule(&config), 0..4);
+        accumulator.record(0, Some(("a".to_string(), 1)));
+        accumulator.record(1, Some(("a".to_string(), 1)));
+        assert_eq!(
+            accumulator.unambiguous_result(),
+            None,
+            "quicknode and ankr could still agree on something else"
+        );
+        accumulator.record(2, Some(("a".to_string(), 1)));
+        assert_eq!(accumulator.unambiguous_result(), Some(1));
+    }
+
+    #[test]
+    fn an_early_answer_waits_while_another_answer_could_still_be_joined() {
+        let config = entity_pool(
+            &[
+                ("shared_external", "alchemy"),
+                ("internal", "operator"),
+                ("shared_external", "alchemy"),
+                ("shared_external", "quicknode"),
+            ],
+            any(2),
+        );
+        let mut accumulator = ExactQuorumAccumulator::new(rule(&config), 0..4);
+        accumulator.record(0, Some(("a".to_string(), 1)));
+        accumulator.record(1, Some(("a".to_string(), 1)));
+        accumulator.record(2, Some(("b".to_string(), 2)));
+        assert_eq!(
+            accumulator.unambiguous_result(),
+            None,
+            "quicknode joining alchemy on b would meet any:2 too"
+        );
     }
 
     #[tokio::test]
@@ -237,13 +453,14 @@ mod tests {
                 tokio::time::sleep(delay).await;
                 (
                     index,
-                    Some((fingerprint.to_string(), fingerprint.to_string())),
+                    Ok(Some((fingerprint.to_string(), fingerprint.to_string()))),
                 )
             });
         }
 
         let started = Instant::now();
-        let result = resolve_provider_quorum(requests, 3, 2, "test")
+        let config = pool(uris(3), 2);
+        let result = resolve_provider_quorum(requests, 3, rule(&config), "test")
             .await
             .unwrap();
 
@@ -258,33 +475,32 @@ mod tests {
         // rank key must match that canonical form, not the raw configured
         // URI, or a recorded Unhealthy rank would never be found here.
         let tracker = ProviderRankTracker::new();
-        let uris = vec![pillar_config::ProviderUri::Uri(
-            "https://aptos.example/v1?auth=secret".to_string(),
-        )];
+        let config = pool(
+            vec![pillar_config::ProviderUri::Uri(
+                "https://aptos.example/v1?auth=secret".to_string(),
+            )],
+            1,
+        );
         tracker
             .record("aptos", "https://aptos.example/v1", false, None)
             .await;
 
-        let error = plan_dispatch(&tracker, "aptos", &uris, 1)
+        let error = plan_dispatch(&tracker, "aptos", rule(&config))
             .await
             .unwrap_err();
         assert!(error.to_string().contains("Not enough healthy providers"));
     }
 
-    fn uris(n: usize) -> Vec<pillar_config::ProviderUri> {
-        (0..n)
-            .map(|i| pillar_config::ProviderUri::Uri(format!("https://rpc-{i}.example")))
-            .collect()
-    }
-
     #[tokio::test]
     async fn plan_dispatch_defaults_unseen_providers_to_normal_rank() {
         let tracker = ProviderRankTracker::new();
-        let uris = uris(3);
         // quorum == total: only passes if every unseen provider defaults to
         // Normal (not Unhealthy), matching the upstream "ranking deferred
         // to first call, defaults to NORMAL" behavior.
-        let plan = plan_dispatch(&tracker, "hoodi", &uris, 3).await.unwrap();
+        let config = pool(uris(3), 3);
+        let plan = plan_dispatch(&tracker, "hoodi", rule(&config))
+            .await
+            .unwrap();
 
         assert_eq!(plan.len(), 3);
         for entry in &plan {
@@ -295,8 +511,10 @@ mod tests {
     #[tokio::test]
     async fn plan_dispatch_staggers_providers_beyond_quorum() {
         let tracker = ProviderRankTracker::new();
-        let uris = uris(4);
-        let plan = plan_dispatch(&tracker, "hoodi", &uris, 2).await.unwrap();
+        let config = pool(uris(4), 2);
+        let plan = plan_dispatch(&tracker, "hoodi", rule(&config))
+            .await
+            .unwrap();
 
         // Stable-sorted, all Normal rank -> stagger purely by original position.
         assert_eq!(plan[0].delay, std::time::Duration::ZERO);
@@ -306,14 +524,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn plan_dispatch_first_wave_spans_distinct_entities() {
+        let tracker = ProviderRankTracker::new();
+        let config = entity_pool(
+            &[
+                ("shared_external", "alchemy"),
+                ("shared_external", "alchemy"),
+                ("shared_external", "quicknode"),
+            ],
+            any(2),
+        );
+        let plan = plan_dispatch(&tracker, "hoodi", rule(&config))
+            .await
+            .unwrap();
+        let first_wave = plan
+            .iter()
+            .filter(|entry| entry.delay.is_zero())
+            .map(|entry| entry.index)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            first_wave,
+            [0, 2],
+            "the second alchemy URL cannot help a two-entity quorum, so it waits"
+        );
+        assert_eq!(plan[2].index, 1);
+        assert_eq!(plan[2].delay, DEFAULT_STALL_TIMEOUT);
+    }
+
+    #[tokio::test]
     async fn plan_dispatch_orders_unhealthy_providers_last() {
         let tracker = ProviderRankTracker::new();
-        let uris = uris(3);
         tracker
             .record("hoodi", "https://rpc-0.example", false, None)
             .await;
 
-        let plan = plan_dispatch(&tracker, "hoodi", &uris, 2).await.unwrap();
+        let config = pool(uris(3), 2);
+        let plan = plan_dispatch(&tracker, "hoodi", rule(&config))
+            .await
+            .unwrap();
 
         assert_eq!(plan[0].index, 1);
         assert_eq!(plan[1].index, 2);
@@ -323,7 +571,6 @@ mod tests {
     #[tokio::test]
     async fn plan_dispatch_rejects_when_fewer_than_quorum_are_healthy() {
         let tracker = ProviderRankTracker::new();
-        let uris = uris(2);
         tracker
             .record("hoodi", "https://rpc-0.example", false, None)
             .await;
@@ -331,9 +578,33 @@ mod tests {
             .record("hoodi", "https://rpc-1.example", false, None)
             .await;
 
-        let error = plan_dispatch(&tracker, "hoodi", &uris, 2)
+        let config = pool(uris(2), 2);
+        let error = plan_dispatch(&tracker, "hoodi", rule(&config))
             .await
             .unwrap_err();
         assert!(error.to_string().contains("Not enough healthy providers"));
+    }
+
+    #[tokio::test]
+    async fn plan_dispatch_rejects_when_healthy_providers_are_one_entity() {
+        let tracker = ProviderRankTracker::new();
+        tracker
+            .record("hoodi", "https://rpc-2.example", false, None)
+            .await;
+        let config = entity_pool(
+            &[
+                ("shared_external", "alchemy"),
+                ("shared_external", "alchemy"),
+                ("internal", "operator"),
+            ],
+            any(2),
+        );
+        let error = plan_dispatch(&tracker, "hoodi", rule(&config))
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("Not enough healthy providers"),
+            "two healthy URLs of one entity cannot meet any:2: {error}"
+        );
     }
 }

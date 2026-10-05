@@ -1,0 +1,15 @@
+{
+ "producedBy": {
+  "upstream": "gasolina-audit 1.2.66 (manifest sha256 8ad87eb6...; archive comment 213cd500...)",
+  "entrypoint": "packages/adapters/gasolina-signer-adapter/src/gasolinaSignerAdapterGetter.ts:getSignerAdapter (CANTON)"
+ },
+ "mnemonic": "test test test test test test test test test test test junk",
+ "derivationPath": "m/44'/60'/0'/0/0",
+ "digest": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+ "signature": "0xd4d30b6cc268d82cb0d416ea150d7bef97391573ec4e6db8dd5277e4f3a3d2d578b5f3cdbb723fd3d19136a904da264b586276c009bcb24c8fee7ef4f520c4ae00",
+ "address": "0x8318535b54105d4a7aae60c08fc45f9687181b4fdfc625bd1a753fa7397fed753547f11ca8696646f2f3acb08e31016afac23e630c5d11f59f61fef57b0d2aa5",
+ "signerInfo": {
+  "address": "0x8318535b54105d4a7aae60c08fc45f9687181b4fdfc625bd1a753fa7397fed753547f11ca8696646f2f3acb08e31016afac23e630c5d11f59f61fef57b0d2aa5",
+  "publicKey": "0x8318535b54105d4a7aae60c08fc45f9687181b4fdfc625bd1a753fa7397fed753547f11ca8696646f2f3acb08e31016afac23e630c5d11f59f61fef57b0d2aa5"
+ }
+}

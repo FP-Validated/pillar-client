@@ -11,6 +11,9 @@ pub(super) fn test_receive_contracts() -> EvmReceiveContracts {
         receive_uln_302_view: "0x2222222222222222222222222222222222222223".to_string(),
         read_lib_1002: Some("0x3333333333333333333333333333333333333333".to_string()),
         read_lib_1002_view: Some("0x3333333333333333333333333333333333333334".to_string()),
+        send_uln_302: None,
+        send_uln_301: None,
+        simple_message_lib: None,
     }
 }
 
@@ -21,10 +24,10 @@ pub(super) fn runtime_rpc_payload_checks(
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "bsc".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://bsc-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://bsc-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["bsc".to_string()]),
     )
@@ -182,10 +185,10 @@ pub(super) fn runtime_rpc_extra_context_checks(
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "ethereum".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://eth-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://eth-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["ethereum".to_string()]),
     )
@@ -276,10 +279,10 @@ pub(super) fn runtime_evm_read_payload_resolver_with_providers(
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "bsc".to_string(),
-            ProviderConfig {
-                uris: uris.into_iter().map(ProviderUri::Uri).collect(),
-                quorum: Some(quorum),
-            },
+            ProviderConfig::with_distinct_entities(
+                uris.into_iter().map(ProviderUri::Uri).collect(),
+                quorum,
+            ),
         )]),
         Some(&["bsc".to_string()]),
     )
@@ -301,10 +304,10 @@ pub(super) fn runtime_rpc_solana_payload_checks(
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "solana".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["solana".to_string()]),
     )

@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::chain_address::{
-    AptosChain, EvmAddressChain, EvmChain, InitiaChain, PillarSignerAdapter, SignerInfo,
-    SolanaChain, SuiChain, TonChain,
+    AptosChain, CantonChain, EvmAddressChain, EvmChain, InitiaChain, PillarSignerAdapter,
+    SignerInfo, SolanaChain, SuiChain, TonChain,
 };
 use crate::types::{ChainType, RawSignerAdapter, SignerError};
 
@@ -15,6 +15,7 @@ pub enum PillarSignerAdapterKind {
     Ton(PillarSignerAdapter<TonChain>),
     Starknet(PillarSignerAdapter<EvmAddressChain>),
     Stellar(PillarSignerAdapter<EvmAddressChain>),
+    Canton(PillarSignerAdapter<CantonChain>),
 }
 
 impl PillarSignerAdapterKind {
@@ -54,6 +55,11 @@ impl PillarSignerAdapterKind {
                 EvmAddressChain,
                 is_kms,
             )),
+            ChainType::Canton => Self::Canton(PillarSignerAdapter::new(
+                signer_adapter,
+                CantonChain,
+                is_kms,
+            )),
         })
     }
 
@@ -67,6 +73,7 @@ impl PillarSignerAdapterKind {
             Self::Ton(adapter) => adapter.pillar_sign(data).await,
             Self::Starknet(adapter) => adapter.pillar_sign(data).await,
             Self::Stellar(adapter) => adapter.pillar_sign(data).await,
+            Self::Canton(adapter) => adapter.pillar_sign(data).await,
         }
     }
 
@@ -80,6 +87,7 @@ impl PillarSignerAdapterKind {
             Self::Ton(adapter) => adapter.get_signer_info().await,
             Self::Starknet(adapter) => adapter.get_signer_info().await,
             Self::Stellar(adapter) => adapter.get_signer_info().await,
+            Self::Canton(adapter) => adapter.get_signer_info().await,
         }
     }
 }

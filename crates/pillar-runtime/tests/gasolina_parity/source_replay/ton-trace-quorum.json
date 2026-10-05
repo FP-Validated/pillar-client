@@ -1,0 +1,79 @@
+{
+  "provenance": {
+    "upstream": "Gasolina 1.2.66 source snapshot",
+    "entrypoint": "packages/multiprovider/src/ton.ts:tonTransactionTraceMessagesQuorumFn",
+    "input": "recorded mainnet events response for tx 0xec1bd845…, offline"
+  },
+  "variants": {
+    "recorded": {
+      "fingerprint": "cf0ca115fcea8450f50122d6d54c24b390c2d1869ccbcbc43860e156857d1ed1"
+    },
+    "metadataOnly": {
+      "fingerprint": "cf0ca115fcea8450f50122d6d54c24b390c2d1869ccbcbc43860e156857d1ed1"
+    },
+    "seqnoAsNumber": {
+      "fingerprint": "cf0ca115fcea8450f50122d6d54c24b390c2d1869ccbcbc43860e156857d1ed1"
+    },
+    "seqnoStringVsNumber": {
+      "fingerprint": "cf0ca115fcea8450f50122d6d54c24b390c2d1869ccbcbc43860e156857d1ed1"
+    },
+    "seqnoChanged": {
+      "fingerprint": "2f765a885ebecf67631770059c9075db4d7daaa4f2ed70c8479dc7092c969ca0"
+    },
+    "missingInMsg": {
+      "error": "Cannot read properties of undefined (reading 'hash')",
+      "errorClass": "TypeError"
+    },
+    "nullInMsg": {
+      "fingerprint": "1998dc3b854d1d189a3236f6721e87ac8296c4e839a44424ba66c23401179193"
+    },
+    "missingTransaction": {
+      "error": "Cannot read properties of undefined (reading 'in_msg')",
+      "errorClass": "TypeError"
+    },
+    "missingChildren": {
+      "error": "Cannot read properties of undefined (reading 'map')",
+      "errorClass": "TypeError"
+    },
+    "nonArrayChildren": {
+      "error": "Cannot read properties of null (reading 'map')",
+      "errorClass": "TypeError"
+    },
+    "missingMessageContent": {
+      "error": "Cannot read properties of undefined (reading 'body')",
+      "errorClass": "TypeError"
+    },
+    "missingBody": {
+      "error": "The first argument must be of type string or an instance of Buffer, ArrayBuffer, or Array or an Array-like Object. Received undefined",
+      "errorClass": "TypeError"
+    },
+    "bodyChanged": {
+      "error": "Invalid CRC32C",
+      "errorClass": "Error"
+    },
+    "sourceChanged": {
+      "fingerprint": "71981d48b243cc0191f42b4b24548ab904dc8ae697bb1278787a56b43f409d1c"
+    },
+    "destinationChanged": {
+      "fingerprint": "6918ca8f76824ff4674221292f0ab57ee4220e4042c2b39d62433cd94ed2b872"
+    },
+    "hashChanged": {
+      "fingerprint": "d0cfde6bb4899ed1f2be38b9c5ef30bad57ab71fdfd2cdac3ce01768dba9d357"
+    },
+    "bouncedNull": {
+      "fingerprint": "0911c41c4c079bbf22644a50387d60d0348017054bf975fabd6cc87f3088eb76"
+    },
+    "bouncedTrue": {
+      "fingerprint": "0911c41c4c079bbf22644a50387d60d0348017054bf975fabd6cc87f3088eb76"
+    },
+    "opcodeNull": {
+      "fingerprint": "41f3288c5dcf2576b357886d4be3810c79df6446f26e289780d93e827af4c1aa"
+    },
+    "opcodeDecimal": {
+      "fingerprint": "cf0ca115fcea8450f50122d6d54c24b390c2d1869ccbcbc43860e156857d1ed1"
+    },
+    "childDropped": {
+      "fingerprint": "064e9b17e0a84a2835722498d70153c641896fa32760d28d6b3a2eaa42111a0b"
+    }
+  }
+}

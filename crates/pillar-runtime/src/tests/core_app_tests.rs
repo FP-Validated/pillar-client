@@ -28,7 +28,6 @@ async fn runtime_core_dependencies_from_layerzero_parts_uses_layerzero_builder_f
             legacy_chain_name_resolver: Arc::new(FixedChainResolver),
         },
         test_v_ids("mainnet"),
-        &["V2".to_string(), "V301".to_string()],
     );
 
     assert!(dependencies.hash_call_data_builders.contains_key("V2"));
@@ -86,33 +85,77 @@ async fn runtime_core_dependencies_from_layerzero_parts_uses_layerzero_builder_f
     );
 }
 
-#[test]
-fn runtime_core_dependencies_apply_supported_ulns_only_to_legacy_builders() {
-    let recorder = Arc::new(RuntimeLayerZeroRecorder::default());
-    let dependencies = runtime_core_dependencies_from_layerzero_parts(
-        RuntimeLayerZeroDependencyParts {
-            uln_v2_payload_builder: recorder.clone(),
-            uln_v3_payload_builder: recorder.clone(),
-            uln_read_v1_payload_builder: recorder.clone(),
-            read_payload_resolver: recorder,
-            sent_event_resolver: Arc::new(FixedResolver),
-            validation_checks: Arc::new(FixedValidationChecks {
-                current_timestamp: 100,
-                calls: Arc::new(Mutex::new(Vec::new())),
-                ranges: Arc::new(Mutex::new(Vec::new())),
-            }),
-            legacy_chain_name_resolver: Arc::new(FixedChainResolver),
-        },
-        test_v_ids("mainnet"),
-        &[],
-    );
+/// Upstream keeps all four builders and sends a V2 request through its V1-sdk
+/// factory before any RPC: EVM, TRON and APTOS sources get an sdk, every other
+/// type is `Unsupported chain type` (TS 1.2.66: `lz-v1-sdk/src/factory.ts:24-48`).
+#[tokio::test]
+async fn v2_requests_pass_upstreams_v1_sdk_factory_gate() {
+    struct Counting(Arc<std::sync::atomic::AtomicUsize>);
 
-    assert!(!dependencies.hash_call_data_builders.contains_key("V2"));
-    assert!(!dependencies.hash_call_data_builders.contains_key("V301"));
-    assert!(dependencies.hash_call_data_builders.contains_key("V302"));
-    assert!(dependencies
-        .hash_call_data_builders
-        .contains_key("ReadV1002"));
+    #[async_trait]
+    impl SentEventResolver for Counting {
+        async fn get_lz_sent_event(
+            &self,
+            src_tx_hash: &str,
+            lz_message_id: &LzMessageId,
+        ) -> Result<LzSentEvent, AppCoreError> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            FixedResolver
+                .get_lz_sent_event(src_tx_hash, lz_message_id)
+                .await
+        }
+    }
+
+    let resolve = |src: &'static str, uln: &'static str| async move {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let recorder = Arc::new(RuntimeLayerZeroRecorder::default());
+        let dependencies = runtime_core_dependencies_from_layerzero_parts(
+            RuntimeLayerZeroDependencyParts {
+                uln_v2_payload_builder: recorder.clone(),
+                uln_v3_payload_builder: recorder.clone(),
+                uln_read_v1_payload_builder: recorder.clone(),
+                read_payload_resolver: recorder,
+                sent_event_resolver: Arc::new(Counting(calls.clone())),
+                validation_checks: Arc::new(FixedValidationChecks {
+                    current_timestamp: 100,
+                    calls: Arc::new(Mutex::new(Vec::new())),
+                    ranges: Arc::new(Mutex::new(Vec::new())),
+                }),
+                legacy_chain_name_resolver: Arc::new(FixedChainResolver),
+            },
+            test_v_ids("mainnet"),
+        );
+        assert_eq!(dependencies.hash_call_data_builders.len(), 4);
+        let mut request = request_v2();
+        request.lz_message_id.pathway_id.src_chain_name = src.to_string();
+        request.lz_message_id.uln_send_version = Value::from(uln);
+        let result = dependencies
+            .sent_event_resolver
+            .get_lz_sent_event("0xtx", &request.lz_message_id)
+            .await
+            .map(|_| ());
+        (result, calls.load(std::sync::atomic::Ordering::SeqCst))
+    };
+
+    for src in ["ethereum", "tron", "aptos"] {
+        assert_eq!(resolve(src, "V2").await, (Ok(()), 1), "{src}");
+    }
+    for uln in ["V301", "V302", "ReadV1002"] {
+        assert_eq!(resolve("ethereum", uln).await, (Ok(()), 1), "{uln}");
+    }
+    for (src, chain_type) in [("solana", "SOLANA"), ("ton", "TON"), ("sui", "SUI")] {
+        assert_eq!(
+            resolve(src, "V2").await,
+            (
+                Err(AppCoreError::Internal(format!(
+                    "Unsupported chain type: {chain_type}"
+                ))),
+                0
+            ),
+            "{src}"
+        );
+        assert_eq!(resolve(src, "V302").await, (Ok(()), 1), "{src}");
+    }
 }
 
 /// The production assembler's inputs, shared by the tests below so that a
@@ -128,7 +171,6 @@ fn runtime_core_app_parts(metrics: Arc<tokio::sync::Mutex<PillarMetrics>>) -> Ru
             provider_config_type: pillar_config::ProviderConfigType::LOCAL,
             environment: Some("mainnet".to_string()),
             available_chain_names: Some(vec!["ethereum".to_string(), "bsc".to_string()]),
-            supported_uln_versions: vec!["V2".to_string(), "V301".to_string()],
             debug_mode: true,
             extra_context_request_url: None,
             extra_context_request_auth_token: None,
@@ -139,6 +181,9 @@ fn runtime_core_app_parts(metrics: Arc<tokio::sync::Mutex<PillarMetrics>>) -> Ru
             public_sign_routes: false,
             max_connections: 1024,
             shutdown_grace_seconds: 25,
+            shutdown_withdrawal: std::time::Duration::from_secs(5),
+            execution_limits: pillar_config::ExecutionLimits::default(),
+            audit: None,
         },
         available_chain_names: Arc::new(vec!["ethereum".to_string(), "bsc".to_string()]),
         wallets_by_chain_name: HashMap::from([(
@@ -278,6 +323,8 @@ struct VerticalTransport {
     dst_receive_uln_302: &'static str,
     dst_receive_uln_302_view: &'static str,
     extra_context_verdict: Arc<Mutex<bool>>,
+    /// A source URL whose receipt reads fail, so only the others can vote.
+    receipt_unavailable_at: Option<&'static str>,
 }
 
 #[async_trait]
@@ -303,6 +350,12 @@ impl JsonRpcTransport for VerticalTransport {
         }
         match body["method"].as_str().unwrap_or_default() {
             "eth_getTransactionReceipt" => {
+                if self
+                    .receipt_unavailable_at
+                    .is_some_and(|unavailable| url.contains(unavailable))
+                {
+                    return Err("receipt unavailable at this provider".to_string());
+                }
                 let receipt = if let Some(rounds) = self.receipt_rounds.lock().unwrap().as_mut() {
                     rounds.answer()
                 } else {
@@ -516,22 +569,14 @@ fn vertical_env_map(env: &VerticalEnvironment) -> HashMap<String, String> {
         (SERVER_PORT.to_string(), "3000".to_string()),
         (LZ_PROVIDER_CONFIG_TYPE.to_string(), "LOCAL".to_string()),
         (LZ_ENV.to_string(), env.environment.to_string()),
-        (
-            pillar_config::LZ_SUPPORTED_ULN_VERSIONS.to_string(),
-            r#"["V2","V301","V302"]"#.to_string(),
-        ),
         (pillar_config::LZ_DEBUG_MODE.to_string(), "true".to_string()),
         (
             pillar_config::LZ_AVAILABLE_CHAIN_NAMES.to_string(),
             format!("{},{}", env.src_chain, env.dst_chain),
         ),
-        (
-            LZ_PROVIDER_CONFIG.to_string(),
-            format!(
-                r#"{{"{}":{{"uris":["https://src-rpc.example"],"quorum":1}},"{}":{{"uris":["https://dst-rpc.example"],"quorum":1}}}}"#,
-                env.src_chain, env.dst_chain
-            ),
-        ),
+        (LZ_PROVIDER_CONFIG.to_string(), providers_json(format!(r#"{{"{}":{{"uris":["https://src-rpc.example"],"quorum":1}},"{}":{{"uris":["https://dst-rpc.example"],"quorum":1}}}}"#,
+        env.src_chain, env.dst_chain))), (LZ_QUORUM_STRATEGY_CONFIG.to_string(), strategy_json(format!(r#"{{"{}":{{"uris":["https://src-rpc.example"],"quorum":1}},"{}":{{"uris":["https://dst-rpc.example"],"quorum":1}}}}"#,
+        env.src_chain, env.dst_chain))),
         (
             pillar_config::EXTRA_CONTEXT_REQUEST_URL.to_string(),
             EXTRA_CONTEXT_URL.to_string(),
@@ -579,13 +624,9 @@ async fn vertical_app_with_receipt_rounds(
     receipts: Vec<Value>,
 ) -> (RuntimeServerApp<VerticalTransport>, RecordedJsonCalls) {
     let mut vars = vertical_env_map(env);
-    vars.insert(
-        LZ_PROVIDER_CONFIG.to_string(),
-        format!(
-            r#"{{"{}":{{"uris":["https://src-rpc-a.example","https://src-rpc-b.example"],"quorum":2}},"{}":{{"uris":["https://dst-rpc.example"],"quorum":1}}}}"#,
-            env.src_chain, env.dst_chain
-        ),
-    );
+    vars.extend([(LZ_PROVIDER_CONFIG.to_string(), providers_json(format!(r#"{{"{}":{{"uris":["https://src-rpc-a.example","https://src-rpc-b.example"],"quorum":2}},"{}":{{"uris":["https://dst-rpc.example"],"quorum":1}}}}"#,
+    env.src_chain, env.dst_chain))), (LZ_QUORUM_STRATEGY_CONFIG.to_string(), strategy_json(format!(r#"{{"{}":{{"uris":["https://src-rpc-a.example","https://src-rpc-b.example"],"quorum":2}},"{}":{{"uris":["https://dst-rpc.example"],"quorum":1}}}}"#,
+    env.src_chain, env.dst_chain)))]);
     vertical_app_with_transport(env, vars, None, Some(receipts), true).await
 }
 
@@ -605,6 +646,7 @@ async fn vertical_app_with_transport(
         dst_receive_uln_302: env.dst_receive_uln_302,
         dst_receive_uln_302_view: env.dst_receive_uln_302_view,
         extra_context_verdict: Arc::new(Mutex::new(extra_context_verdict)),
+        receipt_unavailable_at: Some("src-rpc-unavailable"),
     };
     let app =
         RuntimeServerApp::from_env_map_with_runtime_core(vars, transport, || 1_767_323_045_000)
@@ -954,4 +996,110 @@ async fn production_vertical_never_signs_when_the_source_receipt_moved_between_r
         4,
         "the transport did not exercise two providers in each receipt round: {methods:?}"
     );
+}
+
+/// The source pool as providers-v2 entries, all three URIs answering identically
+/// except `src-rpc-unavailable`, under a source `rpc` strategy of two entities.
+fn entity_quorum_env(
+    env: &VerticalEnvironment,
+    source: [(&str, &str, &str); 3],
+) -> HashMap<String, String> {
+    let mut vars = vertical_env_map(env);
+    let entries = source
+        .iter()
+        .map(|(host, category, entity)| {
+            json!({"uri": format!("https://{host}.example"), "category": category, "entity": entity})
+        })
+        .collect::<Vec<_>>();
+    vars.insert(
+        LZ_PROVIDER_CONFIG.to_string(),
+        json!({
+            "entities": ["alchemy", "operator", "quicknode"],
+            "chains": {
+                env.src_chain: {"rpc": entries},
+                env.dst_chain: {"rpc": [{"uri": "https://dst-rpc.example", "category": "internal", "entity": "operator"}]},
+            },
+        })
+        .to_string(),
+    );
+    vars.insert(
+        LZ_QUORUM_STRATEGY_CONFIG.to_string(),
+        json!({
+            "default": {"allOf": [{"any": 1}]},
+            "chains": {env.src_chain: {"rpc": {"allOf": [{"any": 2}]}}},
+        })
+        .to_string(),
+    );
+    vars
+}
+
+/// Two URLs of one operator agreeing are one vote: with the third provider down, a
+/// two-entity source strategy is unmet and nothing is signed.
+#[tokio::test]
+async fn production_vertical_never_signs_on_two_urls_of_one_entity() {
+    let vars = entity_quorum_env(
+        &MAINNET_VERTICAL,
+        [
+            ("src-rpc-a", "shared_external", "alchemy"),
+            ("src-rpc-b", "shared_external", "alchemy"),
+            ("src-rpc-unavailable", "internal", "operator"),
+        ],
+    );
+    let (app, calls) = vertical_app_with_transport(
+        &MAINNET_VERTICAL,
+        vars,
+        Some(vertical_receipt(&MAINNET_VERTICAL)),
+        None,
+        true,
+    )
+    .await;
+
+    let error = app
+        .sign_request_v2(vertical_request(&MAINNET_VERTICAL))
+        .await
+        .expect_err("one entity cannot satisfy a two-entity quorum");
+
+    let stages = stages_of(&app).await;
+    assert!(
+        matches!(&error, pillar_api::AppError::Internal(message) if message.contains("quorum")),
+        "an unmet provider quorum is a server-side refusal: {error}"
+    );
+    assert!(
+        stages.iter().all(|stage| stage == "get_sent_event"),
+        "refused while resolving the source event; stages={stages:?}"
+    );
+    let receipt_reads = observed_methods(&calls)
+        .iter()
+        .filter(|method| method.as_str() == "src:eth_getTransactionReceipt")
+        .count();
+    assert_eq!(receipt_reads, 3, "every source provider was asked");
+}
+
+/// The same outage with the two answering URLs run by different operators meets
+/// the strategy, and the request signs.
+#[tokio::test]
+async fn production_vertical_signs_on_two_distinct_entities() {
+    let vars = entity_quorum_env(
+        &MAINNET_VERTICAL,
+        [
+            ("src-rpc-a", "shared_external", "alchemy"),
+            ("src-rpc-b", "internal", "operator"),
+            ("src-rpc-unavailable", "shared_external", "quicknode"),
+        ],
+    );
+    let (app, _calls) = vertical_app_with_transport(
+        &MAINNET_VERTICAL,
+        vars,
+        Some(vertical_receipt(&MAINNET_VERTICAL)),
+        None,
+        true,
+    )
+    .await;
+
+    let response = app
+        .sign_request_v2(vertical_request(&MAINNET_VERTICAL))
+        .await
+        .unwrap_or_else(|error| panic!("two distinct entities meet any:2: {error}"));
+    assert!(!response.signatures.is_empty());
+    assert!(stages_of(&app).await.iter().any(|stage| stage == "sign"));
 }

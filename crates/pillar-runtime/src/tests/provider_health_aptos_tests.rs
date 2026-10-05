@@ -5,12 +5,12 @@ async fn provider_health_probes_aptos_with_rest_ledger_info() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "aptos".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri(
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri(
                     "https://aptos-rpc.example/v1?auth=secret-token".to_string(),
                 )],
-                quorum: Some(1),
-            },
+                1,
+            ),
         )]),
         Some(&["aptos".to_string()]),
     )
@@ -30,7 +30,7 @@ async fn provider_health_probes_aptos_with_rest_ledger_info() {
         HashMap::from([("aptos".to_string(), "APTOS".to_string())]),
     );
 
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
 
     assert!(report["aptos"].healthy);
     assert_eq!(report["aptos"].checked_at_unix_ms, 1234);
@@ -54,13 +54,10 @@ async fn provider_health_probes_aptos_with_rest_ledger_info() {
 async fn provider_health_probes_aptos_no_code_indexer_like_typescript() {
     let getter = StaticProviderConfig::new(indexmap::IndexMap::from([(
         "aptos".to_string(),
-        ProviderConfig {
-            uris: vec![ProviderUri::UriWithHeaders {
-                uri: "https://aptos-rpc.example/v1?auth=rpc-token&event-indexer=https%3A%2F%2Fevent-indexer.example%2Fgraphql&event-indexer-api-key=event-token&no-code-indexer=https%3A%2F%2Fno-code.example%2Fv1%2Fgraphql&no-code-indexer-api-key=no-code-token".to_string(),
-                headers: HashMap::from([("x-extra".to_string(), "yes".to_string())]),
-            }],
-            quorum: Some(1),
-        },
+        ProviderConfig::with_distinct_entities(vec![ProviderUri::UriWithHeaders {
+            uri: "https://aptos-rpc.example/v1?auth=rpc-token&event-indexer=https%3A%2F%2Fevent-indexer.example%2Fgraphql&event-indexer-api-key=event-token&no-code-indexer=https%3A%2F%2Fno-code.example%2Fv1%2Fgraphql&no-code-indexer-api-key=no-code-token".to_string(),
+            headers: HashMap::from([("x-extra".to_string(), "yes".to_string())]),
+        }], 1),
     )]), Some(&["aptos".to_string()]))
         .unwrap();
     let calls = Arc::new(Mutex::new(Vec::new()));
@@ -87,7 +84,7 @@ async fn provider_health_probes_aptos_no_code_indexer_like_typescript() {
         HashMap::from([("aptos".to_string(), "APTOS".to_string())]),
     );
 
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
 
     assert!(report["aptos"].healthy);
     assert_eq!(report["aptos"].checked_at_unix_ms, 1234);
@@ -119,12 +116,9 @@ async fn provider_health_probes_aptos_no_code_indexer_like_typescript() {
 async fn provider_health_probes_movement_event_indexer_like_typescript() {
     let getter = StaticProviderConfig::new(indexmap::IndexMap::from([(
         "movement".to_string(),
-        ProviderConfig {
-            uris: vec![ProviderUri::Uri(
-                "https://movement-rpc.example/v1?event-indexer=https%3A%2F%2Fevent-indexer.example%2Fgraphql&event-indexer-api-key=event-token".to_string(),
-            )],
-            quorum: Some(1),
-        },
+        ProviderConfig::with_distinct_entities(vec![ProviderUri::Uri(
+            "https://movement-rpc.example/v1?event-indexer=https%3A%2F%2Fevent-indexer.example%2Fgraphql&event-indexer-api-key=event-token".to_string(),
+        )], 1),
     )]), Some(&["movement".to_string()]))
         .unwrap();
     let calls = Arc::new(Mutex::new(Vec::new()));
@@ -150,7 +144,7 @@ async fn provider_health_probes_movement_event_indexer_like_typescript() {
         HashMap::from([("movement".to_string(), "APTOS".to_string())]),
     );
 
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
 
     assert!(report["movement"].healthy);
     assert_eq!(
@@ -176,13 +170,13 @@ async fn provider_health_marks_aptos_unhealthy_when_ledger_info_is_not_numeric()
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "aptos".to_string(),
-            ProviderConfig {
-                uris: vec![
+            ProviderConfig::with_distinct_entities(
+                vec![
                     ProviderUri::Uri("https://aptos-a.example/v1".to_string()),
                     ProviderUri::Uri("https://aptos-b.example/v1".to_string()),
                 ],
-                quorum: Some(1),
-            },
+                1,
+            ),
         )]),
         Some(&["aptos".to_string()]),
     )
@@ -201,7 +195,7 @@ async fn provider_health_marks_aptos_unhealthy_when_ledger_info_is_not_numeric()
         HashMap::from([("aptos".to_string(), "APTOS".to_string())]),
     );
 
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
 
     assert!(!report["aptos"].healthy);
     assert_eq!(report["aptos"].providers.len(), 2);

@@ -8,12 +8,12 @@ pub(crate) async fn observe_block_confirmations<T>(
     tx_hash: &str,
     source_evidence: Option<&EvmSourceEvidence>,
     required_confirmations: i64,
-) -> BlockConfirmationObservation
+) -> Result<BlockConfirmationObservation, RpcError>
 where
     T: JsonRpcTransport,
 {
     let receipt_transport = transport.clone();
-    let receipt = receipt_transport.post_json(
+    let receipt = receipt_transport.post_json_scoped(
         url.clone(),
         headers.clone(),
         json!({
@@ -23,7 +23,7 @@ where
             "jsonrpc": "2.0",
         }),
     );
-    let latest_block = transport.post_json(
+    let latest_block = transport.post_json_scoped(
         url,
         headers,
         json!({
@@ -34,6 +34,11 @@ where
         }),
     );
     let (receipt_response, latest_block_response) = tokio::join!(receipt, latest_block);
+    let receipt_response = match receipt_response {
+        Err(error @ (RpcError::Admission(_) | RpcError::Configuration(_))) => return Err(error),
+        response => response,
+    };
+    let latest_block_response = provider_response(latest_block_response)?;
     let source_binding_error = source_evidence.and_then(|evidence| {
         receipt_response
             .as_ref()
@@ -47,42 +52,42 @@ where
             })
     });
     if let Some(reason) = source_binding_error {
-        return BlockConfirmationObservation {
+        return Ok(BlockConfirmationObservation {
             validity: BlockConfirmationValidity::SourceChanged(reason),
             current_confirmations: None,
-        };
+        });
     }
     let observation = receipt_response
         .ok()
         .and_then(|receipt| parse_receipt_block_placement(&receipt).ok())
         .zip(
             latest_block_response
-                .ok()
-                .and_then(|block| parse_block_number(&block).ok()),
+                .as_ref()
+                .and_then(|block| parse_block_number(block).ok()),
         );
 
     let Some(((receipt_block_hash, receipt_block_number), current_block_number)) = observation
     else {
-        return BlockConfirmationObservation {
+        return Ok(BlockConfirmationObservation {
             validity: BlockConfirmationValidity::Missing,
             current_confirmations: None,
-        };
+        });
     };
 
     let (Some(current_confirmations), Some(required_block_number)) = (
         current_block_number.checked_sub(receipt_block_number),
         receipt_block_number.checked_add(required_confirmations),
     ) else {
-        return BlockConfirmationObservation {
+        return Ok(BlockConfirmationObservation {
             validity: BlockConfirmationValidity::InvalidRange,
             current_confirmations: None,
-        };
+        });
     };
     if receipt_block_number < 0 || current_block_number < 0 || required_confirmations < 0 {
-        return BlockConfirmationObservation {
+        return Ok(BlockConfirmationObservation {
             validity: BlockConfirmationValidity::InvalidRange,
             current_confirmations: None,
-        };
+        });
     }
     let validity = if current_block_number >= required_block_number {
         BlockConfirmationValidity::Sufficient {
@@ -95,10 +100,10 @@ where
             receipt_block_number,
         }
     };
-    BlockConfirmationObservation {
+    Ok(BlockConfirmationObservation {
         validity,
         current_confirmations: Some(current_confirmations),
-    }
+    })
 }
 
 pub(crate) async fn observe_block_time<T>(
@@ -111,7 +116,7 @@ where
     T: JsonRpcTransport,
 {
     let response = transport
-        .post_json(
+        .post_json_scoped(
             url,
             headers,
             json!({
@@ -122,7 +127,7 @@ where
             }),
         )
         .await
-        .map_err(AppCoreError::Internal)?;
+        .map_err(AppCoreError::from)?;
     parse_block_time_observation(&response)
 }
 

@@ -8,7 +8,7 @@ use crate::packet::extra_u64;
 use crate::packet::uln_send_version_string;
 use crate::types::{
     READ_LIB_1002_ADDRESS, RECEIVE_ULN_301_ADDRESS, RECEIVE_ULN_302_ADDRESS,
-    ULN_VERSION_READ_V1002, ULN_VERSION_V301, ULN_VERSION_V302,
+    ULN_VERSION_READ_V1002, ULN_VERSION_V300, ULN_VERSION_V301, ULN_VERSION_V302,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +27,11 @@ pub struct EvmReceiveContracts {
     pub receive_uln_302_view: String,
     pub read_lib_1002: Option<String>,
     pub read_lib_1002_view: Option<String>,
+    /// Send-side and SimpleMessageLib addresses, consulted only when routing a
+    /// V2 send by its receive library, as upstream's lookup table includes them.
+    pub send_uln_302: Option<String>,
+    pub send_uln_301: Option<String>,
+    pub simple_message_lib: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -152,6 +157,33 @@ pub fn evm_uln_version_from_receive_library(
         return Some(ULN_VERSION_READ_V1002);
     }
     None
+}
+
+/// Upstream's full `getUlnVersionFromAddress` table, in its order (TS 1.2.66:
+/// `lz-v2-sdk/src/endpoint/evm/decoders/index.ts:49-93`). Routing a V2 send only
+/// asks whether the answer is `V301`/`V302`, so the send and SimpleMessageLib
+/// rows matter there and nowhere else.
+pub fn evm_uln_version_for_receive_routing(
+    contracts: &EvmReceiveContracts,
+    address: &str,
+) -> Option<&'static str> {
+    let address = address.trim_start_matches("0x");
+    let matches = |candidate: &str| {
+        !candidate.is_empty()
+            && candidate
+                .trim_start_matches("0x")
+                .eq_ignore_ascii_case(address)
+    };
+    let optional = |candidate: &Option<String>| candidate.as_deref().is_some_and(matches);
+    if optional(&contracts.send_uln_302) {
+        Some(ULN_VERSION_V302)
+    } else if optional(&contracts.send_uln_301) {
+        Some(ULN_VERSION_V301)
+    } else if optional(&contracts.simple_message_lib) {
+        Some(ULN_VERSION_V300)
+    } else {
+        evm_uln_version_from_receive_library(contracts, address)
+    }
 }
 
 pub fn evm_receive_version_from_dst_eid(dst_eid: u64, uln_send_version: &str) -> &'static str {

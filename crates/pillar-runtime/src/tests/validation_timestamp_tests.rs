@@ -34,10 +34,10 @@ async fn runtime_rpc_validation_checks_reads_aptos_move_timestamp() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "aptos".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://aptos.example/".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://aptos.example/".to_string())],
+                1,
+            ),
         )]),
         Some(&["aptos".to_string()]),
     )
@@ -77,10 +77,10 @@ async fn runtime_rpc_validation_checks_reads_movement_move_timestamp() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "movement".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://movement.example/".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://movement.example/".to_string())],
+                1,
+            ),
         )]),
         Some(&["movement".to_string()]),
     )
@@ -120,10 +120,10 @@ async fn runtime_rpc_validation_checks_reads_initia_move_timestamp() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "initia".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://initia.example/".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://initia.example/".to_string())],
+                1,
+            ),
         )]),
         Some(&["initia".to_string()]),
     )
@@ -166,10 +166,10 @@ async fn runtime_rpc_validation_checks_reads_starknet_latest_block_timestamp() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "starknet".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://starknet.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://starknet.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["starknet".to_string()]),
     )
@@ -206,10 +206,10 @@ async fn runtime_rpc_validation_checks_iota_checkpoint_timestamp() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "iotal1".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://iota.example/".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://iota.example/".to_string())],
+                1,
+            ),
         )]),
         Some(&["iotal1".to_string()]),
     )
@@ -253,10 +253,10 @@ async fn runtime_rpc_validation_checks_reads_stellar_ledger_timestamp() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "stellar".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://stellar.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://stellar.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["stellar".to_string()]),
     )
@@ -312,10 +312,10 @@ async fn no_non_evm_chain_falls_through_to_the_evm_block_timestamp_default() {
         let getter = StaticProviderConfig::new(
             indexmap::IndexMap::from([(
                 chain_name.clone(),
-                ProviderConfig {
-                    uris: vec![ProviderUri::Uri(format!("https://{chain_name}.example/"))],
-                    quorum: Some(1),
-                },
+                ProviderConfig::with_distinct_entities(
+                    vec![ProviderUri::Uri(format!("https://{chain_name}.example/"))],
+                    1,
+                ),
             )]),
             Some(std::slice::from_ref(chain_name)),
         )

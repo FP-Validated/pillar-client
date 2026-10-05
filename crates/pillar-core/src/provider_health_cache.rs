@@ -2,6 +2,15 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, OwnedMutexGuard};
+#[derive(Default)]
+struct RefreshOwner(parking_lot::Mutex<Option<tokio::task::JoinHandle<()>>>);
+impl Drop for RefreshOwner {
+    fn drop(&mut self) {
+        if let Some(task) = self.0.get_mut().take() {
+            task.abort();
+        }
+    }
+}
 
 pub type ProviderHealthSnapshot = IndexMap<String, bool>;
 
@@ -41,6 +50,7 @@ pub struct ProviderHealthCache<S> {
     state: Arc<Mutex<Option<CachedHealth>>>,
     refresh_lock: Arc<Mutex<()>>,
     now: Arc<dyn Fn() -> u64 + Send + Sync>,
+    refresh_owner: Option<Arc<RefreshOwner>>,
 }
 
 impl<S> Clone for ProviderHealthCache<S> {
@@ -50,6 +60,7 @@ impl<S> Clone for ProviderHealthCache<S> {
             state: self.state.clone(),
             refresh_lock: self.refresh_lock.clone(),
             now: self.now.clone(),
+            refresh_owner: self.refresh_owner.clone(),
         }
     }
 }
@@ -64,6 +75,7 @@ where
             state: Arc::new(Mutex::new(None)),
             refresh_lock: Arc::new(Mutex::new(())),
             now: Arc::new(now),
+            refresh_owner: Some(Arc::new(RefreshOwner::default())),
         }
     }
     /// Seeds the cache with a report the caller already produced.
@@ -95,10 +107,25 @@ where
             }
             if age <= PROVIDER_HEALTH_CACHE_STALE_MS {
                 if let Ok(guard) = self.refresh_lock.clone().try_lock_owned() {
-                    let this = self.clone();
-                    tokio::spawn(async move {
+                    let mut this = self.clone();
+                    this.refresh_owner = None;
+                    let mut context = crate::execution::RequestContext::background();
+                    context.resources =
+                        crate::execution::current().and_then(|context| context.resources);
+                    context.deadline =
+                        Some(tokio::time::Instant::now() + std::time::Duration::from_secs(10));
+                    let task = tokio::spawn(context.scope(async move {
                         let _ = this.refresh_with_guard(guard).await;
-                    });
+                    }));
+                    let mut owned = self
+                        .refresh_owner
+                        .as_ref()
+                        .expect("cache refresh owner")
+                        .0
+                        .lock();
+                    if let Some(previous) = owned.replace(task) {
+                        previous.abort();
+                    }
                 }
                 return Ok(cached.value);
             }

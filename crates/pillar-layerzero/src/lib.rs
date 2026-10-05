@@ -1,4 +1,5 @@
 mod abi;
+mod adapter_params;
 mod aptos;
 mod builders;
 mod evm;
@@ -25,8 +26,14 @@ pub use abi::{
     decode_evm_address_result, decode_evm_bool_result, decode_evm_bytes_result,
     decode_evm_hash_lookup_result, decode_evm_receive_library_result, decode_evm_uint64_result,
     decode_evm_uln_config_confirmations, decode_evm_uln_v2_app_config,
-    decode_evm_verification_state, evm_address_from_pathway_value, evm_hash_lookup_is_confirmed,
-    keccak256_hex, pack_dvn_call_data,
+    decode_evm_verification_state, evm_address_from_pathway_value, evm_checksum_address,
+    evm_hash_lookup_is_confirmed, keccak256_hex, pack_dvn_call_data,
+};
+pub use adapter_params::{
+    aptos_adapter_params_gas, decode_abi_bytes_return, decode_aptos_adapter_params,
+    decode_uln_v2_relayer_params_log, encode_uln_v2_default_adapter_params_call,
+    evm_adapter_params_gas, node_buffer_from_hex, AptosAdapterParams, ULN_V2_PACKET_TOPIC,
+    ULN_V2_RELAYER_PARAMS_TOPIC,
 };
 pub use aptos::{
     aptos_hash_propose, aptos_hash_verify, AptosReceiveContracts, AptosUlnPayloadBuilder,
@@ -37,15 +44,18 @@ pub use builders::{
 };
 pub use evm::{
     evm_receive_contract_for_uln_version, evm_receive_version_from_dst_eid,
-    evm_uln_version_from_receive_library, EvmReceiveContracts, EvmUlnPayloadBuilder,
+    evm_uln_version_for_receive_routing, evm_uln_version_from_receive_library, EvmReceiveContracts,
+    EvmUlnPayloadBuilder,
 };
 pub use evm_v2::build_evm_uln_v2_verify_call_data;
 pub use evm_v3::build_evm_uln_v3_verify_call_data;
 pub use other_non_evm::{
-    boc_from_base64, build_ton_dvn_verify, committable_view_is_signed, decode_proxy_admin_target,
-    decode_ton_relayer_options, derive_uln_addresses, dvn_attestation,
-    stellar_contract_id_from_strkey, ton_address_to_be32, ton_boc_to_base64,
-    ton_payload_signed_targets, uln_default_receive_config, DerivedAddresses, DvnAttestation,
+    boc_from_base64, build_ton_dvn_verify, canton_gasolina_signer_address, canton_hash_verify,
+    canton_key_fingerprint, canton_party_namespace, committable_view_is_signed,
+    decode_proxy_admin_target, decode_ton_relayer_options, derive_uln_addresses, dvn_attestation,
+    stellar_contract_id_from_strkey, ton_address_to_be32, ton_boc_from_hex, ton_boc_to_base64,
+    ton_payload_signed_targets, ton_state_init_address, uln_default_receive_config,
+    CantonUlnPayloadBuilder, CantonVerifyDigestInput, DerivedAddresses, DvnAttestation,
     StarknetUlnPayloadBuilder, StellarUlnPayloadBuilder, TonContractCodeCells, TonDvnVerifyOutput,
     TonDvnVerifyRequest, TonPathway, TonPayloadSignedRequest, TonPayloadSignedTargets,
     TonStorageCell, TonUlnPayloadBuilder, LIVE_TON_PACKET_BOC,
@@ -53,10 +63,11 @@ pub use other_non_evm::{
 pub use packet::{
     build_evm_feather_proof, build_evm_lz_v1_packet_payload_v2,
     build_evm_lz_v1_packet_payload_v2_from_event, compute_lz_packet_v1_proof,
-    compute_lz_packet_v1_proof_from_event, decode_evm_legacy_packet_v2_payload,
-    decode_evm_packet_sent_log, decode_lz_packet_v1, derive_evm_feather_hash_info,
-    encode_lz_packet_v1, is_lz_read_endpoint_id, native_hash_by_chain_name, EvmPacketSent,
-    EvmUlnProof, LzPacketV1,
+    compute_lz_packet_v1_proof_from_event, decode_aptos_v1_packet,
+    decode_evm_legacy_packet_v2_payload, decode_evm_packet_sent_log, decode_lz_packet_v1,
+    derive_aptos_feather_hash_info, derive_evm_feather_hash_info, encode_aptos_v1_packet,
+    encode_lz_packet_v1, is_lz_read_endpoint_id, native_hash_by_chain_name, AptosV1Packet,
+    EvmPacketSent, EvmPacketSentKind, EvmUlnProof, LzPacketV1,
 };
 pub use read_v1002::{
     build_evm_uln_read_v1_verify_call_data, decode_evm_read_command,

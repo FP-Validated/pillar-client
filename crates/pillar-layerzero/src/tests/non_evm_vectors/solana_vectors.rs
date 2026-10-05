@@ -4,22 +4,26 @@ const SOLANA_DVN_PDA: &str = "HtEYV4xB4wvsj5fgTkcfuChYpvGYzgzwvNhgDZQNh7wW";
 
 #[tokio::test]
 async fn solana_vector_rejects_missing_dvn_pda_like_upstream() {
-    let builder = SolanaUlnPayloadBuilder;
-    let err = builder
-        .build_uln_v3_verify_payload(
-            &solana_sent_event(),
-            64,
-            1_900_000_000,
-            "168".to_string(),
-            None,
-        )
-        .await
-        .unwrap_err();
+    // Upstream throws a string (not BadRequestError) on `!dvnPda`: a 500, and `''` too.
+    for missing in [None, Some("")] {
+        let err = SolanaUlnPayloadBuilder
+            .build_uln_v3_verify_payload(
+                &solana_sent_event(),
+                64,
+                1_900_000_000,
+                "168".to_string(),
+                missing,
+            )
+            .await
+            .unwrap_err();
 
-    assert_eq!(
-        err.to_string(),
-        "Solana: DVN Address is required for verify payload"
-    );
+        assert_eq!(
+            err,
+            AppCoreError::Internal(
+                "Solana: DVN Address is required for verify payload".to_string()
+            )
+        );
+    }
 }
 
 #[tokio::test]

@@ -1,0 +1,1 @@
+{"message":"parse arguments[2] failed, expect integer<u32>, caused by error: invalid type: string \"30101\", expected u32","error_code":"invalid_input","vm_error_code":null}

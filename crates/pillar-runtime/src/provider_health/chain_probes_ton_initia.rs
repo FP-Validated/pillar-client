@@ -5,13 +5,13 @@ pub(crate) async fn probe_ton_v2_provider_health<T>(
     report_url: String,
     request_url: String,
     headers: HashMap<String, String>,
-) -> ProviderHealthEntry
+) -> Result<ProviderHealthEntry, RpcError>
 where
     T: JsonRpcTransport,
 {
     let started_at = Instant::now();
     let response = match transport
-        .post_json(
+        .post_json_scoped(
             request_url,
             headers,
             json!({
@@ -27,14 +27,15 @@ where
             .pointer("/result/last/seqno")
             .cloned()
             .unwrap_or(Value::Null),
-        Err(error) => Value::String(error),
+        Err(RpcError::Remote(error)) => Value::String(error),
+        Err(error) => health_error_response(error)?,
     };
 
-    normalize_provider_health_entry(
+    Ok(normalize_provider_health_entry(
         report_url,
         response,
         Some(started_at.elapsed().as_millis() as u64),
-    )
+    ))
 }
 
 pub(crate) async fn probe_ton_v3_provider_health<T>(
@@ -42,81 +43,90 @@ pub(crate) async fn probe_ton_v3_provider_health<T>(
     report_url: String,
     request_url: String,
     headers: HashMap<String, String>,
-) -> ProviderHealthEntry
+) -> Result<ProviderHealthEntry, RpcError>
 where
     T: JsonRpcTransport,
 {
     let started_at = Instant::now();
-    let response = match transport.get_json(request_url, headers).await {
+    let response = match transport.get_json_scoped(request_url, headers).await {
         Ok(response) => response
             .get("last")
             .and_then(|last| last.get("seqno"))
             .cloned()
             .unwrap_or(Value::Null),
-        Err(error) => Value::String(error),
+        Err(RpcError::Remote(error)) => Value::String(error),
+        Err(error) => health_error_response(error)?,
     };
 
-    normalize_provider_health_entry(
+    Ok(normalize_provider_health_entry(
         report_url,
         response,
         Some(started_at.elapsed().as_millis() as u64),
-    )
+    ))
 }
 
 pub(crate) async fn probe_initia_provider_health<T>(
     transport: T,
     url: String,
     headers: HashMap<String, String>,
-) -> ProviderHealthEntry
+) -> Result<ProviderHealthEntry, RpcError>
 where
     T: JsonRpcTransport,
 {
     let started_at = Instant::now();
     let request_url = initia_latest_block_request_url(&url);
-    let response = match transport.get_json(request_url, headers).await {
+    let response = match transport.get_json_scoped(request_url, headers).await {
         Ok(response) => initia_latest_block_height_response(&response).unwrap_or(Value::Null),
-        Err(error) => Value::String(error),
+        Err(RpcError::Remote(error)) => Value::String(error),
+        Err(error) => health_error_response(error)?,
     };
 
-    normalize_provider_health_entry(url, response, Some(started_at.elapsed().as_millis() as u64))
+    Ok(normalize_provider_health_entry(
+        url,
+        response,
+        Some(started_at.elapsed().as_millis() as u64),
+    ))
 }
 
 pub(crate) async fn probe_initia_indexer_provider_health<T>(
     transport: T,
     request: InitiaIndexerProviderHealthRequest,
-) -> ProviderHealthEntry
+) -> Result<ProviderHealthEntry, RpcError>
 where
     T: JsonRpcTransport,
 {
     let started_at = Instant::now();
     let graph_ql_response = transport
-        .post_json(
+        .post_json_scoped(
             request.indexer_request_url,
             request.headers.clone(),
             request.body,
         )
         .await;
-    let response = match graph_ql_response
-        .ok()
+    let response = match provider_response(graph_ql_response)?
         .and_then(|response| initia_indexer_block_height_response(&response))
     {
         Some(response) => response,
         None => {
             let fallback_url = initia_latest_block_request_url(&request.base_url);
-            match transport.get_json(fallback_url, request.headers).await {
+            match transport
+                .get_json_scoped(fallback_url, request.headers)
+                .await
+            {
                 Ok(response) => {
                     initia_latest_block_height_response(&response).unwrap_or(Value::Null)
                 }
-                Err(error) => Value::String(error),
+                Err(RpcError::Remote(error)) => Value::String(error),
+                Err(error) => health_error_response(error)?,
             }
         }
     };
 
-    normalize_provider_health_entry(
+    Ok(normalize_provider_health_entry(
         request.report_url,
         response,
         Some(started_at.elapsed().as_millis() as u64),
-    )
+    ))
 }
 
 pub(crate) fn initia_latest_block_request_url(base_url: &str) -> String {

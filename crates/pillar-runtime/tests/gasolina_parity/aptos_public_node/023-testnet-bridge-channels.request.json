@@ -1,0 +1,9 @@
+{
+ "method": "GET",
+ "url": "https://api.testnet.aptoslabs.com/v1/accounts/0xec84c05cc40950c86d8a8bed19552f1e8ebb783196bb021c916161d22dc179f7/resource/0x1759cc0d3161f1eb79f65847d4feb9d1f74fb79014698a23b16b28b9cd4c37e3::channel::Channels",
+ "headers": {
+  "accept": "application/json"
+ },
+ "body": null,
+ "utc": "2026-10-04T10:34:08Z"
+}

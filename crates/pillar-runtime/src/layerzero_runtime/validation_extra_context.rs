@@ -31,9 +31,9 @@ where
             let response = self
                 .transport
                 .clone()
-                .post_json(url.to_string(), headers, payload.clone())
+                .post_json_on("extra_context", url.to_string(), headers, payload.clone())
                 .await
-                .map_err(AppCoreError::Internal)?;
+                .map_err(AppCoreError::from)?;
             return strict_policy_verdict(&response);
         }
 
@@ -44,9 +44,9 @@ where
                 )
             })?;
             let response = client
-                .invoke_json(function_name, payload)
+                .invoke_json_scoped(function_name, payload)
                 .await
-                .map_err(AppCoreError::Internal)?;
+                .map_err(AppCoreError::from)?;
             return validate_lambda_response(&response);
         }
 
@@ -115,86 +115,123 @@ where
         src_chain_name: &str,
         tx_hash: &str,
     ) -> Result<String, AppCoreError> {
-        let snapshot = self.providers.load();
-        let dispatch = snapshot
-            .dispatch(&self.rank_tracker, src_chain_name)
-            .await?;
-        let ChainDispatch {
-            config: provider_config,
-            quorum,
-            plan,
-        } = dispatch;
-
-        let requests = FuturesUnordered::new();
-        for DispatchEntry { index, uri, delay } in plan {
-            let transport = self.transport.clone();
-            let tx_hash = tx_hash.to_string();
-            let chain_name = src_chain_name.to_string();
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
-                let observation = match chain_name.as_str() {
-                    "solana" => {
-                        let (url, headers) = provider_uri_parts(uri);
-                        observe_solana_transaction_from(transport, url, headers, &tx_hash)
-                            .await
-                            .ok()
-                    }
-                    "aptos" | "initia" | "movement" => {
-                        let (url, headers) = move_provider_uri_parts(&chain_name, uri);
-                        observe_move_transaction_from(
-                            transport,
-                            &chain_name,
-                            url,
-                            headers,
-                            &tx_hash,
-                        )
-                        .await
-                        .ok()
-                    }
-                    "sui" | "iotal1" => {
-                        let (url, headers) = provider_uri_parts(uri);
-                        observe_sui_transaction_from(transport, &chain_name, url, headers, &tx_hash)
-                            .await
-                            .ok()
-                    }
-                    "starknet" => {
-                        let (url, headers) = provider_uri_parts(uri);
-                        observe_starknet_transaction_from(transport, url, headers, &tx_hash)
-                            .await
-                            .ok()
-                    }
-                    "stellar" => {
-                        let (url, headers) = provider_uri_parts(uri);
-                        observe_stellar_transaction_from(transport, url, headers, &tx_hash)
-                            .await
-                            .ok()
-                    }
-                    "ton" => match ton_v3_provider_uri_parts(uri) {
-                        Some((endpoint, _, headers)) => {
-                            observe_ton_transaction_from(transport, endpoint, headers, &tx_hash)
-                                .await
-                                .ok()
-                        }
-                        None => None,
-                    },
-                    _ => {
-                        let (url, headers) = provider_uri_parts(uri);
-                        observe_transaction_from(transport, url, headers, &tx_hash)
-                            .await
-                            .ok()
-                    }
-                };
-                let observation =
-                    observation.map(|observation| (observation.fingerprint.clone(), observation));
-                (index, observation)
-            });
+        if src_chain_name == "canton" {
+            let snapshot = self.providers.load();
+            let config = snapshot.provider_config(src_chain_name)?;
+            canton_sequencer(src_chain_name, config)?;
+            let parties = canton_ledger_parties(config);
+            if parties.is_empty() {
+                return Err(AppCoreError::Internal(
+                    "Canton RPC provider has no configured parties for ledger reads".to_string(),
+                ));
+            }
+            return self
+                .canton_transaction_from_address(&parties, tx_hash, |entry, uri| {
+                    self.canton_ledger_auth
+                        .token_provider(entry, uri, &self.transport)
+                })
+                .await;
         }
-        let context = format!("transaction-from for chain {src_chain_name}");
-        let observation =
-            resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context).await?;
-        Ok(observation.from)
+        crate::provider_health::rpc_scope(src_chain_name, async {
+            let snapshot = self.providers.load();
+            let dispatch = snapshot
+                .dispatch(&self.rank_tracker, src_chain_name)
+                .await?;
+            let ChainDispatch {
+                config: provider_config,
+                quorum,
+                plan,
+            } = dispatch;
+
+            let requests = FuturesUnordered::new();
+            for DispatchEntry { index, uri, delay } in plan {
+                let transport = self.transport.clone();
+                let tx_hash = tx_hash.to_string();
+                let chain_name = src_chain_name.to_string();
+                requests.push(async move {
+                    if !delay.is_zero() {
+                        tokio::time::sleep(delay).await;
+                    }
+                    let observation = match chain_name.as_str() {
+                        "solana" => {
+                            let (url, headers) = provider_uri_parts(uri);
+                            provider_response(
+                                observe_solana_transaction_from(transport, url, headers, &tx_hash)
+                                    .await,
+                            )
+                        }
+                        "aptos" | "initia" | "movement" => {
+                            let (url, headers) = move_provider_uri_parts(&chain_name, uri);
+                            provider_response(
+                                observe_move_transaction_from(
+                                    transport,
+                                    &chain_name,
+                                    url,
+                                    headers,
+                                    &tx_hash,
+                                )
+                                .await,
+                            )
+                        }
+                        "sui" | "iotal1" => {
+                            let (url, headers) = provider_uri_parts(uri);
+                            provider_response(
+                                observe_sui_transaction_from(
+                                    transport,
+                                    &chain_name,
+                                    url,
+                                    headers,
+                                    &tx_hash,
+                                )
+                                .await,
+                            )
+                        }
+                        "starknet" => {
+                            let (url, headers) = provider_uri_parts(uri);
+                            provider_response(
+                                observe_starknet_transaction_from(
+                                    transport, url, headers, &tx_hash,
+                                )
+                                .await,
+                            )
+                        }
+                        "stellar" => {
+                            let (url, headers) = provider_uri_parts(uri);
+                            provider_response(
+                                observe_stellar_transaction_from(transport, url, headers, &tx_hash)
+                                    .await,
+                            )
+                        }
+                        "ton" => match ton_v3_provider_uri_parts(uri) {
+                            Some((endpoint, _, headers)) => provider_response(
+                                observe_ton_transaction_from(
+                                    transport, endpoint, headers, &tx_hash,
+                                )
+                                .await,
+                            ),
+                            None => Ok(None),
+                        },
+                        _ => {
+                            let (url, headers) = provider_uri_parts(uri);
+                            provider_response(
+                                observe_transaction_from(transport, url, headers, &tx_hash).await,
+                            )
+                        }
+                    };
+                    let observation = observation.map(|observation| {
+                        observation
+                            .map(|observation| (observation.fingerprint.clone(), observation))
+                    });
+                    (index, observation)
+                });
+            }
+            let context = format!("transaction-from for chain {src_chain_name}");
+            let observation =
+                resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
+                    .await?;
+            Ok(observation.from)
+        })
+        .await
     }
 }
 
@@ -208,9 +245,22 @@ async fn observe_move_transaction_from<T>(
 where
     T: JsonRpcTransport,
 {
-    let transaction = fetch_move_transaction(transport, chain_name, url, headers, tx_hash)
-        .await
-        .map_err(AppCoreError::Internal)?;
+    // `getTransactionByHashOrVersion` (`multiprovider/src/aptos.ts:401-416`): a ULNv2 send is
+    // named by its ledger version, not a `0x` hash.
+    let transaction = if chain_name == "aptos" && !tx_hash.starts_with("0x") {
+        let version = super::aptos_ledger_version(tx_hash)?;
+        let url = super::aptos_transaction_by_version_url(&url, &version).ok_or_else(|| {
+            AppCoreError::Internal(format!("Cannot convert {tx_hash} to a BigInt"))
+        })?;
+        transport
+            .get_json_scoped(url, headers)
+            .await
+            .map_err(AppCoreError::from)?
+    } else {
+        fetch_move_transaction(transport, chain_name, url, headers, tx_hash)
+            .await
+            .map_err(AppCoreError::from)?
+    };
     let from = if chain_name == "initia" {
         let encoded_public_key = transaction
             .pointer("/tx/auth_info/signer_infos/0/public_key/key")
@@ -272,7 +322,7 @@ where
     T: JsonRpcTransport,
 {
     let response = transport
-        .post_json(
+        .post_json_scoped(
             url,
             headers,
             json!({
@@ -283,7 +333,7 @@ where
             }),
         )
         .await
-        .map_err(AppCoreError::Internal)?;
+        .map_err(AppCoreError::from)?;
     let result = response
         .get("result")
         .filter(|result| !result.is_null())
@@ -324,7 +374,7 @@ where
     T: JsonRpcTransport,
 {
     let response = transport
-        .post_json(
+        .post_json_scoped(
             url,
             headers,
             json!({
@@ -335,7 +385,7 @@ where
             }),
         )
         .await
-        .map_err(AppCoreError::Internal)?;
+        .map_err(AppCoreError::from)?;
     let result = response
         .get("result")
         .filter(|result| !result.is_null())
@@ -376,7 +426,7 @@ where
     T: JsonRpcTransport,
 {
     let response = transport
-        .post_json(
+        .post_json_scoped(
             url,
             headers,
             json!({
@@ -387,7 +437,7 @@ where
             }),
         )
         .await
-        .map_err(AppCoreError::Internal)?;
+        .map_err(AppCoreError::from)?;
     let result = response.get("result").unwrap_or(&response);
     let status = result
         .get("status")
@@ -424,18 +474,14 @@ async fn observe_ton_transaction_from<T>(
 where
     T: JsonRpcTransport,
 {
-    // Same sink-side refusal as `move_tx_url`: the API boundary refuses a
-    // `srcTxHash` with a path metacharacter, and this splice cannot rely on that
-    // alone.
+    // Same sink-side refusal as `move_tx_url`: the core refuses a `srcTxHash`
+    // with a path metacharacter, and this splice cannot rely on that alone.
     let tx_hash = encode_path_segment(tx_hash)
         .ok_or_else(|| AppCoreError::Internal("Unusable TON transaction hash".to_string()))?;
-    let response = transport
-        .get_json(
-            format!("{}/traces/{tx_hash}", endpoint.trim_end_matches('/')),
-            headers,
-        )
+    let response = fetch_ton_transaction_trace(&transport, &endpoint, &headers, &tx_hash)
         .await
-        .map_err(AppCoreError::Internal)?;
+        .map_err(AppCoreError::from)?
+        .ok_or_else(|| AppCoreError::Internal("Missing TON transaction trace".to_string()))?;
     let destination = response
         .pointer("/transaction/in_msg/destination")
         .and_then(Value::as_str)
@@ -449,12 +495,9 @@ where
             .map_err(|error| AppCoreError::Internal(format!("Invalid TON sender: {error}")))?;
         format!("0x{}", hex::encode(address.hash))
     };
-    let fingerprint = serde_json::to_string(&json!({
-        "destination": destination,
-        "hash": response.pointer("/transaction/in_msg/hash"),
-        "body": response.pointer("/transaction/in_msg/message_content/body"),
-        "block": response.pointer("/transaction/mc_block_seqno"),
-    }))
-    .map_err(|error| AppCoreError::Internal(error.to_string()))?;
+    // Upstream `RpcSdk.getFromAddress` quorums the same trace projection as source
+    // resolution (`multiprovider/src/ton.ts:29-39`).
+    let fingerprint = ton_trace_quorum_fingerprint(&response)
+        .ok_or_else(|| AppCoreError::Internal("Unreadable TON transaction trace".to_string()))?;
     Ok(TransactionFromObservation { fingerprint, from })
 }

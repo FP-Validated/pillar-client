@@ -17,13 +17,16 @@ pillar-core = { path = "../pillar-core" }
 pillar-metrics = { path = "../pillar-metrics" }
 http.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+flate2.workspace = true
+# `JSON.parse` rounds decimals correctly; the default fast path can be one ULP off.
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 regex.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+hex.workspace = true
 tower.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber.workspace = true

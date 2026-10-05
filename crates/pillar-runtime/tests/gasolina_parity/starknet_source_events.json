@@ -1,0 +1,1668 @@
+{
+ "producedBy": {
+  "upstream": "gasolina-audit 1.2.66 (manifest sha256 8ad87eb6...; archive comment 213cd500...)",
+  "entrypoint": "packages/sdks/lz-v2-sdk/src/endpoint/starknet/index.ts:EndpointV2StarknetSdk.getLZSentEvent",
+  "library": "starknet 8.9.0 createTransactionReceipt; @layerzerolabs/lz-v2-utilities 3.0.168 Options",
+  "synthetic": "receipts are scripted; endpoint address, selector, ABI and extractor are upstream"
+ },
+ "environment": "mainnet",
+ "txHash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+ "endpoint": "0x524e065abff21d225fb7b28f26ec2f48314ace6094bc085f0a7cf1dc2660f68",
+ "selector": "0x1dce1b34b90259326b8f3d4fc4307bcd6f7daa7621d66d9d8ba984dea61cca9",
+ "scenarios": [
+  {
+   "name": "match",
+   "receipt": {
+    "type": "INVOKE",
+    "transaction_hash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "actual_fee": {
+     "amount": "0x1",
+     "unit": "FRI"
+    },
+    "execution_status": "SUCCEEDED",
+    "finality_status": "ACCEPTED_ON_L2",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "block_number": 777,
+    "messages_sent": [],
+    "events": [
+     {
+      "from_address": "0x524e065abff21d225fb7b28f26ec2f48314ace6094bc085f0a7cf1dc2660f68",
+      "keys": [
+       "0x1dce1b34b90259326b8f3d4fc4307bcd6f7daa7621d66d9d8ba984dea61cca9",
+       "0x3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c"
+      ],
+      "data": [
+       "0x3",
+       "0x010000000000000007000077240a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0000759500000000000000000000000022",
+       "0x22222222222222222222222222222222222222b8bb68f7362bb01122fcb1f3",
+       "0x1e7c2b015e315a5f76f8aaa6e8e6431a6ad81595deadbeefcafe",
+       "0x1a",
+       "0x0",
+       "0x030100110100000000000000000000000000030d40",
+       "0x16"
+      ]
+     }
+    ],
+    "execution_resources": {
+     "l1_gas": 0,
+     "l1_data_gas": 0,
+     "l2_gas": 0
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30500,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "starknet",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionReceipt": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "starknet",
+      "txHash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "blockNumber": 777,
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcEid": 30500,
+       "srcChainName": "starknet",
+       "dstEid": 30101,
+       "dstChainName": "ethereum",
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V302"
+     },
+     "guid": "0xb8bb68f7362bb01122fcb1f31e7c2b015e315a5f76f8aaa6e8e6431a6ad81595",
+     "message": "0xdeadbeefcafe",
+     "options": {
+      "lzReceive": {
+       "gas": "200000",
+       "value": "0"
+      },
+      "ordered": false
+     },
+     "sendLibrary": "106426552607827385499605684750632268247490794729449047830383808830802508860"
+    }
+   }
+  },
+  {
+   "name": "native drop",
+   "receipt": {
+    "type": "INVOKE",
+    "transaction_hash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "actual_fee": {
+     "amount": "0x1",
+     "unit": "FRI"
+    },
+    "execution_status": "SUCCEEDED",
+    "finality_status": "ACCEPTED_ON_L2",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "block_number": 777,
+    "messages_sent": [],
+    "events": [
+     {
+      "from_address": "0x524e065abff21d225fb7b28f26ec2f48314ace6094bc085f0a7cf1dc2660f68",
+      "keys": [
+       "0x1dce1b34b90259326b8f3d4fc4307bcd6f7daa7621d66d9d8ba984dea61cca9",
+       "0x3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c"
+      ],
+      "data": [
+       "0x3",
+       "0x010000000000000007000077240a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0000759500000000000000000000000022",
+       "0x22222222222222222222222222222222222222b8bb68f7362bb01122fcb1f3",
+       "0x1e7c2b015e315a5f76f8aaa6e8e6431a6ad81595deadbeefcafe",
+       "0x1a",
+       "0x2",
+       "0x0301001101000000000000000000000000000186a0010031020000000000",
+       "0x0c0000000000000000000000004444444444444444",
+       "0x444444444444444444444444",
+       "0xc"
+      ]
+     }
+    ],
+    "execution_resources": {
+     "l1_gas": 0,
+     "l1_data_gas": 0,
+     "l2_gas": 0
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30500,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "starknet",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionReceipt": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "starknet",
+      "txHash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "blockNumber": 777,
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcEid": 30500,
+       "srcChainName": "starknet",
+       "dstEid": 30101,
+       "dstChainName": "ethereum",
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V302"
+     },
+     "guid": "0xb8bb68f7362bb01122fcb1f31e7c2b015e315a5f76f8aaa6e8e6431a6ad81595",
+     "message": "0xdeadbeefcafe",
+     "options": {
+      "lzReceive": {
+       "gas": "100000",
+       "value": "0"
+      },
+      "nativeDrop": [
+       {
+        "amount": "12",
+        "receiver": "0x4444444444444444444444444444444444444444"
+       }
+      ],
+      "ordered": false
+     },
+     "sendLibrary": "106426552607827385499605684750632268247490794729449047830383808830802508860"
+    }
+   }
+  },
+  {
+   "name": "two drops to one receiver",
+   "receipt": {
+    "type": "INVOKE",
+    "transaction_hash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "actual_fee": {
+     "amount": "0x1",
+     "unit": "FRI"
+    },
+    "execution_status": "SUCCEEDED",
+    "finality_status": "ACCEPTED_ON_L2",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "block_number": 777,
+    "messages_sent": [],
+    "events": [
+     {
+      "from_address": "0x524e065abff21d225fb7b28f26ec2f48314ace6094bc085f0a7cf1dc2660f68",
+      "keys": [
+       "0x1dce1b34b90259326b8f3d4fc4307bcd6f7daa7621d66d9d8ba984dea61cca9",
+       "0x3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c"
+      ],
+      "data": [
+       "0x3",
+       "0x010000000000000007000077240a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0000759500000000000000000000000022",
+       "0x22222222222222222222222222222222222222b8bb68f7362bb01122fcb1f3",
+       "0x1e7c2b015e315a5f76f8aaa6e8e6431a6ad81595deadbeefcafe",
+       "0x1a",
+       "0x4",
+       "0x0301001101000000000000000000000000000186a0010031020000000000",
+       "0x0c0000000000000000000000004444444444444444",
+       "0x44444444444444444444444401003102000000000000000000000000000000",
+       "0x0d000000000000000000000000444444444444444444444444444444444444",
+       "0x4444",
+       "0x2"
+      ]
+     }
+    ],
+    "execution_resources": {
+     "l1_gas": 0,
+     "l1_data_gas": 0,
+     "l2_gas": 0
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30500,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "starknet",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionReceipt": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "starknet",
+      "txHash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "blockNumber": 777,
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcEid": 30500,
+       "srcChainName": "starknet",
+       "dstEid": 30101,
+       "dstChainName": "ethereum",
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V302"
+     },
+     "guid": "0xb8bb68f7362bb01122fcb1f31e7c2b015e315a5f76f8aaa6e8e6431a6ad81595",
+     "message": "0xdeadbeefcafe",
+     "options": {
+      "lzReceive": {
+       "gas": "100000",
+       "value": "0"
+      },
+      "nativeDrop": [
+       {
+        "amount": "25",
+        "receiver": "0x4444444444444444444444444444444444444444"
+       }
+      ],
+      "ordered": false
+     },
+     "sendLibrary": "106426552607827385499605684750632268247490794729449047830383808830802508860"
+    }
+   }
+  },
+  {
+   "name": "type-1 options",
+   "receipt": {
+    "type": "INVOKE",
+    "transaction_hash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "actual_fee": {
+     "amount": "0x1",
+     "unit": "FRI"
+    },
+    "execution_status": "SUCCEEDED",
+    "finality_status": "ACCEPTED_ON_L2",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "block_number": 777,
+    "messages_sent": [],
+    "events": [
+     {
+      "from_address": "0x524e065abff21d225fb7b28f26ec2f48314ace6094bc085f0a7cf1dc2660f68",
+      "keys": [
+       "0x1dce1b34b90259326b8f3d4fc4307bcd6f7daa7621d66d9d8ba984dea61cca9",
+       "0x3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c"
+      ],
+      "data": [
+       "0x3",
+       "0x010000000000000007000077240a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0000759500000000000000000000000022",
+       "0x22222222222222222222222222222222222222b8bb68f7362bb01122fcb1f3",
+       "0x1e7c2b015e315a5f76f8aaa6e8e6431a6ad81595deadbeefcafe",
+       "0x1a",
+       "0x1",
+       "0x010000000000000000000000000000000000000000000000000000000000",
+       "0x030d40",
+       "0x3"
+      ]
+     }
+    ],
+    "execution_resources": {
+     "l1_gas": 0,
+     "l1_data_gas": 0,
+     "l2_gas": 0
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30500,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "starknet",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionReceipt": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "starknet",
+      "txHash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "blockNumber": 777,
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcEid": 30500,
+       "srcChainName": "starknet",
+       "dstEid": 30101,
+       "dstChainName": "ethereum",
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V302"
+     },
+     "guid": "0xb8bb68f7362bb01122fcb1f31e7c2b015e315a5f76f8aaa6e8e6431a6ad81595",
+     "message": "0xdeadbeefcafe",
+     "options": {
+      "lzReceive": {
+       "gas": "200000",
+       "value": "0"
+      },
+      "ordered": false
+     },
+     "sendLibrary": "106426552607827385499605684750632268247490794729449047830383808830802508860"
+    }
+   }
+  },
+  {
+   "name": "empty options",
+   "receipt": {
+    "type": "INVOKE",
+    "transaction_hash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "actual_fee": {
+     "amount": "0x1",
+     "unit": "FRI"
+    },
+    "execution_status": "SUCCEEDED",
+    "finality_status": "ACCEPTED_ON_L2",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "block_number": 777,
+    "messages_sent": [],
+    "events": [
+     {
+      "from_address": "0x524e065abff21d225fb7b28f26ec2f48314ace6094bc085f0a7cf1dc2660f68",
+      "keys": [
+       "0x1dce1b34b90259326b8f3d4fc4307bcd6f7daa7621d66d9d8ba984dea61cca9",
+       "0x3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c"
+      ],
+      "data": [
+       "0x3",
+       "0x010000000000000007000077240a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0000759500000000000000000000000022",
+       "0x22222222222222222222222222222222222222b8bb68f7362bb01122fcb1f3",
+       "0x1e7c2b015e315a5f76f8aaa6e8e6431a6ad81595deadbeefcafe",
+       "0x1a",
+       "0x0",
+       "0x0",
+       "0x0"
+      ]
+     }
+    ],
+    "execution_resources": {
+     "l1_gas": 0,
+     "l1_data_gas": 0,
+     "l2_gas": 0
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30500,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "starknet",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionReceipt": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "invalid BigNumber string (argument=\"value\", value=\"0x\", code=INVALID_ARGUMENT, version=bignumber/5.8.0)"
+   }
+  },
+  {
+   "name": "second of two",
+   "receipt": {
+    "type": "INVOKE",
+    "transaction_hash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "actual_fee": {
+     "amount": "0x1",
+     "unit": "FRI"
+    },
+    "execution_status": "SUCCEEDED",
+    "finality_status": "ACCEPTED_ON_L2",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "block_number": 777,
+    "messages_sent": [],
+    "events": [
+     {
+      "from_address": "0x524e065abff21d225fb7b28f26ec2f48314ace6094bc085f0a7cf1dc2660f68",
+      "keys": [
+       "0x1dce1b34b90259326b8f3d4fc4307bcd6f7daa7621d66d9d8ba984dea61cca9",
+       "0x3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c"
+      ],
+      "data": [
+       "0x3",
+       "0x010000000000000006000077240a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0000759500000000000000000000000022",
+       "0x22222222222222222222222222222222222222cec44d3f93d89eff4e31a17d",
+       "0x29d3ff087d3f5081afb7e73c13cf33aa13797c41deadbeefcafe",
+       "0x1a",
+       "0x0",
+       "0x030100110100000000000000000000000000030d40",
+       "0x16"
+      ]
+     },
+     {
+      "from_address": "0x524e065abff21d225fb7b28f26ec2f48314ace6094bc085f0a7cf1dc2660f68",
+      "keys": [
+       "0x1dce1b34b90259326b8f3d4fc4307bcd6f7daa7621d66d9d8ba984dea61cca9",
+       "0x3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c"
+      ],
+      "data": [
+       "0x3",
+       "0x010000000000000007000077240a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0000759500000000000000000000000022",
+       "0x22222222222222222222222222222222222222b8bb68f7362bb01122fcb1f3",
+       "0x1e7c2b015e315a5f76f8aaa6e8e6431a6ad81595deadbeefcafe",
+       "0x1a",
+       "0x0",
+       "0x030100110100000000000000000000000000030d40",
+       "0x16"
+      ]
+     }
+    ],
+    "execution_resources": {
+     "l1_gas": 0,
+     "l1_data_gas": 0,
+     "l2_gas": 0
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30500,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "starknet",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionReceipt": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "starknet",
+      "txHash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "blockNumber": 777,
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcEid": 30500,
+       "srcChainName": "starknet",
+       "dstEid": 30101,
+       "dstChainName": "ethereum",
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V302"
+     },
+     "guid": "0xb8bb68f7362bb01122fcb1f31e7c2b015e315a5f76f8aaa6e8e6431a6ad81595",
+     "message": "0xdeadbeefcafe",
+     "options": {
+      "lzReceive": {
+       "gas": "200000",
+       "value": "0"
+      },
+      "ordered": false
+     },
+     "sendLibrary": "106426552607827385499605684750632268247490794729449047830383808830802508860"
+    }
+   }
+  },
+  {
+   "name": "other nonce",
+   "receipt": {
+    "type": "INVOKE",
+    "transaction_hash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "actual_fee": {
+     "amount": "0x1",
+     "unit": "FRI"
+    },
+    "execution_status": "SUCCEEDED",
+    "finality_status": "ACCEPTED_ON_L2",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "block_number": 777,
+    "messages_sent": [],
+    "events": [
+     {
+      "from_address": "0x524e065abff21d225fb7b28f26ec2f48314ace6094bc085f0a7cf1dc2660f68",
+      "keys": [
+       "0x1dce1b34b90259326b8f3d4fc4307bcd6f7daa7621d66d9d8ba984dea61cca9",
+       "0x3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c"
+      ],
+      "data": [
+       "0x3",
+       "0x010000000000000006000077240a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0000759500000000000000000000000022",
+       "0x22222222222222222222222222222222222222cec44d3f93d89eff4e31a17d",
+       "0x29d3ff087d3f5081afb7e73c13cf33aa13797c41deadbeefcafe",
+       "0x1a",
+       "0x0",
+       "0x030100110100000000000000000000000000030d40",
+       "0x16"
+      ]
+     }
+    ],
+    "execution_resources": {
+     "l1_gas": 0,
+     "l1_data_gas": 0,
+     "l2_gas": 0
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30500,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "starknet",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionReceipt": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "Packet does not match lzMessageId"
+   }
+  },
+  {
+   "name": "V301 request",
+   "receipt": {
+    "type": "INVOKE",
+    "transaction_hash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "actual_fee": {
+     "amount": "0x1",
+     "unit": "FRI"
+    },
+    "execution_status": "SUCCEEDED",
+    "finality_status": "ACCEPTED_ON_L2",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "block_number": 777,
+    "messages_sent": [],
+    "events": [
+     {
+      "from_address": "0x524e065abff21d225fb7b28f26ec2f48314ace6094bc085f0a7cf1dc2660f68",
+      "keys": [
+       "0x1dce1b34b90259326b8f3d4fc4307bcd6f7daa7621d66d9d8ba984dea61cca9",
+       "0x3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c"
+      ],
+      "data": [
+       "0x3",
+       "0x010000000000000007000077240a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0000759500000000000000000000000022",
+       "0x22222222222222222222222222222222222222b8bb68f7362bb01122fcb1f3",
+       "0x1e7c2b015e315a5f76f8aaa6e8e6431a6ad81595deadbeefcafe",
+       "0x1a",
+       "0x0",
+       "0x030100110100000000000000000000000000030d40",
+       "0x16"
+      ]
+     }
+    ],
+    "execution_resources": {
+     "l1_gas": 0,
+     "l1_data_gas": 0,
+     "l2_gas": 0
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30500,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "starknet",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V301"
+   },
+   "calls": [
+    {
+     "getTransactionReceipt": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "starknet",
+      "txHash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "blockNumber": 777,
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcEid": 30500,
+       "srcChainName": "starknet",
+       "dstEid": 30101,
+       "dstChainName": "ethereum",
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V302"
+     },
+     "guid": "0xb8bb68f7362bb01122fcb1f31e7c2b015e315a5f76f8aaa6e8e6431a6ad81595",
+     "message": "0xdeadbeefcafe",
+     "options": {
+      "lzReceive": {
+       "gas": "200000",
+       "value": "0"
+      },
+      "ordered": false
+     },
+     "sendLibrary": "106426552607827385499605684750632268247490794729449047830383808830802508860"
+    }
+   }
+  },
+  {
+   "name": "no events",
+   "receipt": {
+    "type": "INVOKE",
+    "transaction_hash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "actual_fee": {
+     "amount": "0x1",
+     "unit": "FRI"
+    },
+    "execution_status": "SUCCEEDED",
+    "finality_status": "ACCEPTED_ON_L2",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "block_number": 777,
+    "messages_sent": [],
+    "events": [],
+    "execution_resources": {
+     "l1_gas": 0,
+     "l1_data_gas": 0,
+     "l2_gas": 0
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30500,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "starknet",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionReceipt": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "Packet does not match lzMessageId"
+   }
+  },
+  {
+   "name": "event from another contract",
+   "receipt": {
+    "type": "INVOKE",
+    "transaction_hash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "actual_fee": {
+     "amount": "0x1",
+     "unit": "FRI"
+    },
+    "execution_status": "SUCCEEDED",
+    "finality_status": "ACCEPTED_ON_L2",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "block_number": 777,
+    "messages_sent": [],
+    "events": [
+     {
+      "from_address": "0x77777777777777777777777777777777777777777777777777777777777777",
+      "keys": [
+       "0x1dce1b34b90259326b8f3d4fc4307bcd6f7daa7621d66d9d8ba984dea61cca9",
+       "0x3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c"
+      ],
+      "data": [
+       "0x3",
+       "0x010000000000000007000077240a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0000759500000000000000000000000022",
+       "0x22222222222222222222222222222222222222b8bb68f7362bb01122fcb1f3",
+       "0x1e7c2b015e315a5f76f8aaa6e8e6431a6ad81595deadbeefcafe",
+       "0x1a",
+       "0x0",
+       "0x030100110100000000000000000000000000030d40",
+       "0x16"
+      ]
+     }
+    ],
+    "execution_resources": {
+     "l1_gas": 0,
+     "l1_data_gas": 0,
+     "l2_gas": 0
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30500,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "starknet",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionReceipt": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "Packet does not match lzMessageId"
+   }
+  },
+  {
+   "name": "zero-padded from_address",
+   "receipt": {
+    "type": "INVOKE",
+    "transaction_hash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "actual_fee": {
+     "amount": "0x1",
+     "unit": "FRI"
+    },
+    "execution_status": "SUCCEEDED",
+    "finality_status": "ACCEPTED_ON_L2",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "block_number": 777,
+    "messages_sent": [],
+    "events": [
+     {
+      "from_address": "0x0524e065abff21d225fb7b28f26ec2f48314ace6094bc085f0a7cf1dc2660f68",
+      "keys": [
+       "0x1dce1b34b90259326b8f3d4fc4307bcd6f7daa7621d66d9d8ba984dea61cca9",
+       "0x3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c"
+      ],
+      "data": [
+       "0x3",
+       "0x010000000000000007000077240a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0000759500000000000000000000000022",
+       "0x22222222222222222222222222222222222222b8bb68f7362bb01122fcb1f3",
+       "0x1e7c2b015e315a5f76f8aaa6e8e6431a6ad81595deadbeefcafe",
+       "0x1a",
+       "0x0",
+       "0x030100110100000000000000000000000000030d40",
+       "0x16"
+      ]
+     }
+    ],
+    "execution_resources": {
+     "l1_gas": 0,
+     "l1_data_gas": 0,
+     "l2_gas": 0
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30500,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "starknet",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionReceipt": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "Packet does not match lzMessageId"
+   }
+  },
+  {
+   "name": "uppercase from_address",
+   "receipt": {
+    "type": "INVOKE",
+    "transaction_hash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "actual_fee": {
+     "amount": "0x1",
+     "unit": "FRI"
+    },
+    "execution_status": "SUCCEEDED",
+    "finality_status": "ACCEPTED_ON_L2",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "block_number": 777,
+    "messages_sent": [],
+    "events": [
+     {
+      "from_address": "0x524E065ABFF21D225FB7B28F26EC2F48314ACE6094BC085F0A7CF1DC2660F68",
+      "keys": [
+       "0x1dce1b34b90259326b8f3d4fc4307bcd6f7daa7621d66d9d8ba984dea61cca9",
+       "0x3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c"
+      ],
+      "data": [
+       "0x3",
+       "0x010000000000000007000077240a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0000759500000000000000000000000022",
+       "0x22222222222222222222222222222222222222b8bb68f7362bb01122fcb1f3",
+       "0x1e7c2b015e315a5f76f8aaa6e8e6431a6ad81595deadbeefcafe",
+       "0x1a",
+       "0x0",
+       "0x030100110100000000000000000000000000030d40",
+       "0x16"
+      ]
+     }
+    ],
+    "execution_resources": {
+     "l1_gas": 0,
+     "l1_data_gas": 0,
+     "l2_gas": 0
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30500,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "starknet",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionReceipt": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "Packet does not match lzMessageId"
+   }
+  },
+  {
+   "name": "other event selector",
+   "receipt": {
+    "type": "INVOKE",
+    "transaction_hash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "actual_fee": {
+     "amount": "0x1",
+     "unit": "FRI"
+    },
+    "execution_status": "SUCCEEDED",
+    "finality_status": "ACCEPTED_ON_L2",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "block_number": 777,
+    "messages_sent": [],
+    "events": [
+     {
+      "from_address": "0x524e065abff21d225fb7b28f26ec2f48314ace6094bc085f0a7cf1dc2660f68",
+      "keys": [
+       "0x2e054acc493442c862d345e4c94a3d3608881f4bbd103b9b97117f1f0c97e21",
+       "0x3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c"
+      ],
+      "data": [
+       "0x3",
+       "0x010000000000000007000077240a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0000759500000000000000000000000022",
+       "0x22222222222222222222222222222222222222b8bb68f7362bb01122fcb1f3",
+       "0x1e7c2b015e315a5f76f8aaa6e8e6431a6ad81595deadbeefcafe",
+       "0x1a",
+       "0x0",
+       "0x030100110100000000000000000000000000030d40",
+       "0x16"
+      ]
+     }
+    ],
+    "execution_resources": {
+     "l1_gas": 0,
+     "l1_data_gas": 0,
+     "l2_gas": 0
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30500,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "starknet",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionReceipt": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "Packet does not match lzMessageId"
+   }
+  },
+  {
+   "name": "zero-padded selector",
+   "receipt": {
+    "type": "INVOKE",
+    "transaction_hash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "actual_fee": {
+     "amount": "0x1",
+     "unit": "FRI"
+    },
+    "execution_status": "SUCCEEDED",
+    "finality_status": "ACCEPTED_ON_L2",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "block_number": 777,
+    "messages_sent": [],
+    "events": [
+     {
+      "from_address": "0x524e065abff21d225fb7b28f26ec2f48314ace6094bc085f0a7cf1dc2660f68",
+      "keys": [
+       "0x01dce1b34b90259326b8f3d4fc4307bcd6f7daa7621d66d9d8ba984dea61cca9",
+       "0x3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c"
+      ],
+      "data": [
+       "0x3",
+       "0x010000000000000007000077240a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0000759500000000000000000000000022",
+       "0x22222222222222222222222222222222222222b8bb68f7362bb01122fcb1f3",
+       "0x1e7c2b015e315a5f76f8aaa6e8e6431a6ad81595deadbeefcafe",
+       "0x1a",
+       "0x0",
+       "0x030100110100000000000000000000000000030d40",
+       "0x16"
+      ]
+     }
+    ],
+    "execution_resources": {
+     "l1_gas": 0,
+     "l1_data_gas": 0,
+     "l2_gas": 0
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30500,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "starknet",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionReceipt": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "Packet does not match lzMessageId"
+   }
+  },
+  {
+   "name": "no keys",
+   "receipt": {
+    "type": "INVOKE",
+    "transaction_hash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "actual_fee": {
+     "amount": "0x1",
+     "unit": "FRI"
+    },
+    "execution_status": "SUCCEEDED",
+    "finality_status": "ACCEPTED_ON_L2",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "block_number": 777,
+    "messages_sent": [],
+    "events": [
+     {
+      "from_address": "0x524e065abff21d225fb7b28f26ec2f48314ace6094bc085f0a7cf1dc2660f68",
+      "keys": [],
+      "data": [
+       "0x3",
+       "0x010000000000000007000077240a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0000759500000000000000000000000022",
+       "0x22222222222222222222222222222222222222b8bb68f7362bb01122fcb1f3",
+       "0x1e7c2b015e315a5f76f8aaa6e8e6431a6ad81595deadbeefcafe",
+       "0x1a",
+       "0x0",
+       "0x030100110100000000000000000000000000030d40",
+       "0x16"
+      ]
+     }
+    ],
+    "execution_resources": {
+     "l1_gas": 0,
+     "l1_data_gas": 0,
+     "l2_gas": 0
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30500,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "starknet",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionReceipt": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "Packet does not match lzMessageId"
+   }
+  },
+  {
+   "name": "without send_library key",
+   "receipt": {
+    "type": "INVOKE",
+    "transaction_hash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "actual_fee": {
+     "amount": "0x1",
+     "unit": "FRI"
+    },
+    "execution_status": "SUCCEEDED",
+    "finality_status": "ACCEPTED_ON_L2",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "block_number": 777,
+    "messages_sent": [],
+    "events": [
+     {
+      "from_address": "0x524e065abff21d225fb7b28f26ec2f48314ace6094bc085f0a7cf1dc2660f68",
+      "keys": [
+       "0x1dce1b34b90259326b8f3d4fc4307bcd6f7daa7621d66d9d8ba984dea61cca9"
+      ],
+      "data": [
+       "0x3",
+       "0x010000000000000007000077240a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0000759500000000000000000000000022",
+       "0x22222222222222222222222222222222222222b8bb68f7362bb01122fcb1f3",
+       "0x1e7c2b015e315a5f76f8aaa6e8e6431a6ad81595deadbeefcafe",
+       "0x1a",
+       "0x0",
+       "0x030100110100000000000000000000000000030d40",
+       "0x16"
+      ]
+     }
+    ],
+    "execution_resources": {
+     "l1_gas": 0,
+     "l1_data_gas": 0,
+     "l2_gas": 0
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30500,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "starknet",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionReceipt": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "Unexpected end of response"
+   }
+  },
+  {
+   "name": "truncated data",
+   "receipt": {
+    "type": "INVOKE",
+    "transaction_hash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "actual_fee": {
+     "amount": "0x1",
+     "unit": "FRI"
+    },
+    "execution_status": "SUCCEEDED",
+    "finality_status": "ACCEPTED_ON_L2",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "block_number": 777,
+    "messages_sent": [],
+    "events": [
+     {
+      "from_address": "0x524e065abff21d225fb7b28f26ec2f48314ace6094bc085f0a7cf1dc2660f68",
+      "keys": [
+       "0x1dce1b34b90259326b8f3d4fc4307bcd6f7daa7621d66d9d8ba984dea61cca9",
+       "0x3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c"
+      ],
+      "data": [
+       "0x3",
+       "0x010000000000000007000077240a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0000759500000000000000000000000022",
+       "0x22222222222222222222222222222222222222b8bb68f7362bb01122fcb1f3",
+       "0x1e7c2b015e315a5f76f8aaa6e8e6431a6ad81595deadbeefcafe",
+       "0x1a"
+      ]
+     }
+    ],
+    "execution_resources": {
+     "l1_gas": 0,
+     "l1_data_gas": 0,
+     "l2_gas": 0
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30500,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "starknet",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionReceipt": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "Unexpected end of response"
+   }
+  },
+  {
+   "name": "malformed second event",
+   "receipt": {
+    "type": "INVOKE",
+    "transaction_hash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "actual_fee": {
+     "amount": "0x1",
+     "unit": "FRI"
+    },
+    "execution_status": "SUCCEEDED",
+    "finality_status": "ACCEPTED_ON_L2",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "block_number": 777,
+    "messages_sent": [],
+    "events": [
+     {
+      "from_address": "0x524e065abff21d225fb7b28f26ec2f48314ace6094bc085f0a7cf1dc2660f68",
+      "keys": [
+       "0x1dce1b34b90259326b8f3d4fc4307bcd6f7daa7621d66d9d8ba984dea61cca9",
+       "0x3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c"
+      ],
+      "data": [
+       "0x3",
+       "0x010000000000000007000077240a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0000759500000000000000000000000022",
+       "0x22222222222222222222222222222222222222b8bb68f7362bb01122fcb1f3",
+       "0x1e7c2b015e315a5f76f8aaa6e8e6431a6ad81595deadbeefcafe",
+       "0x1a",
+       "0x0",
+       "0x030100110100000000000000000000000000030d40",
+       "0x16"
+      ]
+     },
+     {
+      "from_address": "0x524e065abff21d225fb7b28f26ec2f48314ace6094bc085f0a7cf1dc2660f68",
+      "keys": [
+       "0x1dce1b34b90259326b8f3d4fc4307bcd6f7daa7621d66d9d8ba984dea61cca9",
+       "0x3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c"
+      ],
+      "data": []
+     }
+    ],
+    "execution_resources": {
+     "l1_gas": 0,
+     "l1_data_gas": 0,
+     "l2_gas": 0
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30500,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "starknet",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionReceipt": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "Unexpected end of response"
+   }
+  },
+  {
+   "name": "unknown destination eid",
+   "receipt": {
+    "type": "INVOKE",
+    "transaction_hash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "actual_fee": {
+     "amount": "0x1",
+     "unit": "FRI"
+    },
+    "execution_status": "SUCCEEDED",
+    "finality_status": "ACCEPTED_ON_L2",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "block_number": 777,
+    "messages_sent": [],
+    "events": [
+     {
+      "from_address": "0x524e065abff21d225fb7b28f26ec2f48314ace6094bc085f0a7cf1dc2660f68",
+      "keys": [
+       "0x1dce1b34b90259326b8f3d4fc4307bcd6f7daa7621d66d9d8ba984dea61cca9",
+       "0x3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c"
+      ],
+      "data": [
+       "0x3",
+       "0x010000000000000007000077240a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a00007cff00000000000000000000000022",
+       "0x222222222222222222222222222222222222222fb2b340bce45eb2e203b4b2",
+       "0x8e0750c0d77b9ee2445316063d76e32d4590a7bbdeadbeefcafe",
+       "0x1a",
+       "0x0",
+       "0x030100110100000000000000000000000000030d40",
+       "0x16"
+      ]
+     }
+    ],
+    "execution_resources": {
+     "l1_gas": 0,
+     "l1_data_gas": 0,
+     "l2_gas": 0
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30500,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "starknet",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionReceipt": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "Invariant failed: Invalid endpointId: 31999"
+   }
+  },
+  {
+   "name": "reverted",
+   "receipt": {
+    "type": "INVOKE",
+    "transaction_hash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "actual_fee": {
+     "amount": "0x1",
+     "unit": "FRI"
+    },
+    "execution_status": "REVERTED",
+    "finality_status": "ACCEPTED_ON_L2",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "block_number": 777,
+    "messages_sent": [],
+    "events": [
+     {
+      "from_address": "0x524e065abff21d225fb7b28f26ec2f48314ace6094bc085f0a7cf1dc2660f68",
+      "keys": [
+       "0x1dce1b34b90259326b8f3d4fc4307bcd6f7daa7621d66d9d8ba984dea61cca9",
+       "0x3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c"
+      ],
+      "data": [
+       "0x3",
+       "0x010000000000000007000077240a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0000759500000000000000000000000022",
+       "0x22222222222222222222222222222222222222b8bb68f7362bb01122fcb1f3",
+       "0x1e7c2b015e315a5f76f8aaa6e8e6431a6ad81595deadbeefcafe",
+       "0x1a",
+       "0x0",
+       "0x030100110100000000000000000000000000030d40",
+       "0x16"
+      ]
+     }
+    ],
+    "execution_resources": {
+     "l1_gas": 0,
+     "l1_data_gas": 0,
+     "l2_gas": 0
+    },
+    "revert_reason": "boom"
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30500,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "starknet",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionReceipt": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "Transaction failed for tx 0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+   }
+  },
+  {
+   "name": "no block hash",
+   "receipt": {
+    "type": "INVOKE",
+    "transaction_hash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "actual_fee": {
+     "amount": "0x1",
+     "unit": "FRI"
+    },
+    "execution_status": "SUCCEEDED",
+    "finality_status": "ACCEPTED_ON_L2",
+    "block_number": 777,
+    "messages_sent": [],
+    "events": [
+     {
+      "from_address": "0x524e065abff21d225fb7b28f26ec2f48314ace6094bc085f0a7cf1dc2660f68",
+      "keys": [
+       "0x1dce1b34b90259326b8f3d4fc4307bcd6f7daa7621d66d9d8ba984dea61cca9",
+       "0x3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c"
+      ],
+      "data": [
+       "0x3",
+       "0x010000000000000007000077240a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0000759500000000000000000000000022",
+       "0x22222222222222222222222222222222222222b8bb68f7362bb01122fcb1f3",
+       "0x1e7c2b015e315a5f76f8aaa6e8e6431a6ad81595deadbeefcafe",
+       "0x1a",
+       "0x0",
+       "0x030100110100000000000000000000000000030d40",
+       "0x16"
+      ]
+     }
+    ],
+    "execution_resources": {
+     "l1_gas": 0,
+     "l1_data_gas": 0,
+     "l2_gas": 0
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30500,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "starknet",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionReceipt": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "Block hash not yet populated for tx 0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+   }
+  },
+  {
+   "name": "destination outside the configuration",
+   "receipt": {
+    "type": "INVOKE",
+    "transaction_hash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "actual_fee": {
+     "amount": "0x1",
+     "unit": "FRI"
+    },
+    "execution_status": "SUCCEEDED",
+    "finality_status": "ACCEPTED_ON_L2",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "block_number": 777,
+    "messages_sent": [],
+    "events": [
+     {
+      "from_address": "0x524e065abff21d225fb7b28f26ec2f48314ace6094bc085f0a7cf1dc2660f68",
+      "keys": [
+       "0x1dce1b34b90259326b8f3d4fc4307bcd6f7daa7621d66d9d8ba984dea61cca9",
+       "0x3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c"
+      ],
+      "data": [
+       "0x3",
+       "0x010000000000000007000077240a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0000759600000000000000000000000022",
+       "0x222222222222222222222222222222222222225538e459c42d9c67d2e7e87f",
+       "0x7c15864f6c9af007de20676e2bbca7c1e26084c8deadbeefcafe",
+       "0x1a",
+       "0x0",
+       "0x030100110100000000000000000000000000030d40",
+       "0x16"
+      ]
+     }
+    ],
+    "execution_resources": {
+     "l1_gas": 0,
+     "l1_data_gas": 0,
+     "l2_gas": 0
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30500,
+     "dstEid": 30102,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "starknet",
+     "dstChainName": "bsc"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionReceipt": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "starknet",
+      "txHash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "blockNumber": 777,
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcEid": 30500,
+       "srcChainName": "starknet",
+       "dstEid": 30102,
+       "dstChainName": "bsc",
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V302"
+     },
+     "guid": "0x5538e459c42d9c67d2e7e87f7c15864f6c9af007de20676e2bbca7c1e26084c8",
+     "message": "0xdeadbeefcafe",
+     "options": {
+      "lzReceive": {
+       "gas": "200000",
+       "value": "0"
+      },
+      "ordered": false
+     },
+     "sendLibrary": "106426552607827385499605684750632268247490794729449047830383808830802508860"
+    }
+   }
+  },
+  {
+   "name": "destination on another stage",
+   "receipt": {
+    "type": "INVOKE",
+    "transaction_hash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "actual_fee": {
+     "amount": "0x1",
+     "unit": "FRI"
+    },
+    "execution_status": "SUCCEEDED",
+    "finality_status": "ACCEPTED_ON_L2",
+    "block_hash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "block_number": 777,
+    "messages_sent": [],
+    "events": [
+     {
+      "from_address": "0x524e065abff21d225fb7b28f26ec2f48314ace6094bc085f0a7cf1dc2660f68",
+      "keys": [
+       "0x1dce1b34b90259326b8f3d4fc4307bcd6f7daa7621d66d9d8ba984dea61cca9",
+       "0x3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c"
+      ],
+      "data": [
+       "0x3",
+       "0x010000000000000007000077240a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a00009ce100000000000000000000000022",
+       "0x22222222222222222222222222222222222222f05ea73dbd2e64cd082c6937",
+       "0x9bee43cbf23050902b00eb0b37178d3c7225c449deadbeefcafe",
+       "0x1a",
+       "0x0",
+       "0x030100110100000000000000000000000000030d40",
+       "0x16"
+      ]
+     }
+    ],
+    "execution_resources": {
+     "l1_gas": 0,
+     "l1_data_gas": 0,
+     "l2_gas": 0
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30500,
+     "dstEid": 40161,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "starknet",
+     "dstChainName": "sepolia"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransactionReceipt": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "starknet",
+      "txHash": "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "blockNumber": 777,
+      "blockHash": "0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcEid": 30500,
+       "srcChainName": "starknet",
+       "dstEid": 40161,
+       "dstChainName": "sepolia",
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V302"
+     },
+     "guid": "0xf05ea73dbd2e64cd082c69379bee43cbf23050902b00eb0b37178d3c7225c449",
+     "message": "0xdeadbeefcafe",
+     "options": {
+      "lzReceive": {
+       "gas": "200000",
+       "value": "0"
+      },
+      "ordered": false
+     },
+     "sendLibrary": "106426552607827385499605684750632268247490794729449047830383808830802508860"
+    }
+   }
+  }
+ ]
+}

@@ -4,13 +4,10 @@ use super::*;
 async fn provider_health_probes_ton_v2_and_v3_masterchain_info_like_typescript() {
     let getter = StaticProviderConfig::new(indexmap::IndexMap::from([(
         "ton".to_string(),
-        ProviderConfig {
-            uris: vec![ProviderUri::UriWithHeaders {
-                uri: "https://ton-rpc.example/api/v2?v3-endpoint=https%3A%2F%2Fton-rpc.example%2Fapi%2Fv3&api-key=secret-token&timeout=10".to_string(),
-                headers: HashMap::from([("x-extra".to_string(), "yes".to_string())]),
-            }],
-            quorum: Some(1),
-        },
+        ProviderConfig::with_distinct_entities(vec![ProviderUri::UriWithHeaders {
+            uri: "https://ton-rpc.example/api/v2?v3-endpoint=https%3A%2F%2Fton-rpc.example%2Fapi%2Fv3&api-key=secret-token&timeout=10".to_string(),
+            headers: HashMap::from([("x-extra".to_string(), "yes".to_string())]),
+        }], 1),
     )]), Some(&["ton".to_string()]))
         .unwrap();
     let calls = Arc::new(Mutex::new(Vec::new()));
@@ -32,7 +29,7 @@ async fn provider_health_probes_ton_v2_and_v3_masterchain_info_like_typescript()
         HashMap::from([("ton".to_string(), "TON".to_string())]),
     );
 
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
 
     assert!(report["ton"].healthy);
     assert_eq!(report["ton"].checked_at_unix_ms, 6666);
@@ -72,12 +69,12 @@ async fn provider_health_marks_ton_unhealthy_when_masterchain_info_probe_fails()
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "ton".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri(
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri(
                     "https://ton-rpc.example/api/v2".to_string(),
                 )],
-                quorum: Some(1),
-            },
+                1,
+            ),
         )]),
         Some(&["ton".to_string()]),
     )
@@ -93,7 +90,7 @@ async fn provider_health_marks_ton_unhealthy_when_masterchain_info_probe_fails()
         HashMap::from([("ton".to_string(), "TON".to_string())]),
     );
 
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
 
     assert!(!report["ton"].healthy);
     assert_eq!(

@@ -5,13 +5,13 @@ async fn provider_health_probes_sui_latest_checkpoint_like_typescript() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "sui".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::UriWithHeaders {
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::UriWithHeaders {
                     uri: "https://sui-rpc.example".to_string(),
                     headers: HashMap::from([("x-api-key".to_string(), "token".to_string())]),
                 }],
-                quorum: Some(1),
-            },
+                1,
+            ),
         )]),
         Some(&["sui".to_string()]),
     )
@@ -28,7 +28,7 @@ async fn provider_health_probes_sui_latest_checkpoint_like_typescript() {
         HashMap::from([("sui".to_string(), "SUI".to_string())]),
     );
 
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
 
     assert!(report["sui"].healthy);
     assert_eq!(report["sui"].checked_at_unix_ms, 3333);
@@ -53,10 +53,10 @@ async fn provider_health_marks_sui_unhealthy_when_checkpoint_probe_fails() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "sui".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://sui-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://sui-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["sui".to_string()]),
     )
@@ -72,7 +72,7 @@ async fn provider_health_marks_sui_unhealthy_when_checkpoint_probe_fails() {
         HashMap::from([("sui".to_string(), "SUI".to_string())]),
     );
 
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
 
     assert!(!report["sui"].healthy);
     assert_eq!(
@@ -87,16 +87,16 @@ async fn provider_health_probes_starknet_block_number_like_typescript() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "starknet".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::UriWithHeaders {
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::UriWithHeaders {
                     uri: "https://starknet-rpc.example".to_string(),
                     headers: HashMap::from([(
                         "authorization".to_string(),
                         "Bearer starknet-token".to_string(),
                     )]),
                 }],
-                quorum: Some(1),
-            },
+                1,
+            ),
         )]),
         Some(&["starknet".to_string()]),
     )
@@ -113,7 +113,7 @@ async fn provider_health_probes_starknet_block_number_like_typescript() {
         HashMap::from([("starknet".to_string(), "STARKNET".to_string())]),
     );
 
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
 
     assert!(report["starknet"].healthy);
     assert_eq!(report["starknet"].checked_at_unix_ms, 4444);
@@ -140,10 +140,10 @@ async fn provider_health_marks_starknet_unhealthy_when_block_number_probe_fails(
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "starknet".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://starknet-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://starknet-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["starknet".to_string()]),
     )
@@ -161,7 +161,7 @@ async fn provider_health_marks_starknet_unhealthy_when_block_number_probe_fails(
         HashMap::from([("starknet".to_string(), "STARKNET".to_string())]),
     );
 
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
 
     assert!(!report["starknet"].healthy);
     assert_eq!(
@@ -176,10 +176,10 @@ async fn provider_health_probes_iota_latest_checkpoint() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "iotal1".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://iota-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://iota-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["iotal1".to_string()]),
     )
@@ -195,7 +195,7 @@ async fn provider_health_probes_iota_latest_checkpoint() {
         || 4444,
         HashMap::from([("iotal1".to_string(), "IOTAMOVE".to_string())]),
     );
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
     assert!(report["iotal1"].healthy);
     assert_eq!(
         report["iotal1"].providers[0].numeric_response,

@@ -50,6 +50,19 @@ impl RuntimeValidationChecks for FixedValidationChecks {
         self.calls.lock().unwrap().push("extra".to_string());
         Ok(())
     }
+
+    async fn uln_receive_version(
+        &self,
+        _lz_message_id: &LzMessageId,
+    ) -> Result<String, AppCoreError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push("receive-version".to_string());
+        Err(AppCoreError::Internal(
+            "no receive library in this test".to_string(),
+        ))
+    }
 }
 
 pub(super) struct FixedChainResolver;

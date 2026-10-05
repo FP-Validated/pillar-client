@@ -54,11 +54,16 @@ impl GoogleCloudKmsClient {
 
     pub async fn from_default_credentials() -> Result<Self, SignerError> {
         let client = GcpKeyManagementService::builder()
+            .with_retry_policy(google_cloud_gax::retry_policy::NeverRetry)
             .build()
             .await
             .map_err(|error| SignerError::Message(error.to_string()))?;
         Ok(Self::new(client))
     }
+}
+
+pub(crate) fn response_identity_matches(name: &str, expected: &str) -> bool {
+    (name.is_empty() && !pillar_core::audit::enabled()) || name == expected
 }
 
 #[async_trait]
@@ -76,6 +81,11 @@ impl GcpKmsClient for GoogleCloudKmsClient {
             .send()
             .await
             .map_err(|error| SignerError::Message(error.to_string()))?;
+        if !response_identity_matches(&response.name, version_name) {
+            return Err(SignerError::Message(
+                "GCP KMS: signing key identity changed".into(),
+            ));
+        }
         if response.signature.is_empty() {
             return Err(SignerError::Message(
                 "GCP KMS: asymmetricSign() failed".to_string(),
@@ -92,6 +102,11 @@ impl GcpKmsClient for GoogleCloudKmsClient {
             .send()
             .await
             .map_err(|error| SignerError::Message(error.to_string()))?;
+        if !response_identity_matches(&public_key.name, version_name) {
+            return Err(SignerError::Message(
+                "GCP KMS: public key identity changed".into(),
+            ));
+        }
         if public_key.pem.is_empty() {
             return Err(SignerError::Message(format!(
                 "Cannot find public key: {version_name}"
@@ -125,6 +140,12 @@ impl<C> RawSignerAdapter for GcpKmsRawSignerAdapter<C>
 where
     C: GcpKmsClient,
 {
+    fn supports_durable_audit(&self) -> bool {
+        true
+    }
+    fn kms_provider(&self) -> Option<KmsProvider> {
+        Some(KmsProvider::Gcp)
+    }
     async fn sign(&self, request: SignRequest) -> Result<Vec<u8>, SignerError> {
         if request.signature_type != SignatureType::Ecdsa {
             return Err(SignerError::Message(format!(
@@ -139,10 +160,45 @@ where
                 seed_kind: request.seed_kind,
             })
             .await?;
-        let der_signature = self
-            .client
-            .asymmetric_sign_sha256_digest(&self.version_name, &request.data)
-            .await?;
+        let identity = crate::effects::identity(
+            "gcp",
+            &self.version_name,
+            || {
+                self.version_name
+                    .rsplit_once("/cryptoKeyVersions/")
+                    .map(|(_, version)| version)
+                    .filter(|version| version.parse::<u64>().is_ok_and(|value| value > 0))
+                    .unwrap_or("")
+            },
+            &public_key,
+        );
+        let der_signature = if pillar_core::audit::enabled() {
+            let digest = crate::effects::owned_digest(&request.data)?;
+            let client = self.client.clone();
+            let version_name = self.version_name.clone();
+            crate::effects::sign_owned_effect(
+                &self.version_name,
+                identity,
+                &request.data,
+                "ecdsa",
+                async move {
+                    client
+                        .asymmetric_sign_sha256_digest(&version_name, &digest)
+                        .await
+                },
+            )
+            .await?
+        } else {
+            crate::effects::sign_effect(
+                &self.version_name,
+                None,
+                &request.data,
+                "ecdsa",
+                self.client
+                    .asymmetric_sign_sha256_digest(&self.version_name, &request.data),
+            )
+            .await?
+        };
         kms_ecdsa_signature_to_recoverable(
             &der_signature,
             KmsEcdsaSignatureEncoding::Der,
@@ -159,12 +215,27 @@ where
                 request.signature_type
             )));
         }
-        if let Some(cached) = self.public_key.lock().await.clone() {
-            return Ok(cached);
+        if pillar_core::audit::enabled()
+            && !self
+                .version_name
+                .rsplit_once("/cryptoKeyVersions/")
+                .is_some_and(|(_, version)| version.parse::<u64>().is_ok_and(|value| value > 0))
+        {
+            return Err(SignerError::Message(
+                "durable audit: unresolved GCP key version".into(),
+            ));
         }
-        let pem = self.client.get_public_key_pem(&self.version_name).await?;
+        let mut cached = self.public_key.lock().await;
+        if let Some(public_key) = cached.as_ref() {
+            return Ok(public_key.clone());
+        }
+        let pem = crate::effects::kms_operation(
+            &self.version_name,
+            self.client.get_public_key_pem(&self.version_name),
+        )
+        .await?;
         let public_key = ecdsa_public_key_from_pem(&pem)?;
-        *self.public_key.lock().await = Some(public_key.clone());
+        *cached = Some(public_key.clone());
         Ok(public_key)
     }
 }

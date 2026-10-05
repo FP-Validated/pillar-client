@@ -1,0 +1,138 @@
+{
+  "_provenance": {
+    "what": "The vid each deployed LayerZero Labs DVN contract on testnet doma, lineasep and zksyncsep returns from vid(). DVN.verify/execute reject call data whose packed vid differs, so the signed vid must equal this value.",
+    "sources": {
+      "dvnAddressesAndChainIds": "https://metadata.layerzero-api.com/v1/metadata/deployments (lineasep-testnet nativeChainId 59141, zksyncsep-testnet nativeChainId 300, `dvns` map); doma and scroll DVN addresses from https://metadata.layerzero-api.com/v1/metadata/dvns?environment=testnet (response sha256 c235a796702d439a144989f2cf32009af9b4d2ee16dc01e170e8de068e620be9, recorded 2026-10-04)",
+      "onChain": "eth_call vid() (selector 0xcf34c768 = keccak256(\"vid()\")[:4], from the Linea node's web3_sha3) at block tag latest against the public RPC listed per row, after eth_chainId matched the metadata chain"
+    },
+    "upstream": "gasolina-audit 213cd500 packages/static-config/src/index.ts:191-195 returns EndpointV2 id % 30000 for every chain ('By convention the vid is alwayd the endpointV2 chainId modulo 30000'), i.e. 10425 for doma, 10287 for lineasep and 10305 for zksyncsep. Every row below disagrees with that and equals the EndpointV1 id (10423, 10286, 10248).",
+    "notVerified": "scroll: see `unverified`; it keeps the EndpointV1 id 10214 as a corrected input without on-chain confirmation.",
+    "howToRegenerate": "POST eth_chainId then eth_call {to: <dvn>, data: 0xcf34c768} to each rpc; no key needed."
+  },
+  "unverified": [
+    {
+      "environment": "testnet",
+      "chain": "scroll",
+      "dvn": "0xb186f85d0604fe58af2ea33fe40244f5eef7351b",
+      "dvnSource": "metadata dvns?environment=testnet, scroll entry, LayerZero Labs",
+      "eth_chainIdAttempts": {
+        "https://scroll-sepolia.publicnode.com": "HTTP 403 (also with a browser user-agent)",
+        "https://scroll-sepolia-rpc.publicnode.com": "HTTP 403",
+        "https://sepolia-rpc.scroll.io": "HTTP 404 (also with trailing slash)",
+        "https://scroll-sepolia.drpc.org": "HTTP 400, chain not available on free plan",
+        "https://scroll-sepolia.blockpi.network/v1/rpc/public": "HTTP 521"
+      },
+      "capturedAt": "2026-10-04"
+    }
+  ],
+  "observations": [
+    {
+      "environment": "testnet",
+      "chain": "doma",
+      "rpc": "https://rpc-testnet.doma.xyz",
+      "eth_chainId": "0x17cc4",
+      "eth_chainId_decimal": 97476,
+      "dvn": "0xfee867ed545f26621dc701e6164e02ead9c6b081",
+      "metadataEntry": {
+        "canonicalName": "LayerZero Labs",
+        "id": "layerzero-labs",
+        "version": 2
+      },
+      "codePresent": true,
+      "call": {
+        "selector": "0xcf34c768",
+        "signature": "vid()"
+      },
+      "rawResult": "0x00000000000000000000000000000000000000000000000000000000000028b7",
+      "vid": 10423,
+      "responseSha256": "efca6fb7f073b99447fd29132a3a05c3c4a4eb9b3924fec17ee7a96a9f7cfde0",
+      "capturedAt": "2026-10-04"
+    },
+    {
+      "environment": "testnet",
+      "chain": "lineasep",
+      "rpc": "https://rpc.sepolia.linea.build",
+      "eth_chainId": "0xe705",
+      "eth_chainId_decimal": 59141,
+      "dvn": "0x701f3927871efcea1235db722f9e608ae120d243",
+      "metadataEntry": {
+        "canonicalName": "LayerZero Labs",
+        "id": "layerzero-labs",
+        "version": 2
+      },
+      "codePresent": true,
+      "call": {
+        "selector": "0xcf34c768",
+        "signature": "vid()"
+      },
+      "rawResult": "0x000000000000000000000000000000000000000000000000000000000000282e",
+      "vid": 10286,
+      "capturedAt": "2026-10-04T03:10:04Z"
+    },
+    {
+      "environment": "testnet",
+      "chain": "zksyncsep",
+      "rpc": "https://sepolia.era.zksync.dev",
+      "eth_chainId": "0x12c",
+      "eth_chainId_decimal": 300,
+      "dvn": "0x605688c4caa80d17448e074faa463ed7b7693d63",
+      "metadataEntry": {
+        "canonicalName": "LayerZero Labs",
+        "id": "layerzero-labs",
+        "version": 2
+      },
+      "codePresent": true,
+      "call": {
+        "selector": "0xcf34c768",
+        "signature": "vid()"
+      },
+      "rawResult": "0x0000000000000000000000000000000000000000000000000000000000002808",
+      "vid": 10248,
+      "capturedAt": "2026-10-04T03:10:07Z"
+    },
+    {
+      "environment": "testnet",
+      "chain": "zksyncsep",
+      "rpc": "https://sepolia.era.zksync.dev",
+      "eth_chainId": "0x12c",
+      "eth_chainId_decimal": 300,
+      "dvn": "0xf0326814d47c2a2a4e34fc0ad066683b1100a875",
+      "metadataEntry": {
+        "canonicalName": "LayerZero Labs",
+        "id": "layerzero-labs",
+        "version": 2,
+        "deprecated": true
+      },
+      "codePresent": true,
+      "call": {
+        "selector": "0xcf34c768",
+        "signature": "vid()"
+      },
+      "rawResult": "0x0000000000000000000000000000000000000000000000000000000000002808",
+      "vid": 10248,
+      "capturedAt": "2026-10-04T03:10:06Z"
+    },
+    {
+      "environment": "testnet",
+      "chain": "zksyncsep",
+      "rpc": "https://sepolia.era.zksync.dev",
+      "eth_chainId": "0x12c",
+      "eth_chainId_decimal": 300,
+      "dvn": "0xf52d98b18451eb5501d9929ec40a4caccd2e7e38",
+      "metadataEntry": {
+        "canonicalName": "LayerZero Labs",
+        "id": "layerzero-labs",
+        "version": 2,
+        "deprecated": true
+      },
+      "codePresent": true,
+      "call": {
+        "selector": "0xcf34c768",
+        "signature": "vid()"
+      },
+      "rawResult": "0x0000000000000000000000000000000000000000000000000000000000002808",
+      "vid": 10248,
+      "capturedAt": "2026-10-04T03:10:05Z"
+    }
+  ]
+}

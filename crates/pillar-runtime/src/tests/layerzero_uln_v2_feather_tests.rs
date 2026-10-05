@@ -7,10 +7,10 @@ async fn runtime_evm_uln_v2_payload_builder_discovers_feather_proof_type_from_de
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "bsc".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://bsc-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://bsc-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["bsc".to_string()]),
     )
@@ -29,7 +29,7 @@ async fn runtime_evm_uln_v2_payload_builder_discovers_feather_proof_type_from_de
                     "0x2222222222222222222222222222222222222222",
                 )),
                 eth_call_result(&abi_address_word(proof_library)),
-                eth_call_result(&abi_word(3)),
+                eth_call_result(&abi_word(1)),
                 eth_call_result(&abi_word(2)),
             ])),
         },

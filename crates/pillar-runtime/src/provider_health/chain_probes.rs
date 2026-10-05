@@ -4,13 +4,13 @@ pub(crate) async fn probe_json_rpc_provider<T>(
     transport: T,
     url: String,
     headers: HashMap<String, String>,
-) -> ProviderHealthEntry
+) -> Result<ProviderHealthEntry, RpcError>
 where
     T: JsonRpcTransport,
 {
     let started_at = Instant::now();
     let response = match transport
-        .post_json(
+        .post_json_scoped(
             url.clone(),
             headers.clone(),
             json!({
@@ -23,8 +23,11 @@ where
         .await
     {
         Ok(response) => response.get("result").cloned().unwrap_or(Value::Null),
+        Err(error @ (RpcError::Admission(_) | RpcError::Configuration(_))) => {
+            health_error_response(error)?
+        }
         Err(chain_id_error) => match transport
-            .post_json(
+            .post_json_scoped(
                 url.clone(),
                 headers,
                 json!({
@@ -37,26 +40,33 @@ where
             .await
         {
             Ok(response) => response.get("result").cloned().unwrap_or(Value::Null),
+            Err(error @ (RpcError::Admission(_) | RpcError::Configuration(_))) => {
+                health_error_response(error)?
+            }
             Err(net_version_error) => Value::String(format!(
                 "eth_chainId error: {chain_id_error}; net_version error: {net_version_error}"
             )),
         },
     };
 
-    normalize_provider_health_entry(url, response, Some(started_at.elapsed().as_millis() as u64))
+    Ok(normalize_provider_health_entry(
+        url,
+        response,
+        Some(started_at.elapsed().as_millis() as u64),
+    ))
 }
 
 pub(crate) async fn probe_json_rpc_block_number_provider<T>(
     transport: T,
     url: String,
     headers: HashMap<String, String>,
-) -> ProviderHealthEntry
+) -> Result<ProviderHealthEntry, RpcError>
 where
     T: JsonRpcTransport,
 {
     let started_at = Instant::now();
     let response = match transport
-        .post_json(
+        .post_json_scoped(
             url.clone(),
             headers,
             json!({
@@ -69,10 +79,15 @@ where
         .await
     {
         Ok(response) => response.get("result").cloned().unwrap_or(Value::Null),
-        Err(error) => Value::String(error),
+        Err(RpcError::Remote(error)) => Value::String(error),
+        Err(error) => health_error_response(error)?,
     };
 
-    normalize_provider_health_entry(url, response, Some(started_at.elapsed().as_millis() as u64))
+    Ok(normalize_provider_health_entry(
+        url,
+        response,
+        Some(started_at.elapsed().as_millis() as u64),
+    ))
 }
 
 pub(crate) async fn probe_tron_web_provider_health<T>(
@@ -80,13 +95,13 @@ pub(crate) async fn probe_tron_web_provider_health<T>(
     report_url: String,
     request_url: String,
     headers: HashMap<String, String>,
-) -> ProviderHealthEntry
+) -> Result<ProviderHealthEntry, RpcError>
 where
     T: JsonRpcTransport,
 {
     let started_at = Instant::now();
     let response = match transport
-        .post_json(
+        .post_json_scoped(
             request_url,
             headers,
             json!({
@@ -101,12 +116,13 @@ where
             .and_then(|raw_data| raw_data.get("number"))
             .cloned()
             .unwrap_or(Value::Null),
-        Err(error) => Value::String(error),
+        Err(RpcError::Remote(error)) => Value::String(error),
+        Err(error) => health_error_response(error)?,
     };
 
-    normalize_provider_health_entry(
+    Ok(normalize_provider_health_entry(
         report_url,
         response,
         Some(started_at.elapsed().as_millis() as u64),
-    )
+    ))
 }

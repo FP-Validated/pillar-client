@@ -4,13 +4,13 @@ pub(crate) async fn probe_solana_provider_health<T>(
     transport: T,
     url: String,
     headers: HashMap<String, String>,
-) -> ProviderHealthEntry
+) -> Result<ProviderHealthEntry, RpcError>
 where
     T: JsonRpcTransport,
 {
     let started_at = Instant::now();
     let response = match transport
-        .post_json(
+        .post_json_scoped(
             url.clone(),
             headers,
             json!({
@@ -23,10 +23,15 @@ where
         .await
     {
         Ok(response) => response.get("result").cloned().unwrap_or(Value::Null),
-        Err(error) => Value::String(error),
+        Err(RpcError::Remote(error)) => Value::String(error),
+        Err(error) => health_error_response(error)?,
     };
 
-    normalize_provider_health_entry(url, response, Some(started_at.elapsed().as_millis() as u64))
+    Ok(normalize_provider_health_entry(
+        url,
+        response,
+        Some(started_at.elapsed().as_millis() as u64),
+    ))
 }
 
 pub(crate) async fn probe_sui_provider_health<T>(
@@ -34,7 +39,7 @@ pub(crate) async fn probe_sui_provider_health<T>(
     transport: T,
     url: String,
     headers: HashMap<String, String>,
-) -> ProviderHealthEntry
+) -> Result<ProviderHealthEntry, RpcError>
 where
     T: JsonRpcTransport,
 {
@@ -45,7 +50,7 @@ where
         "sui_getLatestCheckpointSequenceNumber"
     };
     let response = match transport
-        .post_json(
+        .post_json_scoped(
             url.clone(),
             headers,
             json!({
@@ -58,23 +63,28 @@ where
         .await
     {
         Ok(response) => response.get("result").cloned().unwrap_or(Value::Null),
-        Err(error) => Value::String(error),
+        Err(RpcError::Remote(error)) => Value::String(error),
+        Err(error) => health_error_response(error)?,
     };
 
-    normalize_provider_health_entry(url, response, Some(started_at.elapsed().as_millis() as u64))
+    Ok(normalize_provider_health_entry(
+        url,
+        response,
+        Some(started_at.elapsed().as_millis() as u64),
+    ))
 }
 
 pub(crate) async fn probe_starknet_provider_health<T>(
     transport: T,
     url: String,
     headers: HashMap<String, String>,
-) -> ProviderHealthEntry
+) -> Result<ProviderHealthEntry, RpcError>
 where
     T: JsonRpcTransport,
 {
     let started_at = Instant::now();
     let response = match transport
-        .post_json(
+        .post_json_scoped(
             url.clone(),
             headers,
             json!({
@@ -87,23 +97,28 @@ where
         .await
     {
         Ok(response) => response.get("result").cloned().unwrap_or(Value::Null),
-        Err(error) => Value::String(error),
+        Err(RpcError::Remote(error)) => Value::String(error),
+        Err(error) => health_error_response(error)?,
     };
 
-    normalize_provider_health_entry(url, response, Some(started_at.elapsed().as_millis() as u64))
+    Ok(normalize_provider_health_entry(
+        url,
+        response,
+        Some(started_at.elapsed().as_millis() as u64),
+    ))
 }
 
 pub(crate) async fn probe_stellar_provider_health<T>(
     transport: T,
     url: String,
     headers: HashMap<String, String>,
-) -> ProviderHealthEntry
+) -> Result<ProviderHealthEntry, RpcError>
 where
     T: JsonRpcTransport,
 {
     let started_at = Instant::now();
     let response = match transport
-        .post_json(
+        .post_json_scoped(
             url.clone(),
             headers,
             json!({
@@ -120,8 +135,13 @@ where
             .and_then(|result| result.get("sequence"))
             .cloned()
             .unwrap_or(Value::Null),
-        Err(error) => Value::String(error),
+        Err(RpcError::Remote(error)) => Value::String(error),
+        Err(error) => health_error_response(error)?,
     };
 
-    normalize_provider_health_entry(url, response, Some(started_at.elapsed().as_millis() as u64))
+    Ok(normalize_provider_health_entry(
+        url,
+        response,
+        Some(started_at.elapsed().as_millis() as u64),
+    ))
 }

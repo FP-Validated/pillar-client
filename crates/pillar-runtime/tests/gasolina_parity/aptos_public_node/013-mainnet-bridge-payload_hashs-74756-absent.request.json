@@ -1,0 +1,10 @@
+{
+ "method": "POST",
+ "url": "https://api.mainnet.aptoslabs.com/v1/tables/0x2764ee5b95601c6f37ea1f94f0b056ee2c0c5b0ce5cafd83a1b37d433e935420/item",
+ "headers": {
+  "accept": "application/json",
+  "content-type": "application/json"
+ },
+ "body": "{\"key_type\":\"u64\",\"value_type\":\"vector<u8>\",\"key\":\"74756\"}",
+ "utc": "2026-10-04T10:33:15Z"
+}

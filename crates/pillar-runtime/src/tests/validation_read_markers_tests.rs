@@ -5,10 +5,10 @@ async fn runtime_rpc_validation_checks_validates_read_resolved_time_markers() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "bsc".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://bsc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://bsc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["bsc".to_string()]),
     )
@@ -258,10 +258,10 @@ async fn runtime_rpc_validation_checks_rejects_invalid_read_resolved_time_marker
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "bsc".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://bsc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://bsc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["bsc".to_string()]),
     )
@@ -326,10 +326,10 @@ async fn runtime_rpc_validation_checks_rejects_unconfirmed_read_time_marker() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "bsc".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://bsc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://bsc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["bsc".to_string()]),
     )
@@ -375,10 +375,10 @@ async fn runtime_rpc_validation_checks_rejects_read_marker_confirmation_overflow
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "bsc".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://bsc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://bsc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["bsc".to_string()]),
     )
@@ -423,10 +423,10 @@ async fn runtime_rpc_validation_checks_rejects_non_evm_read_time_marker_chain() 
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "solana".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["solana".to_string()]),
     )

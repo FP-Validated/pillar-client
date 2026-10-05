@@ -5,13 +5,13 @@ async fn provider_health_requires_all_providers_healthy_like_typescript() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "ethereum".to_string(),
-            ProviderConfig {
-                uris: vec![
+            ProviderConfig::with_distinct_entities(
+                vec![
                     ProviderUri::Uri("https://healthy-rpc.example".to_string()),
                     ProviderUri::Uri("https://bad-rpc.example".to_string()),
                 ],
-                quorum: Some(1),
-            },
+                1,
+            ),
         )]),
         Some(&["ethereum".to_string()]),
     )
@@ -26,7 +26,7 @@ async fn provider_health_requires_all_providers_healthy_like_typescript() {
         ])),
     };
     let source = RpcProviderHealthSource::from_getter(&getter, transport, || 1);
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
 
     assert!(!report["ethereum"].healthy);
     assert_eq!(report["ethereum"].providers.len(), 2);
@@ -48,10 +48,10 @@ async fn provider_health_does_not_probe_non_evm_chains_with_evm_rpc_methods() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "iotal1".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://iota-rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://iota-rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["iotal1".to_string()]),
     )
@@ -68,7 +68,7 @@ async fn provider_health_does_not_probe_non_evm_chains_with_evm_rpc_methods() {
         HashMap::from([("iotal1".to_string(), "IOTAMOVE".to_string())]),
     );
 
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
 
     assert!(report["iotal1"].healthy);
     assert_eq!(report["iotal1"].checked_at_unix_ms, 1234);
@@ -93,17 +93,17 @@ async fn provider_health_probes_chains_concurrently() {
         indexmap::IndexMap::from([
             (
                 "ethereum".to_string(),
-                ProviderConfig {
-                    uris: vec![ProviderUri::Uri("https://ethereum-rpc.example".to_string())],
-                    quorum: Some(1),
-                },
+                ProviderConfig::with_distinct_entities(
+                    vec![ProviderUri::Uri("https://ethereum-rpc.example".to_string())],
+                    1,
+                ),
             ),
             (
                 "bsc".to_string(),
-                ProviderConfig {
-                    uris: vec![ProviderUri::Uri("https://bsc-rpc.example".to_string())],
-                    quorum: Some(1),
-                },
+                ProviderConfig::with_distinct_entities(
+                    vec![ProviderUri::Uri("https://bsc-rpc.example".to_string())],
+                    1,
+                ),
             ),
         ]),
         Some(&["ethereum".to_string(), "bsc".to_string()]),
@@ -117,7 +117,7 @@ async fn provider_health_probes_chains_concurrently() {
     let source = RpcProviderHealthSource::from_getter(&getter, transport, || 1);
 
     let started_at = std::time::Instant::now();
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
     let elapsed = started_at.elapsed();
 
     assert!(
@@ -168,10 +168,7 @@ async fn a_failing_probe_excludes_the_provider_from_dispatch_for_every_family() 
         let getter = StaticProviderConfig::new(
             indexmap::IndexMap::from([(
                 chain_name.to_string(),
-                ProviderConfig {
-                    uris: vec![uri.clone()],
-                    quorum: Some(1),
-                },
+                ProviderConfig::with_distinct_entities(vec![uri.clone()], 1),
             )]),
             Some(&[chain_name.to_string()]),
         )
@@ -185,7 +182,7 @@ async fn a_failing_probe_excludes_the_provider_from_dispatch_for_every_family() 
             || 0,
             HashMap::from([(chain_name.to_string(), chain_type.to_string())]),
         );
-        let report = source.get_provider_health_report().await;
+        let report = source.get_provider_health_report().await.unwrap();
         assert!(
             !report[chain_name].healthy,
             "{chain_name}: precondition - the probe has to have failed"
@@ -195,7 +192,9 @@ async fn a_failing_probe_excludes_the_provider_from_dispatch_for_every_family() 
         tracker.seed_from_report(&report).await;
 
         // What dispatch actually does with the configured URI.
-        let error = crate::provider_health::plan_dispatch(&tracker, chain_name, &[uri], 1)
+        let pool = pillar_config::ProviderConfigGetter::get_provider_config(&getter, chain_name).unwrap();
+        let quorum = crate::provider_health::required_provider_quorum(pool, chain_name).unwrap();
+        let error = crate::provider_health::plan_dispatch(&tracker, chain_name, quorum)
             .await
             .expect_err(&format!(
                 "{chain_name}: a provider observed unhealthy must be excluded, so a \

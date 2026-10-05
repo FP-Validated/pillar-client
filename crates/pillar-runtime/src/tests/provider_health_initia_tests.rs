@@ -4,13 +4,10 @@ use super::*;
 async fn provider_health_probes_initia_latest_block_like_typescript() {
     let getter = StaticProviderConfig::new(indexmap::IndexMap::from([(
         "initia".to_string(),
-        ProviderConfig {
-            uris: vec![ProviderUri::UriWithHeaders {
-                uri: "https://initia-rpc.example/lcd?event-indexer=https%3A%2F%2Findexer.example%2Fgraphql&rest-api=https%3A%2F%2Frest.example".to_string(),
-                headers: HashMap::from([("authorization".to_string(), "Bearer initia-token".to_string())]),
-            }],
-            quorum: Some(1),
-        },
+        ProviderConfig::with_distinct_entities(vec![ProviderUri::UriWithHeaders {
+            uri: "https://initia-rpc.example/lcd?event-indexer=https%3A%2F%2Findexer.example%2Fgraphql&rest-api=https%3A%2F%2Frest.example".to_string(),
+            headers: HashMap::from([("authorization".to_string(), "Bearer initia-token".to_string())]),
+        }], 1),
     )]), Some(&["initia".to_string()]))
         .unwrap();
     let calls = Arc::new(Mutex::new(Vec::new()));
@@ -44,7 +41,7 @@ async fn provider_health_probes_initia_latest_block_like_typescript() {
         HashMap::from([("initia".to_string(), "INITIA".to_string())]),
     );
 
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
 
     assert!(report["initia"].healthy);
     assert_eq!(report["initia"].checked_at_unix_ms, 7777);
@@ -82,12 +79,12 @@ async fn provider_health_marks_initia_unhealthy_when_latest_block_probe_fails() 
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "initia".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri(
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri(
                     "https://initia-rpc.example/lcd".to_string(),
                 )],
-                quorum: Some(1),
-            },
+                1,
+            ),
         )]),
         Some(&["initia".to_string()]),
     )
@@ -105,7 +102,7 @@ async fn provider_health_marks_initia_unhealthy_when_latest_block_probe_fails() 
         HashMap::from([("initia".to_string(), "INITIA".to_string())]),
     );
 
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
 
     assert!(!report["initia"].healthy);
     assert_eq!(
@@ -119,12 +116,9 @@ async fn provider_health_marks_initia_unhealthy_when_latest_block_probe_fails() 
 async fn provider_health_falls_back_when_initia_indexer_probe_fails_like_typescript() {
     let getter = StaticProviderConfig::new(indexmap::IndexMap::from([(
         "initia".to_string(),
-        ProviderConfig {
-            uris: vec![ProviderUri::Uri(
-                "https://initia-rpc.example/lcd?event-indexer=https%3A%2F%2Findexer.example%2Fgraphql".to_string(),
-            )],
-            quorum: Some(1),
-        },
+        ProviderConfig::with_distinct_entities(vec![ProviderUri::Uri(
+            "https://initia-rpc.example/lcd?event-indexer=https%3A%2F%2Findexer.example%2Fgraphql".to_string(),
+        )], 1),
     )]), Some(&["initia".to_string()]))
         .unwrap();
     let calls = Arc::new(Mutex::new(Vec::new()));
@@ -155,7 +149,7 @@ async fn provider_health_falls_back_when_initia_indexer_probe_fails_like_typescr
         HashMap::from([("initia".to_string(), "INITIA".to_string())]),
     );
 
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
 
     assert!(report["initia"].healthy);
     assert_eq!(

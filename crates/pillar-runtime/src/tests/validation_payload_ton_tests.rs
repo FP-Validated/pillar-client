@@ -51,13 +51,21 @@ fn ton_checks(
     responses: Vec<Result<Value, String>>,
     calls: RecordedJsonCalls,
 ) -> RuntimeRpcValidationChecks<RecordingTransport> {
+    ton_checks_in("mainnet", responses, calls)
+}
+
+fn ton_checks_in(
+    environment: &str,
+    responses: Vec<Result<Value, String>>,
+    calls: RecordedJsonCalls,
+) -> RuntimeRpcValidationChecks<RecordingTransport> {
     let getter = StaticProviderConfig::new(
         IndexMap::from([(
             "ton".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://ton.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://ton.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["ton".to_string()]),
     )
@@ -68,7 +76,7 @@ fn ton_checks(
             calls,
             responses: Arc::new(Mutex::new(responses)),
         },
-        "mainnet",
+        environment,
         &["ton".to_string()],
     )
     .unwrap();
@@ -171,6 +179,176 @@ async fn runtime_rpc_validation_checks_send_the_live_packet_and_reject_its_verif
     );
     assert_eq!(stack[1][0], Value::from("tvm.Cell"));
     assert_eq!(stack[2][0], Value::from("tvm.Cell"));
+}
+
+/// The verbatim toncenter answer of the testnet `UlnConnection`
+/// `0:6E3B2005A1064F8127D1F49A64826DF527E3B2FB910C05EF7FB2A64DE26914EC` to
+/// `committableView` with its own inbound `MdObj` arguments for the delivered
+/// Arbitrum Sepolia(40231) -> TON testnet(40343) packet at nonce 11, observed
+/// 2026-10-05T06:58:22Z at masterchain seqno 89204674. Nonce arguments 12 and
+/// 1000 answered `0x0` for the same packet, so this is a per-nonce read.
+fn testnet_verified_response() -> Result<Value, String> {
+    Ok(json!({
+        "result": {
+            "@type": "smc.runResult",
+            "gas_used": 4486,
+            "stack": [["num", "0x2"]],
+            "exit_code": 0
+        }
+    }))
+}
+
+/// The packet argument that testnet answer was given (toncenter BOC, no CRC flag).
+const TESTNET_DELIVERED_PACKET_BOC: &str = "te6ccgECAwEAAQIAAqcAAAAAUGFja2V0k/8k/9YV7gZ7/////////////////////////////////AAAAAAAAAAvNOR+Tv1jkkBZeD3eompHge/vOEIqs6N/23r/SbtK0wIBAgDnAAAAAAAAcGF0aFFe4F+1J+4Ke/////////////////////////////////wAAnScAAAAAAAAAAAAAAAB+kK6pi+W2WuiySuA5sq5H86hgsgAAnZc5yU0Hm4i0IHcpWsKcOMTs4BzVeThQsAZNiv5M6ZWpv4AZAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC17z";
+
+/// Pathway fields owned by `pillar_layerzero`'s
+/// `rebuilds_the_testnet_delivered_packet_cell`.
+fn testnet_ton_sent_event() -> LzSentEvent {
+    let mut event = payload_signed_sent_event();
+    event.lz_message_id.pathway_id.dst_chain_name = "ton".to_string();
+    event.lz_message_id.nonce = 11;
+    event.message = "0x00030000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000b5ef3".to_string();
+    let extra = &mut event.lz_message_id.pathway_id.extra;
+    extra.insert("srcEid".to_string(), Value::from(40_231));
+    extra.insert("dstEid".to_string(), Value::from(40_343));
+    extra.insert(
+        "sender".to_string(),
+        Value::from("0x7e90aea98be5b65ae8b24ae039b2ae47f3a860b2"),
+    );
+    extra.insert(
+        "receiver".to_string(),
+        Value::from("0x39c94d079b88b42077295ac29c38c4ece01cd5793850b0064d8afe4ce995a9bf"),
+    );
+    event.extra.insert(
+        "guid".to_string(),
+        Value::from("0xcd391f93bf58e490165e0f77a89a91e07bfbce108aace8dff6debfd26ed2b4c0"),
+    );
+    event
+}
+
+/// The testnet configuration must read the deployed contracts of the delivered
+/// pathway, send its real nonce and packet, and refuse the `VERIFIED` answer.
+#[tokio::test]
+async fn runtime_rpc_validation_checks_send_the_testnet_packet_and_reject_its_verified_state() {
+    let calls: RecordedJsonCalls = Arc::new(Mutex::new(Vec::new()));
+    let checks = ton_checks_in(
+        "testnet",
+        vec![
+            address_information(EMPTY_CONNECTION),
+            address_information(ULN_STORAGE),
+            testnet_verified_response(),
+        ],
+        calls.clone(),
+    );
+
+    let error = checks
+        .validate_payload_not_signed(&testnet_ton_sent_event(), Some(CONFIGURED_VERIFIER), "ton")
+        .await
+        .unwrap_err();
+    assert!(matches!(error, AppCoreError::BadRequest(_)), "{error}");
+    assert!(error
+        .to_string()
+        .starts_with("Payload already signed for message {"));
+
+    let recorded = calls.lock().unwrap();
+    let addresses: Vec<&Value> = recorded
+        .iter()
+        .map(|(_, _, body)| &body["params"]["address"])
+        .collect();
+    assert_eq!(
+        addresses,
+        vec![
+            "EQBuOyAFoQZPgSfR9Jpkgm31J-Oy-5EMBe9_sqZN4mkU7AYo",
+            "EQCaoxMQ3rv1HIJXXM9vhbQxA8dZ0FNAmW1R1-YzWGDGDqyT",
+            "EQBuOyAFoQZPgSfR9Jpkgm31J-Oy-5EMBe9_sqZN4mkU7AYo",
+        ],
+        "UlnConnection, Uln, then committableView on the UlnConnection"
+    );
+    let params = &recorded[2].2["params"];
+    assert_eq!(params["method"], "committableView");
+    assert_eq!(
+        params["stack"][0][1],
+        Value::from("11"),
+        "real nonce on the wire"
+    );
+    assert_eq!(params["stack"][1][0], Value::from("tvm.Cell"));
+    let sent_packet =
+        pillar_layerzero::boc_from_base64(params["stack"][1][1].as_str().unwrap()).unwrap();
+    assert_eq!(
+        sent_packet,
+        pillar_layerzero::boc_from_base64(TESTNET_DELIVERED_PACKET_BOC).unwrap(),
+        "the packet argument must be the delivered testnet packet"
+    );
+}
+
+/// Verbatim public read-only responses for the delivered testnet packet:
+/// `UlnConnection` and `Uln` storage from toncenter `getAddressInformation`,
+/// and `committableView` with the contract's own inbound `MdObj` arguments.
+fn ton_testnet_provenance() -> Value {
+    let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("tests/onchain_provenance/ton_testnet_delivered_packet.json");
+    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+/// The production testnet validator over the deployed contracts' real storage:
+/// it must read the delivered pathway's `UlnConnection` and `Uln`, send the
+/// arguments the recorded `committableView` was answered for, and refuse both
+/// the observed `VERIFIED` (2) and `VERIFIED (executed)` (3).
+#[tokio::test]
+async fn runtime_rpc_validation_checks_refuse_the_testnet_packet_over_its_real_storage() {
+    let fixture = ton_testnet_provenance();
+    let verifier = pillar_config::ton_deployment_address("testnet", "DvnProxy").unwrap();
+    let observed_view = Ok(fixture["committableView"]["response"].clone());
+    for (label, view) in [
+        ("observed VERIFIED", observed_view),
+        ("VERIFIED (executed)", committable_view(3)),
+    ] {
+        let calls: RecordedJsonCalls = Arc::new(Mutex::new(Vec::new()));
+        let checks = ton_checks_in(
+            "testnet",
+            vec![
+                Ok(fixture["ulnConnectionStorage"]["response"].clone()),
+                Ok(fixture["ulnStorage"]["response"].clone()),
+                view,
+            ],
+            calls.clone(),
+        );
+        let error = checks
+            .validate_payload_not_signed(&testnet_ton_sent_event(), Some(verifier), "ton")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, AppCoreError::BadRequest(_)),
+            "{label}: {error}"
+        );
+        assert!(
+            error
+                .to_string()
+                .starts_with("Payload already signed for message {"),
+            "{label}: {error}"
+        );
+
+        let recorded = calls.lock().unwrap();
+        let connection = fixture["ulnConnectionAddress"]["friendly"]
+            .as_str()
+            .unwrap();
+        let uln = fixture["ulnAddress"]["friendly"].as_str().unwrap();
+        let addresses: Vec<&Value> = recorded
+            .iter()
+            .map(|(_, _, body)| &body["params"]["address"])
+            .collect();
+        assert_eq!(addresses, vec![connection, uln, connection], "{label}");
+        let sent = &recorded[2].2["params"]["stack"];
+        let observed = &fixture["committableView"]["request"]["stack"];
+        assert_eq!(sent[0], observed[0], "{label}: nonce");
+        for (index, name) in [(1, "packet"), (2, "receive config")] {
+            assert_eq!(
+                pillar_layerzero::boc_from_base64(sent[index][1].as_str().unwrap()).unwrap(),
+                pillar_layerzero::boc_from_base64(observed[index][1].as_str().unwrap()).unwrap(),
+                "{label}: {name} argument differs from the recorded call"
+            );
+        }
+    }
 }
 
 /// The verbatim toncenter response observed when `committableView` was invoked
@@ -464,13 +642,13 @@ async fn runtime_rpc_validation_checks_require_ton_providers_to_agree_on_storage
     let getter = StaticProviderConfig::new(
         IndexMap::from([(
             "ton".to_string(),
-            ProviderConfig {
-                uris: vec![
+            ProviderConfig::with_distinct_entities(
+                vec![
                     ProviderUri::Uri(first.clone()),
                     ProviderUri::Uri(second.clone()),
                 ],
-                quorum: Some(2),
-            },
+                2,
+            ),
         )]),
         Some(&["ton".to_string()]),
     )
@@ -541,13 +719,13 @@ fn ton_quorum_checks(
     let getter = StaticProviderConfig::new(
         IndexMap::from([(
             "ton".to_string(),
-            ProviderConfig {
-                uris: providers
+            ProviderConfig::with_distinct_entities(
+                providers
                     .iter()
                     .map(|(url, _)| ProviderUri::Uri((*url).to_string()))
                     .collect(),
-                quorum: Some(quorum),
-            },
+                quorum,
+            ),
         )]),
         Some(&["ton".to_string()]),
     )

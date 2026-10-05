@@ -1,0 +1,10 @@
+{
+ "method": "POST",
+ "url": "https://api.mainnet.aptoslabs.com/v1/view",
+ "headers": {
+  "accept": "application/json",
+  "content-type": "application/json"
+ },
+ "body": "{\"function\":\"0xe6f6eb32853cb7a43f6ead4bea489b5bb0705b40c41dc13fffd9147c91adfbbf::endpoint_view::get_receive_msglib\",\"type_arguments\":[],\"arguments\":[\"0xabc\",\"101\"]}",
+ "utc": "2026-10-04T10:36:30Z"
+}

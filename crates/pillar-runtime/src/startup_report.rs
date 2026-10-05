@@ -24,8 +24,12 @@ impl fmt::Display for RuntimeMode {
 pub struct StartupChainReport {
     pub chain_name: String,
     pub provider_count: usize,
-    pub quorum: usize,
+    /// The resolved `rpc` strategy, as upstream's `canonicalStrategyKey` renders it.
+    pub quorum: String,
+    /// `category/entity` per provider, in configuration order.
+    pub entities: Vec<String>,
     pub providers: Vec<String>,
+    /// One entity alone can satisfy the strategy.
     pub single_provider_trust_root: bool,
 }
 
@@ -48,6 +52,7 @@ pub struct StartupReport {
     /// too, so an operator must be able to see that from the log alone.
     pub api_auth_enabled: bool,
     pub metrics_state: String,
+    pub audit_enabled: bool,
     pub mode: RuntimeMode,
 }
 
@@ -65,12 +70,18 @@ impl StartupReport {
                 let config = provider_config
                     .get_provider_config(chain_name)
                     .ok_or_else(|| format!("missing provider config for {chain_name}"))?;
-                let quorum = config.quorum.unwrap_or(1).max(1) as usize;
                 Ok(StartupChainReport {
                     chain_name: chain_name.clone(),
                     provider_count: config.uris.len(),
-                    quorum,
-                    single_provider_trust_root: quorum == 1,
+                    quorum: pillar_config::provider_validation::canonical_strategy_key(
+                        &config.strategy,
+                    ),
+                    entities: config
+                        .voters
+                        .iter()
+                        .map(|voter| format!("{}/{}", voter.category, voter.entity))
+                        .collect(),
+                    single_provider_trust_root: config.single_entity_trust_root(),
                     providers: config.uris.iter().map(redact_provider_uri).collect(),
                 })
             })
@@ -103,6 +114,7 @@ impl StartupReport {
             public_sign_routes: runtime_config.public_sign_routes,
             api_auth_enabled: runtime_config.api_auth_enabled,
             metrics_state: "enabled".to_string(),
+            audit_enabled: runtime_config.audit.is_some(),
             mode,
         })
     }
@@ -115,6 +127,15 @@ impl fmt::Display for StartupReport {
         writeln!(formatter, "image_version: {}", self.image_version)?;
         writeln!(formatter, "mode: {}", self.mode)?;
         writeln!(formatter, "metrics: {}", self.metrics_state)?;
+        writeln!(
+            formatter,
+            "signing_audit: {}",
+            if self.audit_enabled {
+                "enabled (fail-closed)"
+            } else {
+                "disabled"
+            }
+        )?;
         writeln!(formatter, "auth_tokens: {}", self.auth_token_count)?;
         writeln!(
             formatter,
@@ -147,7 +168,7 @@ impl fmt::Display for StartupReport {
         for chain in &self.configured_chains {
             writeln!(
                 formatter,
-                "- {} providers={} quorum={}{} [{}]",
+                "- {} providers={} quorum={}{} entities=[{}] [{}]",
                 chain.chain_name,
                 chain.provider_count,
                 chain.quorum,
@@ -156,6 +177,7 @@ impl fmt::Display for StartupReport {
                 } else {
                     ""
                 },
+                chain.entities.join(", "),
                 chain.providers.join(", ")
             )?;
         }

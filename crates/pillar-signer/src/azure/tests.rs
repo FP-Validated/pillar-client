@@ -9,6 +9,7 @@ use crate::types::{
     ChainTypeWalletDefinition, KmsProvider, PublicKeyRequest, RawSignerAdapter, SeedKind,
     SignRequest, SignatureType, SignerError, WalletSignerKind,
 };
+include!("phase1_tests.rs");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MockAzureSignatureEncoding {
@@ -32,7 +33,9 @@ impl AzureKmsClient for MockAzureKmsClient {
         key_id: &AzureKmsKeyId,
         digest: &[u8],
     ) -> Result<Vec<u8>, SignerError> {
-        assert_eq!(key_id, &self.key_id);
+        let mut expected = self.key_id.clone();
+        expected.version.get_or_insert_with(|| "version-one".into());
+        assert_eq!(key_id, &expected);
         self.sign_digests.lock().await.push(digest.to_vec());
         let (signature, _) = self
             .ecdsa_signing_key
@@ -47,11 +50,24 @@ impl AzureKmsClient for MockAzureKmsClient {
     async fn get_ec_public_key_coordinates(
         &self,
         key_id: &AzureKmsKeyId,
-    ) -> Result<(Vec<u8>, Vec<u8>), SignerError> {
+    ) -> Result<AzureEcPublicKey, SignerError> {
         assert_eq!(key_id, &self.key_id);
         *self.public_key_calls.lock().await += 1;
+        let mut resolved = key_id.clone();
+        resolved.version.get_or_insert_with(|| "version-one".into());
+        let reference = format!(
+            "https://test.invalid/keys/{}/{}",
+            resolved.name,
+            resolved.version.as_deref().unwrap()
+        );
         if let Some(coordinates) = &self.coordinates {
-            return Ok(coordinates.clone());
+            let (x, y) = coordinates.clone();
+            return Ok(AzureEcPublicKey {
+                key_id: resolved,
+                reference,
+                x,
+                y,
+            });
         }
         let public_key = self
             .ecdsa_signing_key
@@ -59,7 +75,12 @@ impl AzureKmsClient for MockAzureKmsClient {
             .to_encoded_point(false);
         let x = public_key.x().unwrap().to_vec();
         let y = public_key.y().unwrap().to_vec();
-        Ok((x, y))
+        Ok(AzureEcPublicKey {
+            key_id: resolved,
+            reference,
+            x,
+            y,
+        })
     }
 }
 
@@ -299,4 +320,79 @@ async fn azure_kms_adapter_rejects_empty_ec_coordinate() {
             "Azure Key Vault: P-256K public key coordinate must not be empty".to_string()
         )
     );
+}
+
+/// X and Y of the mainnet DVN's Azure key as registered on chain (offset 17 of the Solana
+/// DVN config account `EqkXVEeapm7JqrS1W3AGeN5ZwCRLDUHtr1XY9TuVr4rD`), pinned at `ded0f97`.
+fn registered_solana_dvn_coordinates() -> (Vec<u8>, Vec<u8>) {
+    (
+        hex::decode("ca11e4b7d37870aca2ace4d5dee1dd296e6d76c7ff757c648d41f1e65d495d74").unwrap(),
+        hex::decode("0897f8edc07fea309c99494ab3f2115c27f1f8aca0d0843ce485e6266ed351f1").unwrap(),
+    )
+}
+
+#[tokio::test]
+async fn azure_solana_signer_info_answers_the_registered_x_coordinate() {
+    let (x, y) = registered_solana_dvn_coordinates();
+    let client = Arc::new(MockAzureKmsClient {
+        key_id: AzureKmsKeyId {
+            name: "solana-key".to_string(),
+            version: None,
+        },
+        ecdsa_signing_key: EcdsaSigningKey::from_slice(&[22u8; 32]).unwrap(),
+        signature_encoding: MockAzureSignatureEncoding::Raw,
+        sign_digests: Mutex::new(Vec::new()),
+        public_key_calls: Mutex::new(0),
+        coordinates: Some((x.clone(), y.clone())),
+    });
+    let adapter = AzureKmsRawSignerAdapter::new("solana-key".to_string(), client).unwrap();
+    let info = crate::chain_address::PillarSignerAdapterKind::for_chain_type(
+        crate::types::ChainType::Solana,
+        Arc::new(adapter),
+        true,
+    )
+    .unwrap()
+    .get_signer_info()
+    .await
+    .unwrap();
+
+    assert_eq!(info.address, "EboBSUoobiqt7JYcH46ro7TGBjtE2vczKnUmsiWy6Ffy");
+    assert_eq!(
+        info.public_key,
+        format!("0x{}{}", hex::encode(&x), hex::encode(&y))
+    );
+}
+
+#[tokio::test]
+async fn azure_solana_signature_carries_the_x_coordinate_address() {
+    let signing_key = EcdsaSigningKey::from_slice(&[23u8; 32]).unwrap();
+    let x = signing_key
+        .verifying_key()
+        .to_encoded_point(false)
+        .x()
+        .unwrap()
+        .to_vec();
+    let client = Arc::new(MockAzureKmsClient {
+        key_id: AzureKmsKeyId {
+            name: "solana-sign-key".to_string(),
+            version: None,
+        },
+        ecdsa_signing_key: signing_key,
+        signature_encoding: MockAzureSignatureEncoding::Raw,
+        sign_digests: Mutex::new(Vec::new()),
+        public_key_calls: Mutex::new(0),
+        coordinates: None,
+    });
+    let adapter = AzureKmsRawSignerAdapter::new("solana-sign-key".to_string(), client).unwrap();
+    let signature = crate::chain_address::PillarSignerAdapterKind::for_chain_type(
+        crate::types::ChainType::Solana,
+        Arc::new(adapter),
+        true,
+    )
+    .unwrap()
+    .pillar_sign(&[0x42; 32])
+    .await
+    .unwrap();
+
+    assert_eq!(signature.address, bs58::encode(&x).into_string());
 }

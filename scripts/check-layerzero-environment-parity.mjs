@@ -64,7 +64,7 @@ function chainPathConnectionsPath(environment) {
 function chainMetadataPath(environment) {
     return path.join(
         sourceRoot,
-        `packages/static-config/src/staticDynamicConfigs/configs/chainMetadataConfig/${environment}/chainMetadataConfig.json`,
+        `packages/configs/chain-metadata-config/values/src/${environment}/chainMetadataConfig.json`,
     )
 }
 
@@ -126,11 +126,16 @@ function optionalProviderConfig() {
     const inline = process.env.LAYERZERO_PROVIDER_CONFIG
     const filePath = process.env.LAYERZERO_PROVIDER_CONFIG_FILE_PATH
     if (!inline && !filePath) return null
+    let parsed
     try {
-        return JSON.parse(inline ?? readRequired(path.resolve(filePath)))
+        parsed = JSON.parse(inline ?? readRequired(path.resolve(filePath)))
     } catch (error) {
         fail(`invalid provider config: ${error instanceof Error ? error.message : error}`)
     }
+    if (!parsed || typeof parsed.chains !== 'object') {
+        fail('provider config must be providers-v2.json ({ entities, chains })')
+    }
+    return parsed
 }
 
 /**
@@ -254,7 +259,7 @@ for (const environment of environments) {
         if (!capability.available || !['V2', 'V302'].includes(capability.ulnVersion)) continue
         const chain = capability.chain
         const providerConfigured = providerConfig
-            ? Object.prototype.hasOwnProperty.call(providerConfig, chain)
+            ? (providerConfig.chains[chain]?.rpc?.length ?? 0) > 0
             : null
         const blockReason = rolloutBlockReason(environment, chain)
         const official = officialDeployment(officialMetadata, environment, chain)

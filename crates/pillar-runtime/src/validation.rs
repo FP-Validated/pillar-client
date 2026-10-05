@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use pillar_core::{
     validate_expiration_bounds, validate_message_hash_for_pillar, AppCoreError, AppValidator,
-    LzSentEvent, PillarApiRequestV2, ReadBlockPin, SigningContext,
+    LzMessageId, LzSentEvent, PillarApiRequestV2, ReadBlockPin, SigningContext,
 };
 use std::sync::Arc;
 
@@ -36,6 +36,11 @@ pub trait RuntimeValidationChecks: Send + Sync + 'static {
     ) -> Result<(), AppCoreError>;
 
     async fn validate_extra_context(&self, sent_event: &LzSentEvent) -> Result<(), AppCoreError>;
+
+    async fn uln_receive_version(
+        &self,
+        lz_message_id: &LzMessageId,
+    ) -> Result<String, AppCoreError>;
 }
 
 pub struct RuntimeAppValidator<C> {
@@ -138,5 +143,12 @@ where
 
     async fn validate_extra_context(&self, sent_event: &LzSentEvent) -> Result<(), AppCoreError> {
         self.checks.validate_extra_context(sent_event).await
+    }
+
+    async fn uln_receive_version(
+        &self,
+        lz_message_id: &LzMessageId,
+    ) -> Result<String, AppCoreError> {
+        self.checks.uln_receive_version(lz_message_id).await
     }
 }

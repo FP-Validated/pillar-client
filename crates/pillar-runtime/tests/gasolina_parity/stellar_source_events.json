@@ -1,0 +1,1043 @@
+{
+ "producedBy": {
+  "upstream": "gasolina-audit 1.2.66 (manifest sha256 8ad87eb6...; archive comment 213cd500...)",
+  "entrypoint": "packages/sdks/lz-v2-sdk/src/endpoint/stellar/index.ts:EndpointV2StellarSdk.prototype.getLZSentEvent (constructor not run: contract bindings absent from the snapshot)"
+ },
+ "environment": "mainnet",
+ "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+ "endpoint": "CCQLLRE5JBAWYCW3KTWOIWLMFDUOKROQVZNSALQMGOSXNW3ERUOWTZGK",
+ "scenarios": [
+  {
+   "name": "match",
+   "transaction": {
+    "status": "SUCCESS",
+    "ledger": 777,
+    "createdAt": 1700000000,
+    "applicationOrder": 1,
+    "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "events": {
+     "transactionEventsXdr": [],
+     "contractEventsXdr": [
+      [
+       "AAAAAAAAAAGgtcSdSEFsCttU7ORZbCjo5UXQrlsgLgwzpXbbZI0daQAAAAEAAAAAAAAAAQAAAA8AAAALcGFja2V0X3NlbnQAAAAAEQAAAAEAAAADAAAADwAAAA5lbmNvZGVkX3BhY2tldAAAAAAADQAAAHcBAAAAAAAAAAcAAHeICgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoAAHWVAAAAAAAAAAAAAAAAIiIiIiIiIiIiIiIiIiIiIiIiIiIPbj6PlPnozaGUYy04Q/Lwl4QUX0olC10IesB9F6wJhd6tvu/K/gAAAAAPAAAAB29wdGlvbnMAAAAADQAAABYAAwEAEQEAAAAAAAAAAAAAAAAAAw1AAAAAAAAPAAAADHNlbmRfbGlicmFyeQAAABIAAAABPDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw="
+      ]
+     ]
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30600,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "stellar",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransaction": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "stellar",
+      "blockNumber": 777,
+      "blockHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcEid": 30600,
+       "srcChainName": "stellar",
+       "dstEid": 30101,
+       "dstChainName": "ethereum",
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V302"
+     },
+     "guid": "0x0f6e3e8f94f9e8cda194632d3843f2f09784145f4a250b5d087ac07d17ac0985",
+     "message": "0xdeadbeefcafe",
+     "options": {
+      "lzReceive": {
+       "gas": "200000",
+       "value": "0"
+      },
+      "ordered": false
+     },
+     "sendLibrary": "CA6DYPB4HQ6DYPB4HQ6DYPB4HQ6DYPB4HQ6DYPB4HQ6DYPB4HQ6DZXB7"
+    }
+   }
+  },
+  {
+   "name": "native drop",
+   "transaction": {
+    "status": "SUCCESS",
+    "ledger": 777,
+    "createdAt": 1700000000,
+    "applicationOrder": 1,
+    "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "events": {
+     "transactionEventsXdr": [],
+     "contractEventsXdr": [
+      [
+       "AAAAAAAAAAGgtcSdSEFsCttU7ORZbCjo5UXQrlsgLgwzpXbbZI0daQAAAAEAAAAAAAAAAQAAAA8AAAALcGFja2V0X3NlbnQAAAAAEQAAAAEAAAADAAAADwAAAA5lbmNvZGVkX3BhY2tldAAAAAAADQAAAHcBAAAAAAAAAAcAAHeICgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoAAHWVAAAAAAAAAAAAAAAAIiIiIiIiIiIiIiIiIiIiIiIiIiIPbj6PlPnozaGUYy04Q/Lwl4QUX0olC10IesB9F6wJhd6tvu/K/gAAAAAPAAAAB29wdGlvbnMAAAAADQAAAEoAAwEAEQEAAAAAAAAAAAAAAAAAAYagAQAxAgAAAAAAAAAAAAAAAAAAAAwAAAAAAAAAAAAAAABERERERERERERERERERERERERERAAAAAAADwAAAAxzZW5kX2xpYnJhcnkAAAASAAAAATw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8"
+      ]
+     ]
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30600,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "stellar",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransaction": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "stellar",
+      "blockNumber": 777,
+      "blockHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcEid": 30600,
+       "srcChainName": "stellar",
+       "dstEid": 30101,
+       "dstChainName": "ethereum",
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V302"
+     },
+     "guid": "0x0f6e3e8f94f9e8cda194632d3843f2f09784145f4a250b5d087ac07d17ac0985",
+     "message": "0xdeadbeefcafe",
+     "options": {
+      "lzReceive": {
+       "gas": "100000",
+       "value": "0"
+      },
+      "nativeDrop": [
+       {
+        "amount": "12",
+        "receiver": "0x4444444444444444444444444444444444444444"
+       }
+      ],
+      "ordered": false
+     },
+     "sendLibrary": "CA6DYPB4HQ6DYPB4HQ6DYPB4HQ6DYPB4HQ6DYPB4HQ6DYPB4HQ6DZXB7"
+    }
+   }
+  },
+  {
+   "name": "two drops to one receiver",
+   "transaction": {
+    "status": "SUCCESS",
+    "ledger": 777,
+    "createdAt": 1700000000,
+    "applicationOrder": 1,
+    "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "events": {
+     "transactionEventsXdr": [],
+     "contractEventsXdr": [
+      [
+       "AAAAAAAAAAGgtcSdSEFsCttU7ORZbCjo5UXQrlsgLgwzpXbbZI0daQAAAAEAAAAAAAAAAQAAAA8AAAALcGFja2V0X3NlbnQAAAAAEQAAAAEAAAADAAAADwAAAA5lbmNvZGVkX3BhY2tldAAAAAAADQAAAHcBAAAAAAAAAAcAAHeICgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoAAHWVAAAAAAAAAAAAAAAAIiIiIiIiIiIiIiIiIiIiIiIiIiIPbj6PlPnozaGUYy04Q/Lwl4QUX0olC10IesB9F6wJhd6tvu/K/gAAAAAPAAAAB29wdGlvbnMAAAAADQAAAH4AAwEAEQEAAAAAAAAAAAAAAAAAAYagAQAxAgAAAAAAAAAAAAAAAAAAAAwAAAAAAAAAAAAAAABERERERERERERERERERERERERERAEAMQIAAAAAAAAAAAAAAAAAAAANAAAAAAAAAAAAAAAAREREREREREREREREREREREREREQAAAAAAA8AAAAMc2VuZF9saWJyYXJ5AAAAEgAAAAE8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PA=="
+      ]
+     ]
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30600,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "stellar",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransaction": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "stellar",
+      "blockNumber": 777,
+      "blockHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcEid": 30600,
+       "srcChainName": "stellar",
+       "dstEid": 30101,
+       "dstChainName": "ethereum",
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V302"
+     },
+     "guid": "0x0f6e3e8f94f9e8cda194632d3843f2f09784145f4a250b5d087ac07d17ac0985",
+     "message": "0xdeadbeefcafe",
+     "options": {
+      "lzReceive": {
+       "gas": "100000",
+       "value": "0"
+      },
+      "nativeDrop": [
+       {
+        "amount": "25",
+        "receiver": "0x4444444444444444444444444444444444444444"
+       }
+      ],
+      "ordered": false
+     },
+     "sendLibrary": "CA6DYPB4HQ6DYPB4HQ6DYPB4HQ6DYPB4HQ6DYPB4HQ6DYPB4HQ6DZXB7"
+    }
+   }
+  },
+  {
+   "name": "empty options",
+   "transaction": {
+    "status": "SUCCESS",
+    "ledger": 777,
+    "createdAt": 1700000000,
+    "applicationOrder": 1,
+    "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "events": {
+     "transactionEventsXdr": [],
+     "contractEventsXdr": [
+      [
+       "AAAAAAAAAAGgtcSdSEFsCttU7ORZbCjo5UXQrlsgLgwzpXbbZI0daQAAAAEAAAAAAAAAAQAAAA8AAAALcGFja2V0X3NlbnQAAAAAEQAAAAEAAAADAAAADwAAAA5lbmNvZGVkX3BhY2tldAAAAAAADQAAAHcBAAAAAAAAAAcAAHeICgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoAAHWVAAAAAAAAAAAAAAAAIiIiIiIiIiIiIiIiIiIiIiIiIiIPbj6PlPnozaGUYy04Q/Lwl4QUX0olC10IesB9F6wJhd6tvu/K/gAAAAAPAAAAB29wdGlvbnMAAAAADQAAAAAAAAAPAAAADHNlbmRfbGlicmFyeQAAABIAAAABPDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw="
+      ]
+     ]
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30600,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "stellar",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransaction": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "invalid BigNumber string (argument=\"value\", value=\"0x\", code=INVALID_ARGUMENT, version=bignumber/5.8.0)"
+   }
+  },
+  {
+   "name": "second of two",
+   "transaction": {
+    "status": "SUCCESS",
+    "ledger": 777,
+    "createdAt": 1700000000,
+    "applicationOrder": 1,
+    "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "events": {
+     "transactionEventsXdr": [],
+     "contractEventsXdr": [
+      [
+       "AAAAAAAAAAGgtcSdSEFsCttU7ORZbCjo5UXQrlsgLgwzpXbbZI0daQAAAAEAAAAAAAAAAQAAAA8AAAALcGFja2V0X3NlbnQAAAAAEQAAAAEAAAADAAAADwAAAA5lbmNvZGVkX3BhY2tldAAAAAAADQAAAHcBAAAAAAAAAAYAAHeICgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoAAHWVAAAAAAAAAAAAAAAAIiIiIiIiIiIiIiIiIiIiIiIiIiKlYBhb/umaUezNW1GgslrYR30a6sJsWpwSxqS6KKYdW96tvu/K/gAAAAAPAAAAB29wdGlvbnMAAAAADQAAABYAAwEAEQEAAAAAAAAAAAAAAAAAAw1AAAAAAAAPAAAADHNlbmRfbGlicmFyeQAAABIAAAABPDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw=",
+       "AAAAAAAAAAGgtcSdSEFsCttU7ORZbCjo5UXQrlsgLgwzpXbbZI0daQAAAAEAAAAAAAAAAQAAAA8AAAALcGFja2V0X3NlbnQAAAAAEQAAAAEAAAADAAAADwAAAA5lbmNvZGVkX3BhY2tldAAAAAAADQAAAHcBAAAAAAAAAAcAAHeICgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoAAHWVAAAAAAAAAAAAAAAAIiIiIiIiIiIiIiIiIiIiIiIiIiIPbj6PlPnozaGUYy04Q/Lwl4QUX0olC10IesB9F6wJhd6tvu/K/gAAAAAPAAAAB29wdGlvbnMAAAAADQAAABYAAwEAEQEAAAAAAAAAAAAAAAAAAw1AAAAAAAAPAAAADHNlbmRfbGlicmFyeQAAABIAAAABPDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw="
+      ]
+     ]
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30600,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "stellar",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransaction": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "stellar",
+      "blockNumber": 777,
+      "blockHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcEid": 30600,
+       "srcChainName": "stellar",
+       "dstEid": 30101,
+       "dstChainName": "ethereum",
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V302"
+     },
+     "guid": "0x0f6e3e8f94f9e8cda194632d3843f2f09784145f4a250b5d087ac07d17ac0985",
+     "message": "0xdeadbeefcafe",
+     "options": {
+      "lzReceive": {
+       "gas": "200000",
+       "value": "0"
+      },
+      "ordered": false
+     },
+     "sendLibrary": "CA6DYPB4HQ6DYPB4HQ6DYPB4HQ6DYPB4HQ6DYPB4HQ6DYPB4HQ6DZXB7"
+    }
+   }
+  },
+  {
+   "name": "other nonce",
+   "transaction": {
+    "status": "SUCCESS",
+    "ledger": 777,
+    "createdAt": 1700000000,
+    "applicationOrder": 1,
+    "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "events": {
+     "transactionEventsXdr": [],
+     "contractEventsXdr": [
+      [
+       "AAAAAAAAAAGgtcSdSEFsCttU7ORZbCjo5UXQrlsgLgwzpXbbZI0daQAAAAEAAAAAAAAAAQAAAA8AAAALcGFja2V0X3NlbnQAAAAAEQAAAAEAAAADAAAADwAAAA5lbmNvZGVkX3BhY2tldAAAAAAADQAAAHcBAAAAAAAAAAYAAHeICgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoAAHWVAAAAAAAAAAAAAAAAIiIiIiIiIiIiIiIiIiIiIiIiIiKlYBhb/umaUezNW1GgslrYR30a6sJsWpwSxqS6KKYdW96tvu/K/gAAAAAPAAAAB29wdGlvbnMAAAAADQAAABYAAwEAEQEAAAAAAAAAAAAAAAAAAw1AAAAAAAAPAAAADHNlbmRfbGlicmFyeQAAABIAAAABPDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw="
+      ]
+     ]
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30600,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "stellar",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransaction": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "Packet does not match lzMessageId"
+   }
+  },
+  {
+   "name": "V301 request",
+   "transaction": {
+    "status": "SUCCESS",
+    "ledger": 777,
+    "createdAt": 1700000000,
+    "applicationOrder": 1,
+    "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "events": {
+     "transactionEventsXdr": [],
+     "contractEventsXdr": [
+      [
+       "AAAAAAAAAAGgtcSdSEFsCttU7ORZbCjo5UXQrlsgLgwzpXbbZI0daQAAAAEAAAAAAAAAAQAAAA8AAAALcGFja2V0X3NlbnQAAAAAEQAAAAEAAAADAAAADwAAAA5lbmNvZGVkX3BhY2tldAAAAAAADQAAAHcBAAAAAAAAAAcAAHeICgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoAAHWVAAAAAAAAAAAAAAAAIiIiIiIiIiIiIiIiIiIiIiIiIiIPbj6PlPnozaGUYy04Q/Lwl4QUX0olC10IesB9F6wJhd6tvu/K/gAAAAAPAAAAB29wdGlvbnMAAAAADQAAABYAAwEAEQEAAAAAAAAAAAAAAAAAAw1AAAAAAAAPAAAADHNlbmRfbGlicmFyeQAAABIAAAABPDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw="
+      ]
+     ]
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30600,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "stellar",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V301"
+   },
+   "calls": [
+    {
+     "getTransaction": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "stellar",
+      "blockNumber": 777,
+      "blockHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcEid": 30600,
+       "srcChainName": "stellar",
+       "dstEid": 30101,
+       "dstChainName": "ethereum",
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V302"
+     },
+     "guid": "0x0f6e3e8f94f9e8cda194632d3843f2f09784145f4a250b5d087ac07d17ac0985",
+     "message": "0xdeadbeefcafe",
+     "options": {
+      "lzReceive": {
+       "gas": "200000",
+       "value": "0"
+      },
+      "ordered": false
+     },
+     "sendLibrary": "CA6DYPB4HQ6DYPB4HQ6DYPB4HQ6DYPB4HQ6DYPB4HQ6DYPB4HQ6DZXB7"
+    }
+   }
+  },
+  {
+   "name": "no events",
+   "transaction": {
+    "status": "SUCCESS",
+    "ledger": 777,
+    "createdAt": 1700000000,
+    "applicationOrder": 1,
+    "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "events": {
+     "transactionEventsXdr": [],
+     "contractEventsXdr": [
+      []
+     ]
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30600,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "stellar",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransaction": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "Packet does not match lzMessageId"
+   }
+  },
+  {
+   "name": "event from another contract",
+   "transaction": {
+    "status": "SUCCESS",
+    "ledger": 777,
+    "createdAt": 1700000000,
+    "applicationOrder": 1,
+    "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "events": {
+     "transactionEventsXdr": [],
+     "contractEventsXdr": [
+      [
+       "AAAAAAAAAAF3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3dwAAAAEAAAAAAAAAAQAAAA8AAAALcGFja2V0X3NlbnQAAAAAEQAAAAEAAAADAAAADwAAAA5lbmNvZGVkX3BhY2tldAAAAAAADQAAAHcBAAAAAAAAAAcAAHeICgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoAAHWVAAAAAAAAAAAAAAAAIiIiIiIiIiIiIiIiIiIiIiIiIiIPbj6PlPnozaGUYy04Q/Lwl4QUX0olC10IesB9F6wJhd6tvu/K/gAAAAAPAAAAB29wdGlvbnMAAAAADQAAABYAAwEAEQEAAAAAAAAAAAAAAAAAAw1AAAAAAAAPAAAADHNlbmRfbGlicmFyeQAAABIAAAABPDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw="
+      ]
+     ]
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30600,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "stellar",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransaction": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "Packet does not match lzMessageId"
+   }
+  },
+  {
+   "name": "other event name",
+   "transaction": {
+    "status": "SUCCESS",
+    "ledger": 777,
+    "createdAt": 1700000000,
+    "applicationOrder": 1,
+    "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "events": {
+     "transactionEventsXdr": [],
+     "contractEventsXdr": [
+      [
+       "AAAAAAAAAAGgtcSdSEFsCttU7ORZbCjo5UXQrlsgLgwzpXbbZI0daQAAAAEAAAAAAAAAAQAAAA8AAAAPcGFja2V0X3ZlcmlmaWVkAAAAABEAAAABAAAAAwAAAA8AAAAOZW5jb2RlZF9wYWNrZXQAAAAAAA0AAAB3AQAAAAAAAAAHAAB3iAoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKAAB1lQAAAAAAAAAAAAAAACIiIiIiIiIiIiIiIiIiIiIiIiIiD24+j5T56M2hlGMtOEPy8JeEFF9KJQtdCHrAfResCYXerb7vyv4AAAAADwAAAAdvcHRpb25zAAAAAA0AAAAWAAMBABEBAAAAAAAAAAAAAAAAAAMNQAAAAAAADwAAAAxzZW5kX2xpYnJhcnkAAAASAAAAATw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8"
+      ]
+     ]
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30600,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "stellar",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransaction": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "Packet does not match lzMessageId"
+   }
+  },
+  {
+   "name": "extra topic",
+   "transaction": {
+    "status": "SUCCESS",
+    "ledger": 777,
+    "createdAt": 1700000000,
+    "applicationOrder": 1,
+    "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "events": {
+     "transactionEventsXdr": [],
+     "contractEventsXdr": [
+      [
+       "AAAAAAAAAAGgtcSdSEFsCttU7ORZbCjo5UXQrlsgLgwzpXbbZI0daQAAAAEAAAAAAAAAAgAAAA8AAAALcGFja2V0X3NlbnQAAAAAAwAAAAEAAAARAAAAAQAAAAMAAAAPAAAADmVuY29kZWRfcGFja2V0AAAAAAANAAAAdwEAAAAAAAAABwAAd4gKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgAAdZUAAAAAAAAAAAAAAAAiIiIiIiIiIiIiIiIiIiIiIiIiIg9uPo+U+ejNoZRjLThD8vCXhBRfSiULXQh6wH0XrAmF3q2+78r+AAAAAA8AAAAHb3B0aW9ucwAAAAANAAAAFgADAQARAQAAAAAAAAAAAAAAAAADDUAAAAAAAA8AAAAMc2VuZF9saWJyYXJ5AAAAEgAAAAE8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PA=="
+      ]
+     ]
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30600,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "stellar",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransaction": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "stellar",
+      "blockNumber": 777,
+      "blockHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcEid": 30600,
+       "srcChainName": "stellar",
+       "dstEid": 30101,
+       "dstChainName": "ethereum",
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V302"
+     },
+     "guid": "0x0f6e3e8f94f9e8cda194632d3843f2f09784145f4a250b5d087ac07d17ac0985",
+     "message": "0xdeadbeefcafe",
+     "options": {
+      "lzReceive": {
+       "gas": "200000",
+       "value": "0"
+      },
+      "ordered": false
+     },
+     "sendLibrary": "CA6DYPB4HQ6DYPB4HQ6DYPB4HQ6DYPB4HQ6DYPB4HQ6DYPB4HQ6DZXB7"
+    }
+   }
+  },
+  {
+   "name": "event name as a string",
+   "transaction": {
+    "status": "SUCCESS",
+    "ledger": 777,
+    "createdAt": 1700000000,
+    "applicationOrder": 1,
+    "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "events": {
+     "transactionEventsXdr": [],
+     "contractEventsXdr": [
+      [
+       "AAAAAAAAAAGgtcSdSEFsCttU7ORZbCjo5UXQrlsgLgwzpXbbZI0daQAAAAEAAAAAAAAAAQAAAA4AAAALcGFja2V0X3NlbnQAAAAAEQAAAAEAAAADAAAADwAAAA5lbmNvZGVkX3BhY2tldAAAAAAADQAAAHcBAAAAAAAAAAcAAHeICgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoAAHWVAAAAAAAAAAAAAAAAIiIiIiIiIiIiIiIiIiIiIiIiIiIPbj6PlPnozaGUYy04Q/Lwl4QUX0olC10IesB9F6wJhd6tvu/K/gAAAAAPAAAAB29wdGlvbnMAAAAADQAAABYAAwEAEQEAAAAAAAAAAAAAAAAAAw1AAAAAAAAPAAAADHNlbmRfbGlicmFyeQAAABIAAAABPDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw="
+      ]
+     ]
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30600,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "stellar",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransaction": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "Packet does not match lzMessageId"
+   }
+  },
+  {
+   "name": "system event type",
+   "transaction": {
+    "status": "SUCCESS",
+    "ledger": 777,
+    "createdAt": 1700000000,
+    "applicationOrder": 1,
+    "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "events": {
+     "transactionEventsXdr": [],
+     "contractEventsXdr": [
+      [
+       "AAAAAAAAAAGgtcSdSEFsCttU7ORZbCjo5UXQrlsgLgwzpXbbZI0daQAAAAAAAAAAAAAAAQAAAA8AAAALcGFja2V0X3NlbnQAAAAAEQAAAAEAAAADAAAADwAAAA5lbmNvZGVkX3BhY2tldAAAAAAADQAAAHcBAAAAAAAAAAcAAHeICgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoAAHWVAAAAAAAAAAAAAAAAIiIiIiIiIiIiIiIiIiIiIiIiIiIPbj6PlPnozaGUYy04Q/Lwl4QUX0olC10IesB9F6wJhd6tvu/K/gAAAAAPAAAAB29wdGlvbnMAAAAADQAAABYAAwEAEQEAAAAAAAAAAAAAAAAAAw1AAAAAAAAPAAAADHNlbmRfbGlicmFyeQAAABIAAAABPDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw="
+      ]
+     ]
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30600,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "stellar",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransaction": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "stellar",
+      "blockNumber": 777,
+      "blockHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcEid": 30600,
+       "srcChainName": "stellar",
+       "dstEid": 30101,
+       "dstChainName": "ethereum",
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V302"
+     },
+     "guid": "0x0f6e3e8f94f9e8cda194632d3843f2f09784145f4a250b5d087ac07d17ac0985",
+     "message": "0xdeadbeefcafe",
+     "options": {
+      "lzReceive": {
+       "gas": "200000",
+       "value": "0"
+      },
+      "ordered": false
+     },
+     "sendLibrary": "CA6DYPB4HQ6DYPB4HQ6DYPB4HQ6DYPB4HQ6DYPB4HQ6DYPB4HQ6DZXB7"
+    }
+   }
+  },
+  {
+   "name": "data not a map",
+   "transaction": {
+    "status": "SUCCESS",
+    "ledger": 777,
+    "createdAt": 1700000000,
+    "applicationOrder": 1,
+    "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "events": {
+     "transactionEventsXdr": [],
+     "contractEventsXdr": [
+      [
+       "AAAAAAAAAAGgtcSdSEFsCttU7ORZbCjo5UXQrlsgLgwzpXbbZI0daQAAAAEAAAAAAAAAAQAAAA8AAAALcGFja2V0X3NlbnQAAAAAAwAAAAE="
+      ]
+     ]
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30600,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "stellar",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransaction": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "Cannot read properties of undefined (reading 'toString')"
+   }
+  },
+  {
+   "name": "without options",
+   "transaction": {
+    "status": "SUCCESS",
+    "ledger": 777,
+    "createdAt": 1700000000,
+    "applicationOrder": 1,
+    "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "events": {
+     "transactionEventsXdr": [],
+     "contractEventsXdr": [
+      [
+       "AAAAAAAAAAGgtcSdSEFsCttU7ORZbCjo5UXQrlsgLgwzpXbbZI0daQAAAAEAAAAAAAAAAQAAAA8AAAALcGFja2V0X3NlbnQAAAAAEQAAAAEAAAACAAAADwAAAA5lbmNvZGVkX3BhY2tldAAAAAAADQAAAHcBAAAAAAAAAAcAAHeICgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoAAHWVAAAAAAAAAAAAAAAAIiIiIiIiIiIiIiIiIiIiIiIiIiIPbj6PlPnozaGUYy04Q/Lwl4QUX0olC10IesB9F6wJhd6tvu/K/gAAAAAPAAAADHNlbmRfbGlicmFyeQAAABIAAAABPDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw="
+      ]
+     ]
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30600,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "stellar",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransaction": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "Cannot read properties of undefined (reading 'toString')"
+   }
+  },
+  {
+   "name": "without send_library",
+   "transaction": {
+    "status": "SUCCESS",
+    "ledger": 777,
+    "createdAt": 1700000000,
+    "applicationOrder": 1,
+    "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "events": {
+     "transactionEventsXdr": [],
+     "contractEventsXdr": [
+      [
+       "AAAAAAAAAAGgtcSdSEFsCttU7ORZbCjo5UXQrlsgLgwzpXbbZI0daQAAAAEAAAAAAAAAAQAAAA8AAAALcGFja2V0X3NlbnQAAAAAEQAAAAEAAAACAAAADwAAAA5lbmNvZGVkX3BhY2tldAAAAAAADQAAAHcBAAAAAAAAAAcAAHeICgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoAAHWVAAAAAAAAAAAAAAAAIiIiIiIiIiIiIiIiIiIiIiIiIiIPbj6PlPnozaGUYy04Q/Lwl4QUX0olC10IesB9F6wJhd6tvu/K/gAAAAAPAAAAB29wdGlvbnMAAAAADQAAABYAAwEAEQEAAAAAAAAAAAAAAAAAAw1AAAA="
+      ]
+     ]
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30600,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "stellar",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransaction": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "stellar",
+      "blockNumber": 777,
+      "blockHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcEid": 30600,
+       "srcChainName": "stellar",
+       "dstEid": 30101,
+       "dstChainName": "ethereum",
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V302"
+     },
+     "guid": "0x0f6e3e8f94f9e8cda194632d3843f2f09784145f4a250b5d087ac07d17ac0985",
+     "message": "0xdeadbeefcafe",
+     "options": {
+      "lzReceive": {
+       "gas": "200000",
+       "value": "0"
+      },
+      "ordered": false
+     }
+    }
+   }
+  },
+  {
+   "name": "account send_library",
+   "transaction": {
+    "status": "SUCCESS",
+    "ledger": 777,
+    "createdAt": 1700000000,
+    "applicationOrder": 1,
+    "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "events": {
+     "transactionEventsXdr": [],
+     "contractEventsXdr": [
+      [
+       "AAAAAAAAAAGgtcSdSEFsCttU7ORZbCjo5UXQrlsgLgwzpXbbZI0daQAAAAEAAAAAAAAAAQAAAA8AAAALcGFja2V0X3NlbnQAAAAAEQAAAAEAAAADAAAADwAAAA5lbmNvZGVkX3BhY2tldAAAAAAADQAAAHcBAAAAAAAAAAcAAHeICgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoAAHWVAAAAAAAAAAAAAAAAIiIiIiIiIiIiIiIiIiIiIiIiIiIPbj6PlPnozaGUYy04Q/Lwl4QUX0olC10IesB9F6wJhd6tvu/K/gAAAAAPAAAAB29wdGlvbnMAAAAADQAAABYAAwEAEQEAAAAAAAAAAAAAAAAAAw1AAAAAAAAPAAAADHNlbmRfbGlicmFyeQAAABIAAAAAAAAAADw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8"
+      ]
+     ]
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30600,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "stellar",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransaction": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "event": {
+     "onChainEvent": {
+      "chainName": "stellar",
+      "blockNumber": 777,
+      "blockHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+     },
+     "lzMessageId": {
+      "pathwayId": {
+       "srcEid": 30600,
+       "srcChainName": "stellar",
+       "dstEid": 30101,
+       "dstChainName": "ethereum",
+       "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "receiver": "0x2222222222222222222222222222222222222222"
+      },
+      "nonce": 7,
+      "ulnSendVersion": "V302"
+     },
+     "guid": "0x0f6e3e8f94f9e8cda194632d3843f2f09784145f4a250b5d087ac07d17ac0985",
+     "message": "0xdeadbeefcafe",
+     "options": {
+      "lzReceive": {
+       "gas": "200000",
+       "value": "0"
+      },
+      "ordered": false
+     },
+     "sendLibrary": "GA6DYPB4HQ6DYPB4HQ6DYPB4HQ6DYPB4HQ6DYPB4HQ6DYPB4HQ6DYTEG"
+    }
+   }
+  },
+  {
+   "name": "malformed second event",
+   "transaction": {
+    "status": "SUCCESS",
+    "ledger": 777,
+    "createdAt": 1700000000,
+    "applicationOrder": 1,
+    "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "events": {
+     "transactionEventsXdr": [],
+     "contractEventsXdr": [
+      [
+       "AAAAAAAAAAGgtcSdSEFsCttU7ORZbCjo5UXQrlsgLgwzpXbbZI0daQAAAAEAAAAAAAAAAQAAAA8AAAALcGFja2V0X3NlbnQAAAAAEQAAAAEAAAADAAAADwAAAA5lbmNvZGVkX3BhY2tldAAAAAAADQAAAHcBAAAAAAAAAAcAAHeICgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoAAHWVAAAAAAAAAAAAAAAAIiIiIiIiIiIiIiIiIiIiIiIiIiIPbj6PlPnozaGUYy04Q/Lwl4QUX0olC10IesB9F6wJhd6tvu/K/gAAAAAPAAAAB29wdGlvbnMAAAAADQAAABYAAwEAEQEAAAAAAAAAAAAAAAAAAw1AAAAAAAAPAAAADHNlbmRfbGlicmFyeQAAABIAAAABPDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw=",
+       "AAAAAAAAAAGgtcSdSEFsCttU7ORZbCjo5UXQrlsgLgwzpXbbZI0daQAAAAEAAAAAAAAAAQAAAA8AAAALcGFja2V0X3NlbnQAAAAAAwAAAAE="
+      ]
+     ]
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30600,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "stellar",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransaction": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "Cannot read properties of undefined (reading 'toString')"
+   }
+  },
+  {
+   "name": "unknown destination eid",
+   "transaction": {
+    "status": "SUCCESS",
+    "ledger": 777,
+    "createdAt": 1700000000,
+    "applicationOrder": 1,
+    "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "events": {
+     "transactionEventsXdr": [],
+     "contractEventsXdr": [
+      [
+       "AAAAAAAAAAGgtcSdSEFsCttU7ORZbCjo5UXQrlsgLgwzpXbbZI0daQAAAAEAAAAAAAAAAQAAAA8AAAALcGFja2V0X3NlbnQAAAAAEQAAAAEAAAADAAAADwAAAA5lbmNvZGVkX3BhY2tldAAAAAAADQAAAHcBAAAAAAAAAAcAAHeICgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoAAHz/AAAAAAAAAAAAAAAAIiIiIiIiIiIiIiIiIiIiIiIiIiI2GYqL9iDYbFgWInLYCRneCoXGe/SueU6nuLDhrZ4gWt6tvu/K/gAAAAAPAAAAB29wdGlvbnMAAAAADQAAABYAAwEAEQEAAAAAAAAAAAAAAAAAAw1AAAAAAAAPAAAADHNlbmRfbGlicmFyeQAAABIAAAABPDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw="
+      ]
+     ]
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30600,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "stellar",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransaction": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "Invariant failed: Invalid endpointId: 31999"
+   }
+  },
+  {
+   "name": "failed transaction",
+   "transaction": {
+    "status": "FAILED",
+    "ledger": 777,
+    "createdAt": 1700000000,
+    "applicationOrder": 1,
+    "txHash": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+    "events": {
+     "transactionEventsXdr": [],
+     "contractEventsXdr": [
+      [
+       "AAAAAAAAAAGgtcSdSEFsCttU7ORZbCjo5UXQrlsgLgwzpXbbZI0daQAAAAEAAAAAAAAAAQAAAA8AAAALcGFja2V0X3NlbnQAAAAAEQAAAAEAAAADAAAADwAAAA5lbmNvZGVkX3BhY2tldAAAAAAADQAAAHcBAAAAAAAAAAcAAHeICgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoAAHWVAAAAAAAAAAAAAAAAIiIiIiIiIiIiIiIiIiIiIiIiIiIPbj6PlPnozaGUYy04Q/Lwl4QUX0olC10IesB9F6wJhd6tvu/K/gAAAAAPAAAAB29wdGlvbnMAAAAADQAAABYAAwEAEQEAAAAAAAAAAAAAAAAAAw1AAAAAAAAPAAAADHNlbmRfbGlicmFyeQAAABIAAAABPDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw8PDw="
+      ]
+     ]
+    }
+   },
+   "request": {
+    "pathwayId": {
+     "srcEid": 30600,
+     "dstEid": 30101,
+     "sender": "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+     "receiver": "0x2222222222222222222222222222222222222222",
+     "srcChainName": "stellar",
+     "dstChainName": "ethereum"
+    },
+    "nonce": 7,
+    "ulnSendVersion": "V302"
+   },
+   "calls": [
+    {
+     "getTransaction": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+    }
+   ],
+   "outcome": {
+    "error": "Transaction failed for tx 5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+   }
+  }
+ ]
+}

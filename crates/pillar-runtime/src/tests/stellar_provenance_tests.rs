@@ -4,13 +4,9 @@ use crate::layerzero_runtime::config::{
     stellar_uln_302_for_environment, stellar_uln_302_published_for_environment,
 };
 
-/// The on-chain reading behind the Stellar refusal, captured from Stellar's own
-/// network rather than from either party to the disagreement.
-///
-/// The pinned upstream package and LayerZero's metadata service name different
-/// Stellar contracts. That alone does not say which is right - a metadata entry
-/// can simply be wrong. What settles it is on chain: the two sets are separate
-/// deployments of *different code*, made months apart by the same deployer.
+/// Recorded deployment evidence for the Stellar address-generation transition.
+/// The current Gasolina 1.2.66 pins and metadata/on-chain live records all name
+/// generation two; the superseded 3.0.167 identifiers remain evidence only.
 fn stellar_provenance() -> Value {
     let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("tests");
@@ -29,10 +25,8 @@ fn generation<'a>(fixture: &'a Value, generation: &str, environment: &str) -> &'
     &fixture["generations"][generation][environment]
 }
 
-/// The tables this build signs with are generation one, and the refusal is
-/// derived from comparing them with generation two. Both halves of that
-/// comparison are asserted here, so the gate cannot be quietly defused by
-/// editing one table to match the other without also facing this evidence.
+/// Current pins must agree with generation-two deployment records while
+/// remaining distinct from the superseded generation-one addresses.
 #[test]
 fn stellar_tables_match_the_generation_recorded_on_chain() {
     let fixture = stellar_provenance();
@@ -40,10 +34,16 @@ fn stellar_tables_match_the_generation_recorded_on_chain() {
     for environment in ["mainnet", "testnet"] {
         assert_eq!(
             stellar_uln_302_for_environment(environment).unwrap(),
-            generation(&fixture, "pinnedUpstream", environment)["uln302"]["contract"]
+            generation(&fixture, "liveMetadata", environment)["uln302"]["contract"]
                 .as_str()
                 .unwrap(),
-            "{environment}: the pinned ULN302 must be the generation recorded on chain"
+            "{environment}: the 1.2.66 pin must equal the generation-two ULN302"
+        );
+        assert_ne!(
+            stellar_uln_302_for_environment(environment).unwrap(),
+            generation(&fixture, "pinnedUpstream", environment)["uln302"]["contract"]
+                .as_str()
+                .unwrap()
         );
         assert_eq!(
             stellar_uln_302_published_for_environment(environment).unwrap(),
@@ -59,12 +59,17 @@ fn stellar_tables_match_the_generation_recorded_on_chain() {
             .trusted_stellar_endpoint_addresses;
         assert!(
             trusted.contains(
-                generation(&fixture, "pinnedUpstream", environment)["endpointV2"]["contract"]
+                generation(&fixture, "liveMetadata", environment)["endpointV2"]["contract"]
                     .as_str()
                     .unwrap()
             ),
-            "{environment}: the trusted EndpointV2 belongs to the same pinned generation"
+            "{environment}: the trusted EndpointV2 belongs to generation two"
         );
+        assert!(!trusted.contains(
+            generation(&fixture, "pinnedUpstream", environment)["endpointV2"]["contract"]
+                .as_str()
+                .unwrap()
+        ));
     }
 }
 
@@ -103,23 +108,22 @@ fn the_two_stellar_generations_are_distinct_deployments_by_the_same_deployer() {
     }
 }
 
-/// Sandbox and localnet have no published deployment to disagree with, so they
-/// keep working. The gate is a comparison, not a blanket ban on the chain.
+/// Sandbox and localnet have no published deployment to compare with. Mainnet
+/// and testnet pin what upstream 1.2.66 pins, and that must stay the published
+/// deployment: a divergence closes the chain again through the refusing builder.
 #[test]
-fn stellar_is_only_gated_where_layerzero_publishes_a_conflicting_deployment() {
+fn stellar_pins_equal_the_published_deployment_where_one_exists() {
     for environment in ["sandbox", "localnet"] {
         assert!(
             stellar_uln_302_published_for_environment(environment).is_none(),
-            "{environment}: nothing published, so nothing to refuse"
+            "{environment}: nothing published, so nothing to compare"
         );
     }
     for environment in ["mainnet", "testnet"] {
-        let pinned = stellar_uln_302_for_environment(environment).unwrap();
-        let published = stellar_uln_302_published_for_environment(environment).unwrap();
-        assert_ne!(
-            pinned, published,
-            "{environment}: if these ever match, the gate opens by itself and the \
-             refusal tests must be retired in the same change"
+        assert_eq!(
+            stellar_uln_302_for_environment(environment).unwrap(),
+            stellar_uln_302_published_for_environment(environment).unwrap(),
+            "{environment}"
         );
     }
 }

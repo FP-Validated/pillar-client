@@ -33,16 +33,16 @@ async fn probes_eth_chain_id_and_preserves_provider_headers() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "ethereum".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::UriWithHeaders {
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::UriWithHeaders {
                     uri: "https://rpc.example".to_string(),
                     headers: HashMap::from([(
                         "authorization".to_string(),
                         "Bearer token".to_string(),
                     )]),
                 }],
-                quorum: Some(1),
-            },
+                1,
+            ),
         )]),
         Some(&["ethereum".to_string()]),
     )
@@ -53,7 +53,7 @@ async fn probes_eth_chain_id_and_preserves_provider_headers() {
         responses: Arc::new(Mutex::new(vec![Ok(json!({"result": "0x1"}))])),
     };
     let source = RpcProviderHealthSource::from_getter(&getter, transport, || 1234);
-    let report = source.get_provider_health_report().await;
+    let report = source.get_provider_health_report().await.unwrap();
 
     assert!(report["ethereum"].healthy);
     assert_eq!(report["ethereum"].checked_at_unix_ms, 1234);
@@ -75,10 +75,10 @@ async fn falls_back_to_net_version_when_chain_id_fails() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "ethereum".to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri("https://rpc.example".to_string())],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://rpc.example".to_string())],
+                1,
+            ),
         )]),
         Some(&["ethereum".to_string()]),
     )

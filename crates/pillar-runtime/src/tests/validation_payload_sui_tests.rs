@@ -120,10 +120,10 @@ fn sui_checks(
     let getter = StaticProviderConfig::new(
         IndexMap::from([(
             chain_name.to_string(),
-            ProviderConfig {
-                uris: vec![ProviderUri::Uri(format!("https://{chain_name}.example"))],
-                quorum: Some(1),
-            },
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri(format!("https://{chain_name}.example"))],
+                1,
+            ),
         )]),
         Some(&[chain_name.to_string()]),
     )
@@ -348,7 +348,8 @@ async fn runtime_rpc_validation_checks_fail_closed_on_sui_transport_failure() {
 /// messaging channel that `endpoint_v2::get_messaging_channel` resolves for its
 /// receiver answered state `2` (`VERIFIED`), while nonce 100 answered `0`.
 ///
-/// Evidence: `local/smoke/sui-live/verifiable-live.json`.
+/// Reproduce with a `sui_devInspectTransactionBlock` of that view call on any
+/// public Sui mainnet fullnode; the constants below pin its inputs.
 const LIVE_SUI_SRC_EID: u64 = 30_101;
 const LIVE_SUI_SENDER: &str = "0x000000000000000000000000e24a3dc889621612422a64e6388927901608b91d";
 const LIVE_SUI_DST_EID: u64 = 30_378;

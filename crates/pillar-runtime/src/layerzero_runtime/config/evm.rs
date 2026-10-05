@@ -59,8 +59,7 @@ pub fn runtime_evm_layerzero_config(
 ) -> Result<RuntimeEvmLayerZeroConfig, ConfigError> {
     let evm_chain_names = evm_chain_names(chain_names)?;
     let chain_name_by_eid = observation_chain_name_by_endpoint_id(environment)?;
-    let mut uln_version_by_send_library_address_by_chain_name = HashMap::new();
-    let mut trusted_packet_emitters_by_chain_name = HashMap::new();
+    let mut packet_sent_bindings_by_chain_name = HashMap::new();
     let mut receive_contracts_by_chain_name = HashMap::new();
 
     for chain_name in evm_chain_names {
@@ -79,29 +78,22 @@ pub fn runtime_evm_layerzero_config(
         let read_lib_1002 = contract("ReadLib1002").ok();
         let read_lib_1002_view = contract("ReadLib1002View").ok();
 
-        let mut trusted_emitters = HashSet::from([
-            normalize_address(&endpoint_v2),
-            normalize_address(&send_uln_302),
-        ]);
-        trusted_emitters.extend(
-            uln_v2
-                .iter()
-                .chain(send_uln_301.iter())
-                .map(|address| normalize_address(address)),
-        );
-        trusted_packet_emitters_by_chain_name.insert(chain_name.clone(), trusted_emitters);
-
-        let mut versions = HashMap::from([(send_uln_302.clone(), ULN_VERSION_V302.to_string())]);
-        if let Some(address) = &uln_v2 {
-            versions.insert(address.clone(), ULN_VERSION_V2.to_string());
-        }
-        if let Some(address) = &send_uln_301 {
-            versions.insert(address.clone(), ULN_VERSION_V301.to_string());
-        }
+        let mut endpoint_v2_send_library_versions =
+            HashMap::from([(send_uln_302.clone(), ULN_VERSION_V302.to_string())]);
         if let Some(address) = &read_lib_1002 {
-            versions.insert(address.clone(), ULN_VERSION_READ_V1002.to_string());
+            endpoint_v2_send_library_versions
+                .insert(address.clone(), ULN_VERSION_READ_V1002.to_string());
         }
-        uln_version_by_send_library_address_by_chain_name.insert(chain_name.clone(), versions);
+        packet_sent_bindings_by_chain_name.insert(
+            chain_name.clone(),
+            EvmPacketSentBindings {
+                endpoint_v2: endpoint_v2.clone(),
+                endpoint_v2_send_library_versions,
+                send_uln_301: send_uln_301.clone(),
+                uln_v2: uln_v2.clone(),
+            },
+        );
+        let simple_message_lib = simple_message_lib_for_environment(environment, &chain_name);
         receive_contracts_by_chain_name.insert(
             chain_name,
             EvmReceiveContracts {
@@ -114,6 +106,9 @@ pub fn runtime_evm_layerzero_config(
                 receive_uln_302_view,
                 read_lib_1002,
                 read_lib_1002_view,
+                send_uln_302: Some(send_uln_302),
+                send_uln_301,
+                simple_message_lib,
             },
         );
     }
@@ -130,8 +125,7 @@ pub fn runtime_evm_layerzero_config(
     Ok(RuntimeEvmLayerZeroConfig {
         packet_sent_resolver_config: EvmPacketSentResolverConfig {
             chain_name_by_eid,
-            uln_version_by_send_library_address_by_chain_name,
-            trusted_packet_emitters_by_chain_name,
+            packet_sent_bindings_by_chain_name,
             trusted_solana_endpoint_program_ids: trusted_solana_endpoint_program_ids(environment)?,
             trusted_solana_send_library_addresses: trusted_solana_send_library_addresses(
                 environment,
@@ -140,9 +134,68 @@ pub fn runtime_evm_layerzero_config(
             trusted_starknet_endpoint_addresses,
             trusted_stellar_endpoint_addresses,
             trusted_move_packet_emitters_by_chain_name,
+            // Upstream names the Aptos V1 ULN301 for every V301 send its Aptos-family
+            // extractor reads, Sui and IotaL1 included.
+            aptos_v1_source: chain_names
+                .iter()
+                .any(|name| {
+                    matches!(
+                        name.as_str(),
+                        "aptos" | "movement" | "initia" | "sui" | "iotal1"
+                    )
+                })
+                .then(|| aptos_v1_source_for_environment(environment))
+                .flatten(),
+            max_eth_get_logs_block_range_by_chain_name: chain_names
+                .iter()
+                .filter_map(|name| {
+                    pillar_config::max_eth_get_logs_block_range(environment, name)
+                        .map(|range| (name.clone(), range))
+                })
+                .collect(),
         },
         receive_contracts_by_chain_name,
     })
+}
+
+/// `getAptosV1LayerZeroAddress` and Aptos's EndpointV1 id, the environments that have
+/// one; upstream 1.2.66's own answers in `tests/gasolina_parity/chain_bindings.json`
+/// (`V1_LAYERZERO`, `eidV1`).
+fn aptos_v1_source_for_environment(environment: &str) -> Option<AptosV1Source> {
+    let (layerzero_account, endpoint_v1_id) = match environment {
+        "mainnet" => (
+            "0x54ad3d30af77b60d939ae356e6606de9a4da67583f02b962d2d3f2e481484e90",
+            108,
+        ),
+        "testnet" => (
+            "0x1759cc0d3161f1eb79f65847d4feb9d1f74fb79014698a23b16b28b9cd4c37e3",
+            10_108,
+        ),
+        _ => return None,
+    };
+    Some(AptosV1Source {
+        layerzero_account: layerzero_account.to_string(),
+        endpoint_v1_id,
+        uln_301: super::non_evm::aptos_v301_contracts_for_environment(environment)
+            .ok()?
+            .uln_301,
+    })
+}
+
+/// `getSimpleMessageLibContractAddress` resolves only on sandbox/localnet; these
+/// are upstream 1.2.66's own answers, recorded in
+/// `tests/gasolina_parity/chain_bindings.json`.
+fn simple_message_lib_for_environment(environment: &str, chain_name: &str) -> Option<String> {
+    if !matches!(environment, "sandbox" | "localnet") {
+        return None;
+    }
+    match chain_name {
+        "arbitrum" | "bsc" | "ethereum" | "polygon" => {
+            Some("0x0f5d1ef48f12b6f691401bfe88c2037c690a6afe".to_string())
+        }
+        "tron" => Some("0x35677258d5523967fd28efcfde8a2ebe65577d1c".to_string()),
+        _ => None,
+    }
 }
 
 fn non_evm_destination_endpoint_ids(environment: &str) -> &'static [(&'static str, u32)] {
@@ -157,6 +210,7 @@ fn non_evm_destination_endpoint_ids(environment: &str) -> &'static [(&'static st
             ("stellar", 30_600),
             ("initia", 30_326),
             ("ton", 30_343),
+            ("canton", 30_567),
         ][..],
         "testnet" => &[
             ("aptos", 40_108),
@@ -168,6 +222,7 @@ fn non_evm_destination_endpoint_ids(environment: &str) -> &'static [(&'static st
             ("stellar", 40_600),
             ("initia", 40_326),
             ("ton", 40_343),
+            ("canton", 40_567),
         ][..],
         "sandbox" | "localnet" => &[
             ("aptos", 50_008),
@@ -175,7 +230,18 @@ fn non_evm_destination_endpoint_ids(environment: &str) -> &'static [(&'static st
             ("sui", 50_378),
             ("iotal1", 50_423),
             ("ton", 50_343),
+            ("canton", 50_567),
         ][..],
+        _ => &[],
+    }
+}
+
+/// Aptos is the only non-EVM chain with an EndpointV1 id (upstream `eidV1`: 108 mainnet,
+/// 10108 testnet); its V301 packets carry it, so it must name the chain too.
+fn non_evm_endpoint_v1_ids(environment: &str) -> &'static [(&'static str, u32)] {
+    match environment {
+        "mainnet" => &[("aptos", 108)][..],
+        "testnet" => &[("aptos", 10_108)][..],
         _ => &[],
     }
 }
@@ -185,7 +251,10 @@ fn add_non_evm_destination_endpoint_ids(
     chain_names: &[String],
     chain_name_by_eid: &mut HashMap<u32, String>,
 ) {
-    for (chain_name, endpoint_id) in non_evm_destination_endpoint_ids(environment) {
+    for (chain_name, endpoint_id) in non_evm_destination_endpoint_ids(environment)
+        .iter()
+        .chain(non_evm_endpoint_v1_ids(environment))
+    {
         if chain_names.iter().any(|candidate| candidate == chain_name) {
             chain_name_by_eid.insert(*endpoint_id, (*chain_name).to_string());
         }
@@ -194,18 +263,13 @@ fn add_non_evm_destination_endpoint_ids(
 
 /// The `vId` packed into every signed DVN call data, per destination chain.
 ///
-/// Upstream reads it out of a table rather than computing it: the vId is the
-/// EndpointV1 chain id, and only a fixed list of non-EVM chains folds the V2 id
-/// into the V1 range instead (TS:
-/// `packages/static-config/src/index.ts:211-243`). Folding the V2 id for every
-/// chain is a different function. On testnet the two disagree for five deployed
-/// chains - `doma`, `dos`, `lineasep`, `scroll` and `zksyncsep`, where the V1 id
-/// is not `V2 % 30_000` - and since the vId is signed, disagreeing means signing
-/// the wrong bytes.
-///
-/// Resolution order mirrors upstream: the EndpointV1 id when the chain has one,
-/// otherwise the folded V2 id. Only non-EVM chains lack a V1 id, which is
-/// exactly upstream's second branch.
+/// The EndpointV1 id when the chain has one, otherwise the EndpointV2 id modulo 30000.
+/// Upstream `gasolina-audit` `213cd500` folds the V2 id for every chain "by convention"
+/// (`packages/static-config/src/index.ts:191-195`), but the deployed LayerZero Labs DVNs
+/// on testnet `doma`, `lineasep` and `zksyncsep` return their EndpointV1 id from `vid()`
+/// (`tests/onchain_provenance/dvn_vid.json`), so folding there signs bytes those
+/// verifiers reject. The rules differ only on those three and testnet `scroll` (whose
+/// EndpointV1 id is not yet confirmed on chain) among served chains, and on no mainnet chain.
 pub fn runtime_v_id_by_chain_name(
     environment: &str,
     chain_names: &[String],
@@ -293,13 +357,20 @@ fn trusted_stellar_endpoint_addresses_for_environment(
     if !chain_names.iter().any(|name| name == "stellar") {
         return Ok(HashSet::new());
     }
-    let address = match environment {
-        "sandbox" | "localnet" => "CCX7RAGXFDJ7SWSVTTMXEP6QMUBOGDHDLWTST54HDRK3BOXVJY2Y62KP",
-        "testnet" => "CBQOTWFU4N4DWFWYIU7EY62DXNCZH5N3U3XHKQW326CGY4CI6GT6Q5AF",
-        "mainnet" => "CAA4ZB7DNJ7KIZDEVDQRAZOQHYOV6U42LGBW375ZG7HIMUILA5FPXKQH",
-        other => return Err(ConfigError::UnknownLayerZeroEnvironment(other.to_string())),
-    };
-    Ok(HashSet::from([address.to_string()]))
+    Ok(HashSet::from([stellar_endpoint_v2_for_environment(
+        environment,
+    )?
+    .to_string()]))
+}
+
+/// Upstream 1.2.66 `getEndpointV2ContractAddress` (lz-stellar-sdk).
+fn stellar_endpoint_v2_for_environment(environment: &str) -> Result<&'static str, ConfigError> {
+    match environment {
+        "sandbox" | "localnet" => Ok("CCX7RAGXFDJ7SWSVTTMXEP6QMUBOGDHDLWTST54HDRK3BOXVJY2Y62KP"),
+        "testnet" => Ok("CALTBA5S6GRJEHAXFP45LGGLKWWAF7HTZCPNUBUJF2HWWRRLQNV35AIV"),
+        "mainnet" => Ok("CCQLLRE5JBAWYCW3KTWOIWLMFDUOKROQVZNSALQMGOSXNW3ERUOWTZGK"),
+        other => Err(ConfigError::UnknownLayerZeroEnvironment(other.to_string())),
+    }
 }
 
 pub fn starknet_uln_302_for_environment(environment: &str) -> Result<&'static str, ConfigError> {
@@ -315,37 +386,45 @@ pub fn starknet_uln_302_for_environment(environment: &str) -> Result<&'static st
 
 pub fn stellar_uln_302_for_environment(environment: &str) -> Result<&'static str, ConfigError> {
     match environment {
-        "mainnet" => Ok("CA5R2JQYRJXFLWHE3XLLIO32HMF4MIDYY2NLWMGYYQDWKU6BTXL7URJI"),
-        "testnet" => Ok("CAWCTJDDZZEWYARYCY6IP7LJ5WAR5XHNDBNDNRFYNS5ZX22MH3RPSJSH"),
+        "mainnet" => Ok("CCV4HEII3UC65THWGSRM2DVIJLB6HS6YMUHDTTHUECX2RHTP5FA2GOBA"),
+        "testnet" => Ok("CCMLPCAWCPIIMXOHJJKU3NZLOFTT2O6QTB2UUFPN6SEHLK35QRHVKKMB"),
         "sandbox" | "localnet" => Ok("CBLL32H25H2TEPTUC2YESW2HDSXBZCNOVREHX4CBQZVV677HSGWUOVLX"),
         other => Err(ConfigError::UnknownLayerZeroEnvironment(other.to_string())),
     }
 }
 
-/// What LayerZero's metadata service publishes as the Stellar ULN302 today.
-///
-/// This exists to disagree with `stellar_uln_302_for_environment` on purpose.
-/// The table above mirrors the pinned upstream package, which is the rule for
-/// every other chain; for Stellar the pinned values were confirmed on chain on
-/// 2026-08-28 to be a superseded generation. Same deployer per network, but
-/// disjoint wasm for both EndpointV2 and ULN302, and the live generation was
-/// deployed roughly three and a half months later. The evidence - wasm hashes,
-/// deployment dates, deployer accounts, lifetime activity - is pinned in
-/// `crates/pillar-runtime/tests/onchain_provenance/stellar_deployment.json`.
-///
-/// Callers compare the two and refuse rather than sign, because
-/// `pillar_layerzero::StellarUlnPayloadBuilder` hashes this id into the DVN
-/// attestation. Re-pinning the table above to a confirmed deployment closes the
-/// disagreement and reopens the chain with no further code change.
-///
-/// `None` means LayerZero publishes no deployment for that environment, so
-/// there is nothing to disagree with - sandbox and localnet stay usable.
+/// LayerZero metadata's Stellar ULN302 address. The pinned Gasolina 1.2.66
+/// contract getter table agrees with these published mainnet and testnet ids.
+/// Keep the independent comparison in `config/parts.rs`: disagreement is a
+/// fail-closed deployment-integrity signal, not an alternate address source.
+/// `None` means no published deployment exists for that environment.
 pub fn stellar_uln_302_published_for_environment(environment: &str) -> Option<&'static str> {
     match environment {
         "mainnet" => Some("CCV4HEII3UC65THWGSRM2DVIJLB6HS6YMUHDTTHUECX2RHTP5FA2GOBA"),
         "testnet" => Some("CCMLPCAWCPIIMXOHJJKU3NZLOFTT2O6QTB2UUFPN6SEHLK35QRHVKKMB"),
         _ => None,
     }
+}
+
+/// Upstream 1.2.66 `getLayerZeroViewsContractAddress` (lz-stellar-sdk), whose
+/// `uln_verifiable` answers the already-verified half of `hasPayloadSigned`.
+pub fn stellar_layerzero_views_for_environment(
+    environment: &str,
+) -> Result<&'static str, ConfigError> {
+    match environment {
+        "mainnet" => Ok("CBCH6XLCAVY2KPWGJYDY4ATDHMJCNLISINKB5JAOHPAAXZXLTBMU43ZB"),
+        "testnet" => Ok("CAWX6SA2NX7HD2IBAARR5KP65C47N4GCCTWXTPZ7KH2WIGUOFQGS3ZHO"),
+        "sandbox" | "localnet" => Ok("CBKBHAK2ELE2JKC5CUUVAYSO4DSJJ45JICFSKDIDUTPM6EHEYQ2VIDHT"),
+        other => Err(ConfigError::UnknownLayerZeroEnvironment(other.to_string())),
+    }
+}
+
+/// `STATIC_VE3_CONTRACT_ADDRESSES.uln302`: `deriveGlobalAddress('uln302',
+/// VE3_CONTRACT)`, the target hashed into every Canton verify digest and the
+/// same in every environment (TS 1.2.66: `ver-address/src/address.ts:62-76`,
+/// `lz-canton-sdk/src/contractGetters.ts:25-36`).
+pub fn canton_uln_302() -> &'static str {
+    "0xe981afc41dfa5510e4599ab8544c0c4c240220df62eded320ac87abf471301db"
 }
 
 pub fn runtime_evm_uln_payload_builder(
@@ -380,11 +459,22 @@ where
             move_uln_302_by_chain_name,
             move_views_for_environment(environment, chain_names)?,
         );
+    if chain_names.iter().any(|chain_name| chain_name == "aptos") {
+        checks =
+            checks.with_aptos_v301_contracts(aptos_v301_contracts_for_environment(environment)?);
+    }
     if chain_names
         .iter()
         .any(|chain_name| chain_name == "starknet")
     {
         checks = checks.with_starknet_uln_302(starknet_uln_302_for_environment(environment)?);
+    }
+    if chain_names.iter().any(|chain_name| chain_name == "stellar") {
+        checks = checks.with_stellar_payload_contracts(super::super::StellarPayloadContracts {
+            endpoint_v2: stellar_endpoint_v2_for_environment(environment)?.to_string(),
+            uln_302: stellar_uln_302_for_environment(environment)?.to_string(),
+            views: stellar_layerzero_views_for_environment(environment)?.to_string(),
+        });
     }
     if chain_names
         .iter()
@@ -396,6 +486,13 @@ where
         if let Some(ton_config) = runtime_ton_layerzero_config(environment) {
             checks = checks.with_ton_payload_contracts(Arc::new(ton_config));
         }
+    }
+    if chain_names.iter().any(|chain_name| chain_name == "canton") {
+        // Upstream reads `CANTON_CLIENT_SECRET` when the `rpc` URI carries no `client-secret`.
+        checks = checks.with_canton_ledger_auth(super::super::CantonLedgerAuth::for_environment(
+            environment,
+            std::env::var("CANTON_CLIENT_SECRET").ok(),
+        ));
     }
     Ok(checks)
 }

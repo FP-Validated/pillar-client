@@ -10,7 +10,7 @@ where
     T: JsonRpcTransport,
 {
     let response = transport
-        .post_json(
+        .post_json_scoped(
             url,
             headers,
             json!({
@@ -21,7 +21,7 @@ where
             }),
         )
         .await
-        .map_err(AppCoreError::Internal)?;
+        .map_err(AppCoreError::from)?;
     parse_transaction_from_observation(&response)
 }
 
@@ -34,25 +34,20 @@ pub(crate) async fn observe_solana_transaction_from<T>(
 where
     T: JsonRpcTransport,
 {
-    let response = transport
-        .post_json(
-            url,
-            headers,
-            json!({
-                "method": "getTransaction",
-                "params": [
-                    signature,
-                    {
-                        "encoding": "jsonParsed",
-                        "maxSupportedTransactionVersion": crate::SOLANA_MAX_SUPPORTED_TRANSACTION_VERSION,
-                    },
-                ],
-                "id": 1,
-                "jsonrpc": "2.0",
-            }),
-        )
-        .await
-        .map_err(AppCoreError::Internal)?;
+    let response = transport.post_json_scoped(url,
+    headers,
+    json!({
+        "method": "getTransaction",
+        "params": [
+            signature,
+            {
+                "encoding": "jsonParsed",
+                "maxSupportedTransactionVersion": crate::SOLANA_MAX_SUPPORTED_TRANSACTION_VERSION,
+            },
+        ],
+        "id": 1,
+        "jsonrpc": "2.0",
+    }),).await.map_err(AppCoreError::from)?;
     parse_solana_transaction_from_observation(&response)
 }
 

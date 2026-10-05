@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use axum::{
     body::Body,
-    extract::{rejection::JsonRejection, DefaultBodyLimit, Query, State},
+    extract::{rejection::BytesRejection, DefaultBodyLimit, RawQuery, State},
     http::{header, HeaderValue, Request, StatusCode},
     middleware::{self, Next},
     response::{Html, IntoResponse, Response},
@@ -9,12 +9,12 @@ use axum::{
     Json, Router,
 };
 use pillar_core::{
-    AppCoreError, BadRequestError, PillarApiRequestV1, PillarApiRequestV2, PillarApiResponse,
-    PillarApp, ProviderHealthSnapshot, ResponseEnvelope, ULN_SEND_VERSIONS,
+    execution::ExecutionResources, AppCoreError, BadRequestError, PillarApiRequestV1,
+    PillarApiRequestV2, PillarApiResponse, PillarApp, ProviderHealthSnapshot, ResponseEnvelope,
+    ULN_SEND_VERSIONS,
 };
 use pillar_metrics::PillarMetrics;
 use regex::Regex;
-use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
@@ -27,8 +27,29 @@ use std::{
 use tokio::sync::Mutex;
 use tracing::Instrument;
 
+mod express;
+
+use express::JSON_BODY_LIMIT_BYTES;
+
+#[derive(Clone, Copy)]
+pub struct SocketRequest;
+#[derive(Clone)]
+struct SocketOutcome(Arc<std::sync::Mutex<Option<pillar_metrics::HttpOutcomeGuard>>>);
+pub fn complete_socket_response(response: &mut Response, timed_out: bool) {
+    if let Some(outcome) = response.extensions_mut().remove::<SocketOutcome>() {
+        let mut guard = outcome
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        if timed_out {
+            if let Some(guard) = &mut guard {
+                guard.finish_class(pillar_core::execution::Outcome::TimedOut);
+            }
+        }
+    }
+}
 const REQUEST_ID_HEADER: &str = "x-request-id";
-const JSON_BODY_LIMIT_BYTES: usize = 100 * 1024;
 const ROOT_ROUTE: &str = "/";
 const SIGN_V2_ROUTE: &str = "/v2/resolve-and-sign";
 const SIGNER_INFO_ROUTE: &str = "/signer-info";
@@ -107,6 +128,9 @@ pub trait ServerApp: Send + Sync + 'static {
     fn metrics(&self) -> Option<Arc<Mutex<PillarMetrics>>> {
         None
     }
+    fn execution_resources(&self) -> Option<Arc<ExecutionResources>> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -129,6 +153,8 @@ pub enum AppError {
     MalformedJson(String),
     #[error("{0}")]
     Internal(String),
+    #[error("{0}")]
+    Admission(pillar_core::execution::BudgetError),
 }
 
 impl From<BadRequestError> for AppError {
@@ -142,6 +168,7 @@ impl From<AppCoreError> for AppError {
         match value {
             AppCoreError::BadRequest(message) => Self::BadRequest(message),
             AppCoreError::Internal(message) => Self::Internal(message),
+            AppCoreError::Admission(error) => Self::Admission(error),
         }
     }
 }
@@ -153,6 +180,7 @@ impl IntoResponse for AppError {
             AppError::Http { status, .. } => *status,
             AppError::MalformedJson(_) => StatusCode::BAD_REQUEST,
             AppError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            AppError::Admission(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
         let message = match &self {
             AppError::BadRequest(message)
@@ -160,14 +188,37 @@ impl IntoResponse for AppError {
             | AppError::Internal(message) => obfuscate_urls(message),
             _ => self.to_string(),
         };
-        (
+        let outcome = if let AppError::Admission(error) = &self {
+            Some(match error {
+                pillar_core::execution::BudgetError::Overloaded => {
+                    pillar_core::execution::Outcome::Overloaded
+                }
+                pillar_core::execution::BudgetError::WaitExpired => {
+                    pillar_core::execution::Outcome::WaitExpired
+                }
+                pillar_core::execution::BudgetError::Deadline => {
+                    pillar_core::execution::Outcome::TimedOut
+                }
+                pillar_core::execution::BudgetError::Closed => {
+                    pillar_core::execution::Outcome::Shutdown
+                }
+                _ => pillar_core::execution::Outcome::Error,
+            })
+        } else {
+            None
+        };
+        let mut response = (
             status,
             Json(ResponseEnvelope {
                 status_code: status.as_u16(),
                 body: message,
             }),
         )
-            .into_response()
+            .into_response();
+        if let Some(outcome) = outcome {
+            response.extensions_mut().insert(outcome);
+        }
+        response
     }
 }
 
@@ -181,18 +232,33 @@ pub struct ApiState {
 
 /// Handle used by the server binary to flip readiness to `NOT_READY` the moment
 /// a shutdown signal arrives, before in-flight requests are drained.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ShutdownSignal {
     flag: Arc<AtomicBool>,
+    resources: Option<Arc<ExecutionResources>>,
 }
 
 impl ShutdownSignal {
+    pub fn close_budgets(&self) {
+        if let Some(resources) = &self.resources {
+            resources.signing.close();
+            resources.rpc.close();
+            resources.kms.close();
+        }
+    }
     pub fn trigger(&self) {
         self.flag.store(true, Ordering::SeqCst);
     }
 
     pub fn is_triggered(&self) -> bool {
         self.flag.load(Ordering::SeqCst)
+    }
+}
+impl std::fmt::Debug for ShutdownSignal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ShutdownSignal")
+            .field("triggered", &self.is_triggered())
+            .finish()
     }
 }
 
@@ -214,6 +280,7 @@ pub fn router_with_shutdown(
     image_version: impl Into<String>,
 ) -> (Router, ShutdownSignal) {
     let app = Arc::new(app);
+    let resources = app.execution_resources();
     let shared_metrics = app
         .metrics()
         .unwrap_or_else(|| Arc::new(Mutex::new(PillarMetrics::new())));
@@ -242,6 +309,7 @@ pub fn router_with_shutdown(
         router,
         ShutdownSignal {
             flag: shutting_down,
+            resources,
         },
     )
 }
@@ -317,9 +385,10 @@ async fn request_middleware(
     req: Request<Body>,
     next: Next,
 ) -> Response {
+    let socket_managed = req.extensions().get::<SocketRequest>().is_some();
     let started_at = Instant::now();
-    let method = req.method().as_str().to_string();
-    let route = route_template(req.uri().path()).to_string();
+    let method = pillar_metrics::normalized_method(req.method().as_str());
+    let route = route_template(req.uri().path());
     let request_id = request_id_or_generated(
         req.headers()
             .get(REQUEST_ID_HEADER)
@@ -331,9 +400,17 @@ async fn request_middleware(
         http_method = %method,
         http_route = %route,
     );
+    let context = pillar_core::execution::current().unwrap_or_else(|| {
+        pillar_core::execution::RequestContext::new(std::time::Duration::from_secs(58))
+    });
+    let mut outcome = state
+        .metrics
+        .lock()
+        .await
+        .begin_http_request(method, route, context.clone());
 
     let mut response = if state.app.api_auth_enabled()
-        && authenticated_route(&method, req.uri().path(), state.app.public_sign_routes())
+        && authenticated_route(method, req.uri().path(), state.app.public_sign_routes())
         && !authorized(&state, &req)
     {
         AppError::Http {
@@ -341,31 +418,51 @@ async fn request_middleware(
             message: "Unauthorized".to_string(),
         }
         .into_response()
+    } else if state.shutting_down.load(Ordering::SeqCst)
+        && matches!(
+            (method, req.uri().path()),
+            ("POST", ROOT_ROUTE | SIGN_V2_ROUTE)
+        )
+    {
+        AppError::Admission(pillar_core::execution::BudgetError::Closed).into_response()
     } else {
-        next.run(req).instrument(span.clone()).await
+        context.scope(next.run(req)).instrument(span.clone()).await
     };
     align_json_content_type(&mut response);
     let status_code = response.status().as_u16();
+    outcome.finish(status_code);
+    if let Some(class) = response
+        .extensions()
+        .get::<pillar_core::execution::Outcome>()
+    {
+        outcome.finish_class(*class);
+    }
     if response.status().is_client_error() || response.status().is_server_error() {
         response.extensions_mut().insert(HttpErrorExtension {
             request_id: request_id.clone(),
-            method: method.clone(),
-            route: route.clone(),
+            method: method.to_string(),
+            route: route.to_string(),
             status_code,
         });
     }
     state.metrics.lock().await.record_http_request(
-        &method,
-        &route,
+        method,
+        route,
         status_code,
         started_at.elapsed().as_secs_f64(),
     );
-    tracing::info!(
-        parent: &span,
-        http_status = status_code,
-        duration_ms = started_at.elapsed().as_millis(),
-        "http request completed"
-    );
+    if matches!(method, "GET" | "HEAD") && status_code < 400 {
+        tracing::debug!(parent: &span, http_status = status_code, duration_ms = started_at.elapsed().as_millis(), "http request completed");
+    } else {
+        tracing::info!(parent: &span, http_status = status_code, duration_ms = started_at.elapsed().as_millis(), "http request completed");
+    }
+    if socket_managed {
+        response
+            .extensions_mut()
+            .insert(SocketOutcome(Arc::new(std::sync::Mutex::new(Some(
+                outcome,
+            )))));
+    }
     response
 }
 
@@ -383,7 +480,7 @@ fn align_json_content_type(response: &mut Response) {
     }
 }
 
-fn route_template(path: &str) -> &str {
+fn route_template(path: &str) -> &'static str {
     match path {
         ROOT_ROUTE => ROOT_ROUTE,
         SIGN_V2_ROUTE => SIGN_V2_ROUTE,
@@ -405,11 +502,14 @@ fn next_generated_request_id() -> String {
 }
 
 fn request_id_or_generated(request_id: Option<&str>) -> String {
-    // Header values are caller-controlled and are interpolated into the request
-    // span. Reject control characters as a unit rather than trying to repair a
-    // partially trusted identifier; malformed identifiers get a fresh local id.
     request_id
-        .filter(|value| !value.chars().any(char::is_control))
+        .filter(|value| {
+            !value.is_empty()
+                && value.len() <= 128
+                && value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+        })
         .map(str::to_owned)
         .unwrap_or_else(next_generated_request_id)
 }
@@ -418,50 +518,47 @@ async fn root() -> Html<&'static str> {
     Html("HEALTHY")
 }
 
-#[derive(Deserialize)]
-struct SignerInfoQuery {
-    #[serde(rename = "chainName")]
-    chain_name: Option<String>,
-}
-
+/// Upstream's `isBodyEnvelope` + `JSON.parse(event.body)`: a parse failure is a
+/// plain `SyntaxError`, so a 500 (`bootstrap.ts:35-39,98-100,124-126`).
 fn unwrap_body_envelope(value: Value) -> Result<Value, AppError> {
-    if let Some(body) = value.get("body").and_then(Value::as_str) {
-        serde_json::from_str(body).map_err(|error| AppError::BadRequest(error.to_string()))
-    } else {
-        Ok(value)
-    }
-}
-
-fn parse_json_payload(payload: Result<Json<Value>, JsonRejection>) -> Result<Value, AppError> {
-    match payload {
-        Ok(Json(value)) => Ok(value),
-        Err(rejection) if rejection.status() == StatusCode::BAD_REQUEST => {
-            Err(AppError::MalformedJson(rejection.body_text()))
+    let mut value = match value.get("body").and_then(Value::as_str) {
+        Some(body) => {
+            serde_json::from_str(body).map_err(|error| AppError::Internal(error.to_string()))?
         }
-        Err(rejection) => Err(AppError::Http {
-            status: rejection.status(),
-            message: rejection.body_text(),
-        }),
-    }
+        None => value,
+    };
+    normalize_js_numbers(&mut value);
+    Ok(value)
 }
 
-/// Transaction ids across the supported families are hex (EVM, Move, TON),
-/// base58 (Solana) or base64url (TON trace ids). None of them contains a path
-/// separator, a dot, a query mark or a fragment mark, which is what makes this a
-/// usable gate on a value that ends up in an outbound URL path segment.
-fn is_transaction_id_shaped(value: &str) -> bool {
-    let body = value.strip_prefix("0x").unwrap_or(value);
-    !body.is_empty()
-        && body.len() <= 128
-        && body
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+/// `JSON.parse` reads every number as a double: `7.0` and `1e3` are the integers
+/// 7 and 1000, and integers past 2^53 round. Typed fields here then accept what
+/// upstream accepts and see the value upstream compares.
+fn normalize_js_numbers(value: &mut Value) {
+    match value {
+        Value::Number(number) => {
+            let Some(float) = number.as_f64() else {
+                return;
+            };
+            if float.fract() != 0.0 {
+                return;
+            }
+            // 2^64 and -2^63 are exact doubles; inside them the casts are lossless.
+            if (0.0..18_446_744_073_709_551_616.0).contains(&float) {
+                *number = serde_json::Number::from(float as u64);
+            } else if (-9_223_372_036_854_775_808.0..0.0).contains(&float) {
+                *number = serde_json::Number::from(float as i64);
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(normalize_js_numbers),
+        Value::Object(map) => map.values_mut().for_each(normalize_js_numbers),
+        _ => {}
+    }
 }
 
 /// Configured LayerZero chain names use the same conservative ASCII alphabet
-/// throughout the generated roster (letters, digits, _ and -). This is a
-/// shape gate only, not roster membership: unknown but well-formed names still
-/// reach the core, which owns the caller-error classification for unknown chains.
+/// throughout the generated roster (letters, digits, _ and -), so a name failing
+/// this can never be available and gets the unavailable-chain 500 before any log.
 fn is_chain_name_shaped(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
@@ -470,170 +567,163 @@ fn is_chain_name_shaped(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
 }
 
-/// Presence and type checks for the protocol fields, at the same boundary
-/// upstream puts them: `apps/gasolina/src/bootstrap.ts:130-157` parses the body
-/// with a Zod schema (numeric EIDs, string addresses, a native `UlnVersion`
-/// enum) and answers 400 before the app is called.
-///
-/// Presence alone is not enough. `PathwayId::extra` and `uln_send_version` are
-/// `serde_json::Value`, so a wrong-typed field deserialises happily and only
-/// fails deep in the core, where the least-wrong classification is an internal
-/// fault - a 500 that blames the server for the caller's payload. Missing-field
-/// wording is unchanged so the existing contract still holds.
+/// Upstream parses the v2 body with `GasolinaApiRequestV2Schema` and answers any
+/// failure with `Invalid request: ` plus every issue message joined by `, `
+/// (`bootstrap.ts:127-135`, `gasolina-client/src/types.ts`,
+/// `common-model/src/v2/lzMessage.ts:78-92`). This walks the same schema in the
+/// same key order and renders Zod 3's messages, so a malformed body gets the
+/// same 400 byte for byte; `fixtures/zod_v2_golden.json` holds upstream's own
+/// output for the cases the tests replay.
 fn validate_v2_request_shape(value: &Value) -> Result<(), AppError> {
-    let mut missing_fields = Vec::new();
-    let mut invalid_fields = Vec::new();
-    let top_level_fields = ["srcTxHash", "lzMessageId", "signingContext", "messageHash"];
-    for field in top_level_fields {
-        if value.get(field).is_none_or(Value::is_null) {
-            missing_fields.push(field.to_string());
-        }
-    }
-    // `srcTxHash` is spliced into the path of an outbound GET against the
-    // operator's own node (the Move transaction fetch and the TON trace fetch),
-    // so `..`, `?` and `#` used to re-target that request to another path, query
-    // or fragment on the same host, carrying the provider's configured API-key
-    // header. Being a string was the only check it had. The character set below
-    // is the union of what every supported chain's transaction id can be - hex
-    // with an optional `0x`, plus base58/base64url for the non-EVM families -
-    // and it excludes every path metacharacter. `messageHash` deliberately has
-    // no such gate: it is compared, never interpolated into a request, and the
-    // log-forgery route it once offered is closed where the record is written.
-    if let Some(present) = value.get("srcTxHash").filter(|value| !value.is_null()) {
-        match present.as_str() {
-            None => invalid_fields.push("srcTxHash: expected a string".to_string()),
-            Some(hash) if !is_transaction_id_shaped(hash) => {
-                invalid_fields.push(
-                    "srcTxHash: expected 1-128 characters of [0-9a-zA-Z_-] with an optional 0x prefix"
-                        .to_string(),
-                );
-            }
-            Some(_) => {}
-        }
-    }
-    if value
-        .get("messageHash")
-        .filter(|value| !value.is_null())
-        .is_some_and(|present| !present.is_string())
-    {
-        invalid_fields.push("messageHash: expected a string".to_string());
-    }
-
-    if let Some(message_id) = value.get("lzMessageId") {
-        if let Some(version) = message_id
-            .get("ulnSendVersion")
-            .filter(|value| !value.is_null())
-        {
-            match version.as_str() {
-                None => {
-                    invalid_fields.push("lzMessageId.ulnSendVersion: expected a string".to_string())
-                }
-                Some(version) if !ULN_SEND_VERSIONS.contains(&version) => {
-                    invalid_fields.push(format!(
-                        "lzMessageId.ulnSendVersion: expected one of {}",
-                        ULN_SEND_VERSIONS.join(", ")
-                    ));
-                }
-                Some(_) => {}
-            }
-        }
-    }
-
-    if let Some(pathway_id) = value
-        .get("lzMessageId")
-        .and_then(|message_id| message_id.get("pathwayId"))
-    {
-        for field in ["srcChainName", "dstChainName"] {
-            let Some(present) = pathway_id.get(field).filter(|value| !value.is_null()) else {
-                missing_fields.push(format!("lzMessageId.pathwayId.{field}"));
-                continue;
-            };
-            match present.as_str() {
-                None => {
-                    invalid_fields.push(format!("lzMessageId.pathwayId.{field}: expected a string"))
-                }
-                Some(name) if !is_chain_name_shaped(name) => invalid_fields.push(format!(
-                    "lzMessageId.pathwayId.{field}: expected 1-128 characters of [0-9a-zA-Z_-]"
-                )),
-                Some(_) => {}
-            }
-        }
-        for field in ["srcEid", "dstEid", "sender", "receiver"] {
-            let Some(present) = pathway_id.get(field).filter(|value| !value.is_null()) else {
-                missing_fields.push(format!("lzMessageId.pathwayId.{field}"));
-                continue;
-            };
-            let well_typed = match field {
-                "srcEid" | "dstEid" => present.is_u64(),
-                _ => present.is_string(),
-            };
-            if !well_typed {
-                let expected = if matches!(field, "srcEid" | "dstEid") {
-                    "a non-negative integer"
-                } else {
-                    "a string"
-                };
-                invalid_fields.push(format!(
-                    "lzMessageId.pathwayId.{field}: expected {expected}"
-                ));
-            }
-        }
-    }
-
-    if !invalid_fields.is_empty() {
-        return Err(AppError::BadRequest(format!(
-            "Invalid request: {}",
-            invalid_fields.join("; ")
-        )));
-    }
-
-    if missing_fields.is_empty() {
+    let mut issues = Vec::new();
+    zod_object(Some(value), &mut issues, |body, issues| {
+        zod_string(body.get("srcTxHash"), issues);
+        zod_object(body.get("lzMessageId"), issues, |message_id, issues| {
+            zod_object(message_id.get("pathwayId"), issues, |pathway, issues| {
+                zod_number(pathway.get("srcEid"), issues);
+                zod_number(pathway.get("dstEid"), issues);
+                zod_string(pathway.get("sender"), issues);
+                zod_string(pathway.get("receiver"), issues);
+                zod_string(pathway.get("srcChainName"), issues);
+                zod_string(pathway.get("dstChainName"), issues);
+            });
+            zod_number(message_id.get("nonce"), issues);
+            zod_uln_version(message_id.get("ulnSendVersion"), issues);
+        });
+        zod_signing_context(body.get("signingContext"), issues);
+        zod_string(body.get("messageHash"), issues);
+    });
+    if issues.is_empty() {
         Ok(())
-    } else if missing_fields.len() == top_level_fields.len()
-        && top_level_fields
-            .iter()
-            .all(|field| missing_fields.iter().any(|missing| missing == field))
-    {
-        Err(AppError::BadRequest(format!(
-            "Invalid request: {}",
-            ["Required"; 4].join(", ")
-        )))
     } else {
         Err(AppError::BadRequest(format!(
             "Invalid request: {}",
-            missing_fields
-                .into_iter()
-                .map(|field| format!("{field}: Required"))
-                .collect::<Vec<_>>()
-                .join("; ")
+            issues.join(", ")
         )))
     }
 }
 
-fn normalize_legacy_lz_message_id(value: &mut Value) {
-    let Some(message_id) = value.get_mut("lzMessageId").and_then(Value::as_object_mut) else {
-        return;
-    };
-    for (typescript_key, rust_key) in [
-        ("srcUAAddress", "srcUaAddress"),
-        ("dstUAAddress", "dstUaAddress"),
-    ] {
-        if message_id.contains_key(rust_key) {
-            continue;
-        }
-        if let Some(raw_value) = message_id.get(typescript_key).cloned() {
-            message_id.insert(rust_key.to_string(), raw_value);
+/// Zod 3's `getParsedType` names for JSON values.
+fn zod_type(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
+fn zod_invalid_type(expected: &str, value: Option<&Value>, issues: &mut Vec<String>) {
+    issues.push(match value {
+        None => "Required".to_string(),
+        Some(value) => format!("Expected {expected}, received {}", zod_type(value)),
+    });
+}
+
+fn zod_string(value: Option<&Value>, issues: &mut Vec<String>) {
+    if !value.is_some_and(Value::is_string) {
+        zod_invalid_type("string", value, issues);
+    }
+}
+
+fn zod_number(value: Option<&Value>, issues: &mut Vec<String>) {
+    if !value.is_some_and(Value::is_number) {
+        zod_invalid_type("number", value, issues);
+    }
+}
+
+fn zod_optional(value: Option<&Value>, kind: &str, issues: &mut Vec<String>) {
+    if let Some(value) = value {
+        if zod_type(value) != kind {
+            zod_invalid_type(kind, Some(value), issues);
         }
     }
+}
+
+fn zod_object(
+    value: Option<&Value>,
+    issues: &mut Vec<String>,
+    fields: impl FnOnce(&Value, &mut Vec<String>),
+) {
+    match value {
+        Some(object @ Value::Object(_)) => fields(object, issues),
+        other => zod_invalid_type("object", other, issues),
+    }
+}
+
+/// `z.nativeEnum(UlnVersion)` (`common-model/src/v1/lzMessage.ts:48-57`).
+fn zod_uln_version(value: Option<&Value>, issues: &mut Vec<String>) {
+    let expected = ULN_SEND_VERSIONS
+        .iter()
+        .map(|version| format!("'{version}'"))
+        .collect::<Vec<_>>()
+        .join(" | ");
+    match value {
+        Some(Value::String(version)) if ULN_SEND_VERSIONS.contains(&version.as_str()) => {}
+        Some(Value::String(version)) => issues.push(format!(
+            "Invalid enum value. Expected {expected}, received '{version}'"
+        )),
+        Some(Value::Number(number)) => issues.push(format!(
+            "Invalid enum value. Expected {expected}, received '{}'",
+            pillar_core::js_number(number)
+        )),
+        Some(other) => issues.push(format!("Expected {expected}, received {}", zod_type(other))),
+        None => issues.push("Required".to_string()),
+    }
+}
+
+/// `z.discriminatedUnion('protocolType', [Message, Read])`; both options extend
+/// the base object, so their keys come in the base order first.
+fn zod_signing_context(value: Option<&Value>, issues: &mut Vec<String>) {
+    zod_object(value, issues, |context, issues| {
+        let read = match context.get("protocolType").and_then(Value::as_str) {
+            Some("MESSAGE") => false,
+            Some("READ") => true,
+            _ => {
+                issues.push("Invalid discriminator value. Expected 'MESSAGE' | 'READ'".to_string());
+                return;
+            }
+        };
+        zod_number(context.get("expiration"), issues);
+        zod_optional(context.get("skipVId"), "boolean", issues);
+        zod_optional(context.get("dvnAddress"), "string", issues);
+        if !read {
+            zod_number(context.get("blockConfirmation"), issues);
+            return;
+        }
+        match context.get("resolvedTimestampTimeMarkers") {
+            Some(Value::Array(markers)) => {
+                for marker in markers {
+                    zod_object(Some(marker), issues, |marker, issues| {
+                        zod_number(marker.get("blockConfirmation"), issues);
+                        if marker.get("isBlockNumber") != Some(&Value::Bool(false)) {
+                            issues.push("Invalid literal value, expected false".to_string());
+                        }
+                        zod_string(marker.get("chainName"), issues);
+                        zod_number(marker.get("blockNumber"), issues);
+                        zod_number(marker.get("timestamp"), issues);
+                    });
+                }
+            }
+            other => zod_invalid_type("array", other, issues),
+        }
+    });
 }
 
 async fn sign_v1(
     State(state): State<ApiState>,
-    payload: Result<Json<Value>, JsonRejection>,
+    headers: axum::http::HeaderMap,
+    payload: Result<axum::body::Bytes, BytesRejection>,
 ) -> Result<Json<ResponseEnvelope<PillarApiResponse>>, AppError> {
-    let value = parse_json_payload(payload)?;
+    let value = express::read_json_body(&headers, payload)?.ok_or_else(unparsed_body)?;
     let mut raw = unwrap_body_envelope(value)?;
-    normalize_legacy_lz_message_id(&mut raw);
+    if raw.is_null() {
+        return Err(AppError::Internal(
+            "Cannot read properties of null (reading 'srcTxHash')".to_string(),
+        ));
+    }
     for key in [
         "srcTxHash",
         "expiration",
@@ -641,23 +731,23 @@ async fn sign_v1(
         "lzMessageId",
         "ulnVersion",
     ] {
-        if raw.get(key).is_none_or(Value::is_null) {
+        // Upstream: `!candidate && candidate !== 0` (`bootstrap.ts:107-113`).
+        let missing = match raw.get(key) {
+            None | Some(Value::Null) | Some(Value::Bool(false)) => true,
+            Some(Value::String(text)) => text.is_empty(),
+            Some(_) => false,
+        };
+        if missing {
             return Err(AppError::BadRequest(format!(
                 "Missing required parameter {key}"
             )));
         }
     }
-    // The same gate the v2 route applies. `PillarApp::sign_request_v1` copies
-    // `srcTxHash` verbatim into a `PillarApiRequestV2` and delegates to
-    // `sign_request_v2`, so this route reaches the identical resolver, readiness
-    // and trace sinks - the ones that splice the value into an outbound URL path.
-    // Gating v2 alone left the control absent on one of the two routes carrying it.
-    if let Some(hash) = raw.get("srcTxHash").and_then(Value::as_str) {
-        if !is_transaction_id_shaped(hash) {
-            return Err(AppError::BadRequest(
-                "srcTxHash: expected 1-128 characters of [0-9a-zA-Z_-] with an optional 0x prefix"
-                    .to_string(),
-            ));
+    // Upstream reads `legacyPathwayId.srcChainId` and siblings off whatever arrived;
+    // on a string, number, boolean or array every one of them is `undefined`.
+    if let Some(message_id) = raw.get_mut("lzMessageId") {
+        if !message_id.is_object() {
+            *message_id = Value::Object(serde_json::Map::new());
         }
     }
     let input: PillarApiRequestV1 =
@@ -676,26 +766,63 @@ async fn sign_v1(
 
 async fn sign_v2(
     State(state): State<ApiState>,
-    payload: Result<Json<Value>, JsonRejection>,
+    headers: axum::http::HeaderMap,
+    payload: Result<axum::body::Bytes, BytesRejection>,
 ) -> Result<Json<ResponseEnvelope<PillarApiResponse>>, AppError> {
-    let value = parse_json_payload(payload)?;
-    let raw = unwrap_body_envelope(value)?;
+    let value = express::read_json_body(&headers, payload)?.ok_or_else(unparsed_body)?;
+    let mut raw = unwrap_body_envelope(value)?;
     validate_v2_request_shape(&raw)?;
+    // Zod objects strip unknown keys (`common-model/src/v2/lzMessage.ts:78-85`), so
+    // upstream never sees, echoes or compares an undeclared pathway field. Only the
+    // flattened `PathwayId::extra` would keep one; every other struct ignores them.
+    if let Some(Value::Object(pathway)) = raw.pointer_mut("/lzMessageId/pathwayId") {
+        pathway.retain(|key, _| {
+            matches!(
+                key.as_str(),
+                "srcEid" | "dstEid" | "sender" | "receiver" | "srcChainName" | "dstChainName"
+            )
+        });
+    }
     let input: PillarApiRequestV2 = serde_json::from_value(raw)
         .map_err(|error| AppError::BadRequest(format!("Invalid request: {error}")))?;
-    let src_chain = input.lz_message_id.pathway_id.src_chain_name.clone();
-    let dst_chain = input.lz_message_id.pathway_id.dst_chain_name.clone();
+    let chains = state.app.get_available_chain_names();
+    let src_chain = chains
+        .iter()
+        .find(|chain| **chain == input.lz_message_id.pathway_id.src_chain_name)
+        .map(String::as_str)
+        .unwrap_or("<unconfigured>");
+    let dst_chain = chains
+        .iter()
+        .find(|chain| **chain == input.lz_message_id.pathway_id.dst_chain_name)
+        .map(String::as_str)
+        .unwrap_or("<unconfigured>");
     let nonce = input.lz_message_id.nonce;
-    let uln_send_version = input
-        .lz_message_id
-        .uln_send_version
-        .as_str()
-        .unwrap_or("unknown")
-        .to_string();
-    if input.signing_context.skip_v_id() == Some(true) {
+    let uln_send_version = ULN_SEND_VERSIONS
+        .iter()
+        .copied()
+        .find(|version| Some(*version) == input.lz_message_id.uln_send_version.as_str())
+        .unwrap_or("<unconfigured>");
+    // `skipVId` is served only where upstream's answer is a bounded Aptos ULN V2 oracle
+    // proposal; the builders refuse it on every other route.
+    let skip_v_id_in_scope = input.lz_message_id.uln_send_version.as_str() == Some("V2")
+        && input.lz_message_id.pathway_id.dst_chain_name == "aptos";
+    if input.signing_context.skip_v_id() == Some(true) && !skip_v_id_in_scope {
         return Err(AppError::BadRequest(
             "skipVId is not supported for v2 requests".to_string(),
         ));
+    }
+    // Upstream's availability check, src first (`app.ts:434-436,554-562`). Done
+    // here so a malformed name is answered before the core could log it.
+    for name in [
+        &input.lz_message_id.pathway_id.src_chain_name,
+        &input.lz_message_id.pathway_id.dst_chain_name,
+    ] {
+        if !is_chain_name_shaped(name) || !chains.contains(name) {
+            return Err(AppError::Internal(format!(
+                "Unsupported dst chain {name}. Available chains : {} ",
+                chains.join(", ")
+            )));
+        }
     }
     tracing::info!(
         src_chain = %src_chain,
@@ -717,13 +844,19 @@ async fn sign_v2(
             body
         }
         Err(error) => {
-            let safe_error = obfuscate_urls(&error.to_string());
+            let error_class = match &error {
+                AppError::BadRequest(_) => "bad_request",
+                AppError::Http { .. } => "http",
+                AppError::MalformedJson(_) => "malformed_json",
+                AppError::Internal(_) => "internal",
+                AppError::Admission(_) => "admission",
+            };
             tracing::warn!(
                 src_chain = %src_chain,
                 dst_chain = %dst_chain,
                 nonce,
                 uln_send_version = %uln_send_version,
-                error = ?safe_error,
+                error_class,
                 "sign request failed"
             );
             return Err(error);
@@ -737,18 +870,38 @@ async fn sign_v2(
 
 async fn signer_info(
     State(state): State<ApiState>,
-    Query(query): Query<SignerInfoQuery>,
+    RawQuery(query): RawQuery,
 ) -> Result<Json<ResponseEnvelope<Vec<SignerInfo>>>, AppError> {
-    let Some(chain_name) = query.chain_name else {
-        return Err(AppError::BadRequest(
-            "Invalid input - Missing chainName query parameter".to_string(),
-        ));
+    let chain_name = match express::chain_name_query(query.as_deref()) {
+        express::ChainNameQuery::Missing => {
+            return Err(AppError::BadRequest(
+                "Invalid input - Missing chainName query parameter".to_string(),
+            ))
+        }
+        express::ChainNameQuery::Unsupported(rendered) => {
+            return Err(AppError::BadRequest(format!(
+                "Chain {rendered} is not supported"
+            )))
+        }
+        express::ChainNameQuery::Name(name) => name,
     };
+    // Never in the roster, so upstream's unsupported-chain 400 (`app.ts:352-355`).
+    if !is_chain_name_shaped(&chain_name) {
+        return Err(AppError::BadRequest(format!(
+            "Chain {chain_name} is not supported"
+        )));
+    }
     let body = state.app.get_signer_info(chain_name).await?;
     Ok(Json(ResponseEnvelope {
         status_code: 200,
         body,
     }))
+}
+
+/// Express 5 leaves `req.body` undefined when `express.json()` does not parse the
+/// request, and both handlers read `req.body.body` first (`bootstrap.ts:59-60,78-79`).
+fn unparsed_body() -> AppError {
+    AppError::Internal("Cannot read properties of undefined (reading 'body')".to_string())
 }
 
 async fn available_chains(State(state): State<ApiState>) -> Json<ResponseEnvelope<Vec<String>>> {
@@ -1114,6 +1267,7 @@ impl ServerApp for StaticApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    include!("phase1_tests.rs");
     /// Test-only credential. Production callers must supply tokens explicitly;
     /// no type in this crate may ever default to a baked-in token.
     const TEST_AUTH_TOKEN: &str = "test-token-0123456789abcdef0123456789";
@@ -1534,6 +1688,101 @@ mod tests {
         (status, json)
     }
 
+    /// Rebuilds a fixture request body: `{text}`, `{hex}`, `{pad: n}` or a spec
+    /// compressed with `{gzip}`/`{deflate}` (only its inflated content matters).
+    fn golden_body(spec: &Value) -> Vec<u8> {
+        use std::io::Write;
+        if let Some(text) = spec["text"].as_str() {
+            return text.as_bytes().to_vec();
+        }
+        if let Some(hex) = spec["hex"].as_str() {
+            return hex::decode(hex).unwrap();
+        }
+        if let Some(pad) = spec["pad"].as_u64() {
+            return serde_json::to_vec(&json!({ "pad": "a".repeat(pad as usize) })).unwrap();
+        }
+        if spec.get("gzip").is_some() {
+            let mut encoder =
+                flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+            encoder.write_all(&golden_body(&spec["gzip"])).unwrap();
+            return encoder.finish().unwrap();
+        }
+        let mut encoder =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&golden_body(&spec["deflate"])).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    /// Replays `fixtures/http_framework_golden.json`, recorded from upstream's own
+    /// Express bootstrap: body reading, compression, charsets and the signer-info
+    /// query. An answer body recorded as `null` (Express's HTML stack-trace page,
+    /// or upstream's stub signer list) is compared by status only.
+    #[tokio::test]
+    async fn http_framework_edges_replay_upstreams_express_answers() {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../fixtures/http_framework_golden.json")).unwrap();
+        let mut mismatches = Vec::new();
+        for (name, case) in fixture["cases"].as_object().unwrap() {
+            let method = case["method"].as_str().unwrap();
+            let mut request = Request::builder()
+                .method(method)
+                .uri(case["path"].as_str().unwrap())
+                .header("authorization", format!("Bearer {TEST_AUTH_TOKEN}"));
+            let body = if method == "POST" {
+                let body = golden_body(&case["body"]);
+                request = request.header("content-length", body.len());
+                body
+            } else {
+                Vec::new()
+            };
+            if let Some(content_type) = case["contentType"].as_str() {
+                request = request.header("content-type", content_type);
+            }
+            let encodings = match &case["contentEncoding"] {
+                Value::String(single) => vec![single.as_str()],
+                Value::Array(many) => many.iter().filter_map(Value::as_str).collect(),
+                _ => Vec::new(),
+            };
+            for content_encoding in encodings {
+                request = request.header("content-encoding", content_encoding);
+            }
+            let app = TestApp::new();
+            let mut signer_roster = static_app_with_auth();
+            signer_roster
+                .chains
+                .retain(|chain| chain == "ethereum" || chain == "bsc");
+            signer_roster
+                .signer_info
+                .retain(|chain, _| chain == "ethereum" || chain == "bsc");
+            let request = request.body(Body::from(body)).unwrap();
+            let response = if method == "POST" {
+                router(app.clone(), "test-version").oneshot(request).await
+            } else {
+                router(signer_roster, "test-version").oneshot(request).await
+            }
+            .unwrap();
+            let status = response.status().as_u16();
+            let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            let actual = serde_json::from_slice::<Value>(&bytes)
+                .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned()));
+            let expected = &case["answer"];
+            let expected_status = expected["status"].as_u64().unwrap() as u16;
+            let body_matches = expected["body"].is_null() || actual == expected["body"];
+            if status != expected_status || !body_matches {
+                mismatches.push(format!(
+                    "{name}: got {status} {actual}, upstream {expected_status} {}",
+                    expected["body"]
+                ));
+            }
+            if method == "POST" {
+                let reached =
+                    app.v1_requests.lock().await.len() + app.v2_requests.lock().await.len();
+                assert_eq!(reached > 0, expected_status == 200, "{name}");
+            }
+        }
+        assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+    }
+
     async fn http_snapshot_json(
         app: impl ServerApp,
         image_version: &str,
@@ -1755,8 +2004,11 @@ mod tests {
         assert!(!is_chain_name_shaped(&"a".repeat(129)));
     }
 
+    /// Upstream answers any unavailable name, src checked first, with its plain
+    /// `Error` (`app.ts:434-436,554-562`): a 500. A malformed name gets exactly
+    /// that here, before the core or any log line sees it.
     #[tokio::test]
-    async fn sign_v2_rejects_unsafe_chain_names_before_signing() {
+    async fn sign_v2_answers_unsafe_chain_names_like_an_unavailable_chain_without_signing() {
         let invalid_names = vec![
             "bad\nname".to_string(),
             "bad\rname".to_string(),
@@ -1771,33 +2023,31 @@ mod tests {
                 request["lzMessageId"]["pathwayId"][field] = Value::String(name.clone());
                 let (status, json) =
                     post_json_with_app(app.clone(), "/v2/resolve-and-sign", request).await;
-                assert_eq!(status, StatusCode::BAD_REQUEST, "{field}={name:?}");
                 assert_eq!(
-                    json["body"],
-                    format!(
-                        "Invalid request: lzMessageId.pathwayId.{field}: expected 1-128 characters of [0-9a-zA-Z_-]"
-                    )
+                    status,
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "{field}={name:?}"
+                );
+                assert_eq!(
+                    json,
+                    json!({
+                        "statusCode": 500,
+                        "body": format!("Unsupported dst chain {name}. Available chains : ethereum, bsc ")
+                    })
                 );
                 assert!(app.v2_requests.lock().await.is_empty());
             }
         }
-    }
-
-    #[tokio::test]
-    async fn sign_v2_accepts_configured_chain_name_shapes() {
-        for (src, dst) in [
-            ("ethereum", "bsc"),
-            ("basesep", "iotal1"),
-            ("moninet", "ethereum"),
-        ] {
-            let app = TestApp::new();
-            let mut request = v2_request_json(false);
-            request["lzMessageId"]["pathwayId"]["srcChainName"] = Value::String(src.into());
-            request["lzMessageId"]["pathwayId"]["dstChainName"] = Value::String(dst.into());
-            let (status, _) =
-                post_json_with_app(app.clone(), "/v2/resolve-and-sign", request).await;
-            assert_eq!(status, StatusCode::OK, "{src}->{dst}");
-        }
+        // Both unavailable: upstream reports the source (`app.ts:554-562`).
+        let app = TestApp::new();
+        let mut request = v2_request_json(false);
+        request["lzMessageId"]["pathwayId"]["srcChainName"] = json!("tron");
+        request["lzMessageId"]["pathwayId"]["dstChainName"] = json!("bad\nname");
+        let (_, json) = post_json_with_app(app, "/v2/resolve-and-sign", request).await;
+        assert_eq!(
+            json["body"],
+            "Unsupported dst chain tron. Available chains : ethereum, bsc "
+        );
     }
 
     #[test]
@@ -1811,109 +2061,6 @@ mod tests {
             assert_ne!(actual, unsafe_id);
             assert!(actual.starts_with("generated-"));
         }
-    }
-
-    /// srcTxHash is spliced into an outbound provider URL path, so path
-    /// metacharacters must be refused at the boundary rather than reaching a transport.
-    #[test]
-    fn transaction_id_shape_refuses_path_metacharacters() {
-        for accepted in [
-            "0xdeadbeef",
-            "deadbeef",
-            "5Kd3NBUAdUnhyzenEwVLy9pBKxSwXvE9FMPyR4UKZvpe",
-            "abc-DEF_123",
-            &"a".repeat(128),
-        ] {
-            assert!(
-                is_transaction_id_shaped(accepted),
-                "{accepted} must be accepted"
-            );
-        }
-        for refused in [
-            "",
-            "0x",
-            "../../admin",
-            "abc/def",
-            "abc?query=1",
-            "abc#frag",
-            "abc def",
-            "abc%2fdef",
-            "abc.def",
-            "abc:def",
-            "abc@def",
-            &"a".repeat(129),
-        ] {
-            assert!(
-                !is_transaction_id_shaped(refused),
-                "{refused:?} must be refused"
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn sign_v2_refuses_a_src_tx_hash_that_could_retarget_a_provider_request() {
-        let response = router(TestApp::new(), "test-version")
-            .oneshot(
-                Request::builder()
-                    .method(Method::POST)
-                    .uri("/v2/resolve-and-sign")
-                    .header("authorization", format!("Bearer {TEST_AUTH_TOKEN}"))
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        json!({
-                            "srcTxHash": "../../../admin/keys",
-                            "lzMessageId": {},
-                            "signingContext": {},
-                            "messageHash": "0xabc"
-                        })
-                        .to_string(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let body = String::from_utf8(body.to_vec()).unwrap();
-        assert!(
-            body.contains("srcTxHash"),
-            "the rejection must name the field, got {body}"
-        );
-    }
-
-    /// `sign_request_v1` copies `srcTxHash` into a `PillarApiRequestV2` and
-    /// delegates, so the v1 route reaches the same URL-splicing sinks as v2.
-    /// Gating v2 alone left the control absent on one of the two routes.
-    #[tokio::test]
-    async fn sign_v1_refuses_a_src_tx_hash_that_could_retarget_a_provider_request() {
-        let response = router(TestApp::new(), "test-version")
-            .oneshot(
-                Request::builder()
-                    .method(Method::POST)
-                    .uri("/")
-                    .header("authorization", format!("Bearer {TEST_AUTH_TOKEN}"))
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        json!({
-                            "srcTxHash": "../../../admin/keys",
-                            "expiration": 1,
-                            "blockConfirmation": 1,
-                            "lzMessageId": {},
-                            "ulnVersion": "V2"
-                        })
-                        .to_string(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let body = String::from_utf8(body.to_vec()).unwrap();
-        assert!(
-            body.contains("srcTxHash"),
-            "the rejection must name the field, got {body}"
-        );
     }
 
     async fn malformed_json_snapshot() -> Value {
@@ -1942,22 +2089,6 @@ mod tests {
         assert_http_snapshot(
             malformed_json_snapshot().await,
             include_str!("../fixtures/http_snapshots/malformed_json.json"),
-        );
-    }
-
-    #[tokio::test]
-    async fn http_snapshot_metrics_preserves_prometheus_text() {
-        let actual = http_snapshot_json(
-            TestApp::new(),
-            "test-version",
-            Method::GET,
-            "/metrics",
-            None,
-        )
-        .await;
-        assert_http_snapshot(
-            actual,
-            include_str!("../fixtures/http_snapshots/metrics.json"),
         );
     }
 
@@ -2087,6 +2218,90 @@ mod tests {
         assert_eq!(requests[0].src_tx_hash, "0xtx");
     }
 
+    /// Upstream's v1 presence check is `!candidate && candidate !== 0`
+    /// (`bootstrap.ts:107-113`): `""`, `false` and `null` are missing, `0` is not.
+    #[tokio::test]
+    async fn sign_v1_treats_falsy_parameters_as_missing_like_upstream() {
+        for (key, value) in [
+            ("srcTxHash", json!("")),
+            ("expiration", json!(false)),
+            ("lzMessageId", Value::Null),
+            ("ulnVersion", json!("")),
+        ] {
+            let app = TestApp::new();
+            let mut request = v1_request_json();
+            request[key] = value;
+            let (status, json) = post_json_with_app(app.clone(), "/", request).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{key}");
+            assert_eq!(
+                json,
+                json!({ "statusCode": 400, "body": format!("Missing required parameter {key}") })
+            );
+            assert!(app.v1_requests.lock().await.is_empty(), "{key}");
+        }
+        let app = TestApp::new();
+        let mut request = v1_request_json();
+        request["blockConfirmation"] = json!(0);
+        let (status, _) = post_json_with_app(app.clone(), "/", request).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn draining_rejects_signing_after_authentication_and_before_the_handler() {
+        let app = TestApp::new();
+        let (router, signal) = router_with_shutdown(app.clone(), "test-version");
+        signal.trigger();
+        let send = |method: Method, path: &str, token: bool, body: &'static str| {
+            let mut builder = Request::builder().method(method).uri(path);
+            if token {
+                builder = builder.header("authorization", format!("Bearer {TEST_AUTH_TOKEN}"));
+            }
+            let request = builder
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap();
+            let router = router.clone();
+            async move {
+                let response = router.oneshot(request).await.unwrap();
+                let status = response.status();
+                let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+                (status, String::from_utf8(body.to_vec()).unwrap())
+            }
+        };
+        let valid = serde_json::to_string(&v2_request_json(false))
+            .unwrap()
+            .leak();
+
+        for path in ["/", "/v2/resolve-and-sign"] {
+            let (status, body) = send(Method::POST, path, false, valid).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED, "{path}");
+            assert_eq!(body, r#"{"statusCode":401,"body":"Unauthorized"}"#);
+            for payload in [valid, "{", ""] {
+                let (status, body) = send(Method::POST, path, true, payload).await;
+                assert_eq!(
+                    status,
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "{path} {payload}"
+                );
+                assert_eq!(body, r#"{"statusCode":500,"body":"resource_draining"}"#);
+            }
+        }
+        assert!(app.v1_requests.lock().await.is_empty());
+        assert!(app.v2_requests.lock().await.is_empty());
+
+        let (status, _) = send(Method::GET, "/ready", false, "").await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        let (status, body) = send(Method::GET, "/", false, "").await;
+        assert_eq!((status, body.as_str()), (StatusCode::OK, "HEALTHY"));
+        let (_, metrics) = send(Method::GET, "/metrics", true, "").await;
+        for path in ["/", "/v2/resolve-and-sign"] {
+            let line = format!(
+                "pillar_http_outcomes_total{{method=\"POST\",path=\"{path}\",outcome=\"shutdown\"}} 3"
+            );
+            assert!(metrics.contains(&line), "{line}\n{metrics}");
+        }
+    }
+
     #[tokio::test]
     async fn sign_v1_accepts_string_body_envelope_when_request_is_valid() {
         let app = TestApp::new();
@@ -2104,11 +2319,11 @@ mod tests {
         assert_eq!(
             requests[0].lz_message_id,
             LegacyLzMessageId {
-                src_chain_id: "1".to_string(),
-                nonce: 7,
-                dst_chain_id: "56".to_string(),
-                src_ua_address: "0xsrc".to_string(),
-                dst_ua_address: "0xdst".to_string(),
+                src_chain_id: Some(json!("1")),
+                nonce: Some(json!(7)),
+                dst_chain_id: Some(json!("56")),
+                src_ua_address: Some(json!("0xsrc")),
+                dst_ua_address: Some(json!("0xdst")),
             }
         );
     }
@@ -2124,13 +2339,10 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(json["statusCode"], 400);
-        let body = json["body"].as_str().unwrap();
-        assert!(body.starts_with("Invalid request:"));
-        for field in ["srcEid", "dstEid", "sender", "receiver"] {
-            assert!(body.contains(field), "{body}");
-        }
-        assert_eq!(body.matches("Required").count(), 4);
+        assert_eq!(
+            json,
+            json!({ "statusCode": 400, "body": "Invalid request: Required, Required, Required, Required" })
+        );
         assert!(app.v2_requests.lock().await.is_empty());
     }
 
@@ -2147,6 +2359,31 @@ mod tests {
             "Invalid request: Required, Required, Required, Required"
         );
         assert!(app.v2_requests.lock().await.is_empty());
+    }
+
+    /// Every malformed body in `fixtures/zod_v2_golden.json` gets upstream's own
+    /// Zod 400, byte for byte. Bodies go through the `{ body: string }` envelope,
+    /// the one way a top-level string or null reaches Zod past `express.json()`.
+    /// The one body upstream accepts, a non-integer `nonce`, is a known residual:
+    /// the typed request here cannot hold it and refuses it with a serde 400.
+    #[tokio::test]
+    async fn v2_body_validation_replays_upstreams_zod_output() {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../fixtures/zod_v2_golden.json")).unwrap();
+        for (name, case) in fixture["cases"].as_object().unwrap() {
+            let app = TestApp::new();
+            let envelope = json!({ "body": serde_json::to_string(&case["body"]).unwrap() });
+            let (status, json) =
+                post_json_with_app(app.clone(), "/v2/resolve-and-sign", envelope).await;
+            match case["error"].as_str() {
+                Some(error) => {
+                    assert_eq!(status, StatusCode::BAD_REQUEST, "{name}");
+                    assert_eq!(json, json!({ "statusCode": 400, "body": error }), "{name}");
+                    assert!(app.v2_requests.lock().await.is_empty(), "{name}");
+                }
+                None => assert_eq!(name, "floatNonce", "upstream accepted {name}: {json}"),
+            }
+        }
     }
 
     #[tokio::test]
@@ -2173,52 +2410,123 @@ mod tests {
         );
     }
 
-    /// Upstream validates the protocol fields with a Zod schema at the HTTP
-    /// boundary and answers 400 (TS: `apps/gasolina/src/bootstrap.ts:130-157`
-    /// feeding a parsed schema into `signRequestV2`). Presence-only checks let a
-    /// wrong-typed `ulnSendVersion` through to the core, which can only classify
-    /// it as an internal fault and answer 500 - blaming the server for a
-    /// caller's malformed request.
-    #[tokio::test]
-    async fn rejects_wrong_typed_uln_send_version_at_http_boundary() {
-        let app = TestApp::new();
-        let mut request = v2_request_json(false);
-        request["lzMessageId"]["ulnSendVersion"] = Value::from(302);
-        let (status, json) = post_json_with_app(app.clone(), "/v2/resolve-and-sign", request).await;
-
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(json["statusCode"], 400);
-        assert!(
-            json["body"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("ulnSendVersion"),
-            "the error must name the offending field: {json}"
-        );
-        assert!(app.v2_requests.lock().await.is_empty());
+    /// Expected strings are Node's own `String(JSON.parse(text))` (v26.7.0).
+    #[test]
+    fn js_number_renders_like_javascript() {
+        for (text, rendered) in [
+            ("12345678901234567890", "12345678901234567000"),
+            ("1e21", "1e+21"),
+            ("1.5e-7", "1.5e-7"),
+            ("0.000001", "0.000001"),
+            ("-0", "0"),
+            ("123.456", "123.456"),
+            ("1e300", "1e+300"),
+            ("-2.5e-9", "-2.5e-9"),
+            ("7.0", "7"),
+            ("100", "100"),
+            ("9007199254740993", "9007199254740992"),
+            ("0.1", "0.1"),
+            ("123456789012345680000", "123456789012345680000"),
+        ] {
+            let number: serde_json::Number = serde_json::from_str(text).unwrap();
+            assert_eq!(pillar_core::js_number(&number), rendered, "{text}");
+        }
     }
 
-    /// This service treats the four protocol versions as a closed set, so an
-    /// unrecognised string is a client error too. Whether a recognised version
-    /// is *enabled* stays a core decision, because that depends on operator
-    /// configuration rather than on the protocol.
+    /// `JSON.parse` makes `7.0` the integer 7 and rounds past 2^53, so upstream
+    /// matches a packet on those values; they must reach the app the same way.
     #[tokio::test]
-    async fn rejects_unknown_uln_send_version_at_http_boundary() {
+    async fn integral_floats_and_large_integers_reach_the_app_as_javascript_reads_them() {
         let app = TestApp::new();
         let mut request = v2_request_json(false);
-        request["lzMessageId"]["ulnSendVersion"] = Value::from("V999");
-        let (status, json) = post_json_with_app(app.clone(), "/v2/resolve-and-sign", request).await;
-
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(json["statusCode"], 400);
-        assert!(
-            json["body"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("ulnSendVersion"),
-            "the error must name the offending field: {json}"
+        request["lzMessageId"]["nonce"] = json!(9_007_199_254_740_993_u64);
+        request["lzMessageId"]["pathwayId"]["srcEid"] = json!(30101.0);
+        let request = request.to_string();
+        assert!(request.contains("\"srcEid\":30101.0"), "{request}");
+        let response = router(app.clone(), "test-version")
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/v2/resolve-and-sign")
+                    .header("authorization", format!("Bearer {TEST_AUTH_TOKEN}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(request))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let requests = app.v2_requests.lock().await;
+        assert_eq!(requests[0].lz_message_id.nonce, 9_007_199_254_740_992);
+        assert_eq!(
+            requests[0].lz_message_id.pathway_id.extra["srcEid"],
+            json!(30101)
         );
-        assert!(app.v2_requests.lock().await.is_empty());
+    }
+
+    /// Upstream parses the body with Zod before the app runs (`bootstrap.ts:127-135`).
+    /// The expected bodies were produced by upstream's own schema (Zod 3.25.76).
+    #[tokio::test]
+    async fn invalid_uln_send_version_gets_upstreams_zod_400() {
+        let expected = "Expected 'V1' | 'V2' | 'V300' | 'V301' | 'V302' | 'ReadV1002'";
+        for (version, body) in [
+            (
+                Value::from("V999"),
+                format!("Invalid request: Invalid enum value. {expected}, received 'V999'"),
+            ),
+            (
+                Value::from(302),
+                format!("Invalid request: Invalid enum value. {expected}, received '302'"),
+            ),
+            (
+                Value::from(""),
+                format!("Invalid request: Invalid enum value. {expected}, received ''"),
+            ),
+            (
+                Value::Bool(true),
+                format!("Invalid request: {expected}, received boolean"),
+            ),
+            (
+                Value::Null,
+                format!("Invalid request: {expected}, received null"),
+            ),
+            (
+                json!([1]),
+                format!("Invalid request: {expected}, received array"),
+            ),
+        ] {
+            let app = TestApp::new();
+            let mut request = v2_request_json(false);
+            request["lzMessageId"]["ulnSendVersion"] = version;
+            let (status, json) =
+                post_json_with_app(app.clone(), "/v2/resolve-and-sign", request).await;
+
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+            assert_eq!(json, json!({ "statusCode": 400, "body": body }));
+            assert!(app.v2_requests.lock().await.is_empty());
+        }
+    }
+
+    /// Zod strips undeclared keys, so the core never sees them.
+    #[tokio::test]
+    async fn undeclared_pathway_fields_are_stripped_like_zod() {
+        let app = TestApp::new();
+        let mut request = v2_request_json(false);
+        request["lzMessageId"]["pathwayId"]["guid"] = Value::from("0x01");
+        request["lzMessageId"]["pathwayId"]["extraKey"] = Value::from("x");
+        let (status, _) = post_json_with_app(app.clone(), "/v2/resolve-and-sign", request).await;
+
+        assert_eq!(status, StatusCode::OK);
+        let seen = app.v2_requests.lock().await;
+        let mut keys = seen[0]
+            .lz_message_id
+            .pathway_id
+            .extra
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        keys.sort_unstable();
+        assert_eq!(keys, ["dstEid", "receiver", "sender", "srcEid"]);
     }
 
     /// `V1` and `V300` are real members of the protocol's version enum that this
@@ -2246,26 +2554,6 @@ mod tests {
                 "{version} never reached the core"
             );
         }
-    }
-
-    /// Upstream types the pathway as numeric EIDs and string addresses, so a
-    /// transposed payload is rejected before any provider is dialled.
-    #[tokio::test]
-    async fn rejects_wrong_typed_pathway_fields_at_http_boundary() {
-        let app = TestApp::new();
-        let mut request = v2_request_json(false);
-        request["lzMessageId"]["pathwayId"]["srcEid"] = Value::from("30101");
-        request["lzMessageId"]["pathwayId"]["sender"] = Value::from(42);
-        let (status, json) = post_json_with_app(app.clone(), "/v2/resolve-and-sign", request).await;
-
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(json["statusCode"], 400);
-        let body = json["body"].as_str().unwrap_or_default().to_string();
-        assert!(
-            body.contains("srcEid") && body.contains("sender"),
-            "both offending fields must be named: {body}"
-        );
-        assert!(app.v2_requests.lock().await.is_empty());
     }
 
     #[tokio::test]

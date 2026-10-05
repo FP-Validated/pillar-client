@@ -53,66 +53,59 @@ The following are deployment-side controls the software cannot enforce for you:
   front of it; the process speaks plain HTTP by design.
 - Use `SIGNER_TYPE=KMS` in production and scope the KMS key policy to this
   workload only. Mnemonic backends keep key material in process environment.
-- Set an explicit `quorum` of at least 2 for every chain in the provider
-  configuration. A quorum of 1 makes a single RPC endpoint the trust root for
-  the event you attest to; the startup report flags such chains.
-- Supply endpoints that are actually independent. A quorum of N is satisfied by
-  N configured URIs returning the **same** value, and nothing more: the
-  configuration carries no notion of who operates an endpoint, so two URIs
-  belonging to one provider satisfy a quorum of 2 while sharing one failure,
-  one compromise and one wrong archive state. Differing answers never merge —
-  a split result fails closed rather than taking a majority — but agreement
-  only proves the answers match, not that they were reached independently.
-  Provider independence is yours to arrange and audit. This matches the
-  upstream service as pinned below, whose provider entry is likewise
-  `{ uris, quorum }` (`packages/common-model/src/provider.ts:6-9`) and whose
-  quorum likewise counts matching responses
-  (`packages/common-utils/src/multiFallbackQuorum.ts:35-48`).
-
-  Two separate reviews have read an upstream tree and reported that an
-  entity/category/endpoint-type trust model is already live there, so the
-  evidence is spelled out. Everything here was checked against the single
-  upstream tree identified under "Which upstream tree the `TS:` citations refer
-  to" below, which also records why one of those reviews is answered with "does
-  not reproduce" rather than "is false". That tree contains the scaffolding —
-  `ProviderCategory` and `QuorumStrategy` declarations at
-  `packages/common-model/src/provider.ts:120-152`, the v2 entry shape
-  `{ uri, category, entity, headers? }` at
-  `packages/common-utils/src/providerValidate.ts:13-25`, and strategy evaluation
-  in `packages/common-utils/src/quorumStrategy.ts` — but **none of it has a
-  caller outside its own file and its tests**. The live path is
-  `apps/gasolina/src/index.ts:361-363` -> `runGasolina:327-335` ->
-  `apps/gasolina/src/bootstrap.ts:206-213` ->
-  `apps/gasolina/src/app/bootstrap.ts:123-124` (`new App(...)`), with providers
-  built at `packages/dynamic-config/src/boostrapConfig/index.ts:103-159`, whose
-  S3 and GCS object key defaults to `providers.json`. No `providers-v2.json` or
-  `quorum-strategy.json` exists anywhere in the tree, and
-  `packages/common-aptos/src/provider.ts:19` carries
-  `// TODO(providers-v2): drop`, which is upstream describing a migration it has
-  not made. If you point this service at an upstream deployment that has since
-  migrated, this paragraph is what to re-check first.
+- Require at least two distinct entities for every chain's `rpc` strategy, for
+  example `{ "allOf": [{ "any": 2 }] }`. A strategy that one entity can satisfy
+  makes that operator the trust root for the event you attest to; the startup
+  report flags such chains as `single-provider-trust-root`.
+- Label entities truthfully. Votes are counted per `(category, entity)` as
+  upstream `gasolina-audit` `213cd500` counts them
+  (`packages/common-utils/src/multiFallbackQuorum.ts:107-147`), so two URIs of one
+  entity are one vote; but the labels are yours, and two URIs of one operator
+  under two entity names are counted twice. Differing answers never merge: if two
+  answers could each meet the strategy the call fails closed, which is stricter
+  than upstream's first-satisfied resolution.
+- Provider configuration differs from upstream `213cd500` where it would
+  otherwise weaken or silently misread a quorum: unknown fields are refused, except
+  the `_`-prefixed top-level documentation keys upstream passes through in
+  `quorum-strategy.json` (`dynamic-config/src/providerConfig/index.ts:102-104`), so a
+  misspelled `allOf` cannot become an empty requirement; a strategy that zero
+  entities satisfy (`{}`, `{ "any": 0 }`) is refused (upstream treats the empty
+  strategy as trivial); only the `rpc` pool is dispatched, so upstream's TON
+  `v2`/`v3`, Aptos/Initia `eventIndexer`, Sui `grpc`/`graphql` and TRON `tronWeb`
+  pools are validated but never dialled; error responses do not vote; and providers
+  observed unhealthy are dispatched last instead of dropped.
+- The signed `vId` is the destination's EndpointV1 id where one exists, otherwise its
+  EndpointV2 id modulo 30000. Upstream `213cd500` folds the V2 id for every chain
+  (`static-config/src/index.ts:191-195`), which differs on testnet `doma`, `lineasep`,
+  `scroll` and `zksyncsep` (and on no mainnet chain). The deployed LayerZero Labs DVNs
+  on `doma`, `lineasep` and `zksyncsep` return the EndpointV1 id from `vid()`
+  (`crates/pillar-runtime/tests/onchain_provenance/dvn_vid.json`); `scroll` could not be
+  read on chain and keeps its EndpointV1 id as an unconfirmed corrected input.
 - Alert on `pillar_provider_config_age_seconds` (stale provider configuration),
+  `pillar_provider_config_refresh_total{result!="ok"}`,
   `pillar_signer_errors_total` and `pillar_provider_request_errors_total`.
-- Rate-limit the signing routes upstream of the process. There is no rate
-  limiting in this workspace; the only throughput controls are
-  `PILLAR_MAX_CONNECTIONS` (default 1024) and the 58s request timeout. That cap
-  bounds in-flight requests, not just sockets, because the server speaks
-  HTTP/1.1 only and a connection carries one request at a time. The protocol
-  surface is pinned by a test: hyper's `http2` feature is enabled process-wide
-  by the AWS and GCP client stacks, and an HTTP/2 connection would multiplex up
-  to 200 concurrent streams behind a single connection permit. One
-  sign request fans out to every configured provider URI for the source chain
-  before any expensive validation, and a request that proceeds adds several
-  more quorum'd reads, so an unthrottled caller amplifies load onto your own
-  RPC endpoints at roughly the URI count per request.
+- Rate-limit signing routes upstream of the process. Fair signing/RPC/KMS budgets
+  bound active work and waiting registrations, but are per process and are not
+  fleet-wide rate limits. RPC permits account for the actual target chain rather
+  than the source label; KMS permits are counted per supplied key reference
+  string (for Azure signing, the resolved key reference), not per physical key.
+  The CLI remains HTTP/1.1-only with `PILLAR_MAX_CONNECTIONS` (default 1024) and
+  one 58s absolute request deadline. A deadline closes the connection without an
+  HTTP timeout envelope. Local overload/wait failures retain legacy 500 envelopes
+  and are admission outcomes, not provider-health/quorum or signer backend faults.
 - Decide deliberately which routes your ingress publishes. `GET /`,
   `GET /ready`, `GET /environment`, `GET /available-chains`, `GET /version` and
   `GET /provider-health` require no credential by design. The chain roster and
   the per-chain health map tell a reader which pathways this DVN serves and
   which of them it currently cannot verify on.
-- Point the readiness probe at `/ready`, not `/`. `/` is a constant liveness
-  string, so a probe on it never observes draining or unhealthy providers and
-  the graceful-drain sequence cannot remove the pod from the endpoint set.
+- Point the readiness probe at `/ready`, not `/`. `/` remains a constant
+  liveness response (`200 HEALTHY`) during drain, while `/ready` returns 503
+  from T0. The listener continues accepting until E = T0 +
+  `PILLAR_SHUTDOWN_WITHDRAWAL_SECONDS`; this interval is carved out of, not
+  added to, the total `PILLAR_SHUTDOWN_GRACE_SECONDS` ending at D = T0 + G. Set
+  the orchestrator termination grace period longer than G. Kubernetes
+  SIGTERM/preStop behavior has not been exercised, so withdrawal races are
+  reduced rather than eliminated.
 - Give the Prometheus scrape a token. `GET /metrics` is authenticated, so a
   scrape job without `Authorization` receives 401 and monitoring goes dark.
 - Serve `ReadV1002` targets from providers that implement EIP-1898 block
@@ -125,6 +118,309 @@ The following are deployment-side controls the software cannot enforce for you:
   return a result, and the same call with an unknown hash must return an error.
   Reth answers both ways as required (checked on public mainnet endpoints on
   2026-09-23: `block not found: canonical hash ...` for the unknown hash).
+
+## Durable signing audit (default disabled)
+
+`PILLAR_AUDIT_ENABLED=false` is the default. Enabling it preserves synchronous
+`{statusCode, body}` responses: there is no 202, cached signature, replay,
+exactly-once claim, recovery engine, or permanent generic nonce lock.
+
+Each wallet attempt follows these gates:
+
+1. Complete ordinary request validation and payload construction. Bind the
+   canonical caller request hash, validated event/read-block-pin fingerprint,
+   provider configuration generation, chains, expiry, immutable effective key
+   reference/version and public-key fingerprint to the actual transformed
+   32-byte signer input. Missing or conflicting identity fails closed.
+2. COMMIT the retained attempt before the SDK signing future can be polled.
+   Namespace quota and identity conflicts are checked transactionally; concurrent
+   cold starts serialize schema setup. No database lock is held across signing.
+3. COMMIT returned-signature fingerprints and result metadata before 200. Any
+   wallet or evidence failure returns the legacy error envelope, never partial
+   signatures. Store admission/connect/write failures never authorize an effect.
+
+The store retains hashes and identity metadata, not raw signatures, READ command
+bytes or debug payloads. `external_returned` fingerprints are Keccak256 of raw
+SDK-returned bytes; `wallet_returned` fingerprints are Keccak256 of the UTF-8
+rendered signature field. These are different domains and are not interchangeable.
+SDK bytes returning is not proof of a valid attestation or HTTP delivery.
+
+An attempt without positive completion evidence is unresolved, not proof that no
+signature exists. Caller drop records `outcome_unknown`; a bounded, runtime-owned
+worker can append late evidence while holding the physical KMS permit. Dropping
+the runtime aborts unfinished workers without asserting remote failure. Audit-on
+disables Azure hedging. A fresh retry repeats validation and appends a new attempt;
+it neither deletes old uncertainty nor returns a retained signature. The same
+caller request and immutable key identity cannot silently change its signing
+input/public key; a different immutable key version has a distinct intent.
+
+Configuration is listed in `README.md`. PostgreSQL operations have bounded
+connect/lock/COMMIT deadlines and explicitly use `synchronous_commit=on`.
+Session-queue timeout refuses only that waiter. After acquiring the mutex, an
+operation timeout/unavailable response invalidates only its owned session generation
+and aborts that driver; a subsequent operation reconnects.
+Session startup sets server lock, statement and idle-transaction timeouts plus TCP
+keepalive/user timeouts. Remote DSNs use `sslmode=require` with rustls hostname
+and WebPKI-root certificate verification; tokio-postgres does not accept
+`verify-full` or `verify-ca` DSN spellings here. Plaintext is limited to literal
+loopback addresses or Unix sockets. The DSN is redacted; credentials must not be
+placed in logs or release artifacts. `PILLAR_AUDIT_MAX_ATTEMPTS` is a retained-row
+quota, not a byte/disk quota. There is no TTL, automatic cleanup or reconciliation.
+Unknown and partial attempts must survive any operator-approved retention plan.
+
+Each process serializes audit operations through one session mutex. Participating
+replicas also serialize namespace quota updates on one PostgreSQL row; KMS
+execution holds no such row lock. There is no measured production TPS, capacity
+calibration, pool, pruning or automatic quota reset. The permanent row cap is not
+a sustainable retention policy: absent an approved archival/retention procedure,
+audit-on eventually exhausts it and refuses signing/readiness. Keep audit off
+until operators verify peak latency/throughput, lock contention, disk/WAL growth,
+namespace quota lifetime and a retention plan preserving unknown attempts.
+
+Startup refuses inaccessible stores or unresolved signing identities. Audit
+capacity/connectivity also gates `/ready`; `pillar_signing_audit_enabled` and
+`pillar_signing_audit_ready` expose the configured mode and last observed store
+state. Readiness probes check reachability/capacity, not every write permission or
+future COMMIT: a read probe can become healthy after a write-only failure, while
+the actual sign still fails closed. Do not use readiness as a durability certificate.
+
+Before any separately approved production activation, establish database
+permissions/schema ownership, disk/WAL capacity, backups, failover durability and
+retention; exercise write failures and immutable identity binding against that
+deployment. A primary COMMIT does not prove synchronous replica failover safety,
+and application append-only writes are not administrator-proof immutability.
+Do not mark a rollout fully audited while old audit-off replicas still serve work.
+To roll back, drain signing traffic and switch the mode off without deleting
+evidence; subsequent audit-off effects will not have these guarantees.
+
+Real PostgreSQL E2Es cover pre-COMMIT failure, post-effect evidence failure,
+multi-wallet partial failure, same-namespace quota races, unresolved/conflicting
+identity, process crashes, caller drop, late completion, and runtime-owner drop.
+They run `RuntimeServerApp` validation/build/control/store and the API router on
+a test `axum::serve` listener, not the CLI socket driver, with a synthetic
+Azure SDK seam and local software ECDSA, not real cloud KMS. Live peak calibration,
+production database permissions/HA and live cloud-wire retry behavior remain
+unverified. No production activation is included in this change.
+
+### Admission accounting and bounded waiting
+
+The three budget metric labels are `sign`, `rpc`, and `kms`; metric labels do not carry
+chain/URI/key values. `pillar_admission_started_total` equals all terminal
+`pillar_admission_total{outcome}` plus `pillar_admission_active` and
+`pillar_admission_waiting` in a coherent snapshot. Started external work abandoned
+by a caller, a losing hedge or shutdown is `outcome_unknown`, not cancellation.
+An unstarted speculative hedge increments `pillar_kms_hedge_skipped_total` instead.
+
+With shared waiting allowance Q and N fixed lanes, the global waiting bound is
+Q + N: each quiet lane may reserve its first waiting registration beyond Q, while
+its per-lane queue cap still applies. Q=0 disables both waiting and reservations.
+There are source lanes plus one KMS background lane, or RPC background and
+extra-context lanes. Background RPC rounds own a finite 10s deadline independent
+of the caller that noticed staleness; stale/failed admission does not overwrite
+cached healthy reports. Custom target/key caps of one cannot reserve a second
+physical foreground slot; calibrate all caps together. SDK retries are disabled;
+the optional audit-off Azure hedge is an explicitly budgeted second attempt.
+
+Both successful GET/HEAD terminal records use debug level. Error records remain
+visible and use fixed classifications, never caller-controlled message hashes.
+
+## Where responses still differ from upstream
+
+Requests are answered as `gasolina-audit` 1.2.66 (manifest sha256 `8ad87eb6…`)
+answers them - status, body and order - except in these cases, each kept because
+it protects credentials, authentication, signing keys or the payload being signed,
+because the input cannot be represented, because a dependency is unavailable, or
+because it is HTTP-framework behaviour of Express and Node that this service does
+not reproduce:
+
+- Authentication is available and on by default; the mainnet deployment turns it
+  off (`PILLAR_API_AUTH_ENABLED=false`, ingress allowlist), where no route differs.
+- A `srcTxHash` outside `[0-9a-zA-Z_-]{1,128}` (optional `0x`) is a 400 just before
+  the source read, after every RPC-free check upstream makes except its V1-sdk
+  factory errors for a `V2` request (`Unknown ULN version`, `Unsupported chain
+  type`), because Move and TON splice it into a provider URL path. Every chain's
+  real transaction id passes; upstream sends such a value to its provider and
+  returns whatever it answers.
+- Fields the typed request cannot hold are a serde 400 where upstream carries on:
+  a non-integer number in any v2 integer field (`nonce`, `expiration`,
+  `blockConfirmation`, time-marker fields), a negative `nonce`, an out-of-range
+  number; on the v1 route a `nonce` JavaScript reads as NaN, negative or past
+  2^64 (`lzMessageId.nonce ... is not a uint64`), and a wrong JSON type for
+  `srcTxHash`, `expiration`, `blockConfirmation`, `messageHash`, `dvnAddress` or
+  `skipVId`. Numbers are otherwise read as `JSON.parse` reads them (`7.0` is 7,
+  integers past 2^53 round), and v1 chain ids, nonce and addresses take
+  upstream's own `parseInt`/`toString` coercions. An unknown v1 chain id is
+  upstream's `Invariant failed: Invalid endpointId: <n>`, the form tiny-invariant
+  throws outside `NODE_ENV=production` (the upstream image sets no `NODE_ENV`);
+  an object-valued v1 sender or receiver is echoed in error bodies with sorted
+  keys, where `JSON.stringify` keeps insertion order.
+- `skipVId: true` is refused with HTTP 400 on both signing routes (`POST /`,
+  `POST /v2/resolve-and-sign`) before any provider read, except on the v2 route
+  for a `V2` send to `aptos`; upstream signs a digest without the vId everywhere.
+  The DVN source in `lz-evm-sdk-v2` always hashes the vid and skips a mismatching
+  one, so on that verifier such a signature is void; other verifiers are
+  unverified. The builders refuse it again on every route but that one.
+- A `V2` send from an EVM source to an `aptos` receiver still on ULN V2 is signed
+  as upstream signs it, with `skipVId`: `hashPropose(sha3_256(packet), confirmations,
+  expiration)` for the V1 oracle, the bare V1 packet being Aptos's feather proof of
+  utils version 2. Served only for the two pinned oracles (mainnet
+  `0xc2846ea0…94eb`, testnet `0x8ab85d94…6c63`) with the packet naming that oracle's
+  EndpointV1 id (108 / 10108), a 32-byte receiver and a 20-byte EVM sender; anything else
+  is a 400 before the signer. Routing reads `endpoint_view::get_receive_msglib` as
+  upstream does (`(2, 0)` is ULN301, otherwise ULN V2). The digest layout agrees
+  with a static decoding of the deployed oracle module; that the oracle accepts
+  the signature on chain has not been observed, and it verifies secp256k1 only,
+  so a local-mnemonic (Ed25519) signature could not pass it.
+- The Solana signer address equals upstream 1.2.66 for a mnemonic, AWS or GCP key:
+  `base58` of the first 32 bytes of SEC1 `04‖X‖Y`. An Azure key answers `base58(X)`,
+  the key registered at offset 17 of the mainnet DVN config account
+  `EqkXVEeapm7JqrS1W3AGeN5ZwCRLDUHtr1XY9TuVr4rD` (`EboBSUoo…`), as fixed in `ded0f97`.
+  Upstream 1.2.66 has no Azure adapter, so this is not a parity divergence. The address
+  is a response label only: the public key and signature bytes are unchanged.
+- Error bodies also mask AWS ARNs and GCP key-ring paths; URL masking is upstream's.
+- Extra-context policies must answer the boolean `true` (only when configured).
+- ReadV1002 reads are pinned to the validated block hash, source receipts are
+  re-bound at readiness, and the EVM receive library is checked even without a
+  `dvnAddress`. Outputs differ on a reorg, an unsupported receive library, an RPC
+  failure inside those extra reads, or a READ provider without EIP-1898.
+- A `V2` send's receive library is read before resolution over the requested
+  pathway, as 1.2.66 does, but by exact provider quorum over the library address;
+  a provider disagreement is a 500. Unknown libraries and endpoint-rejected
+  overrides are upstream's own 500s, and every recognised non-V3 library keeps the
+  V2 builder.
+- A ULNv2 feather proof is signed only when the destination proof library's
+  `getUtilsVersion()` is 1, and then as `bytes32(packetEmitAddress) || packet`.
+  Every `FPValidator` deployment in `@layerzerolabs/lz-evm-sdk-v1` 3.1.15 that
+  ships source (414 of 429, three source variants) hard-codes
+  `utilsVersion = 1` with no setter and reads the first 32 bytes of the proof as
+  the `ulnAddress` that `UltraLightNodeV2.validateTransactionProof` requires to
+  equal `ulnLookup[srcChainId]`; the 15 zkSync-family deployments ship none. Any
+  other value is a 400 before anything is signed. Upstream's `getFeatherProof`
+  signs the bare packet for 2 and throws for anything else; 2 has no deployed
+  verifier source, so its meaning cannot be checked and it is not imitated.
+- A resolved packet must also agree with the request's destination chain name,
+  and, except on Aptos, Movement and Initia sources, with its `ulnSendVersion`
+  and source chain name; upstream's `lzMessageIdMatches` compares only eids,
+  sender, receiver and nonce. On Aptos, Movement and Initia sources the
+  requested version already picks the event token, and the event's version is
+  read from its `send_library` as upstream reads it
+  (`lz-v2-sdk/src/endpoint/aptos/decoders/index.ts:123`); a Movement `V301` send
+  is refused before any read, Movement having no V301 capability. On Sui and
+  IotaL1 a version disagreement (a `V301` request, or an event without
+  `send_library`) and a packet version other than 1 are refused where upstream
+  resolves; on Starknet and Stellar a `V301` request for their always-`V302`
+  packet is too, and on Stellar only a `CONTRACT` event is read where upstream
+  also reads a host `SYSTEM` event.
+  On an EVM source a `V301`/`V302` mismatch answers the same either way:
+  upstream searches the logs of the send contract the requested version names
+  (`SendUln301` for `V2`/`V301`, `EndpointV2` for `V302`/`ReadV1002`;
+  `lz-v2-sdk/src/endpoint/evm/index.ts:200-209`), so a `V301` request for a
+  `V302` packet is its 400 `cannot find packet event ...` too. Outputs differ
+  where upstream finds the event anyway and builds with the requested version:
+  `V302` and `ReadV1002` swapped on an EVM source (both `EndpointV2` logs), and a
+  `V301` label on a Solana source, whose sdk ignores the label and whose `V301`
+  and `V302` builders are one object, so upstream signs what the `V302` request
+  would. A `dstChainName` other than the packet's destination is refused because
+  upstream builds call data for the packet's chain but picks the signer, the
+  expiration check and the duplicate-signature query by the request's name
+  (`apps/gasolina/src/app/app.ts:498-507,525`).
+- Sender and receiver are compared with `===` against upstream's own rendering
+  of the packet's addresses (`getAddressEncodedByChain`), except that an EVM- or
+  TRON-rendered address whose upper 12 bytes are not zero is refused, where
+  upstream keeps only its last 20 bytes. This is a policy choice, not a protocol
+  requirement; see the receiver-narrowing entry below.
+- An EndpointV2 `PacketSent` whose send library is a receive library
+  (`ReceiveUln302`) is a 400 here: EndpointV2 events are bound to send libraries
+  only. Upstream's `MESSAGE_LIB_GETTERS` also lists receive libraries
+  (`lz-v2-sdk/src/endpoint/evm/decoders/index.ts:49-74`), so it resolves the
+  event as `V302`. Not expected from an honest send, since EndpointV2 sets only
+  send-capable libraries (inferred, not executed).
+- The extra-context request body is built with `serde_json::json!` without
+  `preserve_order`, so its object keys are sorted; upstream sends them in
+  insertion order. The replays compare content, not key order. A policy that
+  compares the raw body text would see a difference.
+- Solana `PacketSent` events from a send library other than the configured ULN are
+  skipped; upstream has no such filter. Upstream also re-reads the block (failing
+  with `Block not found` when the node has no such block); this service does not.
+- Stellar and Canton: Stellar pins upstream's generation-two contracts and refuses
+  per request should LayerZero's published deployment ever disagree; its
+  already-signed reads follow the contract source with stellar-sdk 16.0.1
+  encodings, because upstream's own Stellar bindings are not generated in the
+  1.2.66 snapshot and could not be run. Canton's sequencer path (provider entry,
+  committee verification, source resolution, readiness, already-signed) replays
+  upstream's own run of it (`tests/gasolina_parity/canton_sequencer.json`), except:
+  the extra-context sender of a Canton source follows the published `common-canton`
+  1.2.66 source (ledger read, `createTokenProvider`, OAuth2 client credentials with
+  its in-memory cache), tested only with a synthetic ledger, identity provider and
+  token. It refuses (500) before any request when the `rpc` URI lacks `token-url`
+  or `client-id`, or no `client-secret`/`CANTON_CLIENT_SECRET` is set, and always
+  on `sandbox`/`localnet`, where upstream would self-sign an admin JWT. A token
+  response without `access_token` is refused, where upstream would send the ledger
+  request with no token. Prefer `CANTON_CLIENT_SECRET` to a URI `client-secret`. A
+  scan event's
+  `options` are kept as given, so a malformed blob upstream's `Options.fromOptions`
+  rejects resolves here, and a malformed `encodedPayload` fails with this service's
+  packet-decoder text; a sequencer body `JSON.parse` accepts but serde does not
+  (lone-surrogate escapes, nesting past 128, numbers beyond a double) is the
+  `HTTP <method> failed` error; the request deadline is this service's, not
+  upstream's 30 s; and Canton's provider health is not measured. On the Move family,
+  ULN V2 is refused as a destination except as described above for `aptos`
+  (movement and initia have no V2 upstream; with a vId upstream answers its 500
+  `VId is not supported on aptos yet`, as this service does), and a `V301` source on Initia or
+  Movement is refused (no EndpointV1 id). Aptos `V301` resolves as a source and,
+  through EndpointV1 id 108/10108, as an EVM `V301` destination whose already-signed
+  check matches upstream's own chain read for read over offline scenarios. Its reads
+  use the argument types the public Aptos fullnodes accept and decode responses recorded
+  from them; no signing request has run against a live node, and the recorded
+  verification-state answers are for a synthetic packet header. A non-ULN301 receive
+  library on that path is a 400 where upstream throws. None of them is in the mainnet
+  roster. An Initia event whose `data` is not JSON is a 500 on both sides, but the
+  text here is `Invalid JSON in event data: ...`, not V8's `JSON.parse` message.
+- Solana source reads ask for transaction version 1; upstream's default (0)
+  makes its provider reject a v1 transaction.
+- `GET /ready`, HTTP/1.1-only connections, deadlines, the shutdown drain and the
+  KMS same-source limit act only during shutdown, overload or misuse.
+- The roster is `LAYERZERO_AVAILABLE_CHAIN_NAMES` at startup; upstream uses every
+  key of the provider configuration as it refreshes.
+- HTTP framework errors keep upstream's status but not its body: a malformed or
+  non-object JSON body, an unsupported charset or content encoding and a body
+  over 100 KiB get a JSON envelope instead of Express's HTML stack-trace page, and
+  a `{ "body": "..." }` envelope whose string is not JSON is a 500 carrying serde's
+  message, not V8's.
+- Body reading follows Express 5.1's `express.json()` (body-parser 2.2.2, iconv-lite
+  0.7.2) in order and outcome (`crates/pillar-api/fixtures/http_framework_golden.json`:
+  an unparsed body leaving `req.body` undefined, gzip, deflate, multi-member and
+  corrupt streams, the 100 KiB limit on inflated bytes, every iconv-lite `utf-*`
+  decoder, BOMs, charset and encoding refusals) except: a `br` body is always a 400,
+  because no brotli decoder is available here, where upstream inflates a valid one; the
+  compressed bytes themselves are also capped at 100 KiB, which upstream does
+  not do (a body that only gzip header padding makes larger is a 413 here); a
+  gzip `FNAME` or `FCOMMENT` over 65,535 bytes is a 400 (flate2's header bound)
+  where upstream accepts it; a stream that inflates past 100 KiB and then fails
+  its checksum is a 413 here, where upstream answers 400 when the failure falls
+  in the 16 KiB zlib output round that crosses the limit;
+  `utf-16` without a BOM is told apart on the first 64 bytes of the whole body,
+  where upstream uses its first network chunk of at least 16 bytes; a lone UTF-16
+  surrogate becomes U+FFFD, and a lone-surrogate `\u` escape or nesting past 128
+  levels, which `JSON.parse` accepts, is a 400 (serde's recursion bound);
+  a UTF-7 body is decoded as one chunk, where upstream's per-chunk base64
+  carry and BOM stripping follow network chunk boundaries;
+  `Content-Type` parameters are not held to media-typer's grammar
+  (`application/json;` is parsed here, ignored upstream; obs-text there makes the
+  header absent here); and only the two signing routes read a body at all, where
+  upstream parses every route's body before routing (a malformed body on
+  `GET /signer-info` is a 400 upstream).
+- Routing is axum's, not Express's: paths are exact and case-sensitive (Express
+  also matches `/V2/Resolve-And-Sign` and a trailing `/`), a known path with
+  another method is a 405 instead of Express's 404, there is no automatic
+  `OPTIONS` answer, and responses carry no `ETag` nor answer a conditional
+  request with 304; an unknown path is a 404 without Express's HTML page.
+- `/metrics` exposes this service's `pillar_*` families, not upstream's `gasolina_*`
+  (`CHANGELOG.md`, 2.1.0), and response headers differ: no `X-Powered-By: Express`,
+  no Node `Keep-Alive: timeout=60`, and a 405 carries `Allow`.
+- [unverified] Upstream's V1-sdk constructor also loads ULN V2 and Endpoint V1
+  deployment artifacts for a `V2` request's EVM or TRON source; a roster chain
+  without them would fail there before RPC, where this service reads the source.
 
 ## Known caveats
 
@@ -143,61 +439,45 @@ those three values is how you confirm you are reading the bytes these citations
 were written against.
 
 This matters because a claim about "upstream" is only as good as the tree it was
-read from, and that has already gone wrong twice. Two independent reviews
-reported that upstream runs an entity/category/endpoint-type provider trust
-model, and that it switches the hash-call-data builder from V2 to V3 when a
-packet was sent on ULN V2 but the destination receive library has migrated.
-Neither is on the runtime path in the tree identified above. One of those reviews
-named its source as a differently-rooted archive that is not that tree and that
-has not been obtained here, so the accurate statement is that its claims **do not
-reproduce against the identified tree** — not that they are false of whatever it
-read. Those are different claims and only the first is established. If that
-archive is produced, re-run the comparison before trusting either account.
+read from. Two reviews reported that upstream runs an entity/category
+provider trust model, and that it switches the hash-call-data builder from V2
+to V3 when a ULN V2-sent packet's destination receiver has migrated. Neither is
+in the tree identified above. Both are in the later snapshot `gasolina-audit`
+`213cd500` (`apps/gasolina/src/app/app.ts:254-273`,
+`packages/dynamic-config/src/providerConfig/index.ts:21-95`). This service now
+implements both: the builder switch (see the `V2` send bullet under "Where responses
+still differ from upstream") and the entity/category trust model of `providers-v2.json`.
 
-If you point this service at an upstream deployment built from a newer tree,
-this section and the provider-independence bullet above are what to re-check
-first. The behaviour under discussion is load-bearing for signature
-correctness: `hashCallDataBuilders[lzMessageId.ulnSendVersion]` selecting a V2
-builder for a migrated pathway would sign call data the destination rejects,
-and a quorum that counts URIs rather than operators can be satisfied by one
-operator twice.
+### Stellar deployment addresses
 
-### Stellar deployment addresses disagree with LayerZero's live metadata
+Until upstream 1.2.66 this repository pinned the generation-one Stellar contracts
+of the older upstream packages, which disagreed with LayerZero's live deployment
+metadata. 1.2.66's own getters name generation two, the same values the metadata
+publishes, and those are pinned now:
 
-Every Stellar address in this repository comes from the pinned upstream
-TypeScript packages, and every one of them disagrees with LayerZero's live
-deployment metadata, on both `mainnet` and `testnet`:
-
-| Value | This repository | `metadata.layerzero-api.com` |
+| Value | mainnet | testnet |
 | --- | --- | --- |
-| mainnet ULN302 | `CA5R2JQYRJXFLWHE3XLLIO32HMF4MIDYY2NLWMGYYQDWKU6BTXL7URJI` | `CCV4HEII3UC65THWGSRM2DVIJLB6HS6YMUHDTTHUECX2RHTP5FA2GOBA` |
-| testnet ULN302 | `CAWCTJDDZZEWYARYCY6IP7LJ5WAR5XHNDBNDNRFYNS5ZX22MH3RPSJSH` | `CCMLPCAWCPIIMXOHJJKU3NZLOFTT2O6QTB2UUFPN6SEHLK35QRHVKKMB` |
-| mainnet trusted endpoint | `CAA4ZB7DNJ7KIZDEVDQRAZOQHYOV6U42LGBW375ZG7HIMUILA5FPXKQH` | `CCQLLRE5JBAWYCW3KTWOIWLMFDUOKROQVZNSALQMGOSXNW3ERUOWTZGK` |
-| testnet trusted endpoint | `CBQOTWFU4N4DWFWYIU7EY62DXNCZH5N3U3XHKQW326CGY4CI6GT6Q5AF` | `CALTBA5S6GRJEHAXFP45LGGLKWWAF7HTZCPNUBUJF2HWWRRLQNV35AIV` |
+| ULN302 | `CCV4HEII3UC65THWGSRM2DVIJLB6HS6YMUHDTTHUECX2RHTP5FA2GOBA` | `CCMLPCAWCPIIMXOHJJKU3NZLOFTT2O6QTB2UUFPN6SEHLK35QRHVKKMB` |
+| EndpointV2 (trusted emitter) | `CCQLLRE5JBAWYCW3KTWOIWLMFDUOKROQVZNSALQMGOSXNW3ERUOWTZGK` | `CALTBA5S6GRJEHAXFP45LGGLKWWAF7HTZCPNUBUJF2HWWRRLQNV35AIV` |
+| LayerZeroViews | `CBCH6XLCAVY2KPWGJYDY4ATDHMJCNLISINKB5JAOHPAAXZXLTBMU43ZB` | `CAWX6SA2NX7HD2IBAARR5KP65C47N4GCCTWXTPZ7KH2WIGUOFQGS3ZHO` |
 
-The trusted endpoint address is what source-event filtering trusts, so a wrong
-value there is not a cosmetic mismatch. Starknet, pinned from the same upstream
-generation, matches the live metadata on all four equivalent values, which is
-why the most likely explanation is that Stellar was redeployed after the pinned
-package version.
-
-**Stellar is refused structurally, not merely discouraged.**
-`layerzero_rollout_block_reason` (`crates/pillar-config/src/lib.rs:297-301`)
-drops `stellar` from the operational roster on both `mainnet` and `testnet`, so
-listing it in `LAYERZERO_AVAILABLE_CHAIN_NAMES` does not enable it and the
-destination builder refuses per request. The same function blocks `moninet` on
-`testnet`, and `ton` on `testnet` only — TON testnet has no `UlnConnection`, so
-no delivered packet exists whose verdict a payload-signed check could read, and
-it stays fail-closed until one does. Re-pinning the table below to a deployment
-you have confirmed on-chain is what reopens a blocked chain. Confirm with:
+The ULN302 id is hashed into the attestation, so the guard stays: should the
+published deployment and the pinned table ever disagree again, the destination
+builder refuses per request (`stellar_pins_equal_the_published_deployment_where_one_exists`
+checks they agree today). `layerzero_rollout_block_reason` no longer blocks
+Stellar; it blocks `moninet` on `testnet`, and `ton` on `testnet` only. TON
+testnet does have a `UlnConnection` with a delivered packet whose `VERIFIED`
+verdict was read (2026-10-05), and offline tests replay it; the gate stays until
+the operator decides the rollout.
+Confirm with:
 
 ```bash
 curl -s https://metadata.layerzero-api.com/v1/metadata/deployments \
   | jq '."stellar-mainnet".deployments[] | {version, eid, endpointV2, sendUln302, receiveUln302}'
 ```
 
-Addresses live in `stellar_uln_302_for_environment` and
-`trusted_stellar_endpoint_addresses_for_environment`
+Addresses live in `stellar_uln_302_for_environment`,
+`stellar_endpoint_v2_for_environment` and `stellar_layerzero_views_for_environment`
 (`crates/pillar-runtime/src/layerzero_runtime/config/evm.rs`).
 
 ### Other known gaps
@@ -243,18 +523,29 @@ Addresses live in `stellar_uln_302_for_environment` and
   - A receiver on a message library outside those three is refused, not signed.
     That is deliberate - the service cannot tell whether such a payload is
     already verified - but an OApp on a custom library will get errors rather
-    than signatures.
+    than signatures. The exception is a `V2` send to a receiver still on
+    UltraLightNodeV2: the routing lookup has already agreed on that library, and
+    the event has no guid, so the check is skipped as upstream skips it for V1
+    events (`app.ts:399-407`). No already-signed refusal exists on that path,
+    even with a `dvnAddress`.
   - The check costs one extra `eth_call` per provider, two when the receiver
-    overrides the default library.
+    overrides the default library. A `V2` send pays one more lookup round
+    before validation, so a migrated one reads the receive library twice.
 - A pathway names the receiver as `bytes32`, and the packet header that gets
   signed keeps that padded form, so EVM `address` arguments are narrowed at the
   lookup input instead (`evm_address_from_pathway_value`). Upstream narrows with
   `hexZeroPad(address, 32).slice(-40)`
   (`packages/static-config/src/index.ts:723-727`), which silently discards the
-  leading 12 bytes. This repository refuses when they are non-zero: truncating
-  an address that was never a zero-padded EVM address means attesting for a
-  different OApp than the packet names. A pathway upstream would have accepted
-  by truncation is rejected here.
+  leading 12 bytes. This repository refuses when they are non-zero. That is
+  stricter than the destination itself: LayerZero's EVM
+  `ReceiveUln302.commitVerification` takes the receiver as `receiverB20()`,
+  i.e. `address(uint160(...))` (`AddressCast.toAddress`), so the chain also
+  resolves such a receiver to its last 20 bytes, and the signed header carries
+  all 32 bytes either way. This was read from LayerZero-v2 `main` source, not
+  verified against the bytecode deployed on each roster chain. Only a packet whose
+  sending OApp encoded its peer with non-zero upper bytes reaches it - an EVM
+  source always zero-pads its sender (`PacketV1Codec.encode`) - and such a
+  pathway, which upstream accepts by truncation, is rejected here.
 - The generated LayerZero tables are pinned snapshots of a private upstream
   checkout, and no automated check compares them against upstream. Public CI
   cannot: the generators need `PILLAR_AUDIT_ROOT` plus the pinned npm packages,
@@ -353,8 +644,9 @@ Addresses live in `stellar_uln_302_for_environment` and
 
   On a chain-native destination with no address the check is skipped, matching
   upstream. Solana, Stellar and TON hash the address into what they sign and
-  so refuse the request in their builders regardless; that refusal is a `400`,
-  because the combination is one the caller chose.
+  so refuse the request in their builders regardless; like upstream, Solana and
+  Stellar report a missing or empty address as a `500` at the build stage, after
+  resolution and validation.
 - The connection lifetime ceiling is checked before each read and write rather
   than only when the underlying socket returns `Pending`
   (`IdleTimeoutIo`, `crates/pillar-cli/src/main.rs`). A client that keeps the
@@ -363,15 +655,15 @@ Addresses live in `stellar_uln_302_for_environment` and
   still delegate straight to the socket, so the guarantee is that no
   application-level read or write is serviced after the ceiling, not that every
   syscall stops.
-- `srcChainName` and `dstChainName` are shape-checked at the HTTP boundary to
-  1-128 characters of `[0-9a-zA-Z_-]` before anything logs them
-  (`crates/pillar-api/src/lib.rs`), and a caller-supplied `x-request-id`
-  carrying control characters is replaced with a generated id. The installed
-  `tracing-subscriber` formatter does not escape control characters in ordinary
-  Display-formatted fields, so an unvalidated name containing a newline could
-  forge a log record. Roster membership is still decided by the core, which
-  reports an unknown chain as a caller error; the boundary check is shape only.
-  All 272 chain names in the generated roster satisfy it.
+- `srcChainName` and `dstChainName` are checked at the HTTP boundary, before
+  anything logs them, against the roster and the shape 1-128 characters of
+  `[0-9a-zA-Z_-]` (`crates/pillar-api/src/lib.rs`), and a caller-supplied
+  `x-request-id` carrying control characters is replaced with a generated id.
+  The installed `tracing-subscriber` formatter does not escape control characters
+  in ordinary Display-formatted fields, so an unvalidated name containing a
+  newline could forge a log record. Any name that fails either check gets
+  upstream's unavailable-chain `500`, source first. All 272 chain names in the
+  generated roster satisfy the shape.
 
 ## Supported versions
 

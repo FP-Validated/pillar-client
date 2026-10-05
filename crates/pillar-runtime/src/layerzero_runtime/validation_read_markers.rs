@@ -168,48 +168,54 @@ where
         chain_name: &str,
         block_tag: &str,
     ) -> Result<BlockTime, AppCoreError> {
-        // Time-marker block resolution is EVM-only, matching TS
-        // `ChainTimeMarkerValidatorSdkFactory` which throws for non-EVM chain
-        // types. Fail closed with a clear error instead of issuing an
-        // EVM-shaped `eth_getBlockByNumber` against a non-EVM RPC.
-        let owned_chain = chain_name.to_string();
-        let chain_type = static_chain_type_by_chain_name(std::slice::from_ref(&owned_chain))
-            .ok()
-            .and_then(|types| types.get(chain_name).cloned());
-        if chain_type.as_deref() != Some("EVM") {
-            return Err(AppCoreError::Internal(format!(
-                "Unsupported chain type: {} (read time markers are EVM-only) for chain {chain_name}",
-                chain_type.as_deref().unwrap_or("unknown")
-            )));
-        }
-        let snapshot = self.providers.load();
-        let dispatch = snapshot.dispatch(&self.rank_tracker, chain_name).await?;
-        let ChainDispatch {
-            config: provider_config,
-            quorum,
-            plan,
-        } = dispatch;
-        let requests = FuturesUnordered::new();
-        for DispatchEntry { index, uri, delay } in plan {
-            let (url, headers) = provider_uri_parts(uri);
-            let transport = self.transport.clone();
-            let block_tag = block_tag.to_string();
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
-                let observation = observe_block_time(transport, url, headers, &block_tag)
-                    .await
-                    .ok();
-                let observation =
-                    observation.map(|observation| (observation.fingerprint.clone(), observation));
-                (index, observation)
-            });
-        }
-        let context = format!("block for chain {chain_name} block {block_tag}");
-        let observation =
-            resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context).await?;
-        Ok(observation.block)
+        crate::provider_health::rpc_scope(chain_name, async {
+            // Time-marker block resolution is EVM-only, matching TS
+            // `ChainTimeMarkerValidatorSdkFactory` which throws for non-EVM chain
+            // types. Fail closed with a clear error instead of issuing an
+            // EVM-shaped `eth_getBlockByNumber` against a non-EVM RPC.
+            let owned_chain = chain_name.to_string();
+            let chain_type = static_chain_type_by_chain_name(std::slice::from_ref(&owned_chain))
+                .ok()
+                .and_then(|types| types.get(chain_name).cloned());
+            if chain_type.as_deref() != Some("EVM") {
+                return Err(AppCoreError::Internal(format!(
+            "Unsupported chain type: {} (read time markers are EVM-only) for chain {chain_name}",
+            chain_type.as_deref().unwrap_or("unknown")
+        )));
+            }
+            let snapshot = self.providers.load();
+            let dispatch = snapshot.dispatch(&self.rank_tracker, chain_name).await?;
+            let ChainDispatch {
+                config: provider_config,
+                quorum,
+                plan,
+            } = dispatch;
+            let requests = FuturesUnordered::new();
+            for DispatchEntry { index, uri, delay } in plan {
+                let (url, headers) = provider_uri_parts(uri);
+                let transport = self.transport.clone();
+                let block_tag = block_tag.to_string();
+                requests.push(async move {
+                    if !delay.is_zero() {
+                        tokio::time::sleep(delay).await;
+                    }
+                    let observation = provider_response(
+                        observe_block_time(transport, url, headers, &block_tag).await,
+                    );
+                    let observation = observation.map(|observation| {
+                        observation
+                            .map(|observation| (observation.fingerprint.clone(), observation))
+                    });
+                    (index, observation)
+                });
+            }
+            let context = format!("block for chain {chain_name} block {block_tag}");
+            let observation =
+                resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
+                    .await?;
+            Ok(observation.block)
+        })
+        .await
     }
 }
 
