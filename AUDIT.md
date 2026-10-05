@@ -170,7 +170,8 @@ Gates and decisions recorded in the matrix and enforced in code
 
 What the matrix is not: it is not a record of live production traffic, and no row is
 promoted by family inference. Live checks made by the maintainers against their own
-deployment are not part of this repository.
+deployment are not part of this repository; section 9 summarizes the deployed release
+and the limits of its post-rollout check.
 
 Open review item outside the matrix: the Solana signer address reported for an Azure
 key is a fixed rule checked against a fixture; its binding to the on-chain Solana DVN
@@ -286,8 +287,27 @@ the rows separately. The 13 ignored tests in section 6 are opt-in and are not ru
 CI. Later commits that change only Markdown get their own CI run.
 
 The source repository is public. Release images that the maintainers deploy are
-published to a private container package and are not part of this repository. No
-release image built from this repository has been published or deployed yet. An
+published to a private container package and are not part of this repository. An
 image built from this tree must carry
 `org.opencontainers.image.source=https://github.com/FP-Validated/pillar-client` and
 `org.opencontainers.image.revision=<this repository's commit>`.
+
+Deployed release, as of 2026-10-05: the maintainers' mainnet deployment runs one
+linux/amd64 image built once from source commit
+`ff249a1b83edcc25a099d5b7e0706d4c36248b67`, image digest
+`sha256:af496b5b37c17378f92d432e8d5574a2e1c635f5f48be842a14aa8abcd631fe0`. It was
+rolled out by commit `6e10b27f3dce113aaa3ce97d48c4cb462ed6c8aa` in the maintainers'
+private GitOps repository. That source commit changed only Markdown relative to
+`a4d8ff3d`. Commits after it, including the one that adds this paragraph, change
+documentation only. They were not built or deployed. The running image's revision
+label therefore names `ff249a1b`, not this repository's head.
+
+Signer identity after that rollout: each of the three pods, read on its own, reported
+the same `/signer-info` address for `ethereum`
+(`0x06bb41FE76F41429f55aC8C355ac8669769A1ba1`) and for `solana`
+(`EboBSUoobiqt7JYcH46ro7TGBjtE2vczKnUmsiWy6Ffy`). No `/signer-info` value was recorded
+from the replaced pods immediately before the rollout. So it is not verified that these
+addresses are unchanged by this rollout. Equality with the committed fixtures is not
+evidence of that either. The binding of the reported Solana address to the on-chain
+verifier is still the open review item in section 5. No signing request was made
+against the deployment.
