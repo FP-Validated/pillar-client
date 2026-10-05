@@ -73,7 +73,12 @@ The following are deployment-side controls the software cannot enforce for you:
   strategy as trivial); only the `rpc` pool is dispatched, so upstream's TON
   `v2`/`v3`, Aptos/Initia `eventIndexer`, Sui `grpc`/`graphql` and TRON `tronWeb`
   pools are validated but never dialled; error responses do not vote; and providers
-  observed unhealthy are dispatched last instead of dropped.
+  observed unhealthy are dispatched last instead of dropped. Configuration
+  errors name the file, the JSON line and column, schema field names, and only
+  chain, endpoint-type and category names this build defines; an unknown key, an
+  entity, a header or any other value from the file appears as a placeholder or
+  not at all, because a misplaced credential would otherwise reach startup errors
+  and refresh logs.
 - The signed `vId` is the destination's EndpointV1 id where one exists, otherwise its
   EndpointV2 id modulo 30000. Upstream `213cd500` folds the V2 id for every chain
   (`static-config/src/index.ts:191-195`), which differs on testnet `doma`, `lineasep`,
@@ -169,9 +174,11 @@ placed in logs or release artifacts. `PILLAR_AUDIT_MAX_ATTEMPTS` is a retained-r
 quota, not a byte/disk quota. There is no TTL, automatic cleanup or reconciliation.
 Unknown and partial attempts must survive any operator-approved retention plan.
 
-Each process serializes audit operations through one session mutex. Readiness
-probes queue for that mutex one at a time, so at most one probe waits ahead of a
-signing write. Participating
+Each process serializes audit writes through one session mutex. Readiness uses a
+second, separate connection, so a probe never holds the write session; probes
+queue for that one readiness connection, and the whole probe (waiting, connecting
+and querying) shares one `PILLAR_AUDIT_TIMEOUT_MS` budget. A cancelled or timed-out
+probe drops its connection. Participating
 replicas also serialize namespace quota updates on one PostgreSQL row; KMS
 execution holds no such row lock. There is no measured production TPS, capacity
 calibration, pool, pruning or automatic quota reset. The permanent row cap is not
@@ -580,7 +587,13 @@ Addresses live in `stellar_uln_302_for_environment`,
   trace root's `mc_block_seqno`
   (`packages/sdks/rpc-sdk/src/ton/index.ts:175-187`), which can be an earlier
   block than the emission and so overstates the depth. This is a deliberate
-  fail-closed divergence.
+  fail-closed divergence. The comparison is an exact string match against the
+  hash the same provider returned during resolution. Public toncenter v3 mainnet
+  and testnet `/events` and `/traces` were observed on 2026-10-06 to return every
+  transaction hash as canonical padded standard base64, whatever form the request
+  used, and the request hash is percent-encoded so `+`, `/` and `=` survive.
+  Other TON v3 hosts were not checked; one that returns another encoding fails
+  readiness closed rather than passing.
 - A `ReadV1002` read is pinned to the block readiness validated, which
   upstream does not do. Upstream agrees on a time marker's block through a
   quorum and then fetches the payload with `eth_call` against the block

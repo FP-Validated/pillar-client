@@ -36,7 +36,7 @@ fn per_chain_max_floor_passes_and_overrides_are_enforced_with_context() {
     let providers = ProvidersFileV2 {
         entities: vec![],
         chains: BTreeMap::from([(
-            "chain-a".into(),
+            "ethereum".into(),
             BTreeMap::from([(
                 "rpc".into(),
                 vec![entry("https://a", PROVIDER_CATEGORY_INTERNAL, "a")],
@@ -49,7 +49,7 @@ fn per_chain_max_floor_passes_and_overrides_are_enforced_with_context() {
             1,
         )])])),
         chains: BTreeMap::from([(
-            "chain-a".into(),
+            "ethereum".into(),
             BTreeMap::from([(
                 "rpc".into(),
                 QuorumStrategy {
@@ -63,7 +63,7 @@ fn per_chain_max_floor_passes_and_overrides_are_enforced_with_context() {
         )]),
     };
     let error = precompute_resolved_strategy(&providers, &raw, &floor).unwrap_err();
-    assert!(error.contains("chain-a.rpc"));
+    assert!(error.contains("ethereum.rpc"));
     assert!(error.contains("category=internal"));
     assert!(error.contains("resolved=1"));
     assert!(error.contains("minimumMaxEntities=2"));

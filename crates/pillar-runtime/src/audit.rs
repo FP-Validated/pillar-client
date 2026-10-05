@@ -99,10 +99,16 @@ fn transport(config: &Config) -> Result<Transport, Failure> {
         _ => Ok(Transport::Tls),
     }
 }
+fn webpki_roots() -> Arc<rustls::RootCertStore> {
+    Arc::new(rustls::RootCertStore::from_iter(
+        webpki_roots::TLS_SERVER_ROOTS.iter().cloned(),
+    ))
+}
 /// An explicit provider, because the release graph enables both `ring` and `aws-lc-rs`
 /// and rustls then refuses to choose a process default.
-fn tls_connector() -> Result<tokio_postgres_rustls::MakeRustlsConnect, Failure> {
-    let roots = rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+fn tls_connector(
+    roots: Arc<rustls::RootCertStore>,
+) -> Result<tokio_postgres_rustls::MakeRustlsConnect, Failure> {
     let tls = rustls::ClientConfig::builder_with_provider(Arc::new(
         rustls::crypto::ring::default_provider(),
     ))
@@ -115,19 +121,29 @@ fn tls_connector() -> Result<tokio_postgres_rustls::MakeRustlsConnect, Failure> 
 pub(crate) struct PostgresAuditStore {
     config: AuditConfig,
     session: Mutex<Option<Session>>,
-    /// Readiness probes queue here first, so at most one sits ahead of signing writes.
-    probe: Mutex<()>,
-    reachable: Arc<AtomicBool>,
     generation: Arc<AtomicU64>,
+    /// Readiness has its own connection, so a probe never holds the signing writes' session.
+    probe: Mutex<Option<Session>>,
+    probe_generation: Arc<AtomicU64>,
+    reachable: Arc<AtomicBool>,
+    tls_roots: Arc<rustls::RootCertStore>,
 }
 impl PostgresAuditStore {
     pub async fn connect(config: AuditConfig) -> Result<Arc<Self>, String> {
+        Self::connect_with_roots(config, webpki_roots()).await
+    }
+    async fn connect_with_roots(
+        config: AuditConfig,
+        tls_roots: Arc<rustls::RootCertStore>,
+    ) -> Result<Arc<Self>, String> {
         let store = Arc::new(Self {
             config,
             session: Mutex::new(None),
-            probe: Mutex::new(()),
-            reachable: Arc::new(AtomicBool::new(false)),
             generation: Arc::new(AtomicU64::new(0)),
+            probe: Mutex::new(None),
+            probe_generation: Arc::new(AtomicU64::new(0)),
+            reachable: Arc::new(AtomicBool::new(false)),
+            tls_roots,
         });
         {
             let mut slot = store.session.lock().await;
@@ -175,10 +191,13 @@ impl PostgresAuditStore {
             failure.message()
         })
     }
-    async fn session<'a>(&self, slot: &'a mut Option<Session>) -> Result<&'a mut Session, Failure> {
+    async fn session<'a>(
+        &self,
+        slot: &'a mut Option<Session>,
+        lane: &Arc<AtomicU64>,
+    ) -> Result<&'a mut Session, Failure> {
         if slot.as_ref().is_none_or(|session| {
-            session.client.is_closed()
-                || session.generation != self.generation.load(Ordering::Acquire)
+            session.client.is_closed() || session.generation != lane.load(Ordering::Acquire)
         }) {
             slot.take();
             let mut config: Config = self
@@ -195,11 +214,8 @@ impl PostgresAuditStore {
                 .keepalives_retries(3);
             let milliseconds = self.config.timeout.as_millis().max(1);
             config.options(format!("{} -c lock_timeout={}ms -c idle_in_transaction_session_timeout={}ms -c statement_timeout={}ms", config.get_options().unwrap_or(""), (milliseconds / 2).max(1), milliseconds, milliseconds));
-            let generation = self
-                .generation
-                .fetch_add(1, Ordering::AcqRel)
-                .wrapping_add(1);
-            let epoch = self.generation.clone();
+            let generation = lane.fetch_add(1, Ordering::AcqRel).wrapping_add(1);
+            let epoch = lane.clone();
             let reachable = self.reachable.clone();
             let session = if transport(&config)? == Transport::Plaintext {
                 config.ssl_mode(SslMode::Disable);
@@ -217,7 +233,7 @@ impl PostgresAuditStore {
             } else {
                 config.ssl_mode(SslMode::Require);
                 let (client, connection) = config
-                    .connect(tls_connector()?)
+                    .connect(tls_connector(self.tls_roots.clone())?)
                     .await
                     .map_err(unavailable)?;
                 Session {
@@ -237,7 +253,7 @@ impl PostgresAuditStore {
         slot.as_mut().ok_or(Failure::Unavailable)
     }
     async fn initialize(&self, slot: &mut Option<Session>) -> Result<(), Failure> {
-        let session = self.session(slot).await?;
+        let session = self.session(slot, &self.generation).await?;
         let tx = session.client.transaction().await.map_err(unavailable)?;
         tx.execute("SELECT pg_advisory_xact_lock($1)", &[&0x70696c6c6172_i64])
             .await
@@ -265,7 +281,7 @@ impl PostgresAuditStore {
         slot: &mut Option<Session>,
         intent: &AttemptIntent,
     ) -> Result<i64, Failure> {
-        let session = self.session(slot).await?;
+        let session = self.session(slot, &self.generation).await?;
         let tx = session.client.transaction().await.map_err(unavailable)?;
         tx.batch_execute("SET LOCAL synchronous_commit = on")
             .await
@@ -318,7 +334,7 @@ impl PostgresAuditStore {
         kind: EvidenceKind,
         signature_hash: Option<&str>,
     ) -> Result<(), Failure> {
-        let session = self.session(slot).await?;
+        let session = self.session(slot, &self.generation).await?;
         let tx = session.client.transaction().await.map_err(unavailable)?;
         tx.batch_execute("SET LOCAL synchronous_commit = on")
             .await
@@ -349,7 +365,7 @@ impl PostgresAuditStore {
         Ok(())
     }
     async fn health_inner(&self, slot: &mut Option<Session>) -> Result<bool, Failure> {
-        let session = self.session(slot).await?;
+        let session = self.session(slot, &self.probe_generation).await?;
         let row = session.client.query_one("SELECT attempt_count < max_attempts FROM pillar_audit_namespace WHERE namespace=$1", &[&self.config.namespace]).await.map_err(unavailable)?;
         Ok(row.get(0))
     }
@@ -374,14 +390,22 @@ impl SigningAuditStore for PostgresAuditStore {
         self.finish(&mut slot, result)
     }
     async fn healthy(&self) -> bool {
-        let Ok(_probe) = within_deadline(self.config.timeout, self.probe.lock()).await else {
-            return false;
+        // One budget covers waiting for the probe lane, connecting and querying.
+        let probe = async {
+            let mut lane = self.probe.lock().await;
+            // Out of the lane while in use: a cancelled or timed-out probe drops its connection
+            // rather than leaving a possibly wedged one for the next probe.
+            let mut session = lane.take();
+            let result = self.health_inner(&mut session).await;
+            if result.is_ok() {
+                *lane = session;
+            }
+            result
         };
-        let Ok(mut slot) = self.queue().await else {
-            return false;
-        };
-        let result = self.bounded(self.health_inner(&mut slot)).await;
-        let healthy = self.finish(&mut slot, result).unwrap_or(false);
+        let healthy = matches!(
+            within_deadline(self.config.timeout, probe).await,
+            Ok(Ok(true))
+        );
         self.reachable.store(healthy, Ordering::Release);
         healthy
     }
@@ -401,7 +425,7 @@ mod tests {
             "this graph no longer enables both rustls providers, so the regression below \
              no longer exercises the release combination"
         );
-        assert!(tls_connector().is_ok());
+        assert!(tls_connector(webpki_roots()).is_ok());
     }
 
     #[test]
@@ -483,6 +507,212 @@ mod tests {
         )
     }
 
+    /// Completes the PostgreSQL startup handshake on each connection, then never answers.
+    async fn wedged_database() -> (String, Arc<AtomicUsize>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let count = accepted.clone();
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let length = socket.read_u32().await.unwrap() as usize;
+                    let mut startup = vec![0; length - 4];
+                    socket.read_exact(&mut startup).await.unwrap();
+                    let mut ready = Vec::new();
+                    ready.extend_from_slice(&[b'R', 0, 0, 0, 8, 0, 0, 0, 0]);
+                    ready.extend_from_slice(&[b'Z', 0, 0, 0, 5, b'I']);
+                    socket.write_all(&ready).await.unwrap();
+                    let mut sink = [0; 1024];
+                    while socket.read(&mut sink).await.is_ok_and(|read| read > 0) {}
+                });
+                count.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        (
+            format!("postgresql://audit@127.0.0.1:{port}/audit"),
+            accepted,
+        )
+    }
+
+    fn store(url: String, timeout: Duration) -> Arc<PostgresAuditStore> {
+        Arc::new(PostgresAuditStore {
+            config: AuditConfig {
+                database_url: url.into(),
+                namespace: "synthetic".into(),
+                timeout,
+                max_attempts: 16,
+            },
+            session: Mutex::new(None),
+            generation: Arc::new(AtomicU64::new(0)),
+            probe: Mutex::new(None),
+            probe_generation: Arc::new(AtomicU64::new(0)),
+            reachable: Arc::new(AtomicBool::new(true)),
+            tls_roots: webpki_roots(),
+        })
+    }
+
+    /// Answers every SSLRequest with `N` and records any bytes a client sends afterwards.
+    async fn tls_refusing_database() -> (u16, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let tls_requests = Arc::new(AtomicUsize::new(0));
+        let plaintext_bytes = Arc::new(AtomicUsize::new(0));
+        let (requests, plaintext) = (tls_requests.clone(), plaintext_bytes.clone());
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                let (requests, plaintext) = (requests.clone(), plaintext.clone());
+                tokio::spawn(async move {
+                    let mut request = [0; 8];
+                    socket.read_exact(&mut request).await.unwrap();
+                    assert_eq!(request, [0, 0, 0, 8, 4, 210, 22, 47], "SSLRequest");
+                    requests.fetch_add(1, Ordering::SeqCst);
+                    socket.write_all(b"N").await.unwrap();
+                    let mut rest = [0; 1024];
+                    while let Ok(read @ 1..) = socket.read(&mut rest).await {
+                        plaintext.fetch_add(read, Ordering::SeqCst);
+                    }
+                });
+            }
+        });
+        (port, tls_requests, plaintext_bytes)
+    }
+
+    #[tokio::test]
+    async fn audit_tls_target_that_refuses_tls_is_not_retried_in_plaintext() {
+        let (port, tls_requests, plaintext_bytes) = tls_refusing_database().await;
+        for dsn in [
+            format!("host=localhost hostaddr=127.0.0.1 port={port} user=audit dbname=audit"),
+            format!(
+                "host=localhost hostaddr=127.0.0.1 port={port} user=audit dbname=audit sslmode=prefer"
+            ),
+            format!("host=127.0.0.1 port={port} user=audit dbname=audit sslmode=require"),
+        ] {
+            let store = store(dsn.clone(), Duration::from_secs(2));
+            assert!(
+                store.begin(&intent()).await.unwrap_err().contains("store unavailable"),
+                "{dsn}"
+            );
+            assert!(!store.healthy().await, "{dsn}");
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(tls_requests.load(Ordering::SeqCst), 6);
+        assert_eq!(
+            plaintext_bytes.load(Ordering::SeqCst),
+            0,
+            "a refused TLS upgrade must end the connection, not continue in plaintext"
+        );
+    }
+
+    /// Scoped synthetic TLS PostgreSQL: a server certificate for `localhost` issued by a
+    /// test-only CA, and a second test-only CA that did not issue it.
+    struct TlsE2e {
+        port: String,
+        trusted: Arc<rustls::RootCertStore>,
+        untrusted: Arc<rustls::RootCertStore>,
+    }
+    fn tls_e2e() -> TlsE2e {
+        let roots = |name: &str| {
+            let path = std::env::var(name).unwrap_or_else(|_| panic!("{name} is required"));
+            let mut roots = rustls::RootCertStore::empty();
+            roots
+                .add(std::fs::read(path).unwrap().into())
+                .expect("a DER CA certificate");
+            Arc::new(roots)
+        };
+        TlsE2e {
+            port: std::env::var("PILLAR_AUDIT_TLS_E2E_PORT").expect("PILLAR_AUDIT_TLS_E2E_PORT"),
+            trusted: roots("PILLAR_AUDIT_TLS_E2E_CA_DER"),
+            untrusted: roots("PILLAR_AUDIT_TLS_E2E_OTHER_CA_DER"),
+        }
+    }
+    fn tls_config(e2e: &TlsE2e, host: &str, namespace: &str) -> AuditConfig {
+        AuditConfig {
+            database_url: format!(
+                "host={host} hostaddr=127.0.0.1 port={} user=pillar dbname=pillar_audit_tls_e2e",
+                e2e.port
+            )
+            .into(),
+            namespace: namespace.into(),
+            timeout: Duration::from_secs(3),
+            max_attempts: 16,
+        }
+    }
+    async fn session_uses_tls(session: &Mutex<Option<Session>>) -> bool {
+        let slot = session.lock().await;
+        let client = &slot.as_ref().expect("an open session").client;
+        client
+            .query_one(
+                "SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()",
+                &[],
+            )
+            .await
+            .unwrap()
+            .get(0)
+    }
+
+    #[tokio::test]
+    #[ignore = "Requires the scoped synthetic TLS PostgreSQL (PILLAR_AUDIT_TLS_E2E_*)"]
+    async fn audit_tls_e2e_trusted_certificate_serves_writes_and_readiness_over_tls() {
+        let e2e = tls_e2e();
+        let store = PostgresAuditStore::connect_with_roots(
+            tls_config(&e2e, "localhost", "tls-e2e-trusted"),
+            e2e.trusted.clone(),
+        )
+        .await
+        .expect("a certificate for localhost from the trusted CA connects");
+        assert!(store.healthy().await);
+        let attempt = store.begin(&intent()).await.unwrap();
+        store
+            .record(attempt, EvidenceKind::OutcomeUnknown, None)
+            .await
+            .unwrap();
+        assert!(session_uses_tls(&store.session).await, "write session");
+        assert!(session_uses_tls(&store.probe).await, "readiness session");
+    }
+
+    #[tokio::test]
+    #[ignore = "Requires the scoped synthetic TLS PostgreSQL (PILLAR_AUDIT_TLS_E2E_*)"]
+    async fn audit_tls_e2e_refuses_untrusted_issuers_and_other_hosts() {
+        let e2e = tls_e2e();
+        for (case, config, roots) in [
+            (
+                "issuer outside the configured roots",
+                tls_config(&e2e, "localhost", "tls-e2e-untrusted"),
+                e2e.untrusted.clone(),
+            ),
+            (
+                "production WebPKI roots",
+                tls_config(&e2e, "localhost", "tls-e2e-webpki"),
+                webpki_roots(),
+            ),
+            (
+                "certificate for another host",
+                tls_config(&e2e, "pillar-audit-other-host.invalid", "tls-e2e-host"),
+                e2e.trusted.clone(),
+            ),
+        ] {
+            let refused = PostgresAuditStore::connect_with_roots(config, roots).await;
+            assert_eq!(
+                refused.err().as_deref(),
+                Some("durable audit: store unavailable"),
+                "{case}"
+            );
+        }
+    }
+
+    async fn until(condition: impl Fn() -> bool) {
+        while !condition() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
     fn intent() -> AttemptIntent {
         AttemptIntent {
             validated: ValidatedIntent {
@@ -505,25 +735,46 @@ mod tests {
         }
     }
 
+    // Real time throughout: a paused clock can advance past a loopback event before it is observed.
     #[tokio::test]
-    async fn audit_readiness_probes_cannot_queue_ahead_of_a_signing_write() {
-        // Real time: a paused clock can advance past a loopback close before it is observed.
-        // Twelve queued probes at an eighth of the deadline each would outlast the write's deadline.
+    async fn audit_readiness_probe_in_flight_does_not_hold_the_signing_session() {
         let timeout = Duration::from_secs(2);
-        let delay = timeout / 8;
-        let (url, accepted) = slow_refusing_database(delay).await;
-        let store = Arc::new(PostgresAuditStore {
-            config: AuditConfig {
-                database_url: url.into(),
-                namespace: "synthetic".into(),
-                timeout,
-                max_attempts: 16,
-            },
-            session: Mutex::new(None),
-            probe: Mutex::new(()),
-            reachable: Arc::new(AtomicBool::new(true)),
-            generation: Arc::new(AtomicU64::new(0)),
+        let (url, accepted) = wedged_database().await;
+        let store = store(url, timeout);
+        let probe = tokio::spawn({
+            let store = store.clone();
+            async move { store.healthy().await }
         });
+        until(|| accepted.load(Ordering::SeqCst) == 1).await;
+
+        assert!(
+            store.session.try_lock().is_ok(),
+            "a probe waiting on a wedged database must not own the signing session"
+        );
+        let write = tokio::spawn({
+            let store = store.clone();
+            async move { store.begin(&intent()).await }
+        });
+        tokio::time::timeout(timeout / 4, until(|| accepted.load(Ordering::SeqCst) == 2))
+            .await
+            .expect("the signing write must dial while the probe is still in flight");
+        assert!(!probe.is_finished());
+
+        assert!(!probe.await.unwrap());
+        assert!(write
+            .await
+            .unwrap()
+            .unwrap_err()
+            .contains("store unavailable"));
+        assert!(!store.health_state().load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn audit_signing_write_does_not_wait_for_an_in_flight_probe() {
+        let timeout = Duration::from_millis(2400);
+        let delay = timeout / 4;
+        let (url, _) = slow_refusing_database(delay).await;
+        let store = store(url, timeout);
         let probes = (0..12)
             .map(|_| {
                 let store = store.clone();
@@ -535,16 +786,11 @@ mod tests {
         let started = tokio::time::Instant::now();
         let write = store.begin(&intent()).await;
         let waited = started.elapsed();
-        let reached_database_as = accepted.load(Ordering::SeqCst);
 
         assert!(write.unwrap_err().contains("store unavailable"));
         assert!(
-            waited < timeout,
-            "the signing write timed out in the queue after {waited:?}"
-        );
-        assert_eq!(
-            reached_database_as, 2,
-            "the signing write must reach the database after at most one probe"
+            waited < delay * 3 / 2,
+            "the signing write waited {waited:?}; its own refused connection takes {delay:?}"
         );
         for probe in probes {
             assert!(
@@ -553,5 +799,66 @@ mod tests {
             );
         }
         assert!(!store.health_state().load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn audit_concurrent_readiness_probes_share_one_budget_and_one_connection() {
+        let timeout = Duration::from_secs(1);
+        let (url, accepted) = wedged_database().await;
+        let store = store(url, timeout);
+        let started = tokio::time::Instant::now();
+        let probes = (0..12)
+            .map(|_| {
+                let store = store.clone();
+                tokio::spawn(async move {
+                    let ready = store.healthy().await;
+                    (ready, started.elapsed())
+                })
+            })
+            .collect::<Vec<_>>();
+        for probe in probes {
+            let (ready, took) = probe.await.unwrap();
+            assert!(
+                !ready,
+                "a probe against a wedged database must not report ready"
+            );
+            assert!(
+                took < timeout + timeout / 4,
+                "one probe took {took:?} against a {timeout:?} readiness budget"
+            );
+        }
+        let dialled = accepted.load(Ordering::SeqCst);
+        assert!(
+            (1..=2).contains(&dialled),
+            "probes queue for one readiness connection, and at most one more dials as the \
+             first's budget runs out; {dialled} connections were opened"
+        );
+        assert!(!store.health_state().load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn audit_cancelled_readiness_probe_does_not_leave_its_connection_for_the_next() {
+        let timeout = Duration::from_secs(2);
+        let (url, accepted) = wedged_database().await;
+        let store = store(url, timeout);
+        let first = tokio::spawn({
+            let store = store.clone();
+            async move { store.healthy().await }
+        });
+        until(|| accepted.load(Ordering::SeqCst) == 1).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        first.abort();
+        assert!(first.await.unwrap_err().is_cancelled());
+
+        let second = tokio::spawn({
+            let store = store.clone();
+            async move { store.healthy().await }
+        });
+        tokio::time::timeout(timeout / 4, until(|| accepted.load(Ordering::SeqCst) == 2))
+            .await
+            .expect(
+                "the next probe must dial afresh instead of reusing the cancelled one's session",
+            );
+        assert!(!second.await.unwrap());
     }
 }

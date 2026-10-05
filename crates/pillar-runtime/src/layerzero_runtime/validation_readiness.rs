@@ -838,6 +838,7 @@ mod ton_tests {
     #[derive(Clone)]
     struct RecordingTransport {
         responses: Arc<Mutex<Vec<Result<Value, String>>>>,
+        urls: Arc<Mutex<Vec<String>>>,
     }
 
     #[async_trait]
@@ -853,9 +854,13 @@ mod ton_tests {
 
         async fn get_json(
             &self,
-            _url: String,
+            url: String,
             _headers: HashMap<String, String>,
         ) -> Result<Value, String> {
+            self.urls
+                .lock()
+                .map_err(|_| "recording transport mutex poisoned".to_string())?
+                .push(url);
             self.responses
                 .lock()
                 .map_err(|_| "recording transport mutex poisoned".to_string())?
@@ -864,13 +869,23 @@ mod ton_tests {
     }
 
     async fn observe(trace: Value, head: i64, tx_hash: &str) -> BlockConfirmationObservation {
+        observe_recording(trace, head, tx_hash).await.0
+    }
+
+    async fn observe_recording(
+        trace: Value,
+        head: i64,
+        tx_hash: &str,
+    ) -> (BlockConfirmationObservation, Vec<String>) {
+        let urls = Arc::new(Mutex::new(Vec::new()));
         let transport = RecordingTransport {
             responses: Arc::new(Mutex::new(vec![
                 Ok(trace),
                 Ok(json!({"last": {"seqno": head}})),
             ])),
+            urls: urls.clone(),
         };
-        observe_ton_block_confirmations(
+        let observation = observe_ton_block_confirmations(
             transport,
             "https://ton-v3.example".to_string(),
             HashMap::new(),
@@ -878,7 +893,9 @@ mod ton_tests {
             5,
         )
         .await
-        .unwrap()
+        .unwrap();
+        let urls = urls.lock().unwrap().clone();
+        (observation, urls)
     }
 
     /// toncenter v3 `/events`: an external message lands at seqno 100 and the
@@ -949,5 +966,42 @@ mod ton_tests {
             BlockConfirmationValidity::Missing
         ));
         assert_eq!(observation.current_confirmations, None);
+    }
+
+    /// Public toncenter v3 `/events` (observed 2026-10-06) returns every transaction hash as
+    /// canonical padded standard base64, so `+`, `/` and `=` must survive the query string and
+    /// the trace lookup compares the provider's own spelling exactly.
+    #[tokio::test]
+    async fn ton_confirmations_follow_a_canonical_base64_hash_through_the_encoded_query() {
+        const PACKET_SENT: &str = "xl/S/EtS8UMfIBSN5KWDG/XZ7tv3ovs2k3zRO+e7K5w=";
+        const ROOT: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+        let trace = json!({"events": [{
+            "trace": {"tx_hash": ROOT, "children": [{"tx_hash": PACKET_SENT, "children": []}]},
+            "transactions": {
+                ROOT: {"hash": ROOT, "lt": "1000", "mc_block_seqno": 100},
+                PACKET_SENT: {"hash": PACKET_SENT, "lt": "1001", "mc_block_seqno": 105},
+            }
+        }]});
+
+        let (observation, urls) = observe_recording(trace.clone(), 110, PACKET_SENT).await;
+        assert_eq!(
+            urls.first().map(String::as_str),
+            Some("https://ton-v3.example/events?tx_hash=xl%2FS%2FEtS8UMfIBSN5KWDG%2FXZ7tv3ovs2k3zRO%2Be7K5w%3D")
+        );
+        assert!(matches!(
+            observation.validity,
+            BlockConfirmationValidity::Sufficient {
+                receipt_block_number: 105,
+                ..
+            }
+        ));
+
+        // Base64 is case-sensitive: a lowercased hash names other bytes, so it must not match.
+        let lowered = PACKET_SENT.to_lowercase();
+        let observation = observe(trace, 110, &lowered).await;
+        assert!(matches!(
+            observation.validity,
+            BlockConfirmationValidity::Missing
+        ));
     }
 }

@@ -41,7 +41,7 @@ fn flags_an_unknown_entity() {
     assert_eq!(
         errors,
         vec![
-            r#"has entity "mystery-provider" which is not in the registered entities list - add it to entities[] first"#.to_string()
+            "has an entity which is not in the registered entities list - add it to entities[] first".to_string()
         ]
     );
 }

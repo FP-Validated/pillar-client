@@ -118,7 +118,7 @@ fn aggregates_errors_across_multiple_chains() {
         entities: vec!["operator".to_string()],
         chains: BTreeMap::from([
             (
-                "chainA".to_string(),
+                "ethereum".to_string(),
                 BTreeMap::from([(
                     "rpc".to_string(),
                     vec![entry(
@@ -129,7 +129,7 @@ fn aggregates_errors_across_multiple_chains() {
                 )]),
             ),
             (
-                "chainB".to_string(),
+                "bsc".to_string(),
                 BTreeMap::from([(
                     "rpc".to_string(),
                     vec![entry(
@@ -148,7 +148,9 @@ fn aggregates_errors_across_multiple_chains() {
         )])])),
         chains: BTreeMap::new(),
     };
-    let err = check_strategy_config(&file, &strategy).unwrap_err();
-    assert!(err.to_string().contains("chainA"));
-    assert!(err.to_string().contains("chainB"));
+    let err = check_strategy_config(&file, &strategy)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains(r#"Chain "ethereum" rpc"#), "{err}");
+    assert!(err.contains(r#"Chain "bsc" rpc"#), "{err}");
 }

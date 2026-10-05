@@ -179,12 +179,19 @@ async fn postgres_audit_waiter_timeout_preserves_active_commit_and_session() {
     });
     wait_for_gate(&database).await;
     let before = proxy.connections.load(Ordering::SeqCst);
-    let health = RequestContext::new(Duration::from_millis(20)).scope(store.healthy());
+    let health = store.healthy();
     let sign = RequestContext::new(Duration::from_millis(20)).scope(store.begin(&intent));
     let (health, sign) = tokio::join!(health, sign);
-    assert!(!health);
+    assert!(
+        health,
+        "readiness answers from its own connection while a signing COMMIT holds the write session"
+    );
     assert!(sign.unwrap_err().contains("store unavailable"));
-    assert_eq!(proxy.connections.load(Ordering::SeqCst), before);
+    assert_eq!(
+        proxy.connections.load(Ordering::SeqCst),
+        before + 1,
+        "only the readiness connection is new; the waiting write did not replace the session"
+    );
     assert!(
         !active.is_finished(),
         "waiting timeout aborted active COMMIT"
@@ -200,13 +207,13 @@ async fn postgres_audit_waiter_timeout_preserves_active_commit_and_session() {
     active.await.unwrap().unwrap();
     assert!(store.healthy().await);
     assert!(store.begin(&intent).await.is_ok());
-    assert_eq!(proxy.connections.load(Ordering::SeqCst), before);
+    assert_eq!(proxy.connections.load(Ordering::SeqCst), before + 1);
     assert_eq!(
         evidence(&database, &namespace).await,
         vec![("wallet_returned".into(), Some("hash".into()))]
     );
     artifact(
         "waiter-session",
-        &json!({"health_waiter_timed_out":true,"sign_waiter_timed_out":true,"active_commit_succeeded":true,"reconnects_from_waiting_timeout":proxy.connections.load(Ordering::SeqCst)-before,"retained_attempts":database.count(&namespace,"attempt").await}),
+        &json!({"health_answered_while_commit_held":true,"sign_waiter_timed_out":true,"active_commit_succeeded":true,"connections_added_after_gate":proxy.connections.load(Ordering::SeqCst)-before,"retained_attempts":database.count(&namespace,"attempt").await}),
     );
 }

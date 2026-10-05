@@ -187,7 +187,7 @@ fn non_max_default_round_trips_and_resolved_pool_satisfies() {
 fn reports_restriction_error_with_chain_and_endpoint_context() {
     let providers = ProvidersFileV2 {
         entities: vec![],
-        chains: BTreeMap::from([("chain-a".into(), BTreeMap::from([("rpc".into(), vec![])]))]),
+        chains: BTreeMap::from([("ethereum".into(), BTreeMap::from([("rpc".into(), vec![])]))]),
     };
     let strategy = raw(
         vec![CategoryRequirement::from([(
@@ -200,5 +200,5 @@ fn reports_restriction_error_with_chain_and_endpoint_context() {
         minimum_max_entities: Some(2),
     };
     let err = precompute_resolved_strategy(&providers, &strategy, &restrictions).unwrap_err();
-    assert!(err.contains("chain-a.rpc")); // “error context identifies the chain.endpoint pair”; “throws for the first chain that falls below the floor”
+    assert!(err.contains("ethereum.rpc")); // “error context identifies the chain.endpoint pair”; “throws for the first chain that falls below the floor”
 }

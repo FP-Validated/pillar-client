@@ -50,6 +50,27 @@ pub struct StrategyRestrictions {
     pub minimum_max_entities: Option<u64>,
 }
 
+/// A configured key appears in a diagnostic only as a name this build defines; anything else
+/// is input, possibly a pasted credential, and is shown as a placeholder.
+fn chain_label(chain: &str) -> &'static str {
+    crate::static_chain_name(chain).unwrap_or("<unlisted chain>")
+}
+
+fn endpoint_label(endpoint: &str) -> &'static str {
+    [RPC_ENDPOINT_TYPE, SEQUENCER_ENDPOINT_TYPE]
+        .into_iter()
+        .find(|known| *known == endpoint)
+        .unwrap_or("<unlisted endpoint type>")
+}
+
+fn category_label(category: &str) -> &'static str {
+    PROVIDER_CATEGORIES
+        .into_iter()
+        .chain([PROVIDER_CATEGORY_ANY])
+        .find(|known| *known == category)
+        .unwrap_or("<unlisted category>")
+}
+
 pub fn validate_provider_entry(
     entry: &ProviderEntryV2,
     known_entities: &BTreeSet<String>,
@@ -62,15 +83,14 @@ pub fn validate_provider_entry(
         errors.push(r#"entry is missing required "category""#.to_string());
     } else if !PROVIDER_CATEGORIES.contains(&entry.category.as_str()) {
         errors.push(format!(
-            r#"has unknown category "{}" - must be one of: {}"#,
-            entry.category,
+            "has an unknown category - must be one of: {}",
             PROVIDER_CATEGORIES.join(", ")
         ));
     }
     if entry.entity.is_empty() {
         errors.push(r#"entry is missing required "entity""#.to_string());
     } else if !known_entities.contains(&entry.entity) {
-        errors.push(format!(r#"has entity "{}" which is not in the registered entities list - add it to entities[] first"#, entry.entity));
+        errors.push("has an entity which is not in the registered entities list - add it to entities[] first".to_string());
     }
     errors
 }
@@ -83,8 +103,12 @@ pub fn validate_provider_config(
     let mut errors = Vec::new();
     for (chain, endpoints) in &file.chains {
         for (endpoint, entries) in endpoints {
-            for entry in entries {
-                let prefix = format!(r#"chain "{chain}" {endpoint}[]"#);
+            for (index, entry) in entries.iter().enumerate() {
+                let prefix = format!(
+                    r#"chain "{}" {}[{index}]"#,
+                    chain_label(chain),
+                    endpoint_label(endpoint)
+                );
                 errors.extend(
                     validate_provider_entry(entry, &known)
                         .into_iter()
@@ -125,14 +149,20 @@ pub fn check_strategy_config_with_restrictions(
             let resolved = match resolve_max(raw, &counts, restrictions.minimum_max_entities) {
                 Ok(value) => value,
                 Err(error) => {
-                    errors.push(format!("Chain \"{chain}\" {endpoint}: {error}."));
+                    errors.push(format!(
+                        r#"Chain "{}" {}: {error}."#,
+                        chain_label(chain),
+                        endpoint_label(endpoint)
+                    ));
                     continue;
                 }
             };
             if !is_strategy_satisfiable(&counts, &resolved) {
                 errors.push(format!(
-                    r#"Chain "{chain}" {endpoint}: strategy not satisfiable. Strategy: {}."#,
-                    strategy_debug(&resolved)
+                    r#"Chain "{}" {}: strategy not satisfiable. Strategy: {}."#,
+                    chain_label(chain),
+                    endpoint_label(endpoint),
+                    strategy_diagnostic(&resolved)
                 ));
             }
         }
@@ -261,7 +291,10 @@ fn resolve_max(
                 };
                 if let Some(floor) = minimum {
                     if actual < floor {
-                        return Err(format!("RestrictionViolationError: category={category}, resolved={actual}, minimumMaxEntities={floor}"));
+                        return Err(format!(
+                            "RestrictionViolationError: category={}, resolved={actual}, minimumMaxEntities={floor}",
+                            category_label(category)
+                        ));
                     }
                 }
                 *quorum = Quorum::Count(actual);
@@ -271,11 +304,9 @@ fn resolve_max(
     Ok(resolved)
 }
 
-fn strategy_debug(strategy: &QuorumStrategy) -> String {
-    format!(
-        "{{allOf:{:?},oneOf:{:?}}}",
-        strategy.all_of, strategy.one_of
-    )
+/// The canonical form with every category passed through `category_label`, for messages.
+pub(crate) fn strategy_diagnostic(strategy: &QuorumStrategy) -> String {
+    render_strategy(strategy, |key| category_label(key))
 }
 
 pub fn is_trivial_strategy(strategy: &QuorumStrategy) -> bool {
@@ -294,15 +325,23 @@ pub fn is_trivial_strategy(strategy: &QuorumStrategy) -> bool {
 }
 
 pub fn canonical_strategy_key(strategy: &QuorumStrategy) -> String {
-    fn object(reqs: &[CategoryRequirement]) -> String {
+    render_strategy(strategy, |key| key)
+}
+
+fn render_strategy<'a>(
+    strategy: &'a QuorumStrategy,
+    key: impl Fn(&'a str) -> &'a str + Copy,
+) -> String {
+    let object = |reqs: &'a [CategoryRequirement]| {
         format!(
             "[{}]",
             reqs.iter()
                 .map(|req| format!(
                     "{{{}}}",
                     req.iter()
-                        .map(|(key, value)| format!(
-                            "\"{key}\":{}",
+                        .map(|(category, value)| format!(
+                            "\"{}\":{}",
+                            key(category),
                             match value {
                                 Quorum::Count(n) => n.to_string(),
                                 Quorum::Max => "\"max\"".to_string(),
@@ -314,7 +353,7 @@ pub fn canonical_strategy_key(strategy: &QuorumStrategy) -> String {
                 .collect::<Vec<_>>()
                 .join(",")
         )
-    }
+    };
     format!(
         "{{\"allOf\":{},\"oneOf\":{}}}",
         object(&strategy.all_of),
@@ -447,7 +486,7 @@ pub fn precompute_resolved_strategy(
             };
             let pool = entities_per_category(entries);
             let resolved = resolve_max(raw_strategy, &pool, restrictions.minimum_max_entities)
-                .map_err(|e| format!("{chain}.{endpoint}: {e}"))?;
+                .map_err(|e| format!("{}.{}: {e}", chain_label(chain), endpoint_label(endpoint)))?;
             endpoint_strategies.insert(endpoint.clone(), resolved);
         }
         chains.insert(chain.clone(), endpoint_strategies);
@@ -491,9 +530,7 @@ impl<'de> Deserialize<'de> for Quorum {
         match Raw::deserialize(deserializer)? {
             Raw::Count(count) => Ok(Quorum::Count(count)),
             Raw::Text(text) if text == "max" => Ok(Quorum::Max),
-            Raw::Text(text) => Err(serde::de::Error::custom(format!(
-                r#"quorum count must be a non-negative integer or "max", got "{text}""#
-            ))),
+            Raw::Text(_) => Err(serde::de::Error::custom(QUORUM_LITERAL_ERROR)),
         }
     }
 }
@@ -556,6 +593,9 @@ impl From<RawStrategy> for QuorumStrategy {
     }
 }
 
+pub(crate) const QUORUM_LITERAL_ERROR: &str =
+    r#"quorum count must be a non-negative integer or "max""#;
+
 pub const LEGACY_PROVIDER_CONFIG_ERROR: &str = "the legacy `{ uris, quorum }` provider \
      configuration is no longer accepted; supply providers-v2.json (`entities` + \
      `chains.<chain>.rpc[{uri, category, entity}]`) with quorum-strategy.json";
@@ -563,8 +603,12 @@ pub const LEGACY_PROVIDER_CONFIG_ERROR: &str = "the legacy `{ uris, quorum }` pr
 /// Refuses a provider file in the retired `{ uris, quorum }` shape by name, so an operator
 /// who has not migrated is told so rather than shown a schema error.
 pub fn reject_legacy_provider_config(raw: &str) -> Result<(), ConfigError> {
-    let value = serde_json::from_str::<serde_json::Value>(raw)
-        .map_err(|error| ConfigError::Json(format!("providers-v2.json: {error}")))?;
+    let value = serde_json::from_str::<serde_json::Value>(raw).map_err(|error| {
+        ConfigError::Json(format!(
+            "providers-v2.json: {}",
+            crate::json_error_without_input(&error)
+        ))
+    })?;
     let looks_legacy = value.as_object().is_some_and(|object| {
         !object.contains_key("chains")
             && object
@@ -594,13 +638,18 @@ fn parse_providers_file(raw: &str) -> Result<RawProvidersFile, ConfigError> {
 fn parse_strategy_file(
     raw: &str,
 ) -> Result<(QuorumStrategyFileContent, StrategyRestrictions), ConfigError> {
-    let raw = serde_json::from_str::<RawStrategyFile>(raw)
-        .map_err(|error| ConfigError::Json(format!("quorum-strategy.json: {error}")))?;
-    if let Some(key) = raw.extra.keys().find(|key| !key.starts_with('_')) {
-        return Err(ConfigError::Json(format!(
-            "quorum-strategy.json: unknown field `{key}`, expected `default`, `chains`, \
+    let raw = serde_json::from_str::<RawStrategyFile>(raw).map_err(|error| {
+        ConfigError::Json(format!(
+            "quorum-strategy.json: {}",
+            crate::json_error_without_input(&error)
+        ))
+    })?;
+    if raw.extra.keys().any(|key| !key.starts_with('_')) {
+        return Err(ConfigError::Json(
+            "quorum-strategy.json: unknown top-level field, expected `default`, `chains`, \
              `restrictions` or a `_`-prefixed documentation field"
-        )));
+                .to_string(),
+        ));
     }
     Ok((
         QuorumStrategyFileContent {
@@ -679,7 +728,8 @@ pub fn provider_configs_from_v2(
             .cloned()
             .ok_or_else(|| {
                 ConfigError::ProviderValidation(format!(
-                    r#"Chain "{chain}" {RPC_ENDPOINT_TYPE}: no resolved strategy"#
+                    r#"Chain "{}" {RPC_ENDPOINT_TYPE}: no resolved strategy"#,
+                    chain_label(&chain)
                 ))
             })?;
         let uris = entries.iter().map(provider_uri).collect();
@@ -693,7 +743,8 @@ pub fn provider_configs_from_v2(
         let config = ProviderConfig::new(uris, voters, strategy)
             .map_err(|error| {
                 ConfigError::ProviderValidation(format!(
-                    "Chain \"{chain}\" {RPC_ENDPOINT_TYPE}: {error}"
+                    r#"Chain "{}" {RPC_ENDPOINT_TYPE}: {error}"#,
+                    chain_label(&chain)
                 ))
             })?
             .with_sequencer(

@@ -44,10 +44,14 @@ fn throws_for_unknown_category() {
         "private_cloud",
         "operator",
     )]));
-    let err = validate_provider_config(&file, &["operator".to_string()]).unwrap_err();
-    assert!(err
-        .to_string()
-        .contains(r#"unknown category "private_cloud""#));
+    let err = validate_provider_config(&file, &["operator".to_string()])
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains(r#"chain "ethereum" rpc[0] has an unknown category - must be one of:"#),
+        "{err}"
+    );
+    assert!(!err.contains("private_cloud"), "{err}");
 }
 
 // Upstream providerValidate.test.ts › validateProviderConfig › “throws for missing entity”.
@@ -70,11 +74,16 @@ fn throws_for_add_entity_placeholder() {
         PROVIDER_CATEGORY_SHARED_EXTERNAL,
         "ADD_ENTITY",
     )]));
-    let err = validate_provider_config(&file, &["operator".to_string()]).unwrap_err();
-    assert!(err.to_string().contains(r#""ADD_ENTITY""#));
-    assert!(err
-        .to_string()
-        .contains("not in the registered entities list"));
+    let err = validate_provider_config(&file, &["operator".to_string()])
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains(
+            r#"chain "ethereum" rpc[0] has an entity which is not in the registered entities list"#
+        ),
+        "{err}"
+    );
+    assert!(!err.contains("ADD_ENTITY"), "{err}");
 }
 
 // Upstream providerValidate.test.ts › validateProviderConfig › “throws for entity not in registered list”.
@@ -85,11 +94,11 @@ fn throws_for_entity_not_in_registered_list() {
         PROVIDER_CATEGORY_INTERNAL,
         "unknown-provider",
     )]));
-    let err = validate_provider_config(&file, &["operator".to_string()]).unwrap_err();
-    assert!(err.to_string().contains(r#""unknown-provider""#));
-    assert!(err
-        .to_string()
-        .contains("not in the registered entities list"));
+    let err = validate_provider_config(&file, &["operator".to_string()])
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("not in the registered entities list"), "{err}");
+    assert!(!err.contains("unknown-provider"), "{err}");
 }
 
 // Upstream providerValidate.test.ts › validateProviderConfig › “aggregates multiple errors into a single throw”.
@@ -103,7 +112,15 @@ fn aggregates_multiple_errors_into_a_single_throw() {
             "ADD_ENTITY",
         ),
     ]));
-    let err = validate_provider_config(&file, &["operator".to_string()]).unwrap_err();
-    assert!(err.to_string().contains(r#"missing required "uri""#));
-    assert!(err.to_string().contains(r#""ADD_ENTITY""#));
+    let err = validate_provider_config(&file, &["operator".to_string()])
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains(r#"chain "ethereum" rpc[0] entry is missing required "uri""#),
+        "{err}"
+    );
+    assert!(
+        err.contains(r#"chain "ethereum" rpc[1] has an entity which is not"#),
+        "{err}"
+    );
 }

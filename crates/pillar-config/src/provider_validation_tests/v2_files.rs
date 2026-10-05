@@ -107,7 +107,7 @@ fn refuses_pairs_that_would_weaken_or_misread_the_quorum() {
             "misspelled strategy key",
             PROVIDERS,
             r#"{"default": {"allof": [{"any": 1}]}}"#,
-            "unknown field `allof`",
+            "quorum-strategy.json: JSON data error: unknown field at line ",
         ),
         (
             "no agreement required",
@@ -131,7 +131,7 @@ fn refuses_pairs_that_would_weaken_or_misread_the_quorum() {
             "bad quorum literal",
             PROVIDERS,
             r#"{"default": {"allOf": [{"any": "all"}]}}"#,
-            r#"quorum count must be a non-negative integer or "max", got "all""#,
+            r#"quorum-strategy.json: JSON data error: quorum count must be a non-negative integer or "max" at line "#,
         ),
         (
             "unregistered entity in an unused pool",
@@ -140,7 +140,7 @@ fn refuses_pairs_that_would_weaken_or_misread_the_quorum() {
                 r#"indexer.example", "category": "internal", "entity": "nobody""#,
             ),
             r#"{"default": {"allOf": [{"any": 1}]}}"#,
-            r#"has entity "nobody" which is not in the registered entities list"#,
+            r#"chain "ethereum" <unlisted endpoint type>[0] has an entity which is not in the registered entities list"#,
         ),
         (
             "unknown category",
@@ -149,7 +149,7 @@ fn refuses_pairs_that_would_weaken_or_misread_the_quorum() {
                 r#""category": "private", "entity": "operator"}"#,
             ),
             r#"{"default": {"allOf": [{"any": 1}]}}"#,
-            r#"has unknown category "private""#,
+            r#"chain "ethereum" rpc[0] has an unknown category"#,
         ),
         (
             "unknown entry field",
@@ -158,7 +158,7 @@ fn refuses_pairs_that_would_weaken_or_misread_the_quorum() {
                 r#""entity": "quicknode", "weight": 2}"#,
             ),
             r#"{"default": {"allOf": [{"any": 1}]}}"#,
-            "unknown field `weight`",
+            "providers-v2.json: JSON data error: unknown field at line ",
         ),
     ];
     for (name, providers, strategy, expected) in cases {
@@ -191,7 +191,11 @@ fn upstream_documentation_keys_load_and_other_unknown_keys_do_not() {
         PROVIDERS,
         r#"{"note": "no underscore", "default": {"allOf": [{"any": 1}]}}"#,
     ));
-    assert!(error.contains("unknown field `note`"), "{error}");
+    assert!(
+        error.starts_with("quorum-strategy.json: unknown top-level field"),
+        "{error}"
+    );
+    assert!(!error.contains("note"), "{error}");
 }
 
 #[test]
@@ -228,6 +232,99 @@ fn provider_shape_errors_name_the_position_but_not_the_value() {
     }
     let missing = message(load(r#"{"chains": {}}"#, strategy));
     assert!(missing.contains("missing field `entities`"), "{missing}");
+}
+
+#[test]
+fn provider_and_strategy_diagnostics_never_echo_input_keys_or_values() {
+    const SENTINEL: &str = "SYNTHETIC-SENTINEL-not-a-credential";
+    let ok_strategy = r#"{"default": {"allOf": [{"any": 1}]}}"#;
+    let cases: [(&str, String, String, &str); 11] = [
+        (
+            "unknown entry key",
+            PROVIDERS.replace(
+                r#""entity": "quicknode"}"#,
+                &format!(r#""entity": "quicknode", "{SENTINEL}": 1}}"#),
+            ),
+            ok_strategy.into(),
+            "providers-v2.json: JSON data error: unknown field at line ",
+        ),
+        (
+            "unknown top-level providers key",
+            PROVIDERS.replacen('{', &format!(r#"{{"{SENTINEL}": 1, "#), 1),
+            ok_strategy.into(),
+            "providers-v2.json: JSON data error: unknown field at line ",
+        ),
+        (
+            "unknown strategy key",
+            PROVIDERS.into(),
+            format!(r#"{{"default": {{"{SENTINEL}": [{{"any": 1}}]}}}}"#),
+            "quorum-strategy.json: JSON data error: unknown field at line ",
+        ),
+        (
+            "unknown top-level strategy key",
+            PROVIDERS.into(),
+            format!(r#"{{"{SENTINEL}": 1, "default": {{"allOf": [{{"any": 1}}]}}}}"#),
+            "quorum-strategy.json: unknown top-level field",
+        ),
+        (
+            "bad quorum literal",
+            PROVIDERS.into(),
+            format!(r#"{{"default": {{"allOf": [{{"any": "{SENTINEL}"}}]}}}}"#),
+            r#"quorum count must be a non-negative integer or "max" at line "#,
+        ),
+        (
+            "category value",
+            PROVIDERS.replace(
+                r#""category": "internal""#,
+                &format!(r#""category": "{SENTINEL}""#),
+            ),
+            ok_strategy.into(),
+            r#"chain "ethereum" rpc[0] has an unknown category"#,
+        ),
+        (
+            "entity value",
+            PROVIDERS.replace(
+                r#""entity": "quicknode"}"#,
+                &format!(r#""entity": "{SENTINEL}"}}"#),
+            ),
+            ok_strategy.into(),
+            r#"chain "ethereum" rpc[2] has an entity which is not in the registered entities list"#,
+        ),
+        (
+            "chain and endpoint keys",
+            PROVIDERS.replace(
+                r#""bsc": {"#,
+                &format!(r#""{SENTINEL}": {{"{SENTINEL}": [], "#),
+            ),
+            r#"{"default": {"allOf": [{"any": 2}]}}"#.into(),
+            r#"Chain "<unlisted chain>" <unlisted endpoint type>: strategy not satisfiable"#,
+        ),
+        (
+            "strategy category key below the floor",
+            PROVIDERS.into(),
+            format!(
+                r#"{{"default": {{"allOf": [{{"{SENTINEL}": "max"}}]}}, "restrictions": {{"minimumMaxEntities": 1}}}}"#
+            ),
+            "RestrictionViolationError: category=<unlisted category>, resolved=0",
+        ),
+        (
+            "strategy category key unsatisfiable",
+            PROVIDERS.into(),
+            format!(r#"{{"default": {{"allOf": [{{"{SENTINEL}": 1}}]}}}}"#),
+            r#"Strategy: {"allOf":[{"<unlisted category>":1}],"oneOf":[]}"#,
+        ),
+        (
+            "syntax error after a value",
+            format!(r#"{{"entities": ["{SENTINEL}" "#),
+            ok_strategy.into(),
+            "providers-v2.json: JSON unexpected end of input at line 1 column ",
+        ),
+    ];
+    for (name, providers, strategy, expected) in cases {
+        let error = message(load(&providers, &strategy));
+        assert!(!error.contains(SENTINEL), "{name}: {error}");
+        assert!(error.contains(expected), "{name}: {error}");
+    }
 }
 
 #[test]

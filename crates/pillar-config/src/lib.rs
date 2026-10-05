@@ -694,7 +694,7 @@ pub fn wallet_definitions_from_env_map(
 ) -> Result<Vec<WalletDefinition>, ConfigError> {
     let raw = required(vars, LZ_WALLETS)?;
     let wallets = serde_json::from_str::<Vec<WalletDefinition>>(raw)
-        .map_err(|error| ConfigError::Json(error.to_string()))?;
+        .map_err(|error| ConfigError::Json(json_error_without_input(&error)))?;
     if wallets.is_empty() {
         Err(ConfigError::NoWalletDefinition(LZ_WALLETS))
     } else {
@@ -708,7 +708,7 @@ pub fn wallet_definitions_from_file_path_env_map(
     let path = required(vars, LZ_WALLETS_FILE_PATH)?;
     let raw = fs::read_to_string(path).map_err(|error| ConfigError::Io(error.to_string()))?;
     let wallets = serde_json::from_str::<Vec<WalletDefinition>>(&raw)
-        .map_err(|error| ConfigError::Json(error.to_string()))?;
+        .map_err(|error| ConfigError::Json(json_error_without_input(&error)))?;
     if wallets.is_empty() {
         Err(ConfigError::NoWalletDefinition(LZ_WALLETS_FILE_PATH))
     } else {
@@ -716,8 +716,9 @@ pub fn wallet_definitions_from_file_path_env_map(
     }
 }
 
-/// serde_json's type errors quote the offending input, which here can be a seed phrase or
-/// an RPC credential; keep only field names, which name a key rather than a value.
+/// serde_json's errors quote the offending input, which here can be a seed phrase or an RPC
+/// credential, and an unknown key is input too; keep only `missing field`, whose name serde
+/// takes from the schema, and this crate's own constant messages.
 pub fn json_error_without_input(error: &serde_json::Error) -> String {
     use serde_json::error::Category;
     let category = match error.classify() {
@@ -727,13 +728,18 @@ pub fn json_error_without_input(error: &serde_json::Error) -> String {
         Category::Eof => "unexpected end of input",
     };
     let message = error.to_string();
-    let field = ["missing field `", "unknown field `"]
-        .into_iter()
-        .find_map(|prefix| {
-            let (field, _) = message.strip_prefix(prefix)?.split_once('`')?;
-            Some(format!(": {prefix}{field}`"))
-        })
-        .unwrap_or_default();
+    let field = if let Some((field, _)) = message
+        .strip_prefix("missing field `")
+        .and_then(|rest| rest.split_once('`'))
+    {
+        format!(": missing field `{field}`")
+    } else if message.starts_with("unknown field `") {
+        ": unknown field".to_string()
+    } else if message.starts_with(provider_validation::QUORUM_LITERAL_ERROR) {
+        format!(": {}", provider_validation::QUORUM_LITERAL_ERROR)
+    } else {
+        String::new()
+    };
     format!(
         "JSON {category}{field} at line {} column {}",
         error.line(),
@@ -1161,6 +1167,15 @@ pub fn static_chain_type_name(chain_name: &str) -> Result<&'static str, ConfigEr
         .map_err(|_| ConfigError::UnknownStaticChainName(chain_name.to_string()))
 }
 
+/// The table's own copy of `chain_name`, so a diagnostic that prints it prints a name this build
+/// defines rather than bytes from the input.
+pub(crate) fn static_chain_name(chain_name: &str) -> Option<&'static str> {
+    STATIC_CHAIN_TYPE_NAMES
+        .binary_search_by_key(&chain_name, |(name, _)| *name)
+        .ok()
+        .map(|index| STATIC_CHAIN_TYPE_NAMES[index].0)
+}
+
 pub fn static_chain_type_by_chain_name(
     chain_names: &[String],
 ) -> Result<HashMap<String, String>, ConfigError> {
@@ -1395,7 +1410,7 @@ impl ProviderConfig {
         ) {
             return Err(format!(
                 "strategy {} requires no provider agreement",
-                provider_validation::canonical_strategy_key(&self.strategy)
+                provider_validation::strategy_diagnostic(&self.strategy)
             ));
         }
         if !provider_validation::is_strategy_satisfiable(
@@ -1404,7 +1419,7 @@ impl ProviderConfig {
         ) {
             return Err(format!(
                 "strategy {} is not satisfiable by the configured entities",
-                provider_validation::canonical_strategy_key(&self.strategy)
+                provider_validation::strategy_diagnostic(&self.strategy)
             ));
         }
         Ok(())
@@ -2764,6 +2779,41 @@ mod tests {
                 error.starts_with("JSON unexpected end of input at line 1"),
                 "{error}"
             );
+        }
+    }
+
+    #[test]
+    fn wallet_definition_shape_errors_name_the_position_but_not_the_value() {
+        const SENTINEL: &str = "SYNTHETIC-SENTINEL-not-a-credential";
+        let file = NamedTempFile::new().unwrap();
+        let parse_both = |raw: &str| {
+            std::fs::write(file.path(), raw).unwrap();
+            [
+                wallet_definitions_from_env_map(&HashMap::from([(
+                    LZ_WALLETS.to_string(),
+                    raw.to_string(),
+                )])),
+                wallet_definitions_from_file_path_env_map(&HashMap::from([(
+                    LZ_WALLETS_FILE_PATH.to_string(),
+                    file.path().to_string_lossy().into_owned(),
+                )])),
+            ]
+            .map(|result| result.unwrap_err().to_string())
+        };
+        for raw in [
+            format!(r#"[{{"name":"w","byChainType":"{SENTINEL}","walletSetName":"s"}}]"#),
+            format!(r#"["{SENTINEL}"]"#),
+        ] {
+            for error in parse_both(&raw) {
+                assert!(!error.contains(SENTINEL), "{error}");
+                assert!(
+                    error.starts_with("JSON data error at line 1 column "),
+                    "{error}"
+                );
+            }
+        }
+        for error in parse_both(r#"[{"name":"w","byChainType":{}}]"#) {
+            assert!(error.contains("missing field `walletSetName`"), "{error}");
         }
     }
 
