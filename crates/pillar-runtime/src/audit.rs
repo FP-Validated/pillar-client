@@ -810,15 +810,21 @@ mod tests {
 
     #[tokio::test]
     async fn audit_concurrent_readiness_probes_share_one_budget_and_one_connection() {
-        let timeout = Duration::from_secs(1);
+        let budget = Duration::from_secs(1);
         let (url, accepted) = wedged_database().await;
-        let store = store(url, timeout);
+        let store = store(url, budget * 2);
+        let request = RequestContext::new(budget);
         let started = tokio::time::Instant::now();
         let probes = (0..12)
-            .map(|_| {
+            .map(|i| {
                 let store = store.clone();
+                let request = request.clone();
                 tokio::spawn(async move {
-                    let ready = store.healthy().await;
+                    // Staggered starts stand in for runner preemption; one shared deadline still allows one dial.
+                    if i > 0 && i % 4 == 0 {
+                        std::thread::sleep(Duration::from_millis(3));
+                    }
+                    let ready = request.scope(store.healthy()).await;
                     (ready, started.elapsed())
                 })
             })
@@ -830,17 +836,47 @@ mod tests {
                 "a probe against a wedged database must not report ready"
             );
             assert!(
-                took < timeout + timeout / 4,
-                "one probe took {took:?} against a {timeout:?} readiness budget"
+                took < budget + budget / 4,
+                "one probe took {took:?} against a {budget:?} request budget"
             );
         }
-        let dialled = accepted.load(Ordering::SeqCst);
-        assert!(
-            (1..=2).contains(&dialled),
-            "probes queue for one readiness connection, and at most one more dials as the \
-             first's budget runs out; {dialled} connections were opened"
+        assert_eq!(
+            store.probe_generation.load(Ordering::SeqCst),
+            1,
+            "probes sharing one deadline queue for one readiness connection"
         );
+        assert_eq!(accepted.load(Ordering::SeqCst), 1);
         assert!(!store.health_state().load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn audit_readiness_probe_without_a_request_deadline_keeps_the_store_budget() {
+        let timeout = Duration::from_millis(100);
+        let (url, accepted) = wedged_database().await;
+        let store = store(url, timeout);
+        let holder = tokio::spawn({
+            let store = store.clone();
+            async move { store.healthy().await }
+        });
+        until(|| accepted.load(Ordering::SeqCst) == 1).await;
+        let queued = (0..4)
+            .map(|_| {
+                let store = store.clone();
+                tokio::spawn(async move { store.healthy().await })
+            })
+            .collect::<Vec<_>>();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        // Blocks the runtime so the store budget runs out before the lane is handed on.
+        std::thread::sleep(timeout * 2);
+        assert!(!holder.await.unwrap());
+        for probe in queued {
+            assert!(!probe.await.unwrap());
+        }
+        assert_eq!(
+            store.probe_generation.load(Ordering::SeqCst),
+            1,
+            "a probe granted the lane after the store budget ran out must not dial"
+        );
     }
 
     #[tokio::test]
@@ -897,9 +933,10 @@ mod tests {
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert_eq!(
-            accepted.load(Ordering::SeqCst),
+            store.probe_generation.load(Ordering::SeqCst),
             1,
             "a probe granted the lane after its budget ran out must not dial"
         );
+        assert_eq!(accepted.load(Ordering::SeqCst), 1);
     }
 }

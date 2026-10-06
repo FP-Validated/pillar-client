@@ -413,13 +413,20 @@ the audit readiness probe that `3edb5d23` added, not in the test. The lane wait 
 dial ran under one timeout that polls its future before its deadline, so a probe
 granted the lane after its budget had run out still dialed once. Whether that happens
 depends on the order in which expired probes are woken; no local run before this one
-showed it. The next commit waits for the lane and then dials only within the budget
-that is left, and adds
-`audit_readiness_probe_granted_the_lane_after_its_budget_does_not_dial`, which fails
-against the previous probe (2 connections, expected 1). Locally, with Rust 1.98.1 and
-`RUSTFLAGS="-D warnings"`, the job's commands then passed again, with 955 tests passed,
-0 failed and 15 ignored; the eight non-ignored audit store tests passed in 15 of 15
-repeated runs, and `cargo check` passed on Rust 1.94.1.
+showed it. The fix waits for the lane and then dials only within the budget that is
+left. Tests count dial attempts (`probe_generation`, incremented before each
+connect) rather than accepted connections, because a connection the client drops at
+once may never be accepted. With the previous probe,
+`audit_readiness_probe_granted_the_lane_after_its_budget_does_not_dial` counts 5 dial
+attempts where 1 is expected. The concurrent test now gives its 12 probes one shared
+request deadline and staggers their starts; the previous probe makes 12 dial attempts
+there, expected 1. Its old 1–2 connection bound assumed that every probe started
+within two timer ticks, so a slow runner could fail it against correct code.
+`audit_readiness_probe_without_a_request_deadline_keeps_the_store_budget` makes 2 dial
+attempts, expected 1, when the second step reuses the full store timeout instead of
+what is left of it. Locally, with Rust 1.98.1 and `RUSTFLAGS="-D warnings"`, the job's
+commands then passed again, with 956 tests passed, 0 failed and 15 ignored, and
+`cargo check` passed on Rust 1.94.1.
 
 ### Deployment
 
