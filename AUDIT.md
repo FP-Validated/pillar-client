@@ -27,7 +27,7 @@ lint or run the default test suite.
 | --- | --- |
 | `crates/*/src` | Product code; workspace layout in `README.md` |
 | `crates/pillar-config/src/generated_*.rs` | Generated LayerZero tables (signing-critical addresses, endpoint ids, capability). Never hand-edited; provenance header in each file |
-| `crates/*/src/tests*`, `crates/*/tests` | Unit, integration and E2E tests: `cargo test --workspace --locked` runs 934 and ignores 13 (section 6) |
+| `crates/*/src/tests*`, `crates/*/tests` | Unit, integration and E2E tests: at `3edb5d23`, `cargo test --workspace` runs 954 and ignores 15 (sections 6 and 10) |
 | `crates/*/tests/**/*.json`, `*.hex`, `*.body` | Fixtures: upstream-executed outputs, recorded public-chain RPC responses, official LayerZero vectors, synthetic inputs |
 | `crates/pillar-config/examples/provider-config/` | Example provider files on reserved `.example` hosts; no real endpoint or key |
 | `scripts/` | Table generators, parity emitters (`scripts/gasolina-parity/`), the CI integrity check and the acceptance-matrix builder |
@@ -180,7 +180,8 @@ responses still differ from upstream").
 
 ## 6. Ignored tests
 
-`cargo test --workspace --locked` skips 13 tests that need external inputs.
+`cargo test --workspace --locked` skips 15 tests that need external inputs. Through
+`7dc694ca` it skipped 13; `3edb5d23` added the two TLS tests below.
 
 ### Durable audit against PostgreSQL (11 tests)
 
@@ -221,6 +222,36 @@ cargo test -p pillar-runtime --lib --locked -- --ignored --exact \
 ```
 
 The maintainers' ledger is not available to auditors.
+
+### Durable audit over TLS (2 tests)
+
+`crates/pillar-runtime/src/audit.rs`:
+`audit_tls_e2e_trusted_certificate_serves_writes_and_readiness_over_tls` and
+`audit_tls_e2e_refuses_untrusted_issuers_and_other_hosts`. They need a disposable
+PostgreSQL that accepts only TLS:
+
+- listening on `127.0.0.1`; the tests connect with
+  `host=<name> hostaddr=127.0.0.1 port=<port> user=pillar dbname=pillar_audit_tls_e2e`
+  and send no password, so `pg_hba.conf` needs only
+  `hostssl all pillar 127.0.0.1/32 trust`;
+- a server certificate with `DNS:localhost` in its subject alternative names, issued
+  by a CA you created for the test;
+- a second, unrelated CA that issued nothing for this server;
+- the role rights listed for the PostgreSQL tests above.
+
+```bash
+export PILLAR_AUDIT_TLS_E2E_PORT='<port>'
+export PILLAR_AUDIT_TLS_E2E_CA_DER=/path/to/test-ca.der         # issued the server cert
+export PILLAR_AUDIT_TLS_E2E_OTHER_CA_DER=/path/to/other-ca.der  # unrelated CA
+cargo test -p pillar-runtime --lib --locked -- --ignored audit_tls_e2e
+```
+
+The first test writes an attempt and its evidence and answers readiness, and asserts
+that `pg_stat_ssl.ssl` is true for both the write and the readiness sessions. The
+second test expects `durable audit: store unavailable` for the unrelated CA, for the
+WebPKI roots that production uses, and for host name `pillar-audit-other-host.invalid`.
+The default suite covers the refusal to fall back to plaintext
+(`audit_tls_target_that_refuses_tls_is_not_retried_in_plaintext`).
 
 ## 7. Inputs that are not in this repository
 
@@ -277,14 +308,15 @@ configuration, the acceptance-matrix builder and its output, and a comment in th
 integrity check.
 
 CI run [37314461749](https://github.com/FP-Validated/pillar-client/actions/runs/37314461749)
-on commit `a4d8ff3d1b2a0e70e140bd77aea99539de103c09` (the last commit that changed
-code, tests or CI) passed all five jobs: `fmt, clippy, test`, `minimum supported rust
-version` (Rust 1.94.1), `generated config integrity` (including
+on commit `a4d8ff3d1b2a0e70e140bd77aea99539de103c09` (at that time the last commit
+that changed code, tests or CI; `7dc694ca` and `3edb5d23` later changed code and tests
+and have no CI run, section 10) passed all five jobs: `fmt, clippy, test`, `minimum
+supported rust version` (Rust 1.94.1), `generated config integrity` (including
 `build-acceptance-matrix.mjs --check`), `audit, deny, sbom` and `container image`. The
 Rust test job reported 934 passed, 0 failed and 13 ignored. These are test-function
 counts. They are not route counts and not acceptance-matrix rows; section 5 classifies
-the rows separately. The 13 ignored tests in section 6 are opt-in and are not run by
-CI. Later commits that change only Markdown get their own CI run.
+the rows separately. The 13 tests ignored in that run are opt-in (section 6) and are
+not run by CI. Later commits that change only Markdown get their own CI run.
 
 The source repository is public. Release images that the maintainers deploy are
 published to a private container package and are not part of this repository. An
@@ -298,9 +330,10 @@ linux/amd64 image built once from source commit
 `sha256:af496b5b37c17378f92d432e8d5574a2e1c635f5f48be842a14aa8abcd631fe0`. It was
 rolled out by commit `6e10b27f3dce113aaa3ce97d48c4cb462ed6c8aa` in the maintainers'
 private GitOps repository. That source commit changed only Markdown relative to
-`a4d8ff3d`. Commits after it, including the one that adds this paragraph, change
-documentation only. They were not built or deployed. The running image's revision
-label therefore names `ff249a1b`, not this repository's head.
+`a4d8ff3d`. The commits after it up to `70141ac9`, which added this paragraph, changed
+documentation only. `7dc694ca` and `3edb5d23` changed code; section 10 gives their
+status. The running image's revision label, as recorded at that rollout, names
+`ff249a1b`, not a later commit.
 
 Signer identity after that rollout: each of the three pods, read on its own, reported
 the same `/signer-info` address for `ethereum`
@@ -311,3 +344,96 @@ addresses are unchanged by this rollout. Equality with the committed fixtures is
 evidence of that either. The binding of the reported Solana address to the on-chain
 verifier is still the open review item in section 5. No signing request was made
 against the deployment.
+
+## 10. Remediation status, 2026-10-06
+
+This section records the state on 2026-10-06. It does not change the dated results
+in section 9.
+
+Two commits after `70141ac9` change code and tests:
+
+- `7dc694ca53ef4941532a39808e71530b5300d9a5` fixes seven findings of a public audit:
+  audit TLS provider, `hostaddr` plaintext gate, readiness probe queue, JSON error
+  redaction, transport `Debug` redaction, EVM signer order and TON readiness depth.
+- `3edb5d237120c9c37493c2ad8be3a69cfcc8c20e` gives audit readiness its own connection
+  and one time budget, stops echoing input keys and values in provider-config and
+  quorum-strategy errors, and adds TLS and TON regression tests.
+
+An independent reviewer accepted the executable code of both commits. The commit that
+adds this section changes documentation only.
+
+### Local checks
+
+These ran on a maintainer workstation, not in CI, with rustc and clippy 1.96.0, not
+the CI baseline 1.98.1. No CI run exists for `7dc694ca`, `3edb5d23` or later commits
+on this date.
+
+- `cargo test --offline --workspace`: 954 passed, 0 failed, 15 ignored. It ran on the
+  `3edb5d23` tree before a last edit to one ignored test,
+  `postgres_audit_waiter_timeout_preserves_active_commit_and_session` in
+  `audit_reconnect_e2e.rs`; the PostgreSQL run below covers that edit.
+- `cargo fmt --all --check`: clean. `cargo clippy --offline --workspace --all-targets`:
+  exit 0 with one `clippy::nonminimal_bool` warning at
+  `crates/pillar-runtime/src/tests/gasolina_parity_tests.rs:72`. That file is unchanged
+  since `a4d8ff3d`, which passed CI clippy with `-D warnings`. Clippy 1.98.1 was not run.
+- The 11 PostgreSQL tests in section 6 passed against a disposable PostgreSQL 18.6 on
+  loopback.
+- The 2 TLS tests in section 6 passed against a disposable PostgreSQL 18.6 that
+  accepted only TLS, with test-only CAs.
+- `durable_process_worker` ran only as the child of the crash test, which asserts its
+  exit codes 73 and 74. The independent reviewer confirmed this. It was not run by hand.
+- The Canton ledger test did not run. No ledger, party, recorded `updateId` or
+  `PILLAR_CANTON_LIVE_*` input was available.
+
+### Deployment
+
+Kubernetes and Argo CD metadata, read on 2026-10-06 between 00:26 and 00:35 UTC:
+
+- The maintainers' mainnet deployment still runs the image digest named in section 9,
+  `sha256:af496b5b37c17378f92d432e8d5574a2e1c635f5f48be842a14aa8abcd631fe0`, on all
+  three pods.
+- Its GitOps source is still commit `6e10b27f3dce113aaa3ce97d48c4cb462ed6c8aa`.
+- `7dc694ca`, `3edb5d23` and the commit that adds this section were not built,
+  published as an image or deployed.
+- The revision label `ff249a1b` is the provenance recorded at the 2026-10-05 rollout.
+  The container package is private and anonymous registry inspection was denied, so
+  the label was not read again.
+
+### Effect on that deployment if released with unchanged configuration
+
+Configuration facts below come from the GitOps values file. The pods' environment was
+not read.
+
+- The values set `PILLAR_AUDIT_ENABLED: "false"`. Then `AuditConfig::from_map` returns
+  `None` (`crates/pillar-config/src/execution.rs:150-153`) and no audit store or
+  database connection exists (`crates/pillar-runtime/src/execution.rs:43-50`). The
+  audit TLS and readiness changes do not run.
+- The chain list has 18 chains and no TON or Canton chain. The TON readiness change
+  does not run.
+- No server crate depends on `pillar-client`, so its signer-order and `Debug` changes
+  are not in the image.
+- `pillar-core`, `pillar-signer` and `pillar-layerzero` are unchanged since
+  `ff249a1b`. Hash, call-data, signing and address-derivation code is the same.
+- The remaining runtime effect is the text of provider-config and quorum-strategy error
+  messages and refresh logs. Which configurations are accepted does not change.
+
+### Remaining limits
+
+- **Remote TLS.** Only a local synthetic TLS server was tested. No remote database was
+  tested. `SECURITY.md` states the trust and plaintext rules. With audit on, each
+  process uses at most two database connections: one for writes and one for
+  readiness. These limits apply when audit is enabled. They do not block a release
+  that keeps audit off.
+- **Canton.** The live test needs the inputs in section 6. Canton code did not change
+  after `ff249a1b`, and the deployment has no Canton chain. The maintainers rely on the
+  repository's own Canton tests.
+- **TON response depth (not fixed, present since before `ff249a1b`).** The independent
+  reviewer reported that a recorded toncenter testnet `/events` response nests JSON
+  266 levels deep, beyond the default `serde_json` recursion limit.
+  `bounded_json_response` decodes provider responses with that default
+  (`crates/pillar-runtime/src/provider_health/transport.rs:429`), so such a response
+  fails to decode. The reviewer's replay of that response removed its `decoded` field;
+  it is not a raw end-to-end transport pass. It is not known whether LayerZero TON
+  traffic produces such responses. The deployment above has no TON chain.
+- **Signer addresses.** As in section 9, the addresses after the next rollout are not
+  verified unless each pod's `/signer-info` is recorded before and after it.
