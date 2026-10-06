@@ -360,15 +360,16 @@ Two commits after `70141ac9` change code and tests:
   quorum-strategy errors, and adds TLS and TON regression tests.
 
 An independent reviewer accepted the executable code of both commits. The later
-commits change documentation only, except the release commit for 2.5.0. That commit
-also sets the workspace version and the workspace packages' `Cargo.lock` entries from
-2.4.1 to 2.5.0; it changes no executable logic and no third-party dependency.
+commits change documentation only, except two. The release commit for 2.5.0 also
+sets the workspace version and the workspace packages' `Cargo.lock` entries from
+2.4.1 to 2.5.0; it changes no executable logic and no third-party dependency. The
+CI fix below changes one loop in `pillar-client`.
 
 ### Local checks
 
 These ran on a maintainer workstation, not in CI, with rustc and clippy 1.96.0, not
-the CI baseline 1.98.1. No CI run exists for `7dc694ca`, `3edb5d23` or later commits
-on this date.
+the CI baseline 1.98.1. When they ran, no CI run existed for `7dc694ca`, `3edb5d23`
+or later commits; the next subsection records the first.
 
 - `cargo test --offline --workspace`: 954 passed, 0 failed, 15 ignored. It ran on the
   `3edb5d23` tree before a last edit to one ignored test,
@@ -389,6 +390,20 @@ on this date.
   check. That run passed with `sdk_calls` 0 and `attempts` 0.
 - The Canton ledger test did not run. No ledger, party, recorded `updateId` or
   `PILLAR_CANTON_LIVE_*` input was available.
+
+### CI on the release commit
+
+CI run [37397588068](https://github.com/FP-Validated/pillar-client/actions/runs/37397588068)
+on the 2.5.0 release commit `d3b282150e51594fd91d825c1aa56ffe8584680a` failed in the
+`fmt, clippy, test` job. Clippy 1.98.1 with `-D warnings` reported
+`clippy::chunks_exact_to_as_chunks` at `crates/pillar-client/src/lib.rs:531`, in the
+EVM signer-order helper that `7dc694ca` added. The other four jobs passed. The next
+commit replaces `chunks_exact(2)` with `as_chunks::<2>()` and does not change what
+the helper returns. Locally, with Rust 1.98.1 and `RUSTFLAGS="-D warnings"`, that job's
+commands then passed: `cargo fmt --all --check`, `cargo clippy --workspace
+--all-targets` (no warning), `cargo test --workspace --locked` (954 passed, 0 failed,
+15 ignored) and the release build. `cargo check --workspace --locked --all-targets`
+also passed on Rust 1.94.1.
 
 ### Deployment
 

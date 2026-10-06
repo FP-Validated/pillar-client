@@ -528,9 +528,10 @@ fn evm_address_bytes(address: &str) -> Option<[u8; 20]> {
         return None;
     }
     let mut bytes = [0u8; 20];
-    for (byte, pair) in bytes.iter_mut().zip(digits.chunks_exact(2)) {
-        let high = char::from(pair[0]).to_digit(16)?;
-        let low = char::from(pair[1]).to_digit(16)?;
+    let (pairs, _) = digits.as_chunks::<2>();
+    for (byte, &[high, low]) in bytes.iter_mut().zip(pairs) {
+        let high = char::from(high).to_digit(16)?;
+        let low = char::from(low).to_digit(16)?;
         *byte = u8::try_from(high * 16 + low).ok()?;
     }
     Some(bytes)

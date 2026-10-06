@@ -13,7 +13,7 @@ the Prometheus metric names.
 ### Audit
 
 - Add `AUDIT.md`: threat model, trust boundaries, reproduction steps, evidence classes, opt-in PostgreSQL, TLS and Canton E2E instructions, and the inputs this repository cannot supply.
-- `AUDIT.md` section 10 records this release's checks: locally 954 passed, 0 failed and 15 ignored; the 11 opt-in PostgreSQL and 2 opt-in TLS E2Es passed against disposable local servers; the Canton live test did not run, for lack of a ledger and its inputs. The commits that fix the public audit findings below had no CI run before publication.
+- `AUDIT.md` section 10 records this release's checks: locally 954 passed, 0 failed and 15 ignored; the 11 opt-in PostgreSQL and 2 opt-in TLS E2Es passed against disposable local servers; the Canton live test did not run, for lack of a ledger and its inputs. The first CI run of the commits that fix the public audit findings below failed on a Rust 1.98.1 clippy lint in `pillar-client`; the fix replaces `chunks_exact(2)` with `as_chunks::<2>()` and leaves behavior unchanged.
 - Add `scripts/build-acceptance-matrix.mjs` and its output under `audit/acceptance/` (1696 rows over the ACTIVE capability table), regenerated from committed inputs only and checked in CI.
 - Example provider configurations use reserved `.example` hosts.
 
