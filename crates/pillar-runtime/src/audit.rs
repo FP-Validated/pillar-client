@@ -391,21 +391,25 @@ impl SigningAuditStore for PostgresAuditStore {
     }
     async fn healthy(&self) -> bool {
         // One budget covers waiting for the probe lane, connecting and querying.
-        let probe = async {
-            let mut lane = self.probe.lock().await;
-            // Out of the lane while in use: a cancelled or timed-out probe drops its connection
-            // rather than leaving a possibly wedged one for the next probe.
-            let mut session = lane.take();
-            let result = self.health_inner(&mut session).await;
-            if result.is_ok() {
-                *lane = session;
+        let started = tokio::time::Instant::now();
+        let healthy = match within_deadline(self.config.timeout, self.probe.lock()).await {
+            Ok(mut lane) => {
+                // A probe granted the lane after its budget ran out fails here instead of dialing.
+                let remaining = self.config.timeout.saturating_sub(started.elapsed());
+                let probe = async {
+                    // Out of the lane while in use: a cancelled or timed-out probe drops its
+                    // connection rather than leaving a possibly wedged one for the next probe.
+                    let mut session = lane.take();
+                    let result = self.health_inner(&mut session).await;
+                    if result.is_ok() {
+                        *lane = session;
+                    }
+                    result
+                };
+                matches!(within_deadline(remaining, probe).await, Ok(Ok(true)))
             }
-            result
+            Err(_) => false,
         };
-        let healthy = matches!(
-            within_deadline(self.config.timeout, probe).await,
-            Ok(Ok(true))
-        );
         self.reachable.store(healthy, Ordering::Release);
         healthy
     }
@@ -414,7 +418,10 @@ impl SigningAuditStore for PostgresAuditStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pillar_core::audit::{EffectiveKey, ValidatedIntent};
+    use pillar_core::{
+        audit::{EffectiveKey, ValidatedIntent},
+        execution::RequestContext,
+    };
     use std::{sync::atomic::AtomicUsize, time::Duration};
 
     #[test]
@@ -860,5 +867,39 @@ mod tests {
                 "the next probe must dial afresh instead of reusing the cancelled one's session",
             );
         assert!(!second.await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn audit_readiness_probe_granted_the_lane_after_its_budget_does_not_dial() {
+        let timeout = Duration::from_secs(2);
+        let (url, accepted) = wedged_database().await;
+        let store = store(url, timeout);
+        let holder = tokio::spawn({
+            let store = store.clone();
+            async move { store.healthy().await }
+        });
+        until(|| accepted.load(Ordering::SeqCst) == 1).await;
+        let budget = Duration::from_millis(100);
+        let queued = (0..4)
+            .map(|_| {
+                let store = store.clone();
+                tokio::spawn(
+                    RequestContext::new(budget).scope(async move { store.healthy().await }),
+                )
+            })
+            .collect::<Vec<_>>();
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        // Blocks the runtime so every queued budget runs out before the lane is handed on.
+        std::thread::sleep(budget * 2);
+        holder.abort();
+        for probe in queued {
+            assert!(!probe.await.unwrap());
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(
+            accepted.load(Ordering::SeqCst),
+            1,
+            "a probe granted the lane after its budget ran out must not dial"
+        );
     }
 }

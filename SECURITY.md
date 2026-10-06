@@ -177,8 +177,9 @@ Unknown and partial attempts must survive any operator-approved retention plan.
 Each process serializes audit writes through one session mutex. Readiness uses a
 second, separate connection, so a probe never holds the write session; probes
 queue for that one readiness connection, and the whole probe (waiting, connecting
-and querying) shares one `PILLAR_AUDIT_TIMEOUT_MS` budget. A cancelled or timed-out
-probe drops its connection. Participating
+and querying) shares one `PILLAR_AUDIT_TIMEOUT_MS` budget. A probe whose budget runs
+out while it waits does not dial. A cancelled or timed-out probe drops its
+connection. Participating
 replicas also serialize namespace quota updates on one PostgreSQL row; KMS
 execution holds no such row lock. There is no measured production TPS, capacity
 calibration, pool, pruning or automatic quota reset. The permanent row cap is not

@@ -360,10 +360,10 @@ Two commits after `70141ac9` change code and tests:
   quorum-strategy errors, and adds TLS and TON regression tests.
 
 An independent reviewer accepted the executable code of both commits. The later
-commits change documentation only, except two. The release commit for 2.5.0 also
+commits change documentation only, except three. The release commit for 2.5.0 also
 sets the workspace version and the workspace packages' `Cargo.lock` entries from
 2.4.1 to 2.5.0; it changes no executable logic and no third-party dependency. The
-CI fix below changes one loop in `pillar-client`.
+two CI fixes below change one loop in `pillar-client` and the audit readiness probe.
 
 ### Local checks
 
@@ -391,7 +391,7 @@ or later commits; the next subsection records the first.
 - The Canton ledger test did not run. No ledger, party, recorded `updateId` or
   `PILLAR_CANTON_LIVE_*` input was available.
 
-### CI on the release commit
+### CI on the release commits
 
 CI run [37397588068](https://github.com/FP-Validated/pillar-client/actions/runs/37397588068)
 on the 2.5.0 release commit `d3b282150e51594fd91d825c1aa56ffe8584680a` failed in the
@@ -404,6 +404,22 @@ commands then passed: `cargo fmt --all --check`, `cargo clippy --workspace
 --all-targets` (no warning), `cargo test --workspace --locked` (954 passed, 0 failed,
 15 ignored) and the release build. `cargo check --workspace --locked --all-targets`
 also passed on Rust 1.94.1.
+
+CI run [37399413275](https://github.com/FP-Validated/pillar-client/actions/runs/37399413275)
+on that fix, `d947947057f0759f05c94e34faae3663723ed216`, failed in the same job:
+`audit_concurrent_readiness_probes_share_one_budget_and_one_connection` counted 9
+connections where at most 2 are allowed. The other four jobs passed. The cause is in
+the audit readiness probe that `3edb5d23` added, not in the test. The lane wait and the
+dial ran under one timeout that polls its future before its deadline, so a probe
+granted the lane after its budget had run out still dialed once. Whether that happens
+depends on the order in which expired probes are woken; no local run before this one
+showed it. The next commit waits for the lane and then dials only within the budget
+that is left, and adds
+`audit_readiness_probe_granted_the_lane_after_its_budget_does_not_dial`, which fails
+against the previous probe (2 connections, expected 1). Locally, with Rust 1.98.1 and
+`RUSTFLAGS="-D warnings"`, the job's commands then passed again, with 955 tests passed,
+0 failed and 15 ignored; the eight non-ignored audit store tests passed in 15 of 15
+repeated runs, and `cargo check` passed on Rust 1.94.1.
 
 ### Deployment
 
