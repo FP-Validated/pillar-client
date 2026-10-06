@@ -359,8 +359,10 @@ Two commits after `70141ac9` change code and tests:
   and one time budget, stops echoing input keys and values in provider-config and
   quorum-strategy errors, and adds TLS and TON regression tests.
 
-An independent reviewer accepted the executable code of both commits. The commit that
-adds this section changes documentation only.
+An independent reviewer accepted the executable code of both commits. The later
+commits change documentation only, except the release commit for 2.5.0. That commit
+also sets the workspace version and the workspace packages' `Cargo.lock` entries from
+2.4.1 to 2.5.0; it changes no executable logic and no third-party dependency.
 
 ### Local checks
 
@@ -396,8 +398,9 @@ Kubernetes and Argo CD metadata, read on 2026-10-06 between 00:26 and 00:35 UTC:
   `sha256:af496b5b37c17378f92d432e8d5574a2e1c635f5f48be842a14aa8abcd631fe0`, on all
   three pods.
 - Its GitOps source is still commit `6e10b27f3dce113aaa3ce97d48c4cb462ed6c8aa`.
-- `7dc694ca`, `3edb5d23` and the commit that adds this section were not built,
-  published as an image or deployed.
+- `7dc694ca`, `3edb5d23` and the later documentation and version commits were not
+  built, published as an image or deployed at that read. No `v2.5.0` image tag, Git
+  tag or GitHub release existed when checked at 00:55 UTC.
 - The revision label `ff249a1b` is the provenance recorded at the 2026-10-05 rollout.
   The container package is private and anonymous registry inspection was denied, so
   the label was not read again.

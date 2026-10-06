@@ -4,7 +4,7 @@ All notable changes to this project are documented here. This project follows
 semantic versioning for the HTTP surface, the environment-variable contract and
 the Prometheus metric names.
 
-## Unreleased
+## 2.5.0 - 2026-10-06
 
 ### Scope
 
@@ -12,7 +12,8 @@ the Prometheus metric names.
 
 ### Audit
 
-- Add `AUDIT.md`: threat model, trust boundaries, reproduction steps, evidence classes, opt-in PostgreSQL and Canton E2E instructions, and the inputs this repository cannot supply.
+- Add `AUDIT.md`: threat model, trust boundaries, reproduction steps, evidence classes, opt-in PostgreSQL, TLS and Canton E2E instructions, and the inputs this repository cannot supply.
+- `AUDIT.md` section 10 records this release's checks: locally 954 passed, 0 failed and 15 ignored; the 11 opt-in PostgreSQL and 2 opt-in TLS E2Es passed against disposable local servers; the Canton live test did not run, for lack of a ledger and its inputs. The commits that fix the public audit findings below had no CI run before publication.
 - Add `scripts/build-acceptance-matrix.mjs` and its output under `audit/acceptance/` (1696 rows over the ACTIVE capability table), regenerated from committed inputs only and checked in CI.
 - Example provider configurations use reserved `.example` hosts.
 
@@ -48,6 +49,12 @@ the Prometheus metric names.
 - The already-signed 400 names the message as upstream does, `JSON.stringify` of the resolved event's `lzMessageId` (`srcEid`, `srcChainName`, `dstEid`, `dstChainName`, then each address in its chain's rendering). It was serde's rendering of the internal pathway: chain names first and padded `bytes32` addresses. Found by the new production differential: for each of the 16 recorded pathways, upstream's own `startServer` in front of its real App and this service's router, both in production `debugMode: false`, answer the signing request and its three refusals (untrusted emitter, already signed, unavailable chain) with equal status and envelope (`tests/gasolina_parity/historical_smoke.json`, `http`).
 - A ULNv2 `Packet` no longer carries a synthetic all-zero guid. That guid sent every `V2` request through the guid-keyed EVM already-signed check, which refused any receiver still on UltraLightNodeV2 with `receives on a library this service cannot validate`. Such requests now skip that check, as upstream does for V1 events, and are signed with the V2 builder. No already-signed refusal exists on that path, even with a `dvnAddress`.
 - Refuse (400) a ULNv2 feather proof whose destination proof library reports a `getUtilsVersion()` other than 1, before anything is built or signed. Previously any value was signed with the version-1 layout; upstream signs the bare packet for 2 and throws otherwise. Every deployed `FPValidator` with published source reports 1, so responses for those are unchanged. The `inboundProofType` event-extra shortcut, which skipped the on-chain proof-library read and was set only by tests, is removed.
+- Durable audit (default off) builds its TLS connector with the ring provider named explicitly. It called `rustls::ClientConfig::builder()`, which panics in this dependency graph (`audit_tls_connector_builds_where_the_process_default_provider_panics`), so a remote audit database could not be reached. Certificates are still verified against WebPKI roots and the DSN host name, and a server that refuses TLS is not retried in plaintext.
+- Durable audit sends plaintext only when `host` and every `hostaddr`, which tokio-postgres dials in place of `host`, are literal loopback addresses or a Unix socket. A loopback `host` with a remote `hostaddr` was accepted for plaintext.
+- Durable audit readiness uses its own connection. A probe no longer holds or waits for the signing session; the whole probe (waiting, connecting and querying) shares one `PILLAR_AUDIT_TIMEOUT_MS` budget, and a cancelled or timed-out probe drops its connection. With audit on, each process uses at most two database connections.
+- Parse and validation errors no longer echo input. Wallet definitions, the AWS mnemonic secret, `providers-v2.json` and `quorum-strategy.json` report the position and schema-defined field names; unknown keys, entities, categories and unlisted chain or endpoint names are replaced by fixed labels, in startup errors and in refresh logs alike. Which configurations are accepted is unchanged.
+- Count TON confirmations from the masterchain block of the `PacketSent` transaction itself, found by exact hash in the provider's trace, and refuse readiness when that transaction is absent. The count started at the trace root, which can be an earlier block and so overstated the depth. Upstream reads the trace root (`packages/sdks/rpc-sdk/src/ton/index.ts:175-187`); this is a deliberate fail-closed divergence.
+- `pillar-client` orders EVM signatures by address bytes. String order put checksummed (mixed-case) addresses out of the ascending order EVM verifiers expect. `ReqwestPillarTransport`'s `Debug` output redacts header values; the headers are still sent. The server binary does not depend on `pillar-client`.
 
 ### Breaking
 
@@ -86,6 +93,12 @@ Migration, before any deployment of this build:
 - Pin the CI validation toolchain to Rust 1.98.1 after Rust 1.99 reports
   `double_must_use` in `async_trait` expansion. Keep warnings as errors; runtime
   code and published image tags/digests are unchanged.
+
+### Operator action
+
+- `PILLAR_IMAGE_VERSION` set by a deployment overrides the image's build-time value in `GET /version` and `pillar_build_info`; set it to the deployed tag.
+- Before enabling durable audit against a remote PostgreSQL: its certificate must chain to a WebPKI root, since no private CA can be configured, and `max_connections` must allow two connections per replica. Remote TLS was tested only against a local synthetic server.
+- Known limitation, present before this release: provider JSON responses are decoded with `serde_json`'s default recursion limit. A toncenter response nested deeper fails to decode, so that provider's read fails; an independent review recorded one testnet `/events` response nested 266 levels deep. It is not known whether LayerZero TON traffic produces such responses.
 
 ## 2.4.1-mainnet-20261003.1-phase1 - 2026-10-03
 
