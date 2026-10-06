@@ -380,8 +380,11 @@ on this date.
   loopback.
 - The 2 TLS tests in section 6 passed against a disposable PostgreSQL 18.6 that
   accepted only TLS, with test-only CAs.
-- `durable_process_worker` ran only as the child of the crash test, which asserts its
-  exit codes 73 and 74. The independent reviewer confirmed this. It was not run by hand.
+- In the maintainers' runs, `durable_process_worker` ran only as the child of the
+  crash test, which asserts its exit codes 73 and 74. The independent reviewer
+  confirmed this coverage. The reviewer also ran the worker once by hand without
+  `PILLAR_AUDIT_E2E_WORKER_MODE`. Without a mode it runs a separate missing-wallet-scope
+  check. That run passed with `sdk_calls` 0 and `attempts` 0.
 - The Canton ledger test did not run. No ledger, party, recorded `updateId` or
   `PILLAR_CANTON_LIVE_*` input was available.
 
