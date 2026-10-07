@@ -1,11 +1,20 @@
 use super::*;
 
+pub(super) const PACKET_SENT_TX_HASH: &str = "0xtx";
+const PACKET_SENT_BLOCK_HASH: &str =
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
 pub(super) fn packet_sent_endpoint_v2_data() -> Value {
     json!({
-        "blockHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "transactionHash": PACKET_SENT_TX_HASH,
+        "blockHash": PACKET_SENT_BLOCK_HASH,
         "blockNumber": "0x64",
         "status": "0x1",
         "logs": [{
+            "transactionHash": PACKET_SENT_TX_HASH,
+            "blockHash": PACKET_SENT_BLOCK_HASH,
+            "blockNumber": "0x64",
+            "removed": false,
             "address": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
             "logIndex": "0x0",
             "topics": [pillar_layerzero::ENDPOINT_V2_PACKET_SENT_TOPIC],
@@ -33,10 +42,15 @@ pub(super) fn packet_sent_endpoint_v2_data() -> Value {
 /// read arms of `formatPathwayId` and `computeLZMessageV2Proof` fire.
 pub(super) fn packet_sent_read_v1002_data() -> Value {
     json!({
-        "blockHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "transactionHash": PACKET_SENT_TX_HASH,
+        "blockHash": PACKET_SENT_BLOCK_HASH,
         "blockNumber": "0x64",
         "status": "0x1",
         "logs": [{
+            "transactionHash": PACKET_SENT_TX_HASH,
+            "blockHash": PACKET_SENT_BLOCK_HASH,
+            "blockNumber": "0x64",
+            "removed": false,
             "address": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
             "logIndex": "0x0",
             "topics": [pillar_layerzero::ENDPOINT_V2_PACKET_SENT_TOPIC],
@@ -84,10 +98,15 @@ pub(super) fn evm_read_packet_sent_request() -> LzMessageId {
 
 pub(super) fn packet_sent_uln301_data() -> Value {
     json!({
-        "blockHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "transactionHash": PACKET_SENT_TX_HASH,
+        "blockHash": PACKET_SENT_BLOCK_HASH,
         "blockNumber": "0x64",
         "status": "0x1",
         "logs": [{
+            "transactionHash": PACKET_SENT_TX_HASH,
+            "blockHash": PACKET_SENT_BLOCK_HASH,
+            "blockNumber": "0x64",
+            "removed": false,
             "address": "0x4444444444444444444444444444444444444444",
             "logIndex": "0x0",
             "topics": [pillar_layerzero::ULN_301_PACKET_SENT_TOPIC],
@@ -109,10 +128,15 @@ pub(super) fn packet_sent_uln301_data() -> Value {
 
 pub(super) fn legacy_uln_v2_packet_data() -> Value {
     json!({
-        "blockHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "transactionHash": PACKET_SENT_TX_HASH,
+        "blockHash": PACKET_SENT_BLOCK_HASH,
         "blockNumber": "0x64",
         "status": "0x1",
         "logs": [{
+            "transactionHash": PACKET_SENT_TX_HASH,
+            "blockHash": PACKET_SENT_BLOCK_HASH,
+            "blockNumber": "0x64",
+            "removed": false,
             "address": "0x4444444444444444444444444444444444444444",
             "logIndex": "0x0",
             "topics": [pillar_layerzero::LEGACY_ULN_V2_PACKET_TOPIC],

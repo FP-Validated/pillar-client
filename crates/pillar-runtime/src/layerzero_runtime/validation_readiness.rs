@@ -368,6 +368,7 @@ where
                 &tx_hash,
                 source_evidence.as_ref(),
                 block_confirmation,
+                matches!(src_chain_name.as_str(), "polygon" | "tron"),
             )
             .await;
             (index, observation.map(|observation| Some((format!("{:?}", observation.validity), observation))))

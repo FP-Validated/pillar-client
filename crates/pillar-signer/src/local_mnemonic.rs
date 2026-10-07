@@ -105,12 +105,11 @@ impl RawSignerAdapter for LocalMnemonicRawSignerAdapter {
                 let (signature, recovery_id) = signing_key
                     .sign_prehash_recoverable(&request.data)
                     .map_err(|error| SignerError::Message(error.to_string()))?;
+                let recovery_id = crate::kms_signature::recovery_id_byte(
+                    recovery_id.to_byte(),
+                    request.transform_recovery_id,
+                )?;
                 let mut result = signature.to_bytes().to_vec();
-                let recovery_id = if request.transform_recovery_id {
-                    recovery_id.to_byte() + 27
-                } else {
-                    recovery_id.to_byte()
-                };
                 result.push(recovery_id);
                 crate::effects::local_returned(record, &result).await?;
                 Ok(result)
@@ -130,12 +129,11 @@ impl RawSignerAdapter for LocalMnemonicRawSignerAdapter {
                 let (signature, recovery_id) = signing_key
                     .sign_prehash_recoverable(&request.data)
                     .map_err(|error| SignerError::Message(error.to_string()))?;
+                let recovery_id = crate::kms_signature::recovery_id_byte(
+                    recovery_id.to_byte(),
+                    request.transform_recovery_id,
+                )?;
                 let mut result = signature.to_bytes().to_vec();
-                let recovery_id = if request.transform_recovery_id {
-                    recovery_id.to_byte() + 27
-                } else {
-                    recovery_id.to_byte()
-                };
                 result.push(recovery_id);
                 crate::effects::local_returned(record, &result).await?;
                 Ok(result)

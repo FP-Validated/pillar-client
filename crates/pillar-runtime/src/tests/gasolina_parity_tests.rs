@@ -272,12 +272,21 @@ async fn evm_signing_path_matches_gasolina_for_the_same_packet_sent_log() {
         let config = runtime_evm_layerzero_config(environment, &chain_names).unwrap();
         let v_ids = runtime_v_id_by_chain_name(environment, &chain_names).unwrap();
 
+        let tx_hash = expected["onChainEvent"]["txHash"].as_str().unwrap();
+        let block_hash = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let block_number = "0x64";
         let receipt = json!({
             "result": {
-                "blockHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "transactionHash": tx_hash,
+                "blockHash": block_hash,
+                "blockNumber": block_number,
                 "blockNumber": "0x64",
                 "status": "0x1",
                 "logs": [{
+                    "transactionHash": tx_hash,
+                    "blockHash": block_hash,
+                    "blockNumber": block_number,
+                    "removed": false,
                     "address": arm["input"]["log"]["address"].clone(),
                     "logIndex": "0x0",
                     "topics": arm["input"]["log"]["topics"].clone(),
@@ -307,7 +316,6 @@ async fn evm_signing_path_matches_gasolina_for_the_same_packet_sent_log() {
 
         let uln_send_version = expected["lzMessageId"]["ulnSendVersion"].as_str().unwrap();
         let nonce = expected["lzMessageId"]["nonce"].as_u64().unwrap();
-        let tx_hash = expected["onChainEvent"]["txHash"].as_str().unwrap();
         let sent_event = resolver
             .get_lz_sent_event(tx_hash, &parity_request(pathway, nonce, uln_send_version))
             .await
@@ -739,7 +747,11 @@ impl RuntimeValidationChecks for ParityChecks {
         Ok(())
     }
 
-    async fn validate_extra_context(&self, _sent_event: &LzSentEvent) -> Result<(), AppCoreError> {
+    async fn validate_extra_context(
+        &self,
+        _sent_event: &LzSentEvent,
+        _signing_context: &SigningContext,
+    ) -> Result<(), AppCoreError> {
         Ok(())
     }
 

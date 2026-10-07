@@ -1,6 +1,63 @@
 use super::*;
 use pillar_metrics::PillarMetrics;
-
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::net::TcpListener;
+async fn local_policy_server(listener: TcpListener, request_count: usize) -> Vec<Value> {
+    let mut requests = Vec::with_capacity(request_count);
+    for _ in 0..request_count {
+        let (stream, _) =
+            tokio::time::timeout(std::time::Duration::from_secs(5), listener.accept())
+                .await
+                .expect("timed out waiting for policy request")
+                .expect("accept policy request");
+        let mut stream = BufReader::new(stream);
+        let mut line = String::new();
+        stream
+            .read_line(&mut line)
+            .await
+            .expect("policy request line");
+        let mut content_length = 0;
+        loop {
+            line.clear();
+            stream.read_line(&mut line).await.expect("policy headers");
+            if line == "\r\n" || line.is_empty() {
+                break;
+            }
+            if let Some((name, value)) = line.split_once(':') {
+                if name.eq_ignore_ascii_case("content-length") {
+                    content_length = value.trim().parse::<usize>().expect("content length");
+                }
+            }
+        }
+        let mut body = vec![0; content_length];
+        stream
+            .read_exact(&mut body)
+            .await
+            .expect("policy request body");
+        let request: Value = serde_json::from_slice(&body).expect("policy request JSON");
+        let context = &request["signingContext"];
+        let allowed = context["protocolType"] == "MESSAGE"
+            && context["expiration"] == 1_751_500_000
+            && context["dvnAddress"] == "0x4444444444444444444444444444444444444444";
+        let response_body = if allowed { "true" } else { "false" };
+        let response_header = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+            response_body.len()
+        );
+        stream
+            .get_mut()
+            .write_all(response_header.as_bytes())
+            .await
+            .expect("policy response headers");
+        stream
+            .get_mut()
+            .write_all(response_body.as_bytes())
+            .await
+            .expect("policy response body");
+        requests.push(request);
+    }
+    requests
+}
 #[tokio::test]
 async fn runtime_core_dependencies_from_layerzero_parts_uses_layerzero_builder_factory() {
     let recorder = Arc::new(RuntimeLayerZeroRecorder::default());
@@ -323,8 +380,12 @@ struct VerticalTransport {
     dst_receive_uln_302: &'static str,
     dst_receive_uln_302_view: &'static str,
     extra_context_verdict: Arc<Mutex<bool>>,
+    extra_context_url: String,
+    extra_context_http: Option<ReqwestJsonRpcTransport>,
     /// A source URL whose receipt reads fail, so only the others can vote.
     receipt_unavailable_at: Option<&'static str>,
+    finalized_number: &'static str,
+    canonical_header_number: Option<&'static str>,
 }
 
 #[async_trait]
@@ -338,15 +399,20 @@ impl JsonRpcTransport for VerticalTransport {
         self.calls
             .lock()
             .unwrap()
-            .push((url.clone(), headers, body.clone()));
-        // The extra-context endpoint is not JSON-RPC: it is a plain POST of
-        // `{sentEvent, from}` whose truthy body is the verdict
-        // (`validation_extra_context.rs:32-47`).
-        if url == EXTRA_CONTEXT_URL {
-            return match *self.extra_context_verdict.lock().unwrap() {
-                true => Ok(json!(true)),
-                false => Ok(json!(false)),
-            };
+            .push((url.clone(), headers.clone(), body.clone()));
+        // The extra-context endpoint is not JSON-RPC: it receives the sent event,
+        // resolved source address and exact typed signing context as a plain POST.
+        // (validation_extra_context.rs)
+        if url == self.extra_context_url {
+            if let Some(transport) = &self.extra_context_http {
+                return transport.post_json(url, headers, body).await;
+            }
+            let allow = *self.extra_context_verdict.lock().unwrap()
+                && body["signingContext"]["protocolType"] == "MESSAGE"
+                && body["signingContext"]["expiration"] == 1_751_500_000
+                && body["signingContext"]["dvnAddress"]
+                    == "0x4444444444444444444444444444444444444444";
+            return Ok(json!(allow));
         }
         match body["method"].as_str().unwrap_or_default() {
             "eth_getTransactionReceipt" => {
@@ -370,14 +436,26 @@ impl JsonRpcTransport for VerticalTransport {
             // Answering them identically would hide a check that reads the wrong
             // chain, so the destination's block is recent and the source's is years
             // older - the expiration in `vertical_request` only fits the former.
-            "eth_getBlockByNumber" => Ok(json!({"result": {
-                "number": "0x64",
-                "timestamp": if url.contains("dst-rpc") {
-                    DESTINATION_BLOCK_TIMESTAMP
+            "eth_getBlockByNumber" => {
+                let tag = body["params"][0].as_str().unwrap_or_default();
+                if url.contains("src-rpc") && tag == "finalized" {
+                    Ok(json!({"result": {
+                        "number": self.finalized_number,
+                        "hash": "0xabababababababababababababababababababababababababababababababab"
+                    }}))
+                } else if url.contains("src-rpc") && tag == "0x60" {
+                    let mut header = json!({"hash": "0xabababababababababababababababababababababababababababababababab"});
+                    if let Some(number) = self.canonical_header_number {
+                        header["number"] = Value::from(number);
+                    }
+                    Ok(json!({"result": header}))
                 } else {
-                    STALE_SOURCE_BLOCK_TIMESTAMP
+                    Ok(json!({"result": {
+                        "number": "0x64",
+                        "timestamp": if url.contains("dst-rpc") { DESTINATION_BLOCK_TIMESTAMP } else { STALE_SOURCE_BLOCK_TIMESTAMP }
+                    }}))
                 }
-            }})),
+            }
             "eth_getTransactionByHash" => {
                 Ok(json!({"result": {"from": "0x1111111111111111111111111111111111111111"}}))
             }
@@ -467,6 +545,7 @@ const EXTRA_CONTEXT_URL: &str = "https://extra-context.example/verify";
 /// table). The shared PacketSent fixture carries placeholder addresses that only the
 /// hand-built resolver configs trust, so a vertical test that reuses it unchanged never
 /// gets past the trusted-emitter check.
+#[derive(Clone, Copy)]
 struct VerticalEnvironment {
     environment: &'static str,
     src_chain: &'static str,
@@ -478,6 +557,8 @@ struct VerticalEnvironment {
     dst_endpoint_v2: &'static str,
     dst_receive_uln_302: &'static str,
     dst_receive_uln_302_view: &'static str,
+    finalized_number: &'static str,
+    canonical_header_number: Option<&'static str>,
 }
 
 const MAINNET_VERTICAL: VerticalEnvironment = VerticalEnvironment {
@@ -491,6 +572,8 @@ const MAINNET_VERTICAL: VerticalEnvironment = VerticalEnvironment {
     dst_endpoint_v2: "0x1a44076050125825900e736c501f859c50fE728c",
     dst_receive_uln_302: "0xB217266c3A98C8B2709Ee26836C98cf12f6cCEC1",
     dst_receive_uln_302_view: "0x311867F9cF785f4233fbb0cC6CAd2dd3f071F0FF",
+    finalized_number: "0x64",
+    canonical_header_number: Some("0x60"),
 };
 
 /// Testnet is not mainnet with different numbers: `ethereum` has a testnet endpoint id
@@ -507,6 +590,37 @@ const TESTNET_VERTICAL: VerticalEnvironment = VerticalEnvironment {
     dst_endpoint_v2: "0x6EDCE65403992e310A62460808c4b910D972f10f",
     dst_receive_uln_302: "0x188d4bbCeD671A7aA2b5055937F79510A32e9683",
     dst_receive_uln_302_view: "0xECbc738D306c51E504C4020a4643C4f2FA9ec1a4",
+    finalized_number: "0x64",
+    canonical_header_number: Some("0x60"),
+};
+// Generated deployment rows in generated_layerzero_evm.rs and EVM endpoint IDs.
+const POLYGON_VERTICAL: VerticalEnvironment = VerticalEnvironment {
+    environment: "mainnet",
+    src_chain: "polygon",
+    dst_chain: "bsc",
+    src_eid: 30_109,
+    dst_eid: 30_102,
+    src_endpoint_v2: "0x1a44076050125825900e736c501f859c50fE728c",
+    src_send_uln_302: "0x6c26c61a97006888ea9E4FA36584c7df57Cd9dA3",
+    dst_endpoint_v2: "0x1a44076050125825900e736c501f859c50fE728c",
+    dst_receive_uln_302: "0xB217266c3A98C8B2709Ee26836C98cf12f6cCEC1",
+    dst_receive_uln_302_view: "0x311867F9cF785f4233fbb0cC6CAd2dd3f071F0FF",
+    finalized_number: "0x64",
+    canonical_header_number: Some("0x60"),
+};
+const TRON_VERTICAL: VerticalEnvironment = VerticalEnvironment {
+    environment: "mainnet",
+    src_chain: "tron",
+    dst_chain: "bsc",
+    src_eid: 30_420,
+    dst_eid: 30_102,
+    src_endpoint_v2: "0x0Af59750D5dB5460E5d89E268C474d5F7407c061",
+    src_send_uln_302: "0xE369D146219380B24Bb5D9B9E08a5b9936F9E719",
+    dst_endpoint_v2: "0x1a44076050125825900e736c501f859c50fE728c",
+    dst_receive_uln_302: "0xB217266c3A98C8B2709Ee26836C98cf12f6cCEC1",
+    dst_receive_uln_302_view: "0x311867F9cF785f4233fbb0cC6CAd2dd3f071F0FF",
+    finalized_number: "0x64",
+    canonical_header_number: Some("0x60"),
 };
 
 fn vertical_receipt(env: &VerticalEnvironment) -> Value {
@@ -526,12 +640,18 @@ fn vertical_receipt(env: &VerticalEnvironment) -> Value {
         .replace("00007595", &format!("{:08x}", env.src_eid))
         .replace("00007596", &format!("{:08x}", env.dst_eid));
     let mut result: Value = serde_json::from_str(&raw).expect("the rewrite stays valid JSON");
-    // The readiness check reads the receipt's own block, then compares it against
-    // `eth_blockNumber`/`eth_getBlockByNumber`. 0x60 against a latest of 0x64 leaves
-    // more than the single confirmation the request asks for.
-    result["blockNumber"] = Value::from("0x60");
-    result["blockHash"] =
-        Value::from("0xabababababababababababababababababababababababababababababababab");
+    let block_number = "0x60";
+    let block_hash = "0xabababababababababababababababababababababababababababababababab";
+    result["blockNumber"] = Value::from(block_number);
+    result["blockHash"] = Value::from(block_hash);
+    result["transactionHash"] = Value::from("0xtx");
+    for log in result["logs"].as_array_mut().expect("receipt logs") {
+        log["transactionHash"] = Value::from("0xtx");
+        log["blockNumber"] = Value::from(block_number);
+        log["blockHash"] = Value::from(block_hash);
+        log["transactionIndex"] = Value::from("0x0");
+        log["removed"] = Value::Bool(false);
+    }
     json!({"result": result})
 }
 
@@ -561,7 +681,7 @@ fn vertical_request(env: &VerticalEnvironment) -> PillarApiRequestV2 {
 }
 
 fn vertical_env_map(env: &VerticalEnvironment) -> HashMap<String, String> {
-    HashMap::from([
+    let mut vars = HashMap::from([
         (
             pillar_config::PILLAR_API_AUTH_TOKENS.to_string(),
             "test-token-0123456789abcdef0123456789".to_string(),
@@ -594,7 +714,28 @@ fn vertical_env_map(env: &VerticalEnvironment) -> HashMap<String, String> {
             pillar_config::LZ_WALLET_MNEMONIC_MAPPING.to_string(),
             r#"{"wallet-a-EVM":{"mnemonic":"test test test test test test test test test test test junk","path":"m/44'/60'/0'/0/0"}}"#.to_string(),
         ),
-    ])
+    ]);
+    if env.src_chain == "tron" || env.dst_chain == "tron" {
+        let mut wallets: Vec<Value> =
+            serde_json::from_str(vars.get(pillar_config::LZ_WALLETS).unwrap()).unwrap();
+        wallets[0]["byChainType"]["TRON"] = json!({"secretName": "secret-tron"});
+        vars.insert(
+            pillar_config::LZ_WALLETS.to_string(),
+            serde_json::to_string(&wallets).unwrap(),
+        );
+        let mut mapping: Value =
+            serde_json::from_str(vars.get(pillar_config::LZ_WALLET_MNEMONIC_MAPPING).unwrap())
+                .unwrap();
+        mapping["wallet-a-TRON"] = json!({
+            "mnemonic": "test test test test test test test test test test test junk",
+            "path": "m/44'/60'/0'/0/0",
+        });
+        vars.insert(
+            pillar_config::LZ_WALLET_MNEMONIC_MAPPING.to_string(),
+            mapping.to_string(),
+        );
+    }
+    vars
 }
 
 async fn vertical_app(
@@ -638,6 +779,13 @@ async fn vertical_app_with_transport(
     extra_context_verdict: bool,
 ) -> (RuntimeServerApp<VerticalTransport>, RecordedJsonCalls) {
     let calls: RecordedJsonCalls = Arc::new(Mutex::new(Vec::new()));
+    let extra_context_url = vars
+        .get(pillar_config::EXTRA_CONTEXT_REQUEST_URL)
+        .cloned()
+        .unwrap_or_else(|| EXTRA_CONTEXT_URL.to_string());
+    let extra_context_http = extra_context_url
+        .starts_with("http://127.0.0.1:")
+        .then(|| ReqwestJsonRpcTransport::new().expect("policy HTTP transport"));
     let transport = VerticalTransport {
         calls: calls.clone(),
         receipt: Arc::new(Mutex::new(receipt)),
@@ -646,7 +794,11 @@ async fn vertical_app_with_transport(
         dst_receive_uln_302: env.dst_receive_uln_302,
         dst_receive_uln_302_view: env.dst_receive_uln_302_view,
         extra_context_verdict: Arc::new(Mutex::new(extra_context_verdict)),
+        extra_context_url,
+        extra_context_http,
         receipt_unavailable_at: Some("src-rpc-unavailable"),
+        finalized_number: env.finalized_number,
+        canonical_header_number: env.canonical_header_number,
     };
     let app =
         RuntimeServerApp::from_env_map_with_runtime_core(vars, transport, || 1_767_323_045_000)
@@ -678,8 +830,6 @@ pub(super) async fn stages_of<T: JsonRpcTransport>(app: &RuntimeServerApp<T>) ->
         .collect()
 }
 
-/// The `{sentEvent, from}` body the extra-context stage posts
-/// (`validation_extra_context.rs:28-31`), or `None` if that POST never happened.
 fn extra_context_payload(calls: &RecordedJsonCalls) -> Option<Value> {
     calls
         .lock()
@@ -704,7 +854,7 @@ fn observed_methods(calls: &RecordedJsonCalls) -> Vec<String> {
         .unwrap()
         .iter()
         .map(|(url, _, body)| {
-            let host = if url == EXTRA_CONTEXT_URL {
+            let host = if body.get("sentEvent").is_some() {
                 "extra-context"
             } else if url.contains("dst-rpc") {
                 "dst"
@@ -774,6 +924,16 @@ async fn assert_vertical_completes(env: &VerticalEnvironment) {
     assert_eq!(
         payload["sentEvent"]["onChainEvent"]["txHash"], "0xtx",
         "the extra-context body did not carry the sent event: {payload}"
+    );
+    assert_eq!(
+        payload["signingContext"],
+        json!({
+            "protocolType": "MESSAGE",
+            "expiration": 1_751_500_000,
+            "dvnAddress": "0x4444444444444444444444444444444444444444",
+            "blockConfirmation": 1,
+        }),
+        "the exact MESSAGE signing context was not passed to the policy: {payload}"
     );
     // The guid the observable names, carried out of the decoded packet rather than
     // supplied by the caller.
@@ -952,6 +1112,122 @@ async fn production_vertical_never_signs_when_extra_context_rejects_the_request(
         "a rejected extra-context verdict reached the key; stages={stages:?}"
     );
 }
+#[tokio::test]
+async fn production_vertical_uses_local_http_signing_context_policy() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind loopback policy service");
+    let url = format!(
+        "http://{}/verify",
+        listener.local_addr().expect("policy address")
+    );
+    let policy_server = tokio::spawn(local_policy_server(listener, 3));
+    let cases = [
+        (vertical_request(&TESTNET_VERTICAL), true),
+        (
+            {
+                let mut request = vertical_request(&TESTNET_VERTICAL);
+                request.signing_context = SigningContext::Message {
+                    expiration: 1_751_500_001,
+                    skip_v_id: None,
+                    dvn_address: Some("0x4444444444444444444444444444444444444444".to_string()),
+                    block_confirmation: 1,
+                };
+                request
+            },
+            false,
+        ),
+        (
+            {
+                let mut request = vertical_request(&TESTNET_VERTICAL);
+                request.signing_context = SigningContext::Message {
+                    expiration: 1_751_500_000,
+                    skip_v_id: None,
+                    dvn_address: Some("0x5555555555555555555555555555555555555555".to_string()),
+                    block_confirmation: 1,
+                };
+                request
+            },
+            false,
+        ),
+    ];
+
+    let mut observations = Vec::with_capacity(3);
+    for (case, (request, expected_allow)) in
+        ["allow", "expiry_deny", "dvn_deny"].into_iter().zip(cases)
+    {
+        let mut vars = vertical_env_map(&TESTNET_VERTICAL);
+        vars.insert(
+            pillar_config::EXTRA_CONTEXT_REQUEST_URL.to_string(),
+            url.clone(),
+        );
+        let (app, calls) = vertical_app_with_transport(
+            &TESTNET_VERTICAL,
+            vars,
+            Some(vertical_receipt(&TESTNET_VERTICAL)),
+            None,
+            true,
+        )
+        .await;
+        let outcome = app.sign_request_v2(request).await;
+        assert_eq!(
+            outcome.is_ok(),
+            expected_allow,
+            "localhost policy result did not follow the request's signing context"
+        );
+        let methods = observed_methods(&calls);
+        let policy_http_requested = methods.iter().any(|method| method == "extra-context:post");
+        assert!(
+            policy_http_requested,
+            "the policy request did not traverse the HTTP transport: {methods:?}"
+        );
+        let stages = stages_of(&app).await;
+        let builder_stage_called = stages.iter().any(|stage| stage == "build_hash_call_data");
+        let signer_stage_called = stages.iter().any(|stage| stage == "sign");
+        assert_eq!(builder_stage_called, expected_allow, "stages={stages:?}");
+        assert_eq!(signer_stage_called, expected_allow, "stages={stages:?}");
+        observations.push(json!({
+            "case": case,
+            "policy_http_requested": policy_http_requested,
+            "outcome": if expected_allow { "allow" } else { "deny" },
+            "builder_stage_called": builder_stage_called,
+            "signer_stage_called": signer_stage_called,
+        }));
+    }
+
+    let requests = tokio::time::timeout(std::time::Duration::from_secs(10), policy_server)
+        .await
+        .expect("localhost policy service received all requests")
+        .expect("localhost policy service task");
+    assert_eq!(requests.len(), 3);
+    assert_eq!(
+        requests[0]["signingContext"],
+        json!({
+            "protocolType": "MESSAGE",
+            "expiration": 1_751_500_000,
+            "dvnAddress": "0x4444444444444444444444444444444444444444",
+            "blockConfirmation": 1,
+        })
+    );
+    assert!(requests[0]["signingContext"].get("skipVId").is_none());
+    assert_eq!(requests[1]["signingContext"]["expiration"], 1_751_500_001);
+    assert_eq!(
+        requests[2]["signingContext"]["dvnAddress"],
+        "0x5555555555555555555555555555555555555555"
+    );
+    println!(
+        "{}",
+        json!({
+            "event": "extra_context_policy_e2e",
+            "pipeline": "RuntimeServerApp::sign_request_v2",
+            "observations": observations,
+            "signing_contexts": requests
+                .iter()
+                .map(|request| request["signingContext"].clone())
+                .collect::<Vec<_>>(),
+        })
+    );
+}
 
 /// The resolver and validator must share the source receipt identity across the
 /// two production rounds. This uses two agreeing providers in each round so the
@@ -1102,4 +1378,270 @@ async fn production_vertical_signs_on_two_distinct_entities() {
         .unwrap_or_else(|error| panic!("two distinct entities meet any:2: {error}"));
     assert!(!response.signatures.is_empty());
     assert!(stages_of(&app).await.iter().any(|stage| stage == "sign"));
+}
+#[tokio::test]
+async fn production_vertical_never_signs_for_malformed_source_receipt_metadata() {
+    type ReceiptCorruption = fn(&mut Value);
+    let corruptions: [(&str, ReceiptCorruption); 3] = [
+        ("receipt transaction hash", |receipt| {
+            receipt["result"]["transactionHash"] =
+                Value::from("0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd");
+        }),
+        ("log transaction hash", |receipt| {
+            receipt["result"]["logs"][0]["transactionHash"] =
+                Value::from("0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd");
+        }),
+        ("removed log", |receipt| {
+            receipt["result"]["logs"][0]["removed"] = Value::Bool(true);
+        }),
+    ];
+    for (field, corrupt) in corruptions {
+        let mut receipt = vertical_receipt(&MAINNET_VERTICAL);
+        corrupt(&mut receipt);
+        let (app, _) = vertical_app(&MAINNET_VERTICAL, Some(receipt)).await;
+        let outcome = app
+            .sign_request_v2(vertical_request(&MAINNET_VERTICAL))
+            .await;
+        assert!(
+            outcome.is_err(),
+            "malformed {field} unexpectedly produced a signature"
+        );
+        let stages = stages_of(&app).await;
+        assert!(
+            stages.iter().all(|stage| stage != "sign"),
+            "malformed {field} reached signer: {stages:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn production_vertical_accepts_l1_fee_metadata_difference_between_receipt_reads() {
+    let baseline_receipt = vertical_receipt(&MAINNET_VERTICAL);
+    let (baseline_app, _) = vertical_app_with_receipt_rounds(
+        &MAINNET_VERTICAL,
+        vec![baseline_receipt.clone(), baseline_receipt],
+    )
+    .await;
+    let baseline = baseline_app
+        .sign_request_v2(vertical_request(&MAINNET_VERTICAL))
+        .await
+        .expect("matching provider receipts must produce a positive control signature");
+
+    let mut first = vertical_receipt(&MAINNET_VERTICAL);
+    let mut second = first.clone();
+    first["result"]["l1Fee"] = Value::from("0x2");
+    second["result"]["l1Fee"] = Value::from("0x1");
+    let (app, _) = vertical_app_with_receipt_rounds(&MAINNET_VERTICAL, vec![first, second]).await;
+    let response = app
+        .sign_request_v2(vertical_request(&MAINNET_VERTICAL))
+        .await
+        .expect("metadata-only receipt differences preserve packet quorum");
+    assert!(
+        !response.signatures.is_empty(),
+        "valid matched payload returned no signature"
+    );
+    assert!(
+        !response.payload.is_empty(),
+        "valid matched payload was empty"
+    );
+    assert_eq!(
+        response.payload, baseline.payload,
+        "l1Fee-only difference changed payload bytes"
+    );
+    assert_eq!(
+        response.signatures, baseline.signatures,
+        "l1Fee-only difference changed signature bytes"
+    );
+    let stages = stages_of(&app).await;
+    assert_eq!(
+        stages
+            .iter()
+            .filter(|stage| stage.as_str() == "sign")
+            .count(),
+        1,
+        "valid quorum entered the sign stage exactly once: {stages:?}"
+    );
+}
+
+#[tokio::test]
+async fn production_vertical_never_signs_when_packet_data_changes_on_readiness_reread() {
+    let first = vertical_receipt(&MAINNET_VERTICAL);
+    let mut second = first.clone();
+    let data = second["result"]["logs"][0]["data"]
+        .as_str()
+        .expect("fixture data")
+        .to_string();
+    second["result"]["logs"][0]["data"] = Value::from(format!("{data}00"));
+    let (app, _) = vertical_app_with_receipt_rounds(&MAINNET_VERTICAL, vec![first, second]).await;
+    let outcome = app
+        .sign_request_v2(vertical_request(&MAINNET_VERTICAL))
+        .await;
+    assert!(
+        outcome.is_err(),
+        "changed PacketSent data unexpectedly signed"
+    );
+    let stages = stages_of(&app).await;
+    assert!(
+        stages.iter().any(|stage| stage == "get_sent_event")
+            && stages.iter().any(|stage| stage == "validate"),
+        "consumer did not reach readiness: {stages:?}"
+    );
+    assert!(
+        stages.iter().all(|stage| stage != "sign"),
+        "changed packet data reached signer: {stages:?}"
+    );
+}
+fn source_block_tags(calls: &RecordedJsonCalls) -> Vec<String> {
+    calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|(url, _, body)| {
+            (url.contains("src-rpc") && body["method"] == "eth_getBlockByNumber")
+                .then(|| body["params"][0].as_str().map(str::to_string))
+                .flatten()
+        })
+        .collect()
+}
+
+async fn assert_finality_readiness_trace(
+    env: &VerticalEnvironment,
+    calls: &RecordedJsonCalls,
+    app: &RuntimeServerApp<VerticalTransport>,
+) -> (Vec<String>, Vec<String>, usize, bool) {
+    let stages = stages_of(app).await;
+    assert!(
+        stages.iter().any(|stage| stage == "get_sent_event"),
+        "{} did not resolve the event: {stages:?}",
+        env.src_chain
+    );
+    assert!(
+        stages.iter().any(|stage| stage == "validate"),
+        "{} did not enter readiness validation: {stages:?}",
+        env.src_chain
+    );
+    let recorded = calls.lock().unwrap();
+    let source_receipt_reads = recorded
+        .iter()
+        .filter(|(url, _, body)| {
+            url.contains("src-rpc") && body["method"] == "eth_getTransactionReceipt"
+        })
+        .count();
+    let source_transaction_resolved = recorded.iter().any(|(url, _, body)| {
+        url.contains("src-rpc") && body["method"] == "eth_getTransactionByHash"
+    });
+    drop(recorded);
+    assert!(
+        source_receipt_reads >= 2,
+        "{} did not exercise both resolution and readiness receipt reads: {source_receipt_reads}",
+        env.src_chain
+    );
+    let tags = source_block_tags(calls);
+    assert!(
+        tags.iter().any(|tag| tag == "latest"),
+        "{} never checked latest: {tags:?}",
+        env.src_chain
+    );
+    assert!(
+        tags.iter().any(|tag| tag == "finalized"),
+        "{} never checked finalized: {tags:?}",
+        env.src_chain
+    );
+    (
+        stages,
+        tags,
+        source_receipt_reads,
+        source_transaction_resolved,
+    )
+}
+
+#[tokio::test]
+async fn production_vertical_polygon_and_tron_enforce_finality_and_canonical_headers() {
+    let mut observations = Vec::new();
+    for base in [&POLYGON_VERTICAL, &TRON_VERTICAL] {
+        let mut lag = *base;
+        lag.finalized_number = "0x5f";
+        let (app, calls) = vertical_app(&lag, Some(vertical_receipt(&lag))).await;
+        let outcome = app.sign_request_v2(vertical_request(&lag)).await;
+        let (stages, tags, receipt_reads, transaction_resolved) =
+            assert_finality_readiness_trace(&lag, &calls, &app).await;
+        assert!(matches!(outcome, Err(pillar_api::AppError::BadRequest(_))));
+        assert!(
+            stages.iter().all(|stage| stage != "sign"),
+            "finality lag entered signer: {stages:?}"
+        );
+        assert!(
+            !tags.iter().any(|tag| tag == "0x60"),
+            "receipt-height lookup should not run before finality: {tags:?}"
+        );
+        observations.push(json!({"chain": lag.src_chain, "case": "finalized_lag", "signed": false, "stages": stages, "source_block_tags": tags, "source_receipt_reads": receipt_reads, "source_transaction_resolved": transaction_resolved}));
+
+        for (case, canonical_number) in [
+            ("canonical_number_missing", None),
+            ("canonical_number_mismatch", Some("0x61")),
+            ("canonical_number_valid", Some("0x60")),
+        ] {
+            let mut scenario = *base;
+            scenario.finalized_number = "0x64";
+            scenario.canonical_header_number = canonical_number;
+            let (app, calls) = vertical_app(&scenario, Some(vertical_receipt(&scenario))).await;
+            let outcome = app.sign_request_v2(vertical_request(&scenario)).await;
+            let (stages, tags, receipt_reads, transaction_resolved) =
+                assert_finality_readiness_trace(&scenario, &calls, &app).await;
+            assert!(
+                tags.iter().any(|tag| tag == "0x60"),
+                "{} did not query receipt-height canonical header in {case}: {tags:?}",
+                scenario.src_chain
+            );
+            if case == "canonical_number_valid" {
+                let response = outcome.unwrap_or_else(|error| {
+                    panic!(
+                        "{} valid canonical header did not sign: {error}",
+                        scenario.src_chain
+                    )
+                });
+                assert!(
+                    !response.signatures.is_empty(),
+                    "{} returned no signature for valid finality control",
+                    scenario.src_chain
+                );
+                assert!(
+                    transaction_resolved,
+                    "{} positive control missed source transaction metadata lookup",
+                    scenario.src_chain
+                );
+                for stage in ["get_sent_event", "validate", "build_hash_call_data", "sign"] {
+                    assert!(
+                        stages.iter().any(|recorded| recorded == stage),
+                        "{} valid finality control missed {stage}: {stages:?}",
+                        scenario.src_chain
+                    );
+                }
+                assert_eq!(
+                    stages
+                        .iter()
+                        .filter(|stage| stage.as_str() == "sign")
+                        .count(),
+                    1,
+                    "{} positive control must enter the signer exactly once: {stages:?}",
+                    scenario.src_chain
+                );
+                observations.push(json!({"chain": scenario.src_chain, "case": case, "signed": true, "signature_count": response.signatures.len(), "stages": stages, "source_block_tags": tags, "source_receipt_reads": receipt_reads, "source_transaction_resolved": transaction_resolved}));
+            } else {
+                let error =
+                    outcome.expect_err("malformed or mismatched canonical header must reject");
+                assert!(matches!(&error, pillar_api::AppError::Internal(_)));
+                assert!(
+                    stages.iter().all(|stage| stage != "sign"),
+                    "{} invalid canonical header entered signer: {stages:?}",
+                    scenario.src_chain
+                );
+                observations.push(json!({"chain": scenario.src_chain, "case": case, "signed": false, "error": error.to_string(), "stages": stages, "source_block_tags": tags, "source_receipt_reads": receipt_reads, "source_transaction_resolved": transaction_resolved}));
+            }
+        }
+    }
+    println!(
+        "{}",
+        json!({"event": "evm_finality_consumer_controls", "pipeline": "RuntimeServerApp::sign_request_v2", "observations": observations})
+    );
 }

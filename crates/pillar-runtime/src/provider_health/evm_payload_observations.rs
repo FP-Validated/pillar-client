@@ -318,6 +318,36 @@ where
         .map(ToOwned::to_owned)
         .ok_or_else(|| AppCoreError::Internal("Missing eth_call result".to_string()))
 }
+/// Shares the READ call's EIP-1898 pin when validating an empty result's target code.
+pub(crate) async fn eth_get_code_at_block<T>(
+    transport: T,
+    url: String,
+    headers: HashMap<String, String>,
+    address: &str,
+    block: Value,
+) -> Result<String, AppCoreError>
+where
+    T: JsonRpcTransport,
+{
+    let response = transport
+        .post_json_scoped(
+            url,
+            headers,
+            json!({
+                "method": "eth_getCode",
+                "params": [address, block],
+                "id": 1,
+                "jsonrpc": "2.0",
+            }),
+        )
+        .await
+        .map_err(AppCoreError::from)?;
+    response
+        .get("result")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| AppCoreError::Internal("Missing eth_getCode result".to_string()))
+}
 
 pub(crate) fn strip_hex_prefix(value: &str) -> &str {
     value

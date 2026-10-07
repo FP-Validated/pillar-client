@@ -257,10 +257,15 @@ fn read_vertical_receipt(marker: ReadMarker) -> Value {
         )
     );
     json!({"result": {
+        "transactionHash": PACKET_SENT_TX_HASH,
         "blockHash": format!("0x{}", "ab".repeat(32)),
         "blockNumber": "0x60",
         "status": "0x1",
         "logs": [{
+            "transactionHash": PACKET_SENT_TX_HASH,
+            "blockHash": format!("0x{}", "ab".repeat(32)),
+            "blockNumber": "0x60",
+            "removed": false,
             "address": ethereum_contract("EndpointV2").to_lowercase(),
             "logIndex": "0x0",
             "topics": [pillar_layerzero::ENDPOINT_V2_PACKET_SENT_TOPIC],

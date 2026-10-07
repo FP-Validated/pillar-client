@@ -37,6 +37,45 @@ fn kms_ecdsa_signature_to_recoverable_matches_typescript_der_and_raw_paths() {
 }
 
 #[test]
+fn ethereum_recovery_transform_rejects_rare_recovery_ids_but_raw_mode_preserves_them() {
+    let digest = [0u8; 32];
+    for wanted_id in [2u8, 3u8] {
+        let (signature, public_key) = (1u16..=u8::MAX as u16)
+            .find_map(|r| {
+                let mut compact = [0u8; 64];
+                compact[30..32].copy_from_slice(&r.to_be_bytes());
+                compact[63] = 1;
+                let signature = EcdsaSignature::from_slice(&compact).ok()?;
+                let recovery_id = EcdsaRecoveryId::try_from(wanted_id).ok()?;
+                let recovered =
+                    EcdsaVerifyingKey::recover_from_prehash(&digest, &signature, recovery_id)
+                        .ok()?;
+                Some((
+                    compact,
+                    recovered.to_encoded_point(false).as_bytes().to_vec(),
+                ))
+            })
+            .expect("small deterministic r range contains a valid recovery-id 2/3 point");
+        let raw = kms_ecdsa_signature_to_recoverable(
+            &signature,
+            KmsEcdsaSignatureEncoding::Raw,
+            &digest,
+            &public_key,
+            false,
+        )
+        .unwrap();
+        assert_eq!(raw[64], wanted_id);
+        assert!(kms_ecdsa_signature_to_recoverable(
+            &signature,
+            KmsEcdsaSignatureEncoding::Raw,
+            &digest,
+            &public_key,
+            true,
+        )
+        .is_err());
+    }
+}
+#[test]
 fn kms_ecdsa_signature_to_recoverable_rejects_bad_raw_signature_length() {
     let err = kms_ecdsa_signature_to_recoverable(
         &[1, 2, 3],

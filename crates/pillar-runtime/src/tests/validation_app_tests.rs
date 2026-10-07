@@ -90,7 +90,18 @@ async fn runtime_app_validator_matches_core_checks_and_delegates_external_checks
         .validate_payload_signed(&sent_event, Some("0xdvn"), "bsc")
         .await
         .unwrap();
-    validator.validate_extra_context(&sent_event).await.unwrap();
+    validator
+        .validate_extra_context(
+            &sent_event,
+            &SigningContext::Message {
+                expiration: 1_700_000_000,
+                skip_v_id: None,
+                dvn_address: None,
+                block_confirmation: 12,
+            },
+        )
+        .await
+        .unwrap();
 
     assert_eq!(
         ranges.lock().unwrap().as_slice(),

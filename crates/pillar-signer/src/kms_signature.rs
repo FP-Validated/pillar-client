@@ -12,6 +12,21 @@ pub enum KmsEcdsaSignatureEncoding {
     Der,
     Raw,
 }
+pub(crate) fn recovery_id_byte(
+    recovery_id: u8,
+    transform_recovery_id: bool,
+) -> Result<u8, SignerError> {
+    if transform_recovery_id && recovery_id > 1 {
+        return Err(SignerError::Message(
+            "Ethereum-style recovery ID must be 0 or 1".to_string(),
+        ));
+    }
+    Ok(if transform_recovery_id {
+        recovery_id + 27
+    } else {
+        recovery_id
+    })
+}
 
 pub fn kms_ecdsa_signature_to_recoverable(
     signature: &[u8],
@@ -27,12 +42,9 @@ pub fn kms_ecdsa_signature_to_recoverable(
     .map_err(|error| SignerError::Message(error.to_string()))?;
     let signature = signature.normalize_s().unwrap_or(signature);
     let recovery_id = recover_ecdsa_recovery_id(&signature, digest, expected_public_key)?;
+    let recovery_id = recovery_id_byte(recovery_id, transform_recovery_id)?;
     let mut result = signature.to_bytes().to_vec();
-    result.push(if transform_recovery_id {
-        recovery_id + 27
-    } else {
-        recovery_id
-    });
+    result.push(recovery_id);
     Ok(result)
 }
 

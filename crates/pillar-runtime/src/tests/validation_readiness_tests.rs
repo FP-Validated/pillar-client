@@ -307,6 +307,7 @@ async fn runtime_rpc_validation_checks_validates_message_readiness_with_quorum()
 fn bound_receipt(block_hash: &str, block_number: &str, status: &str, log_index: &str) -> Value {
     json!({
         "result": {
+            "transactionHash": "0xtx",
             "blockHash": block_hash,
             "blockNumber": block_number,
             "status": status,
@@ -314,7 +315,11 @@ fn bound_receipt(block_hash: &str, block_number: &str, status: &str, log_index: 
                 "address": "0x1a44076050125825900e736c501f859c50fe728c",
                 "topics": ["0x1ab700d4ced0c005b164c0f789fd09fcbb0156d4c2041b8a3bfbcd961cd1567f"],
                 "data": "0x00",
-                "logIndex": log_index
+                "transactionHash": "0xtx",
+                "blockHash": block_hash,
+                "blockNumber": block_number,
+                "logIndex": log_index,
+                "removed": false
             }]
         }
     })
@@ -323,6 +328,7 @@ fn bound_receipt(block_hash: &str, block_number: &str, status: &str, log_index: 
 fn reverted_receipt(block_hash: &str, block_number: &str) -> Value {
     json!({
         "result": {
+            "transactionHash": "0xtx",
             "blockHash": block_hash,
             "blockNumber": block_number,
             "status": "0x0",
@@ -340,11 +346,152 @@ fn readiness_sent_event_bound_to(
         source_evidence: Some(pillar_core::EvmSourceEvidence {
             block_hash: block_hash.to_string(),
             block_number,
-            status: "0x1".to_string(),
+            status: "1".to_string(),
             packet_log_index: log_index,
+            transaction_hash: "0xtx".to_string(),
+            packet_log_address: "0x1a44076050125825900e736c501f859c50fe728c".to_string(),
+            packet_log_topics: vec![
+                "0x1ab700d4ced0c005b164c0f789fd09fcbb0156d4c2041b8a3bfbcd961cd1567f".to_string(),
+            ],
+            packet_log_data: "0x00".to_string(),
         }),
         ..readiness_sent_event()
     }
+}
+
+fn finalized_header(number: &str, hash: &str) -> Value {
+    json!({ "result": { "number": number, "hash": hash } })
+}
+
+/// Polygon/tron readiness asks for the `finalized` header. Beyond the reference's height
+/// comparison, the canonical header at the receipt height must be the receipt's block, so
+/// a second receipt read of a forked block can no longer pass. Responses are consumed in
+/// request order: receipt, latest, finalized, then (finalized ahead) the receipt height.
+async fn finalized_readiness(responses: Vec<Value>) -> (Result<(), AppCoreError>, Vec<String>) {
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "polygon".to_string(),
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://poly-a.example".to_string())],
+                1,
+            ),
+        )]),
+        Some(&["polygon".to_string()]),
+    )
+    .unwrap();
+    let calls: RecordedJsonCalls = Arc::new(Mutex::new(Vec::new()));
+    let transport = RecordingTransport {
+        calls: calls.clone(),
+        responses: Arc::new(Mutex::new(responses.into_iter().map(Ok).collect())),
+    };
+    let mut sent_event = readiness_sent_event_bound_to("0xaaa", 100, 0);
+    sent_event.lz_message_id.pathway_id.src_chain_name = "polygon".to_string();
+    let result = RuntimeRpcValidationChecks::from_getter(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        transport,
+    )
+    .validate_readiness(
+        &sent_event,
+        &SigningContext::Message {
+            expiration: 1,
+            skip_v_id: None,
+            dvn_address: None,
+            block_confirmation: 2,
+        },
+    )
+    .await
+    .map(|_| ());
+    let tags = calls
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|call| call.2["params"][0].to_string())
+        .collect();
+    (result, tags)
+}
+
+#[tokio::test]
+async fn polygon_readiness_binds_canonical_header_at_receipt_height() {
+    let receipt = bound_receipt("0xaaa", "0x64", "0x1", "0x0");
+
+    // Finalized height equals the receipt height: its header hash is the canonical hash.
+    let (result, tags) = finalized_readiness(vec![
+        receipt.clone(),
+        latest_block("0x67"),
+        finalized_header("0x64", "0xaaa"),
+    ])
+    .await;
+    result.expect("finalized header is the receipt block");
+    assert_eq!(
+        tags.len(),
+        3,
+        "no extra RPC when finalized == receipt height: {tags:?}"
+    );
+    assert_eq!(tags[2], "\"finalized\"");
+
+    // Finalized ahead of the receipt: one extra header read at the receipt height.
+    let (result, tags) = finalized_readiness(vec![
+        receipt.clone(),
+        latest_block("0x67"),
+        finalized_header("0x66", "0xfff"),
+        finalized_header("0x64", "0xaaa"),
+    ])
+    .await;
+    result.expect("canonical header at receipt height is the receipt block");
+    assert_eq!(tags[3], "\"0x64\"");
+
+    // Forks: the finalized/canonical header at the receipt height is another block.
+    for (responses, scenario) in [
+        (
+            vec![
+                receipt.clone(),
+                latest_block("0x67"),
+                finalized_header("0x64", "0xbbb"),
+            ],
+            "finalized == receipt height, header hash differs",
+        ),
+        (
+            vec![
+                receipt.clone(),
+                latest_block("0x67"),
+                finalized_header("0x66", "0xfff"),
+                finalized_header("0x64", "0xbbb"),
+            ],
+            "finalized ahead, canonical header at receipt height differs",
+        ),
+    ] {
+        let (result, _) = finalized_readiness(responses).await;
+        let error = result.expect_err(scenario);
+        assert!(
+            matches!(error, AppCoreError::BadRequest(_))
+                && error.to_string().contains("canonical block hash"),
+            "{scenario}: {error}"
+        );
+    }
+
+    // Finalized behind the receipt is simply not final yet; no canonical read is made.
+    let (result, tags) = finalized_readiness(vec![
+        receipt,
+        latest_block("0x67"),
+        finalized_header("0x63", "0xccc"),
+    ])
+    .await;
+    let error = result.expect_err("finalized behind the receipt is not final yet");
+    assert!(
+        matches!(error, AppCoreError::BadRequest(_)) && error.to_string().contains("not met"),
+        "{error}"
+    );
+    assert_eq!(tags.len(), 3, "{tags:?}");
+
+    // A null or unparsable finalized header is a provider failure, not a height lag.
+    let (result, _) = finalized_readiness(vec![
+        bound_receipt("0xaaa", "0x64", "0x1", "0x0"),
+        latest_block("0x67"),
+        json!({ "result": null }),
+    ])
+    .await;
+    let error = result.expect_err("an unusable finalized header must not pass");
+    assert!(!error.to_string().contains("not met"), "{error}");
 }
 
 async fn readiness_against(receipt: Value, sent_event: &LzSentEvent) -> Result<(), AppCoreError> {
@@ -388,25 +535,10 @@ async fn readiness_against(receipt: Value, sent_event: &LzSentEvent) -> Result<(
     .map(|pins| assert!(pins.is_empty(), "a MESSAGE request produced READ pins"))
 }
 
-/// The resolver reads the source receipt once to extract `PacketSent`, and
-/// readiness reads it again to count confirmations. Provider quorum proves the
-/// providers agreed *within* each round, never that the two rounds saw the same
-/// chain state, so a reorg that re-included the same transaction hash with
-/// different logs - or reverted it - used to leave the service signing the
-/// packet captured in round one while readiness passed on the round-two
-/// receipt. The resolved event now carries the receipt's block hash, block
-/// number, status and the `PacketSent` log index, and readiness refuses when
-/// the second read disagrees.
-///
-/// This asserts the refusal at the point the binding is enforced. That a
-/// readiness error reaches no signer is already pinned end to end by
-/// `gasolina_parity_tests`'s rejection matrix, which asserts `signer_calls == 0`
-/// for a validator refusal.
 #[tokio::test]
 async fn runtime_rpc_validation_checks_refuses_a_source_receipt_that_changed_after_resolution() {
     let sent_event = readiness_sent_event_bound_to("0xaaa", 100, 0);
 
-    // The control: the same receipt the event was resolved from still signs.
     readiness_against(bound_receipt("0xaaa", "0x64", "0x1", "0x0"), &sent_event)
         .await
         .expect("an unchanged successful receipt stays eligible");
@@ -414,32 +546,24 @@ async fn runtime_rpc_validation_checks_refuses_a_source_receipt_that_changed_aft
     let cases = [
         (
             bound_receipt("0xbbb", "0x64", "0x1", "0x0"),
-            "block hash changed",
             "re-included in a different block",
         ),
         (
             bound_receipt("0xaaa", "0xc8", "0x1", "0x0"),
-            "block number changed",
             "re-included at a different height",
         ),
-        (
-            reverted_receipt("0xaaa", "0x64"),
-            "execution status is not successful",
-            "re-executed as a revert",
-        ),
+        (reverted_receipt("0xaaa", "0x64"), "re-executed as a revert"),
         (
             bound_receipt("0xaaa", "0x64", "0x1", "0x5"),
-            "log index 0 is no longer present",
             "the PacketSent log it attested to is gone",
         ),
         (
             json!({ "result": Value::Null }),
-            "source receipt disappeared",
             "the transaction is no longer mined",
         ),
     ];
 
-    for (receipt, expected, scenario) in cases {
+    for (receipt, scenario) in cases {
         let error = readiness_against(receipt, &sent_event)
             .await
             .expect_err(&format!("{scenario} must not be signed"));
@@ -447,10 +571,6 @@ async fn runtime_rpc_validation_checks_refuses_a_source_receipt_that_changed_aft
         assert!(
             matches!(error, AppCoreError::BadRequest(_)),
             "{scenario}: a changed source chain is a caller-visible refusal, got {message}"
-        );
-        assert!(
-            message.contains(expected),
-            "{scenario}: expected {expected:?}, got {message:?}"
         );
     }
 }

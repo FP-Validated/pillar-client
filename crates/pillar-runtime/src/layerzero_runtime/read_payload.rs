@@ -148,7 +148,31 @@ where
             requests.push(async move {
                 let observation = match rpc_permits.acquire_owned().await {
                     Ok(_permit) => {
-                        eth_call_at_block(transport, url, headers, &to, &call_data, block).await
+                        match eth_call_at_block(
+                            transport.clone(),
+                            url.clone(),
+                            headers.clone(),
+                            &to,
+                            &call_data,
+                            block.clone(),
+                        )
+                        .await
+                        {
+                            Ok(result) if result == "0x" => {
+                                match crate::provider_health::eth_get_code_at_block(
+                                    transport, url, headers, &to, block,
+                                )
+                                .await
+                                {
+                                    Ok(code) if code != "0x" => Ok(result),
+                                    Ok(_) => Err(AppCoreError::Internal(
+                                        "ReadV1002 eth_call target has no code".to_string(),
+                                    )),
+                                    Err(error) => Err(error),
+                                }
+                            }
+                            result => result,
+                        }
                     }
                     Err(_) => Err(AppCoreError::Admission(pillar_core::execution::BudgetError::Closed)),
                 };

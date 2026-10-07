@@ -62,6 +62,16 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         headers: HashMap<String, String>,
     ) -> Result<Value, String>;
 
+    /// TON v3 traces may exceed serde_json's default nesting limit. This opt-in
+    /// path is deliberately separate so every other provider keeps its normal parser.
+    async fn get_ton_json(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+    ) -> Result<Value, String> {
+        self.get_json(url, headers).await
+    }
+
     /// The HTTP status and body text, whatever the status and whether or not the body is
     /// JSON. Fakes that only answer JSON get a 200 carrying that JSON.
     async fn post_text(
@@ -114,6 +124,14 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         headers: HashMap<String, String>,
     ) -> Result<Value, RpcError> {
         limited_rpc(chain, self.get_json(url, headers)).await
+    }
+    async fn get_ton_json_scoped(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+    ) -> Result<Value, RpcError> {
+        let target = rpc_target_for_call()?;
+        limited_rpc(&target, self.get_ton_json(url, headers)).await
     }
     async fn post_json_scoped(
         &self,
@@ -329,6 +347,21 @@ impl JsonRpcTransport for ReqwestJsonRpcTransport {
             .map_err(|error| error.without_url().to_string())?;
         bounded_json_response(response).await
     }
+    async fn get_ton_json(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+    ) -> Result<Value, String> {
+        let mut request = self.client.get(url);
+        for (key, value) in headers {
+            request = request.header(key, value);
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|error| error.without_url().to_string())?;
+        bounded_ton_json_response(response).await
+    }
 
     async fn post_text(
         &self,
@@ -427,6 +460,92 @@ async fn bounded_json_response(response: reqwest::Response) -> Result<Value, Str
         extend_bounded_json(&mut bytes, &chunk)?;
     }
     serde_json::from_slice(&bytes).map_err(|error| error.to_string())
+}
+const MAX_TON_JSON_DEPTH: usize = 512;
+
+async fn bounded_ton_json_response(response: reqwest::Response) -> Result<Value, String> {
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("Provider returned HTTP {status}"));
+    }
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_JSON_RESPONSE_BYTES as u64)
+    {
+        return Err(format!(
+            "Provider JSON response exceeds {MAX_JSON_RESPONSE_BYTES} byte limit"
+        ));
+    }
+    let mut bytes = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| error.without_url().to_string())?;
+        extend_bounded_json(&mut bytes, &chunk)?;
+    }
+    ensure_json_depth(&bytes, MAX_TON_JSON_DEPTH)?;
+
+    let mut deserializer = serde_json::Deserializer::from_slice(&bytes);
+    deserializer.disable_recursion_limit();
+    let guarded = serde_stacker::Deserializer::new(&mut deserializer);
+    let value =
+        <Value as serde::Deserialize>::deserialize(guarded).map_err(|error| error.to_string())?;
+    if let Err(error) = deserializer.end() {
+        drop_json_value_safely(value);
+        return Err(error.to_string());
+    }
+    Ok(value)
+}
+
+fn ensure_json_depth(bytes: &[u8], limit: usize) -> Result<(), String> {
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for &byte in bytes {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == 92 {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'{' | b'[' => {
+                depth += 1;
+                if depth > limit {
+                    return Err(format!("Provider TON JSON exceeds {limit} nesting limit"));
+                }
+            }
+            b'}' | b']' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+pub(crate) fn drop_json_value_safely(value: Value) {
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        match value {
+            Value::Array(values) => {
+                for child in values {
+                    if matches!(&child, Value::Array(_) | Value::Object(_)) {
+                        pending.push(child);
+                    }
+                }
+            }
+            Value::Object(values) => {
+                for (_, child) in values {
+                    if matches!(&child, Value::Array(_) | Value::Object(_)) {
+                        pending.push(child);
+                    }
+                }
+            }
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+        }
+    }
 }
 
 fn extend_bounded_json(buffer: &mut Vec<u8>, chunk: &[u8]) -> Result<(), String> {

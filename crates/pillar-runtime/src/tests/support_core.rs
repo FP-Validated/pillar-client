@@ -78,7 +78,11 @@ impl AppValidator for NoopValidator {
         Ok(())
     }
 
-    async fn validate_extra_context(&self, _sent_event: &LzSentEvent) -> Result<(), AppCoreError> {
+    async fn validate_extra_context(
+        &self,
+        _sent_event: &LzSentEvent,
+        _signing_context: &SigningContext,
+    ) -> Result<(), AppCoreError> {
         Ok(())
     }
 

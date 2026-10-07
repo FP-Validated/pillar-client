@@ -9,6 +9,7 @@ where
     pub(crate) async fn validate_extra_context_request(
         &self,
         sent_event: &LzSentEvent,
+        signing_context: &SigningContext,
     ) -> Result<(), AppCoreError> {
         if self.extra_context.request_url.is_none() && self.extra_context.aws_lambda_name.is_none()
         {
@@ -22,6 +23,7 @@ where
         let payload = json!({
             "sentEvent": extra_context_sent_event_payload(sent_event),
             "from": from,
+            "signingContext": signing_context,
         });
         if let Some(url) = self.extra_context.request_url.as_deref() {
             let mut headers = HashMap::new();

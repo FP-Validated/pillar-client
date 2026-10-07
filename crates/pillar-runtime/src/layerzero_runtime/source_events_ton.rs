@@ -1,4 +1,5 @@
 use super::*;
+use crate::provider_health::drop_json_value_safely;
 use std::collections::{HashMap, HashSet};
 use ton_core::cell::{BoC, TonCell};
 
@@ -35,7 +36,7 @@ pub(crate) fn normalize_ton_address(value: &str) -> String {
 /// `{transaction, children}` tree, which `/transactionTrace` already returns.
 pub(crate) fn ton_transaction_trace_tree(response: &Value) -> Option<Value> {
     if response.get("transaction").is_some() {
-        return Some(response.clone());
+        return Some(clone_json_value_safely(response));
     }
     let item = response
         .get("traces")
@@ -43,17 +44,70 @@ pub(crate) fn ton_transaction_trace_tree(response: &Value) -> Option<Value> {
         .as_array()?
         .first()?;
     let transactions = item.get("transactions")?.as_object()?;
-    fn build(node: &Value, transactions: &serde_json::Map<String, Value>) -> Option<Value> {
-        let transaction = transactions.get(node.get("tx_hash")?.as_str()?)?.clone();
-        let children = node
-            .get("children")?
-            .as_array()?
-            .iter()
-            .map(|child| build(child, transactions))
-            .collect::<Option<Vec<_>>>()?;
-        Some(json!({ "transaction": transaction, "children": children }))
+    let root = item.get("trace")?;
+    let mut pending = vec![(root, false)];
+    let mut built = Vec::new();
+    while let Some((node, expanded)) = pending.pop() {
+        let Some(children) = node.get("children").and_then(Value::as_array) else {
+            drop_json_value_safely(Value::Array(built));
+            return None;
+        };
+        if expanded {
+            let Some(transaction) = node
+                .get("tx_hash")
+                .and_then(Value::as_str)
+                .and_then(|hash| transactions.get(hash))
+                .map(clone_json_value_safely)
+            else {
+                drop_json_value_safely(Value::Array(built));
+                return None;
+            };
+            let Some(start) = built.len().checked_sub(children.len()) else {
+                drop_json_value_safely(Value::Array(built));
+                return None;
+            };
+            let child_trees = built.drain(start..).collect::<Vec<_>>();
+            built.push(json!({ "transaction": transaction, "children": child_trees }));
+        } else {
+            pending.push((node, true));
+            pending.extend(children.iter().rev().map(|child| (child, false)));
+        }
     }
-    build(item.get("trace")?, transactions)
+    (built.len() == 1).then(|| built.pop()).flatten()
+}
+fn clone_json_value_safely(root: &Value) -> Value {
+    let mut pending = vec![(root, false)];
+    let mut built = Vec::new();
+    while let Some((value, expanded)) = pending.pop() {
+        match value {
+            Value::Array(children) if expanded => {
+                let start = built.len() - children.len();
+                let cloned = built.drain(start..).collect();
+                built.push(Value::Array(cloned));
+            }
+            Value::Object(children) if expanded => {
+                let start = built.len() - children.len();
+                let cloned = children
+                    .iter()
+                    .zip(built.drain(start..))
+                    .map(|((key, _), value)| (key.clone(), value))
+                    .collect();
+                built.push(Value::Object(cloned));
+            }
+            Value::Array(children) => {
+                pending.push((value, true));
+                pending.extend(children.iter().rev().map(|child| (child, false)));
+            }
+            Value::Object(children) => {
+                pending.push((value, true));
+                pending.extend(children.values().rev().map(|child| (child, false)));
+            }
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
+                built.push(value.clone());
+            }
+        }
+    }
+    built.pop().expect("root clone is complete")
 }
 
 /// Upstream `TonClient3.getTransactionTrace`: `/events`, then `/traces`, then
@@ -72,8 +126,14 @@ pub(crate) async fn fetch_ton_transaction_trace<T: JsonRpcTransport>(
         format!("{base}/traces?tx_hash={encoded_tx_hash}"),
         format!("{base}/transactionTrace?hash={encoded_tx_hash}"),
     ] {
-        observation = provider_response(transport.get_json_scoped(url, headers.clone()).await)
-            .map(|response| response.and_then(|value| ton_transaction_trace_tree(&value)));
+        observation = provider_response(transport.get_ton_json_scoped(url, headers.clone()).await)
+            .map(|response| {
+                response.and_then(|value| {
+                    let tree = ton_transaction_trace_tree(&value);
+                    drop_json_value_safely(value);
+                    tree
+                })
+            });
         if !matches!(observation, Ok(None)) {
             break;
         }
@@ -220,10 +280,11 @@ pub(crate) fn decode_ton_packet_sent_events(
 }
 
 fn collect_trace_nodes<'a>(node: &'a Value, out: &mut Vec<&'a Value>) {
-    out.push(node);
-    if let Some(children) = node.get("children").and_then(Value::as_array) {
-        for child in children {
-            collect_trace_nodes(child, out);
+    let mut pending = vec![node];
+    while let Some(node) = pending.pop() {
+        out.push(node);
+        if let Some(children) = node.get("children").and_then(Value::as_array) {
+            pending.extend(children.iter().rev());
         }
     }
 }

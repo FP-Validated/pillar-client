@@ -568,20 +568,22 @@ Addresses live in `stellar_uln_302_for_environment`,
   `@layerzerolabs/lz-ton-sdk-v2` versions with input sha256s) and nowhere else.
   Treat a chain, deployment or status that changed upstream as unsupported here
   until a maintainer regenerates and the diff is reviewed.
-- The EVM source event is bound to the receipt it was extracted from, which
-  upstream does not do. Resolution keeps the receipt's block hash, block number,
-  execution status and the `PacketSent` log index on the event
-  (`EvmSourceEvidence`, `crates/pillar-core/src/lib.rs`), and readiness refuses
-  when its own later read of the same transaction hash disagrees on any of them,
-  or when the transaction is no longer mined
-  (`crates/pillar-runtime/src/provider_health/evm_observations.rs`). A provider
-  quorum only proves the providers agreed within one round; it says nothing
-  about whether two rounds observed the same chain state, so a reorg that
-  re-included the same transaction with different logs, or reverted it, would
-  otherwise leave the packet captured in round one being signed against a
-  round-two confirmation count. A receipt whose execution status is not success
-  is refused at resolution. This is a deliberate fail-closed divergence from
-  upstream, which performs the same two-phase read without binding it.
+- EVM source resolution은 receipt와 모든 log의 transaction hash를 요청한 source transaction에 결속한다.
+  Log의 block hash와 number도 receipt와 같아야 한다. `removed`는 명시적으로 false여야 한다.
+  Quorum은 정규화한 typed receipt와 log를 비교한다. `l1Fee` 같은 추가 metadata는 비교하지 않는다.
+  Resolution은 `EvmSourceEvidence`에 transaction hash, block hash와 number, execution status,
+  PacketSent log의 index, address, topics와 data를 보관한다.
+  Readiness와 ULNv2 MPT builder의 재조회는 이 evidence와 일치해야 한다.
+  따라서 같은 transaction이 다른 log로 재포함된 경우에도 서명하지 않는다.
+  `polygon`과 `tron`은 latest confirmation 수와 finalized 높이를 모두 만족해야 한다.
+  Receipt 높이의 canonical header number와 hash도 일치해야 한다.
+  Finalized RPC 실패, null과 canonical header number 불일치는 표를 얻지 못한다.
+  Canonical hash 불일치는 SourceChanged 표가 되며 quorum이 성립하면 서명을 거부한다.
+  Latest-only fallback은 없다.
+  다른 EVM chain과 `amoy`에는 이 finalized 정책을 추가하지 않는다.
+  Canonical header 결속은 upstream보다 엄격한 fail-closed 정책이다.
+  Transaction hash 비교는 optional `0x` prefix와 대소문자를 정규화한다. RPC 요청 값은 바꾸지 않는다.
+  Evidence 필드 확장으로 validation audit hash는 이전 버전과 byte 단위로 비교할 수 없다.
 - TON block confirmations count from the masterchain seqno of the `PacketSent`
   transaction itself, found by hash inside the provider's trace, and readiness
   refuses when that transaction is absent from the trace. Upstream reads the
@@ -617,6 +619,15 @@ Addresses live in `stellar_uln_302_for_environment`,
   not change: the read is still only as final as the marker's
   `blockConfirmation` makes it, and a reorg deeper than that *after* signing is
   a finality question this service cannot answer.
+- READ의 `eth_call`이 정확히 `0x`이면 같은 provider와 headers로 `eth_getCode`를 조회한다.
+  두 요청은 readiness가 검증한 같은 EIP-1898 block hash와 `requireCanonical:true`를 사용한다.
+  Code가 `0x`이거나 code 조회가 실패하면 그 provider는 표를 얻지 못한다.
+  Code가 있는 contract의 정상 empty return은 허용한다. 별도 call/code quorum은 없다.
+  Nonempty return과 RPC revert의 동작은 바꾸지 않는다.
+- Extra-context의 HTTP와 Lambda 요청은 `sentEvent`, `from`, typed `signingContext`를 포함한다.
+  MESSAGE와 READ의 기존 Serde 형식과 optional omission을 유지한다.
+  Closed-schema policy handler는 새 필드를 허용해야 한다.
+  이 전달은 on-chain state 검증을 대신하지 않으며 policy를 설정하지 않은 경로는 바꾸지 않는다.
 - An external extra-context policy must answer `true`, and the two transports
   wrap that verdict differently. **The shapes are not interchangeable** - a
   policy service migrated from one form to the other will be refused.

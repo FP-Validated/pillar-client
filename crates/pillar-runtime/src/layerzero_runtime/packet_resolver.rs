@@ -132,7 +132,7 @@ where
             .map_err(|error| AppCoreError::Internal(error.to_string()))?;
         // Still refused, but as upstream reports it: a reverted transaction has no
         // PacketSent log, so its sdk ends in `Packet does not match lzMessageId`.
-        if !matches!(receipt.status.as_str(), "0x1" | "0X1" | "1") {
+        if receipt.status != "1" {
             return Err(packet_does_not_match(src_tx_hash));
         }
         Ok(receipt)
@@ -489,6 +489,10 @@ where
             let snapshot = self.providers.load();
             let provider_config = snapshot.provider_config(chain_name)?;
             let quorum = required_provider_quorum(provider_config, chain_name)?;
+            let receipt_expected_tx_hash = (body.get("method").and_then(Value::as_str)
+                == Some("eth_getTransactionReceipt"))
+            .then(|| body.pointer("/params/0").and_then(Value::as_str))
+            .flatten();
             let mut requests = FuturesUnordered::new();
             for (index, uri) in provider_config.uris.iter().enumerate() {
                 let transport = self.transport.clone();
@@ -503,11 +507,31 @@ where
             while let Some((index, response)) = requests.next().await {
                 let observation = provider_response(response).and_then(|response| {
                     response
-                        .and_then(|response| response.get("result").cloned())
+                        .and_then(|mut response| response.get_mut("result").map(Value::take))
                         .map(|result| {
-                            serde_json::to_string(&result)
-                                .map(|fingerprint| (fingerprint, result))
-                                .map_err(|error| RpcError::Remote(error.to_string()))
+                            if result.is_null() {
+                                return Ok(("null".to_string(), result));
+                            }
+                            if let Some(expected_tx_hash) = receipt_expected_tx_hash {
+                                serde_json::from_value::<EvmTransactionReceipt>(result)
+                                    .map_err(|error| RpcError::Remote(error.to_string()))
+                                    .and_then(|receipt| {
+                                        receipt
+                                            .normalize(expected_tx_hash)
+                                            .map_err(RpcError::Remote)
+                                    })
+                                    .and_then(|receipt| {
+                                        let fingerprint = evm_receipt_fingerprint(&receipt)
+                                            .map_err(RpcError::Remote)?;
+                                        let value = serde_json::to_value(receipt)
+                                            .map_err(|error| RpcError::Remote(error.to_string()))?;
+                                        Ok((fingerprint, value))
+                                    })
+                            } else {
+                                serde_json::to_string(&result)
+                                    .map(|fingerprint| (fingerprint, result))
+                                    .map_err(|error| RpcError::Remote(error.to_string()))
+                            }
                         })
                         .transpose()
                 });
@@ -1139,10 +1163,9 @@ where
             let receipt = self
                 .get_receipt_logs(&lz_message_id.pathway_id.src_chain_name, src_tx_hash)
                 .await?;
-            let block_hash = receipt.block_hash.to_ascii_lowercase();
-            let status = receipt.status.clone();
-            let block_number = numeric_response(&Value::String(receipt.block_number.clone()))
-                .ok_or_else(|| AppCoreError::Internal("Invalid receipt block number".to_string()))?
+            let block_hash = receipt.block_hash;
+            let status = receipt.status;
+            let block_number = receipt.block_number
                 .parse::<i64>()
                 .map_err(|error| AppCoreError::Internal(error.to_string()))?;
             let logs = receipt.logs;
@@ -1154,9 +1177,7 @@ where
                 ) else {
                     continue;
                 };
-                let Some(packet_log_index) =
-                    numeric_response(&Value::String(log.log_index.clone()))
-                        .and_then(|value| value.parse::<u64>().ok())
+                let Some(packet_log_index) = log.log_index.parse::<u64>().ok()
                 else {
                     continue;
                 };
@@ -1165,6 +1186,10 @@ where
                     block_number,
                     status: status.clone(),
                     packet_log_index,
+                    transaction_hash: receipt.transaction_hash.clone(),
+                    packet_log_address: log.address.clone(),
+                    packet_log_topics: log.topics,
+                    packet_log_data: log.data,
                 };
                 // Non-fatal for the same reason the decode above is. A batching
                 // transaction can emit several PacketSent events, and this
@@ -1778,6 +1803,20 @@ where
             block_number: number("blockNumber")?,
             status: status.unwrap_or_default().to_string(),
             packet_log_index: u64::try_from(number("logIndex")?).ok()?,
+            transaction_hash: log
+                .get("transactionHash")
+                .and_then(Value::as_str)
+                .unwrap_or(tx_hash)
+                .to_ascii_lowercase(),
+            packet_log_address: address.to_ascii_lowercase(),
+            packet_log_topics: topics
+                .iter()
+                .map(|topic| topic.to_ascii_lowercase())
+                .collect(),
+            packet_log_data: log
+                .get("data")
+                .and_then(Value::as_str)?
+                .to_ascii_lowercase(),
         };
         let event = self
             .packet_sent_to_lz_sent_event(chain, tx_hash, packet_sent, address, source_evidence)

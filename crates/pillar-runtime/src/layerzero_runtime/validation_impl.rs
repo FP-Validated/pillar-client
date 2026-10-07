@@ -33,8 +33,13 @@ where
             .await
     }
 
-    async fn validate_extra_context(&self, sent_event: &LzSentEvent) -> Result<(), AppCoreError> {
-        self.validate_extra_context_request(sent_event).await
+    async fn validate_extra_context(
+        &self,
+        sent_event: &LzSentEvent,
+        signing_context: &SigningContext,
+    ) -> Result<(), AppCoreError> {
+        self.validate_extra_context_request(sent_event, signing_context)
+            .await
     }
 
     async fn uln_receive_version(

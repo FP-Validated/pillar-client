@@ -1,4 +1,5 @@
 use super::*;
+use serde::Serialize;
 
 pub(crate) fn evm_receive_contract_pair<'a>(
     contracts: &'a EvmReceiveContracts,
@@ -84,8 +85,10 @@ pub(crate) fn extra_context_sent_event_payload(sent_event: &LzSentEvent) -> Valu
     value
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct EvmTransactionReceipt {
+    #[serde(rename = "transactionHash")]
+    pub(crate) transaction_hash: String,
     #[serde(rename = "blockHash")]
     pub(crate) block_hash: String,
     #[serde(rename = "blockNumber")]
@@ -95,13 +98,79 @@ pub(crate) struct EvmTransactionReceipt {
     pub(crate) logs: Vec<EvmReceiptLog>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct EvmReceiptLog {
     pub(crate) address: String,
     pub(crate) topics: Vec<String>,
     pub(crate) data: String,
+    #[serde(rename = "transactionHash")]
+    pub(crate) transaction_hash: String,
+    #[serde(rename = "blockHash")]
+    pub(crate) block_hash: String,
+    #[serde(rename = "blockNumber")]
+    pub(crate) block_number: String,
     #[serde(rename = "logIndex")]
     pub(crate) log_index: String,
+    // Standard JSON-RPC receipts must state whether each log was removed by a reorg.
+    pub(crate) removed: bool,
+}
+
+fn evm_transaction_hash_body(value: &str) -> &str {
+    value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+        .unwrap_or(value)
+}
+
+pub(crate) fn evm_transaction_hash_matches(observed: &str, expected: &str) -> bool {
+    evm_transaction_hash_body(observed).eq_ignore_ascii_case(evm_transaction_hash_body(expected))
+}
+
+fn normalize_evm_transaction_hash(value: &mut String) {
+    value.make_ascii_lowercase();
+    if !value.starts_with("0x") {
+        value.insert_str(0, "0x");
+    }
+}
+
+impl EvmTransactionReceipt {
+    pub(crate) fn normalize(mut self, expected_tx_hash: &str) -> Result<Self, String> {
+        let quantity = |value: &str, field: &str| {
+            parse_numeric_string(value).ok_or_else(|| format!("invalid receipt {field}"))
+        };
+        normalize_evm_transaction_hash(&mut self.transaction_hash);
+        if !evm_transaction_hash_matches(&self.transaction_hash, expected_tx_hash) {
+            return Err("receipt transactionHash does not match requested transaction".to_string());
+        }
+        self.block_hash.make_ascii_lowercase();
+        self.block_number = quantity(&self.block_number, "blockNumber")?;
+        self.status = quantity(&self.status, "status")?;
+        for log in &mut self.logs {
+            if log.removed {
+                return Err("receipt contains a removed log".to_string());
+            }
+            normalize_evm_transaction_hash(&mut log.transaction_hash);
+            log.block_hash.make_ascii_lowercase();
+            log.block_number = quantity(&log.block_number, "log blockNumber")?;
+            log.log_index = quantity(&log.log_index, "logIndex")?;
+            if log.transaction_hash != self.transaction_hash
+                || log.block_hash != self.block_hash
+                || log.block_number != self.block_number
+            {
+                return Err("receipt log placement does not match its receipt".to_string());
+            }
+            log.address.make_ascii_lowercase();
+            for topic in &mut log.topics {
+                topic.make_ascii_lowercase();
+            }
+            log.data.make_ascii_lowercase();
+        }
+        Ok(self)
+    }
+}
+
+pub(crate) fn evm_receipt_fingerprint(receipt: &EvmTransactionReceipt) -> Result<String, String> {
+    serde_json::to_string(receipt).map_err(|error| error.to_string())
 }
 
 pub(crate) fn normalize_address_map(map: HashMap<String, String>) -> HashMap<String, String> {

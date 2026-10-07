@@ -246,15 +246,17 @@ pub struct ResponseEnvelope<T> {
 #[derive(Debug, thiserror::Error)]
 #[error("{0}")]
 pub struct BadRequestError(pub String);
-/// Evidence captured from the quorum'd EVM receipt that produced a sent event.
-/// Kept out of the serialized event so readiness can bind its second read to
-/// the exact receipt used for resolution without changing the public shape.
+/// Binds readiness to the receipt and packet log agreed on during resolution.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EvmSourceEvidence {
     pub block_hash: String,
     pub block_number: i64,
     pub status: String,
     pub packet_log_index: u64,
+    pub transaction_hash: String,
+    pub packet_log_address: String,
+    pub packet_log_topics: Vec<String>,
+    pub packet_log_data: String,
 }
 
 /// The block a READ time marker was validated against, agreed on by provider
@@ -360,7 +362,11 @@ pub trait AppValidator: Send + Sync + 'static {
         dst_chain_name: &str,
     ) -> Result<(), AppCoreError>;
 
-    async fn validate_extra_context(&self, sent_event: &LzSentEvent) -> Result<(), AppCoreError>;
+    async fn validate_extra_context(
+        &self,
+        sent_event: &LzSentEvent,
+        signing_context: &SigningContext,
+    ) -> Result<(), AppCoreError>;
 
     /// The ULN version of the library the destination receiver currently
     /// receives on, agreed by provider quorum. Asked only for V2 sends, before
@@ -819,7 +825,9 @@ impl PillarApp {
                     dst_chain_name,
                 ),
             )?;
-            self.validator.validate_extra_context(&sent_event).await?;
+            self.validator
+                .validate_extra_context(&sent_event, &request.signing_context)
+                .await?;
             Ok::<_, AppCoreError>(read_block_pins)
         }
         .await;
@@ -1592,6 +1600,7 @@ mod tests {
         async fn validate_extra_context(
             &self,
             _sent_event: &LzSentEvent,
+            _signing_context: &SigningContext,
         ) -> Result<(), AppCoreError> {
             Ok(())
         }
@@ -1648,6 +1657,7 @@ mod tests {
         async fn validate_extra_context(
             &self,
             _sent_event: &LzSentEvent,
+            _signing_context: &SigningContext,
         ) -> Result<(), AppCoreError> {
             Ok(())
         }
@@ -2054,6 +2064,7 @@ mod tests {
         async fn validate_extra_context(
             &self,
             _sent_event: &LzSentEvent,
+            _signing_context: &SigningContext,
         ) -> Result<(), AppCoreError> {
             // Upstream holds extra-context back until the rest have passed, so
             // it must never overlap with them.
@@ -2158,6 +2169,7 @@ mod tests {
             async fn validate_extra_context(
                 &self,
                 _sent_event: &LzSentEvent,
+                _signing_context: &SigningContext,
             ) -> Result<(), AppCoreError> {
                 Ok(())
             }

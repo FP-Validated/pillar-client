@@ -252,8 +252,15 @@ async fn evm_uln_v2_refresh_matches_gasolina() {
             block_number: upstream_event["onChainEvent"]["blockNumber"]
                 .as_i64()
                 .unwrap(),
-            status: "0x1".to_string(),
+            status: "1".to_string(),
             packet_log_index: 1,
+            transaction_hash: upstream_event["onChainEvent"]["txHash"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+            packet_log_address: String::new(),
+            packet_log_topics: Vec::new(),
+            packet_log_data: String::new(),
         }),
     );
     let mut compared = 0;

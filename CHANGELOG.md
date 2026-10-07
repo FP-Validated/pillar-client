@@ -4,6 +4,22 @@ All notable changes to this project are documented here. This project follows
 semantic versioning for the HTTP surface, the environment-variable contract and
 the Prometheus metric names.
 
+## Unreleased
+
+### Security
+
+- `polygon`과 `tron`의 MESSAGE readiness는 요청한 confirmation 수와 finalized head를 함께 확인한다. Receipt 높이의 canonical header number와 hash도 receipt와 같아야 한다. 이 결속은 reference보다 엄격하다. 다른 EVM chain과 `amoy`의 정책은 바꾸지 않는다.
+- EVM receipt quorum은 서명에 사용하는 receipt와 log 필드만 정규화한다. `l1Fee` 같은 추가 metadata는 표를 나누지 않는다. Receipt와 log의 transaction/block identity가 다르거나 log의 `removed`가 false가 아니면 거부한다. Transaction hash의 optional `0x` prefix와 대소문자는 같은 값으로 비교한다. Readiness와 ULNv2 MPT 재조회는 resolution의 packet log 내용과 block에 다시 결속된다.
+- READ의 `eth_call`이 정확히 `0x`이면 같은 provider에서 같은 EIP-1898 block hash로 `eth_getCode`를 조회한다. Code도 `0x`이거나 조회에 실패하면 해당 provider는 표를 얻지 못한다. 별도 call/code quorum과 latest fallback은 없다.
+- Extra-context HTTP와 Lambda에 기존 typed `signingContext`를 전달한다. Strict-schema policy consumer는 새 필드를 허용해야 한다. 설정하지 않은 policy와 strict boolean-true gate의 동작은 유지한다.
+- Ethereum-style signature 변환은 모든 ECDSA signer에서 recovery ID 2/3을 거부한다. 기존 low-S 정규화 순서와 non-EVM raw recovery ID 형식은 유지한다. KMS 호출 뒤에 거부하므로 cloud signing call 자체를 방지하는 변경은 아니다.
+- TON 전용 HTTP JSON decoder는 기존 4 MiB 제한과 명시적인 512-level JSON container nesting 제한을 적용한다. 다른 chain의 JSON parser는 바꾸지 않는다. 원본 JSON 순회와 해제는 반복형이다. 변환된 trace tree의 일반 해제는 허용된 depth로 제한한다. JSON nesting과 trace node 수는 다른 단위다.
+
+### Audit
+
+- Azure Solana fixture의 64-byte `X||Y`는 공개 mainnet 계정의 finalized slot `454171112` 응답과 일치했다. 이 관측은 실제 deployed program version과 독립 Azure immutable key response를 검증하지 않는다. 따라서 Azure binding 전체는 아직 미확인이다. TON의 보고된 266-depth 원본 응답도 찾지 못했다. 합성 depth 검증은 원본 replay를 대신하지 않는다.
+- 리테스트의 `78bdd20e…`와 기존 source manifest의 `8ad87eb6…`는 hash 대상이 확인될 때까지 별개 식별자로 유지한다. 이번에 확인한 archive SHA-256은 `2e94b7cdc0e9f4bdfecba47ac391b3e619bfd9ad6d0dfc069ae4c498ef42d090`이다.
+
 ## 2.5.0 - 2026-10-06
 
 ### Scope

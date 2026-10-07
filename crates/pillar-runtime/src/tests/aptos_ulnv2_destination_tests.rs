@@ -19,6 +19,14 @@ fn fixture() -> Value {
     serde_json::from_str(FIXTURE).unwrap()
 }
 
+fn source_tx_hash() -> String {
+    format!("0x{}", "5a".repeat(32))
+}
+
+fn source_block_hash() -> String {
+    format!("0x{}", "b1".repeat(32))
+}
+
 fn src_chain(environment: &str) -> &'static str {
     if environment == "mainnet" {
         "ethereum"
@@ -193,7 +201,11 @@ impl<T: JsonRpcTransport> RuntimeValidationChecks for A3Checks<T> {
             .await
     }
 
-    async fn validate_extra_context(&self, _: &LzSentEvent) -> Result<(), AppCoreError> {
+    async fn validate_extra_context(
+        &self,
+        _: &LzSentEvent,
+        _: &SigningContext,
+    ) -> Result<(), AppCoreError> {
         Ok(())
     }
 
@@ -234,13 +246,16 @@ fn uln_v2_receipt(environment: &str, row: &Value) -> Value {
         200_000,
         "0".repeat(60)
     );
+    let transaction_hash = source_tx_hash();
+    let block_hash = source_block_hash();
     json!({
-        "blockHash": format!("0x{}", "b1".repeat(32)),
+        "transactionHash": transaction_hash,
+        "blockHash": block_hash,
         "blockNumber": "0x60",
         "status": "0x1",
         "logs": [
-            {"address": uln, "logIndex": "0x0", "topics": [pillar_layerzero::ULN_V2_RELAYER_PARAMS_TOPIC], "data": relayer_params},
-            {"address": uln, "logIndex": "0x1", "topics": [pillar_layerzero::LEGACY_ULN_V2_PACKET_TOPIC], "data": data},
+            {"address": uln, "transactionHash": transaction_hash, "blockHash": block_hash, "blockNumber": "0x60", "removed": false, "logIndex": "0x0", "topics": [pillar_layerzero::ULN_V2_RELAYER_PARAMS_TOPIC], "data": relayer_params},
+            {"address": uln, "transactionHash": transaction_hash, "blockHash": block_hash, "blockNumber": "0x60", "removed": false, "logIndex": "0x1", "topics": [pillar_layerzero::LEGACY_ULN_V2_PACKET_TOPIC], "data": data},
         ],
     })
 }
@@ -257,7 +272,7 @@ fn request_for(row: &Value, skip_v_id: Option<bool>, message_hash: &str) -> Valu
         signing_context["skipVId"] = Value::from(skip);
     }
     json!({
-        "srcTxHash": format!("0x{}", "5a".repeat(32)),
+        "srcTxHash": source_tx_hash(),
         "lzMessageId": {
             "pathwayId": pathway,
             "nonce": row["nonce"],

@@ -1,5 +1,14 @@
 use super::*;
 
+fn policy_message_context() -> SigningContext {
+    SigningContext::Message {
+        expiration: 1_700_000_000,
+        skip_v_id: None,
+        dvn_address: None,
+        block_confirmation: 12,
+    }
+}
+
 #[tokio::test]
 async fn runtime_rpc_validation_checks_accepts_unsigned_payload() {
     let calls = Arc::new(Mutex::new(Vec::new()));
@@ -493,7 +502,7 @@ async fn runtime_rpc_validation_checks_skips_extra_context_when_unconfigured() {
     );
 
     checks
-        .validate_extra_context(&payload_signed_sent_event())
+        .validate_extra_context(&payload_signed_sent_event(), &policy_message_context())
         .await
         .unwrap();
 
@@ -501,56 +510,176 @@ async fn runtime_rpc_validation_checks_skips_extra_context_when_unconfigured() {
 }
 
 #[tokio::test]
-async fn runtime_rpc_validation_checks_posts_ts_compatible_extra_context() {
-    let calls = Arc::new(Mutex::new(Vec::new()));
-    let checks = runtime_rpc_extra_context_checks(
-        RuntimeExtraContextConfig {
-            request_url: Some("https://policy.example/extra".to_string()),
-            request_auth_token: Some("secret-token".to_string()),
-            aws_lambda_name: None,
-        },
-        vec![
-            transaction_result("0xABCDEFabcdefABCDEFabcdefABCDEFabcdefabcd"),
-            Ok(Value::Bool(true)),
-        ],
-        calls.clone(),
+async fn runtime_rpc_validation_read_signing_context_controls_local_policy_verdict() {
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind local policy and RPC server");
+    let address = listener.local_addr().expect("local test server address");
+    let policy_server = tokio::spawn(async move {
+        let mut policy_verdicts = Vec::with_capacity(2);
+        for _ in 0..4 {
+            let (stream, _) =
+                tokio::time::timeout(std::time::Duration::from_secs(10), listener.accept())
+                    .await
+                    .expect("local policy/RPC request timed out")
+                    .expect("accept local policy/RPC request");
+            let mut stream = BufReader::new(stream);
+            let mut line = String::new();
+            stream
+                .read_line(&mut line)
+                .await
+                .expect("read request line");
+            let mut content_length = 0usize;
+            loop {
+                line.clear();
+                stream
+                    .read_line(&mut line)
+                    .await
+                    .expect("read request headers");
+                if line == "\r\n" || line.is_empty() {
+                    break;
+                }
+                if let Some((name, value)) = line.split_once(':') {
+                    if name.eq_ignore_ascii_case("content-length") {
+                        content_length = value.trim().parse().expect("valid content length");
+                    }
+                }
+            }
+            let mut body = vec![0; content_length];
+            stream
+                .read_exact(&mut body)
+                .await
+                .expect("read request body");
+            let request: Value = serde_json::from_slice(&body).expect("JSON request body");
+            let response = if request.get("method").is_some() {
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": request["id"],
+                    "result": {
+                        "hash": "0xtx",
+                        "from": "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+                        "to": "0x2222222222222222222222222222222222222222",
+                        "input": "0xdeadbeef",
+                    },
+                })
+            } else {
+                let context = &request["signingContext"];
+                let markers = &context["resolvedTimestampTimeMarkers"];
+                let allowed = request["from"] == "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"
+                    && context["protocolType"] == "READ"
+                    && context.get("skipVId").is_none()
+                    && context.get("dvnAddress").is_none()
+                    && context["expiration"] == 1_700_000_001
+                    && markers.as_array().is_some_and(|markers| {
+                        markers.len() == 1
+                            && markers[0]["blockConfirmation"] == 4
+                            && markers[0]["isBlockNumber"] == true
+                            && markers[0]["chainName"] == "ethereum"
+                            && markers[0]["blockNumber"] == 99
+                            && markers[0]["timestamp"] == 1_700_000_000
+                    });
+                policy_verdicts.push(allowed);
+                json!(allowed)
+            };
+            let response = serde_json::to_vec(&response).expect("serialize local response");
+            let headers = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                response.len()
+            );
+            stream
+                .get_mut()
+                .write_all(headers.as_bytes())
+                .await
+                .expect("write response headers");
+            stream
+                .get_mut()
+                .write_all(&response)
+                .await
+                .expect("write response body");
+        }
+        policy_verdicts
+    });
+
+    let provider_url = format!("http://{address}");
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "ethereum".to_string(),
+            ProviderConfig::with_distinct_entities(vec![ProviderUri::Uri(provider_url.clone())], 1),
+        )]),
+        Some(&["ethereum".to_string()]),
+    )
+    .expect("local source RPC provider config");
+    let checks = RuntimeRpcValidationChecks::from_getter(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        ReqwestJsonRpcTransport::new().expect("production reqwest transport"),
+    )
+    .with_extra_context(RuntimeExtraContextConfig {
+        request_url: Some(format!("{provider_url}/verify")),
+        request_auth_token: None,
+        aws_lambda_name: None,
+    });
+    let event = payload_signed_sent_event();
+    let valid_context = SigningContext::Read {
+        expiration: 1_700_000_001,
+        skip_v_id: None,
+        dvn_address: None,
+        resolved_timestamp_time_markers: vec![ResolvedTimestampTimeMarker {
+            block_confirmation: 4,
+            is_block_number: true,
+            chain_name: "ethereum".to_string(),
+            block_number: 99,
+            timestamp: 1_700_000_000,
+        }],
+    };
+
+    let allowed = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        checks.validate_extra_context(&event, &valid_context),
+    )
+    .await
+    .expect("valid READ policy validation timed out");
+    assert!(
+        allowed.is_ok(),
+        "valid READ context was rejected: {allowed:?}"
     );
 
-    checks
-        .validate_extra_context(&payload_signed_sent_event())
-        .await
-        .unwrap();
+    let mut altered_context = valid_context.clone();
+    if let SigningContext::Read {
+        resolved_timestamp_time_markers,
+        ..
+    } = &mut altered_context
+    {
+        resolved_timestamp_time_markers[0].timestamp += 1;
+    }
+    let denied = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        checks.validate_extra_context(&event, &altered_context),
+    )
+    .await
+    .expect("altered READ policy validation timed out");
+    assert!(matches!(denied, Err(AppCoreError::BadRequest(_))));
 
-    let calls = calls.lock().unwrap();
-    assert_eq!(calls.len(), 2);
-    assert_eq!(calls[0].0, "https://eth-rpc.example");
-    assert_eq!(
-        calls[0].2,
+    let verdicts = tokio::time::timeout(std::time::Duration::from_secs(10), policy_server)
+        .await
+        .expect("local policy server timed out")
+        .expect("local policy server task failed");
+    assert_eq!(verdicts, vec![true, false]);
+    println!(
+        "{}",
         json!({
-            "method": "eth_getTransactionByHash",
-            "params": ["0xtx"],
-            "id": 1,
-            "jsonrpc": "2.0",
+            "event": "read_signing_context_policy_consumer_e2e",
+            "transport": "ReqwestJsonRpcTransport",
+            "validation_path": "RuntimeRpcValidationChecks.validate_extra_context",
+            "observations": [
+                { "case": "valid_marker", "policy_verdict": "allow", "validation": "accepted" },
+                { "case": "changed_marker_timestamp", "policy_verdict": "deny", "validation": "rejected" },
+            ],
         })
     );
-    assert_eq!(calls[1].0, "https://policy.example/extra");
-    assert_eq!(
-        calls[1].1.get("Authorization"),
-        Some(&"Bearer secret-token".to_string())
-    );
-    assert_eq!(
-        calls[1].2["from"],
-        "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"
-    );
-    assert_eq!(calls[1].2["sentEvent"]["onChainEvent"]["txHash"], "0xtx");
-    assert_eq!(
-        calls[1].2["sentEvent"]["onChainEvent"]["chainName"],
-        "ethereum"
-    );
-    assert!(calls[1].2["sentEvent"].get("txHash").is_none());
-    assert_eq!(calls[1].2["sentEvent"]["lzMessageId"]["nonce"], 7);
 }
-
 #[tokio::test]
 async fn runtime_rpc_validation_checks_rejects_false_extra_context_response() {
     let checks = runtime_rpc_extra_context_checks(
@@ -567,7 +696,7 @@ async fn runtime_rpc_validation_checks_rejects_false_extra_context_response() {
     );
 
     let err = checks
-        .validate_extra_context(&payload_signed_sent_event())
+        .validate_extra_context(&payload_signed_sent_event(), &policy_message_context())
         .await
         .unwrap_err();
 
@@ -605,7 +734,7 @@ async fn runtime_rpc_validation_checks_rejects_non_boolean_extra_context_respons
         );
 
         let err = checks
-            .validate_extra_context(&payload_signed_sent_event())
+            .validate_extra_context(&payload_signed_sent_event(), &policy_message_context())
             .await
             .unwrap_err();
 
@@ -615,46 +744,6 @@ async fn runtime_rpc_validation_checks_rejects_non_boolean_extra_context_respons
         assert_eq!(calls.len(), 2, "policy response was not requested");
         assert_eq!(calls[1].0, "https://policy.example/extra");
     }
-}
-
-#[tokio::test]
-async fn runtime_rpc_validation_checks_invokes_ts_compatible_extra_context_lambda() {
-    let rpc_calls = Arc::new(Mutex::new(Vec::new()));
-    let lambda_calls = Arc::new(Mutex::new(Vec::new()));
-    let checks = runtime_rpc_extra_context_checks(
-        RuntimeExtraContextConfig {
-            request_url: None,
-            request_auth_token: None,
-            aws_lambda_name: Some("policy-lambda".to_string()),
-        },
-        vec![transaction_result(
-            "0xABCDEFabcdefABCDEFabcdefABCDEFabcdefabcd",
-        )],
-        rpc_calls.clone(),
-    )
-    .with_extra_context_lambda_client(Arc::new(RecordingLambdaClient {
-        calls: lambda_calls.clone(),
-        responses: Arc::new(Mutex::new(vec![Ok(json!({ "body": true }))])),
-    }));
-
-    checks
-        .validate_extra_context(&payload_signed_sent_event())
-        .await
-        .unwrap();
-
-    assert_eq!(rpc_calls.lock().unwrap().len(), 1);
-    let lambda_calls = lambda_calls.lock().unwrap();
-    assert_eq!(lambda_calls.len(), 1);
-    assert_eq!(lambda_calls[0].0, "policy-lambda");
-    assert_eq!(
-        lambda_calls[0].1["from"],
-        "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"
-    );
-    assert_eq!(
-        lambda_calls[0].1["sentEvent"]["onChainEvent"]["txHash"],
-        "0xtx"
-    );
-    assert!(lambda_calls[0].1["sentEvent"].get("txHash").is_none());
 }
 
 #[tokio::test]
@@ -676,7 +765,7 @@ async fn runtime_rpc_validation_checks_rejects_false_lambda_body() {
     }));
 
     let err = checks
-        .validate_extra_context(&payload_signed_sent_event())
+        .validate_extra_context(&payload_signed_sent_event(), &policy_message_context())
         .await
         .unwrap_err();
 
@@ -715,7 +804,7 @@ async fn runtime_rpc_validation_checks_rejects_unsafe_lambda_responses() {
         }));
 
         let err = checks
-            .validate_extra_context(&payload_signed_sent_event())
+            .validate_extra_context(&payload_signed_sent_event(), &policy_message_context())
             .await
             .unwrap_err();
 

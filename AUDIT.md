@@ -471,13 +471,37 @@ not read.
 - **Canton.** The live test needs the inputs in section 6. Canton code did not change
   after `ff249a1b`, and the deployment has no Canton chain. The maintainers rely on the
   repository's own Canton tests.
-- **TON response depth (not fixed, present since before `ff249a1b`).** The independent
-  reviewer reported that a recorded toncenter testnet `/events` response nests JSON
-  266 levels deep, beyond the default `serde_json` recursion limit.
-  `bounded_json_response` decodes provider responses with that default
-  (`crates/pillar-runtime/src/provider_health/transport.rs:429`), so such a response
-  fails to decode. The reviewer's replay of that response removed its `decoded` field;
-  it is not a raw end-to-end transport pass. It is not known whether LayerZero TON
-  traffic produces such responses. The deployment above has no TON chain.
+- **TON response depth.** 이번 수정은 TON 전용 decoder에 4 MiB 응답 제한과 512-level JSON container nesting 제한을 적용한다. 실제 localhost HTTP 경로에서 합성 depth 266과 512를 허용하고 513을 거부했다. 250-node trace의 실제 fetch, fingerprint와 해제도 검증했다. JSON nesting은 trace node 수와 다르다. 보고된 266-depth 원본 응답은 찾지 못했으므로 원본 replay는 아직 미확인이다. 기존 archived fixture의 depth는 25이며 원본 증거를 대신하지 않는다.
 - **Signer addresses.** As in section 9, the addresses after the next rollout are not
   verified unless each pod's `/signer-info` is recorded before and after it.
+
+## 11. 리테스트 후속 수정, 2026-10-07
+
+`f5868d0428cf3edb585dca5a396c02e37d3d0ade`를 기준으로 source finality, receipt integrity, READ empty return, extra-context, recovery ID와 TON 응답 경계를 수정했다.
+통합 검증과 재현 명령은 maintainer-local `audit/retest-250/verification.md`에 보존한다. 원시 실행 출력과 로컬 관측 자료는 이 source 체크포인트에 포함하지 않는다.
+이 문서의 과거 배포 설명은 과거 시점의 근거다. 2026-10-07 검증 당시 변경은 미커밋·미게시 상태였다. 이 체크포인트는 source 게시용이며 production 배포를 포함하지 않는다.
+
+### 범위와 의도적인 차이
+
+- `polygon`과 `tron`만 finalized policy를 추가한다. Receipt 높이의 canonical header number/hash 결속은 reference보다 엄격하다. 지원하지 않는 finalized RPC에 latest fallback을 하지 않는다. 운영 provider의 finalized 지원은 실제 RPC로 검증하지 않았다.
+- Receipt quorum은 typed semantic fields를 비교한다. Receipt/log의 transaction/block identity와 명시적인 `removed=false`를 요구한다. Optional `0x` prefix는 같은 transaction hash로 비교하지만 RPC wire 값은 바꾸지 않는다.
+- Source evidence 확장으로 validation audit hash는 이전 버전과 byte 단위로 비교할 수 없다. 원래 보관한 evidence는 수정하지 않는다.
+- Extra-context consumer는 새 typed `signingContext` 필드를 허용해야 한다. 알 수 없는 입력 필드와 없는 optional 값은 typed serialization에 남지 않는다. Live Lambda와 cloud KMS는 호출하지 않았다.
+- TON 제한의 단위는 JSON container nesting이다. 512 nesting은 512 trace levels를 뜻하지 않는다. 허용된 최대 trace levels는 envelope에 따라 달라지며 대략 254이다. 원본 JSON 해제는 반복형이다. 변환된 trace tree의 일반 해제는 허용된 depth로 제한한다.
+
+### Azure Solana 근거와 남은 조건
+
+공개 LayerZero-v2 commit `9c741e7f9790639537b1710a203bcdfd73b0b9ac`의 `dvn_config.rs`는 64-byte signer `X||Y`를 정의한다. Anchor/Borsh layout은 첫 signer의 byte offset 17을 뒷받침한다. 이 근거는 해당 source layout만 확인한다.
+
+Main은 2026-10-07 17:36:52 KST에 공식 공개 Solana mainnet RPC로 계정 `EqkXVEeapm7JqrS1W3AGeN5ZwCRLDUHtr1XY9TuVr4rD`를 조회했다. Finalized slot은 `454171112`이다. Owner는 `9U6MUTuH9XZFoP993kq3We6gu95NbJhNM82cdpbpyF9n`이다. `DvnConfig` discriminator와 signer 수 1을 확인했고 offset 17의 64 bytes가 Azure fixture와 일치했다. 원본 응답 SHA-256은 `ca5c00de9c4104173926b95f8ad7f36e6b811c0c0b8d86d1e972605c43548e14`이다.
+
+이 관측만으로 Azure binding 전체를 닫지 않는다. 해당 owner의 deployed executable/version과 source 대응이 필요하다. 같은 immutable Azure key version의 독립 공개키 응답도 필요하다. 이번 작업은 Azure API를 호출하지 않았다.
+
+### Reference provenance와 진단 차이
+
+- 리테스트 원본 SHA-256은 `0ef2ddc5f3f2796818f3e895c9410122568c9a90de345eb42db813216ab8e531`이다. 보고서의 `78bdd20e…`와 저장소의 `8ad87eb6…`는 hash 대상과 전체 값이 확인될 때까지 같은 식별자로 합치지 않는다.
+- 원본 `gasolina-audit-main.zip` SHA-256은 `2e94b7cdc0e9f4bdfecba47ac391b3e619bfd9ad6d0dfc069ae4c498ef42d090`이다. Archive comment의 `213cd50097f5c19438a28ecb5ec63da99d8485e7`을 독립 검증한 reference commit이라고 주장하지 않는다.
+- 보고서는 351 comparisons를 적었지만 category 합은 387이다. 중복과 적용 대상을 설명하는 comparison ledger가 없으므로 이번 작업은 351 전체 재실행을 주장하지 않는다. 기존 acceptance matrix의 1696 rows는 다른 집계다.
+- 원본 보고서는 checksummed target과 bytes32-padded sender/receiver의 `debugInfo` 차이를 293건으로 집계했고 signature는 같다고 보고했다. Malformed JSON과 READ-on-V302는 같은 status code에서 error text가 달랐다고 보고했다. 이는 작성자 보고이며 Main의 새 reference replay가 아니다. 이 진단 형식은 바꾸지 않았다. Finalized lag의 confirmation 표시값은 reference의 `-1`과 다르지만 두 구현 모두 signing을 거부한다. 오류 종류와 sign-stage 진입 여부를 검증했다.
+
+근거: audit/retest-250/verification.md와 원본 리테스트 보고서 · 시각 미상
