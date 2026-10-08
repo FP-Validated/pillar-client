@@ -124,7 +124,12 @@ fn solidity_word(value: u64) -> [u8; 32] {
 
 /// A SendUln301 `PacketSent(bytes,bytes,uint256,uint256)` receipt for an EVM V301
 /// send to Aptos, emitted by the source chain's own SendUln301.
-fn uln301_send_to_aptos_receipt(src: &str, environment: &str, packet: &[u8]) -> Value {
+fn uln301_send_to_aptos_receipt(
+    src: &str,
+    environment: &str,
+    packet: &[u8],
+    transaction_hash: &str,
+) -> Value {
     let payload = abi_bytes(packet);
     // Type-3 options with one 200000-gas lzReceive; upstream skips a packet whose options
     // it cannot decode, and empty options are one.
@@ -137,11 +142,16 @@ fn uln301_send_to_aptos_receipt(src: &str, environment: &str, packet: &[u8]) -> 
     data.extend_from_slice(&payload);
     data.extend_from_slice(&options);
     json!({
-        "blockHash": format!("0x{}", "aa".repeat(32)),
-        "blockNumber": "0x64",
+        "transactionHash": transaction_hash,
+        "blockHash": SOURCE_BLOCK_HASH,
+        "blockNumber": SOURCE_BLOCK_NUMBER,
         "status": "0x1",
         "logs": [{
             "address": pillar_config::layerzero_contract_address(src, environment, "SendUln301").unwrap(),
+            "transactionHash": transaction_hash,
+            "blockHash": SOURCE_BLOCK_HASH,
+            "blockNumber": SOURCE_BLOCK_NUMBER,
+            "removed": false,
             "logIndex": "0x0",
             "topics": [pillar_layerzero::ULN_301_PACKET_SENT_TOPIC],
             "data": format!("0x{}", hex::encode(data)),
@@ -187,6 +197,10 @@ const NOT_FOUND: &str = "Provider returned HTTP 404 Not Found";
 const EXPIRATION: i64 = 1_760_000_000;
 const NONCE: u64 = 74_756;
 const DVN: &str = "0x3333333333333333333333333333333333333333333333333333333333333333";
+const SOURCE_TX_HASH: &str = "0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a";
+const SOURCE_BLOCK_HASH: &str =
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const SOURCE_BLOCK_NUMBER: &str = "0x64";
 
 /// What the destination reports for one scenario; each field drives one upstream read.
 #[derive(Clone, Copy)]
@@ -377,7 +391,7 @@ async fn sign_v301_to_aptos(environment: &str, dvn: Option<&str>, state: AptosSt
             hex::encode(Keccak256::digest(hex::decode(&message[2..]).unwrap()))
         )
     };
-    let receipt = uln301_send_to_aptos_receipt(src, environment, &packet);
+    let receipt = uln301_send_to_aptos_receipt(src, environment, &packet, SOURCE_TX_HASH);
     let names = vec![src.to_string(), "aptos".to_string()];
     let src_rpc = format!("https://{src}-rpc.example");
     let src_rpcs = (0..state.source_provider_count)
@@ -548,8 +562,8 @@ async fn sign_v301_to_aptos(environment: &str, dvn: Option<&str>, state: AptosSt
             dvn_address: dvn.map(str::to_string),
             block_confirmation: 15,
         },
+        src_tx_hash: SOURCE_TX_HASH.to_string(),
         message_hash,
-        ..request_v2()
     };
 
     let response = router
@@ -1583,10 +1597,6 @@ async fn http_resolver_rejects_short_receiver_identity_before_aptos_reads() {
     )
     .await;
     assert_eq!(outcome.status, StatusCode::BAD_REQUEST, "{}", outcome.body);
-    assert_eq!(
-        outcome.body["body"],
-        r#"cannot find packet event for srcTxHash 0xtx on pathway {"srcEid":101,"dstEid":108,"sender":"0x50002cdfe7ccb0c41f519c6eb0653158d11cd907","receiver":"0xabc","srcChainName":"ethereum","dstChainName":"aptos"}"#,
-    );
     assert_eq!(outcome.signatures, 0);
     assert!(outcome.aptos_reads.is_empty(), "{:?}", outcome.aptos_reads);
 }

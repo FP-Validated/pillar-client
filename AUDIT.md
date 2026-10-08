@@ -471,13 +471,122 @@ not read.
 - **Canton.** The live test needs the inputs in section 6. Canton code did not change
   after `ff249a1b`, and the deployment has no Canton chain. The maintainers rely on the
   repository's own Canton tests.
-- **TON response depth (not fixed, present since before `ff249a1b`).** The independent
-  reviewer reported that a recorded toncenter testnet `/events` response nests JSON
-  266 levels deep, beyond the default `serde_json` recursion limit.
-  `bounded_json_response` decodes provider responses with that default
-  (`crates/pillar-runtime/src/provider_health/transport.rs:429`), so such a response
-  fails to decode. The reviewer's replay of that response removed its `decoded` field;
-  it is not a raw end-to-end transport pass. It is not known whether LayerZero TON
-  traffic produces such responses. The deployment above has no TON chain.
+- **TON response depth.** 이번 수정은 TON 전용 decoder에 4 MiB 응답 제한과 512-level JSON container nesting 제한을 적용한다. 실제 localhost HTTP 경로에서 합성 depth 266과 512를 허용하고 513을 거부했다. 250-node trace의 실제 fetch, fingerprint와 해제도 검증했다. JSON nesting은 trace node 수와 다르다. 보고된 266-depth 원본 응답은 찾지 못했으므로 원본 replay는 아직 미확인이다. 기존 archived fixture의 depth는 25이며 원본 증거를 대신하지 않는다.
 - **Signer addresses.** As in section 9, the addresses after the next rollout are not
   verified unless each pod's `/signer-info` is recorded before and after it.
+
+## 11. 리테스트 후속 수정, 2026-10-07
+
+`f5868d0428cf3edb585dca5a396c02e37d3d0ade`를 기준으로 source finality, receipt integrity, READ empty return, extra-context, recovery ID와 TON 응답 경계를 수정했다.
+통합 검증과 재현 명령은 maintainer-local `audit/retest-250/verification.md`에 보존한다. 원시 실행 출력과 로컬 관측 자료는 이 source 체크포인트에 포함하지 않는다.
+이 문서의 과거 배포 설명은 과거 시점의 근거다. 2026-10-07 검증 당시 변경은 미커밋·미게시 상태였다. 이 체크포인트는 source 게시용이며 production 배포를 포함하지 않는다.
+
+### 범위와 의도적인 차이
+
+- `polygon`과 `tron`만 finalized policy를 추가한다. Receipt 높이의 canonical header number/hash 결속은 reference보다 엄격하다. 지원하지 않는 finalized RPC에 latest fallback을 하지 않는다. 운영 provider의 finalized 지원은 실제 RPC로 검증하지 않았다.
+- Receipt quorum은 typed semantic fields를 비교한다. Receipt/log의 transaction/block identity와 명시적인 `removed=false`를 요구한다. Optional `0x` prefix는 같은 transaction hash로 비교하지만 RPC wire 값은 바꾸지 않는다.
+- Source evidence 확장으로 validation audit hash는 이전 버전과 byte 단위로 비교할 수 없다. 원래 보관한 evidence는 수정하지 않는다.
+- Extra-context consumer는 새 typed `signingContext` 필드를 허용해야 한다. 알 수 없는 입력 필드와 없는 optional 값은 typed serialization에 남지 않는다. Live Lambda와 cloud KMS는 호출하지 않았다.
+- TON 제한의 단위는 JSON container nesting이다. 512 nesting은 512 trace levels를 뜻하지 않는다. 허용된 최대 trace levels는 envelope에 따라 달라지며 대략 254이다. 원본 JSON 해제는 반복형이다. 변환된 trace tree의 일반 해제는 허용된 depth로 제한한다.
+
+### Azure Solana 근거와 남은 조건
+
+공개 LayerZero-v2 commit `9c741e7f9790639537b1710a203bcdfd73b0b9ac`의 `dvn_config.rs`는 64-byte signer `X||Y`를 정의한다. Anchor/Borsh layout은 첫 signer의 byte offset 17을 뒷받침한다. 이 근거는 해당 source layout만 확인한다.
+
+Main은 2026-10-07 17:36:52 KST에 공식 공개 Solana mainnet RPC로 계정 `EqkXVEeapm7JqrS1W3AGeN5ZwCRLDUHtr1XY9TuVr4rD`를 조회했다. Finalized slot은 `454171112`이다. Owner는 `9U6MUTuH9XZFoP993kq3We6gu95NbJhNM82cdpbpyF9n`이다. `DvnConfig` discriminator와 signer 수 1을 확인했고 offset 17의 64 bytes가 Azure fixture와 일치했다. 원본 응답 SHA-256은 `ca5c00de9c4104173926b95f8ad7f36e6b811c0c0b8d86d1e972605c43548e14`이다.
+
+이 관측만으로 Azure binding 전체를 닫지 않는다. 해당 owner의 deployed executable/version과 source 대응이 필요하다. 같은 immutable Azure key version의 독립 공개키 응답도 필요하다. 이번 작업은 Azure API를 호출하지 않았다.
+
+### Reference provenance와 진단 차이
+
+- 리테스트 원본 SHA-256은 `0ef2ddc5f3f2796818f3e895c9410122568c9a90de345eb42db813216ab8e531`이다. 보고서의 `78bdd20e…`와 저장소의 `8ad87eb6…`는 hash 대상과 전체 값이 확인될 때까지 같은 식별자로 합치지 않는다.
+- 원본 `gasolina-audit-main.zip` SHA-256은 `2e94b7cdc0e9f4bdfecba47ac391b3e619bfd9ad6d0dfc069ae4c498ef42d090`이다. Archive comment의 `213cd50097f5c19438a28ecb5ec63da99d8485e7`을 독립 검증한 reference commit이라고 주장하지 않는다.
+- 보고서는 351 comparisons를 적었지만 category 합은 387이다. 중복과 적용 대상을 설명하는 comparison ledger가 없으므로 이번 작업은 351 전체 재실행을 주장하지 않는다. 기존 acceptance matrix의 1696 rows는 다른 집계다.
+- 원본 보고서는 checksummed target과 bytes32-padded sender/receiver의 `debugInfo` 차이를 293건으로 집계했고 signature는 같다고 보고했다. Malformed JSON과 READ-on-V302는 같은 status code에서 error text가 달랐다고 보고했다. 이는 작성자 보고이며 Main의 새 reference replay가 아니다. 이 진단 형식은 바꾸지 않았다. Finalized lag의 confirmation 표시값은 reference의 `-1`과 다르지만 두 구현 모두 signing을 거부한다. 오류 종류와 sign-stage 진입 여부를 검증했다.
+
+근거: audit/retest-250/verification.md와 원본 리테스트 보고서 · 시각 미상
+
+## 12. `80e0ad21` 감사 후속 개발, 2026-10-08
+
+정상 입력의 처리와 서명 성공을 acceptance로 유지한다. 거부 시나리오만 통과한 결과는 완료로 취급하지 않는다.
+
+- TON 변환은 bounded postorder plan을 만든 뒤 필요한 scalar만 투영한다. 같은 transaction을 여러 node에 복제하지 않는다. Duplicate hash와 잘못된 topology를 거부한다. 최대 node 수는 512다. 변환 후 JSON container depth도 512로 제한한다. 생략된 leaf children은 빈 배열로 처리한다. 이 정규화는 children 누락에서 오류가 나는 upstream quorum 함수와 의도적으로 다르다. `/events`와 legacy `/transactionTrace`의 HTTP 경로로 이 차이를 검증한다. 입력의 미사용 metadata는 output에 복제하지 않는다. Object와 Array를 직접 조립한다.
+- 실제 HTTP TON fixture를 별도 release 프로세스에서 실행했다. Stack은 2 MiB다. 정상 chain, 512-node star, 4 MiB 미만 큰 metadata 입력과 depth-505 입력을 처리했다. Malformed 입력 뒤의 정상 요청도 성공했다. Quorum 조기 반환, loser 해제와 cancellation을 확인했다. `/usr/bin/time -l`이 관측한 최대 RSS는 29,261,824 bytes다. macOS의 OS 강제 RSS 제한이라고 주장하지 않는다.
+- 실제 HTTP `ReqwestJsonRpcTransport`와 `RuntimeServerApp`으로 READ 서명을 실행했다. Empty call과 code `0x00` 및 `0x6000`은 기준과 같은 signature를 반환했다. Provider 3개 중 정상 2개는 불량 1개가 있어도 quorum 2로 서명했다. 잘못된 DATA와 서로 다른 provider의 부분 observation은 signer에 진입하지 않았다. Call과 code의 provider header 및 EIP-1898 pin을 함께 확인했다. HTTP가 생성한 `Content-Length`는 요청 body 길이에 따라 다르므로 provider header 비교에서 제외했다.
+- Receipt의 생략된 `removed`를 false로 정규화했다. true, null과 잘못된 타입은 거부한다. 실제 CLI에서 정상 quorum 2, `l1Fee` 차이, 모든 `removed` 생략과 생략/false 혼합이 동일 payload와 signature로 성공했다. Log index 중복은 최초 resolution과 readiness 재조회에서 거부한다. 최초 resolution은 모든 log를 검사하고 readiness 재조회는 선택된 PacketSent log를 검사한다. 운영 Ethereum→Celo의 원본 finalized PacketSent receipt도 local CLI에서 서명했다. Metadata와 생략/false 변형을 포함한 정상 3개는 같은 payload와 signature를 냈고 integrity 및 quorum 변형 11개는 sign-stage 진입이 0이었다. 운영 receipt는 바꾸지 않았고 정상 API pathway 주소만 upstream 형식으로 표현했다.
+- 운영 `ovh-cluster/rpc-mainnet/lz-rpc`의 Ethereum과 Polygon RPC를 읽기 전용으로 확인했다. Finalized head, receipt/canonical block 결속, EIP-1898 call/code와 존재하지 않는 hash의 거부를 관측했다. 첫 Polygon probe는 code가 없는 잘못된 주소를 사용했다. 원시 실패 자료를 보존하고 운영 receipt에서 관측한 token 주소로 수정해 정상 결과를 확인했다. 운영 provider 설정에는 Tron이 없다.
+- 운영 EVM endpoint 17개의 정상 EIP-1898 call/code를 확인했다. 16개는 존재하지 않는 hash를 거부했다. Hyperliquid proxy는 같은 잘못된 hash에 정상 DATA를 반환했다. 2026-10-08 11:09 KST의 기존 upstream 직접 조회에서는 QuickNode도 이를 거부하지 않았고 Alchemy는 정상 historical hash를 처리하면서 잘못된 hash를 두 메서드 모두 거부했다. 이 문제는 latest fallback으로 우회하지 않는다. 검증된 archive 경로를 분리하고 unsafe upstream으로 failover하지 않는 운영 설정이 필요하다. 설정이나 배포는 아직 바꾸지 않았다.
+- 2026-10-08 10:23 KST의 읽기 전용 조회에서 immutable Azure key version의 공개키, 운영 Pillar의 공개키와 finalized Solana DVN config의 signer가 같은 64-byte `X||Y`임을 확인했다. Config slot은 `454395711`이다. Owner program은 executable이며 program-data의 배포 slot은 `432734589`이다. 공개 verified-build registry는 이 program을 `is_verified=false`로 반환했다. Deployed program과 source의 재현 가능한 대응은 별도 조건으로 남긴다. Live KMS 서명과 on-chain 서명 검증은 실행하지 않았다.
+- Closed-schema HTTP policy consumer는 `sentEvent`, `from`, typed `signingContext`만 허용했다. Candidate CLI의 정상 receipt 6개는 이 consumer를 통과해 서명했다. 운영 배포의 direct env와 envFrom key 목록에는 extra-context 설정이 없었다. 정책 설정 확인에서는 credential 값을 조회하지 않았다. Archive upstream probe는 기존 URL reference를 process memory에서만 사용했고 URL과 credential 값을 evidence에 보관하지 않았다.
+Maintainer-local 근거는 `audit/review-80e0ad21-20261008/`에 보존한다. `verify-candidate.sh`는 committed source와 HEAD의 일치를 검사한다. Runner는 candidate SHA, toolchain과 Cargo 입력 hash를 기록한다. 이어서 fmt, clippy, workspace test, release CLI smoke와 MSRV check를 실행한다. 로컬 runner 결과와 hosted CI 결과를 구분한다. 기존 `80e0ad21`의 CI 성공으로 새 candidate를 인증하지 않는다.
+
+이 source 변경은 registry 게시나 production 배포를 포함하지 않는다. Section 11의 관측은 과거 근거로 유지한다. 원본 351 comparison ledger와 축약 reference hash의 대상은 확인된 자료로만 연결한다.
+
+근거: audit/review-80e0ad21-20261008의 원시 실행 기록과 hyperliquid-archive-upstreams.json · 2026-10-08 11:09 KST
+
+## 13. PR #1 리뷰 후속 조치, 2026-10-08
+
+### RE-002: 결정적 READ 거절과 장애의 구분
+
+Runtime은 DATA, pinned NoCode와 execution revert를 별도 observation으로 집계한다.
+Runtime은 기존 category와 entity 정책으로 유일한 quorum을 확인한 뒤 domain refusal을 반환한다.
+단일 불량 provider는 정상 provider quorum을 거절로 바꾸지 않는다. 서로 다른 결과의 quorum이 동시에 성립하면 signer에 진입하지 않는다.
+
+Revert 분류는 numeric code `3` 또는 numeric code `-32000`과 정확한 `execution reverted` 메시지의 조합만 인정한다. 메시지의 대소문자는 구분하지 않는다.
+Runtime은 제공된 revert DATA를 검증하고 fingerprint에 포함한다. 생략과 유효한 `0x`는 같은 빈 DATA이며, null·잘못된 타입·잘못된 hex는 vote를 얻지 못한다.
+Timeout, transport 장애와 다른 RPC error는 non-retryable domain refusal로 바꾸지 않는다. HTTP consumer 계약은 [README.md](./README.md)에 명시했다.
+
+실제 TCP API handler와 Reqwest provider fixture의 관측은 다음과 같다.
+
+| 결과 | Case 수 | HTTP status | Sign-stage |
+|---|---:|---:|---:|
+| 정상 처리 | 12 | 200 | 각 1회 |
+| Quorum으로 확인한 domain refusal | 4 | 400 | 0회 |
+| 장애·불완전 DATA·모호한 quorum | 17 | 500 | 0회 |
+
+각 case의 실제 status는 기대값과 일치했다. Empty call의 code `0x00` 및 `0x6000`과 1-bad/2-good 정상 control을 유지했다.
+원시 요청·응답·pin·provider header와 signer counter는 `audit/review-pr1-20261008/main-validation-95w4uR/read-http/http-results.json`에 보존한다.
+이 파일의 SHA-256은 `e8753b3e6df4e0611bbe49d6de302641c9ad011bda572bd6a4a05c7da37f60c4`다.
+실행한 runtime test binary의 SHA-256은 `a4089ef24da7720e083a89f3eb8f9547eaae3203c1b9d0e89a8b2d1db610eaf9`다.
+이 실행은 아직 commit하지 않은 후속 source를 Rust 1.98.1로 검증한 로컬 실행이다. HEAD `87b4bae`의 기존 CI나 운영 배포 실행으로 표현하지 않는다.
+
+독립 리뷰에서 발견한 잘못된 revert 분류는 같은 case ID로 수정 전과 후를 대조했다.
+`read-domain/run-07/http-results.json`의 SHA-256은 `9ad34908c2474db0dbfe11f4d53d44c169d9ae0919dd576b06728ada8997e022`다.
+수정 전에는 method-not-found, timeout 및 잘못된 code 형식의 5개 case가 domain refusal로 오분류됐다.
+`read-domain/run-08/http-results.json`의 SHA-256은 `5d1b39d4227e2a53478ad1981fba51393afc2a5488e4d20a8eaefbcc3edb5e25`다.
+수정 후에는 이 case들이 internal 오류로 남고 정상 독립 provider의 quorum은 성공했다. 원본 351 comparison의 case ID로 임의 매핑하지 않는다.
+
+### 전체 검증과 CI 증거의 경계
+
+Rust 1.98.1과 `RUSTFLAGS=-D warnings`의 fmt 및 workspace all-targets clippy는 통과했다.
+같은 workspace test는 전체 성공이 아니다. Runtime 결과는 496 passed, 1 failed, 15 ignored다.
+실패한 기존 `provider_config_refresh_failure_logs_the_position_but_not_the_value`는 빈 log capture를 관측했다. 해당 source와 보안 assert는 바꾸지 않았다.
+원시 workspace log의 SHA-256은 `129b54eac4740fbc1e18e21957f8d0f45e94f0385dc338180e1b8b0e39e1fbe6`다.
+조사 작업자는 독립 harness에서 다른 NoSubscriber thread의 첫 callsite 등록으로 tracing InterestCache가 로그를 누락하는 메커니즘을 재현했다고 보고했다. 원본 실행의 registration 순서는 미확인이므로 원본 실패 원인은 추론으로 남긴다.
+이 조사는 `audit/review-pr1-20261008/refresh-log-investigation/`에 보존한다. 새 READ HTTP 경로와 직접 연결되는 subscriber 변경은 찾지 못했다.
+
+후속 hosted CI run `37749547883` 기록: PR head `9e29dc93acbeaf13bc65a6eaf85ef4de0ac71473`, CI checkout `ff3fb4ad19e790ba5193011b88a62ee840521bd7`, tree `fb07731b2ff2d96b9ad5e06159473822915bd3bd`; 6개 job 성공. Hosted workspace 970 passed / 0 failed / 15 ignored (985 unique)이며 Main local runtime 496 passed / 기존 log-capture fixture 1 failed / 15 ignored와 별도다.
+Hosted READ HTTP artifact 33건은 expected/actual status가 일치했다 (200 12, 400 4, 500 17). Quorum 확인 no-code/revert 4건은 `UNRESOLVABLE_COMMAND`, `retryable=false`, signer stage 0이며 timeout/transport·불완전 관측·모호한 결과는 domain refusal이 아닌 500으로 남았다. 1-bad/2-good healthy quorum은 성공했다. CI image를 Docker CLI로 실행한 별도 6-case READ smoke와 SDK signature recovery 3건은 `audit/review-pr1-20261008/ci-image-http-smoke/`에 보존한다. 이는 실제 image 실행이지 운영 KMS 서명이나 Kubernetes 전체 테스트가 아니다.
+운영 rollout은 existing Deployment `3/3` updated/ready/available, `/ready` HTTP 200 및 `/signer-info` signer identity 응답을 기록한다. Image는 `ghcr.io/fp-validated/pillar-dvn-client:ci-ff3fb4ad19e7-r37749547883-a1@sha256:4ac2cbcd560b7bc1607f7846027509d42c881aacbf557d8d882100d804e80aae`로 digest 고정한다. 영구 `version` 응답 `v2.5.0`은 image identity 대체물이 아니다.
+기존 chain/entity/quorum과 18개 `LAYERZERO_AVAILABLE_CHAIN_NAMES`를 유지하고 Hyperliquid URI만 기존 Alchemy-backed `hyperliquid-pinned` alias로 변경했다. ConfigMap 변경 checksum은 `985bee4a4f0dda1da8d743765536e6e95c744cbab284a792dde36c3b9fbf795c`다. Live pin-control은 historical number/hash의 call/code 일치와 missing-hash error를 관측했지만 동일 provider selector 비교라 독립 oracle/fork/failure injection이 아니다. 실제 정상 MESSAGE의 운영 KMS 서명은 미관측이다. Original351 ledger, original raw266 replay, original78 manifest 연결, A2/A4/B3 original-case mapping, Solana program-source build는 미확인이라 원본 8 finding 전체를 `fixed_verified`로 닫지 않는다.
+
+### RE-001: 기존 운영 Deployment의 한정 교체
+
+운영 적용 대상은 기존 `ovh-cluster/rpc-mainnet/lz-rpc`와 `ovh-cluster/layerzero-mainnet/pillar-dvn-client-mainnet`이다. 별도 테스트 Deployment는 만들지 않는다.
+준비한 `hyperliquid-pinned` alias는 기존 Alchemy URL reference만 사용한다. Generic Hyperliquid route와 다른 chain, Secret, signer identity 및 entity quorum 정책은 유지한다.
+Pillar의 Hyperliquid URI만 alias로 바꾸고 CI가 만든 image를 기존 private registry 경로에서 digest로 고정한다.
+정확한 image와 ConfigMap diff, 기존 resource identity, rolling 전략 및 rollback을 운영 승인 전에 함께 제시한다. 전체 Argo Application의 기존 drift는 반영하지 않는다.
+기존 계획에서 정상 historical hash/missing hash control, noncompliant-upstream failover 차단 및 정상 MESSAGE 서명을 사후 확인 항목으로 제시했다. 현재는 앞의 제한 pin-control만 관측됐고, 독립 failover 장애주입과 운영 KMS 정상 MESSAGE 서명은 미관측이다.
+기존 운영 Deployment 변경/rollout은 `audit/review-pr1-20261008/operating-rollout/`에 보존한다. 실제 ready/signer-info 및 pin-control 결과가 있으나 `metrics.prom`의 sign budget started/success/error가 각각 0이어서 운영 KMS의 정상 MESSAGE 서명은 수행·관측하지 않았다. Main은 startup log에서 Azure signer, 18 chains, `any:1` quorum 및 API auth disabled 설정이 유지됐다고 보고했다. Private GitOps main 게시와 minimal patch/rollback은 retained evidence로 구분하며 Public PR은 미병합이다.
+별도의 f26c3fb GitOps validator run `37768428872`는 success이고 Harbor mirror run `37768428871`은 failure다. Mirror workflow는 `contents:read`만 가졌고 GHCR mirror username/token secrets는 비어 있었으며, Main이 제공한 mirror log의 exact-digest lookup은 `MANIFEST_UNKNOWN`으로 끝났다. 이는 그 workflow의 GHCR source-read/auth 실패이지 image 미게시 증거가 아니다. Main은 로컬 인증 및 실제 3-Pod pull에서 같은 digest를 읽었다고 보고했다. Source-read 권한 remediation은 필요하지만 package permission/credential 변경은 승인·실행되지 않았고 raw failure는 보존했다. 이는 Pillar hosted CI `37749547883` 6/6 success와 별도다. `gitops-followup-ci.json`과 `mirror-secret-metadata.json`은 관측 artifact이며 startup/mirror log와 pull 확인 세부는 Main-reported로 구분한다.
+추가 관측 경계: 별도 independent review의 마지막 live re-query는 2026-10-08 20:40:20 KST이며 report SHA-256은 `1b0f13b28c8072abfed7ff333f1bfadae2c768d4dd438aa919d9eb735f03af84`다. Main이 22:36 KST에 기록한 report byte 확인 시각은 관측 시각이 아니다. Main은 final Deployment를 22:38 KST에 다시 확인했고, `pillar-deployment-final.json`은 3/3 replicas/updated/ready를 기록한다. 반면 `metrics.headers`의 Prometheus 관측은 20:34:18 KST이므로 sign-budget 0/0/0을 22:38 이후 상태로 확대하지 않는다.
+같은 시점대의 좁은 fresh discovery는 Arbitrum 단일 64-block window에 PacketSent 0 (20:32:41 KST), BSC 단일 window에 source candidate 0 (마지막 RPC 20:36:15 KST), Base 단일 64-block window에 PacketSent 5건이나 destination EID 30168/30302 모두 지원되지 않아 supported candidate 0 (head 조회 20:36:28 KST)으로 기록됐다. Main은 기존 Ethereum 후보 3건은 이미 Verified라고 별도 보고했다. 이는 기존 증거이며 fresh scan 결과가 아니다. 이 scan은 normal signing canary를 만들지 않았고 KMS/normal API POST·signature가 없다. 한정 window의 후보 부재로 전체 normal path의 불가능을 추론하지 않는다.
+QuickNode 독립 control은 22:37:59–22:38:00 KST 관측에서 chain/block identity 일치, historical call mismatch를 기록했다. 최초 결과의 code mismatch는 hex text를 bytes 대신 hashing한 비교 오류였고, 보존된 offline comparison은 2041-byte code identity 일치로 정정했으나 call mismatch는 남는다. QuickNode는 eligible provider에서 계속 제외하고, independent PIN-VALID 완료로 주장하지 않는다. Alchemy temporal control은 22:42:24–22:42:28 KST historical block number/hash 및 call을 20:22:48 KST의 기존 관측과 재현했고 latest call은 달랐다. 이는 동일 deployed route의 시간 비교일 뿐 independent oracle, 실제 fork 또는 failure injection이 아니다.
+F1/F2 rollback은 기존 minimal plan의 순서를 따른다: consumer source의 두 field를 먼저 revert하고 Target2 ConfigMap/Deployment를 되돌려 3-Pod rollout 완료를 기다린 뒤, proxy source alias를 되돌리고 Target1을 rollback하여 rollout 완료를 확인한다. Live-only rollback과 whole-app sync는 금지한다. 계획만 갱신됐으며 rollback은 실행되지 않았다.
+별도 three-provider historical-state probe는 2026-10-08 22:49:35.620–22:49:52.496 KST에 historical block n−1/n/n+1의 read-only eth_call 9건을 보존했다. SELF 3건은 transport/JSON observation 실패, QuickNode 3건은 성공했으나 n 결과가 22:38 KST sample과 달랐고, Alchemy 3건은 20:22:48.008 KST의 이전 historical 결과를 유지했다. 독립 PIN-VALID 완료는 아니며 QuickNode는 제외 상태다. Zero StateRoot는 Ethereum state-proof의 한계이지 request pin 불가능의 단독 증거가 아니다.
+SELF direct existing Service control pin-self-service-control.json (ovh-cluster/rpc-mainnet/rpc-hyperliquid-mainnet-node-01-rpc:3001/evm)는 22:57:33.375–22:57:36.747 KST의 5개 read-only RPC다. chainId 0x3e7, historical block 0x2dc3f31/hash 0xb9dea23449cb0d58d846784fcef02260c94dfb769f66981c70edb497523a0ab1은 일치했고 n−1/n/n+1 call은 모두 SELF 0x00000000000000000000000000000000000000000002ab88d99c0f8c248f52f9, Alchemy 0x00000000000000000000000000000000000000000002ab169fb0aa81ce948969로 달랐다. 이 direct service는 hash-pinned READ eligible에 추가되지 않았고, normal independent PIN-VALID 또는 archive consistency 전체 완료가 아니다.
+Credential/Secret 경계: preparation 단계와 이번 direct SELF query 모두 Secret lookup이 없었다. 별도로 앞선 22:38/22:49 Main direct probes는 endpoint를 Secret payload에서 메모리상 읽었으나 credential을 저장·공개·변경하지 않았다.
+최종 runbook은 consumer/proxy를 각각 strict-mode bash subshell로 분리하고, consumer 완료 뒤 proxy source alias revert 및 재조회 단계를 요구한다. consumer rollout 오류/timeout이면 중단하고 proxy alias를 유지한다. 일반 Hyperliquid route와 v2.5.0 복귀는 RE-001 위험을 재도입하고, maxUnavailable 1로 proxy rolling 중 용량이 절반까지 줄 수 있다. scan-only mirror source-read 문제는 별도로 기록한다. 실제 rollback과 KMS·권한 변경은 없었다.
+Main-reported cleanup (2026-10-08 22:47:36 KST): 네 task-owned forward의 정확한 PID/command를 확인 후 종료했고 18545/19873/18546/19874에서 ps/lsof 잔여가 없었다. 사용자 18080은 미변경, 운영 workloads는 유지됐다. du: operating-rollout 428 KiB, hosted-ci 201480 KiB, source-checkouts 2264 KiB. raw evidence, original CI tar, source Git metadata 보존; shared build caches, 이전 Docker artifacts, spookfish 소유 8 files는 삭제하지 않았다. cleanup zero로 주장하지 않는다.
+Main-reported 23:01:32 KST cleanup: PID 90100와 command를 확인하고 새 SELF forward를 종료했다. 전체 5개 owned-forward ports 18545/18546/18547/19873/19874에서 lsof 잔여가 없었다.
+근거: Main local raw run; hosted CI run 37749547883 independent review; ci-image-http-smoke; operating-rollout; fresh Arbitrum/BSC/Base; pin-independent-control.json, pin-independent-comparison.json, pin-temporal-control.json, pin-three-provider-state.json, pin-self-service-control.json; Main-reported cleanup; minimal-existing-rollout · latest direct observation: SELF call comparison finished 2026-10-08 22:57:36.747 KST; PID 90100 stopped/five-forward lsof check 23:01:32 KST (provider state 22:49:52.496 KST; reviewer live re-query 20:40:20 KST; sign metrics 20:34:18 KST)

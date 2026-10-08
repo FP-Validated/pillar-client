@@ -1,0 +1,519 @@
+{
+  "schemaVersion": 1,
+  "reportId": "pr1-case-evidence",
+  "scope": {
+    "requestedOriginalFindings": [
+      "A2",
+      "A3",
+      "A4",
+      "B3"
+    ],
+    "definitions": "PILLAR_CHANGES.md, user-provided; A2 90-132, A3 134-164, A4 167-204, B3 293-330",
+    "original351Ledger": {
+      "status": "unavailable",
+      "coverageClaim": false,
+      "note": "351 total and 387 category sum are reported; individual ledger unavailable. No per-case ID mapping inferred."
+    },
+    "passPolicy": "Do not mark fixed_verified unless stable case identity, current source/binary identity, and result artifact are traceably bound. Reported summaries are not raw execution.",
+    "newCiRuns": "Hosted run 37749547883 and post-rollout operating evidence are recorded separately from Main local workspace/HTTP execution; original351 ledger remains unavailable and no original-case closure is implied."
+  },
+  "identity": {
+    "reviewCheckoutHead": "87b4bae121280a67fb589f60bbd0deebafae2eab",
+    "reviewTree": "a4582f12c18e77ff48165a56a947fccd1bb2ebe2",
+    "candidateToolchainRecord": "/Users/steve/orca/workspaces/pillar-client/retest-250-20261007/audit/review-80e0ad21-20261008/candidate-87b4bae/candidate-identity.txt",
+    "candidateReleaseBinarySha256": "1050398ac2c2f6713b83c863e2afccd866ef52c03351e3861454f841c69c433e",
+    "bindingCaveat": "The retained local runner script checks candidate source cleanliness, records HEAD/toolchain/Cargo input hashes, builds the locked native release binary, and hashes it. The same binary SHA-256 appears in candidate release-binary-hash.txt, source-consumer.json executedBinarySHA256, and receipt proof.json. This supports a limited local source-bound execution claim for candidate 87b4bae (not a claim of independent bit-for-bit reproducible build).",
+    "readDomainRuntimeEvidence": {
+      "runDirectory": "/Users/steve/orca/workspaces/pillar-client/retest-250-20261007/audit/review-pr1-20261008/main-validation-95w4uR",
+      "finishedAtKst": "2026-10-08 16:02 KST",
+      "sourceBase": "87b4bae121280a67fb589f60bbd0deebafae2eab",
+      "sourceSnapshot": "audit/review-pr1-20261008/read-domain/source-p2-final.tar.gz",
+      "sourceSnapshotSha256": "f45f4fb5aa79720ec1b098373d7cb2ce0e8719c046bb80323af15c2b55ca93ce",
+      "sourceManifest": "audit/review-pr1-20261008/read-domain/source-p2-final2-sha256.txt",
+      "sourceManifestSha256": "4c91c7a8297951ece3c2cc35d3c2ddc85cb7a83dc6d02235fdbf91b3dbc86790",
+      "deliveryRecord": "audit/review-pr1-20261008/read-domain/delivery-p2.json",
+      "deliveryRecordSha256": "2ce7fadaf4f03fa8a2fbce0a15242a8b0a9884d94284a9bc781126dcc252568a",
+      "selectedSnapshotFileCount": 19,
+      "sourceFiles": {
+        "providerHealthHelperSha256": "291c678f059973624f30ac3cb76d4ecf1f02d7abe43a814cdd89d0673cd87026",
+        "readHttpE2eSha256": "fcf7551eb4159af10eec49dd6f2a48db2feb25359c562e9107503a40b4d6385b",
+        "CargoTomlSha256": "264be26c8b564e3a08d216f081872dc6f8404e5389fafe81237fad878847dd2b",
+        "CargoLockSha256": "51a70dc1eb052efffb7db4ba497055aee8f5220fb463ce08d43f37bfd8c0dd01"
+      },
+      "runtimeBinary": {
+        "path": "target/audit-review-20261008/debug/deps/pillar_runtime-60735513aadcc7c6",
+        "sha256": "a4089ef24da7720e083a89f3eb8f9547eaae3203c1b9d0e89a8b2d1db610eaf9"
+      },
+      "toolchain": "Rust 1.98.1; aarch64-apple-darwin; RUSTFLAGS=-D warnings",
+      "readHttpArtifact": {
+        "path": "audit/review-pr1-20261008/main-validation-95w4uR/read-http/http-results.json",
+        "sha256": "e8753b3e6df4e0611bbe49d6de302641c9ad011bda572bd6a4a05c7da37f60c4",
+        "bytes": 423085,
+        "cases": 33,
+        "statusCounts": {"200": 12, "400": 4, "500": 17},
+        "expectedStatusMismatches": 0,
+        "negativeSignerStage": 0,
+        "positiveSignerStage": 1
+      },
+      "workspaceChecks": {
+        "fmt": {"status": "passed", "exitStatus": 0, "artifact": "audit/review-pr1-20261008/main-validation-95w4uR/fmt-exit-status.txt"},
+        "clippyAllTargets": {"status": "passed", "exitStatus": 0, "artifact": "audit/review-pr1-20261008/main-validation-95w4uR/clippy-exit-status.txt"},
+        "workspaceTests": {"status": "failed", "exitStatus": 101, "passed": 496, "failed": 1, "ignored": 15, "failure": "Main이 기존 config_loader log-capture 실패를 직접 관측했다. 이 count는 runtime target의 결과이며 workspace 전체 합계가 아니다. 기존 source와 assert는 변경하지 않았다.", "rawLogSha256": "129b54eac4740fbc1e18e21957f8d0f45e94f0385dc338180e1b8b0e39e1fbe6", "rawLogPath": "audit/review-pr1-20261008/main-validation-95w4uR/workspace-test.log"}
+      },
+      "workerTestFirstEvidence": {
+        "sourceBase": "87b4bae121280a67fb589f60bbd0deebafae2eab",
+        "toolchain": "rustc 1.96.0 ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96; aarch64-apple-darwin",
+        "baselineSourceManifest": "audit/review-pr1-20261008/read-domain/source-p2-baseline-sha256.txt",
+        "baselineSourceManifestSha256": "1e49011a0c1ebb5e09e3bf083a327b34060d394e4d22c57913edc847340bcaca",
+        "baselineSourceHashes": {"providerHealthHelper": "76ef90d7f348aa916c4cd23eb39fd6fca48fe15681584ef1400f02b7eb3ad865", "readHttpE2e": "fcf7551eb4159af10eec49dd6f2a48db2feb25359c562e9107503a40b4d6385b"},
+        "postFixSourceManifest": "audit/review-pr1-20261008/read-domain/source-p2-final2-sha256.txt",
+        "postFixSourceManifestSha256": "4c91c7a8297951ece3c2cc35d3c2ddc85cb7a83dc6d02235fdbf91b3dbc86790",
+        "postFixSourceHashes": {"providerHealthHelper": "291c678f059973624f30ac3cb76d4ecf1f02d7abe43a814cdd89d0673cd87026", "readHttpE2e": "fcf7551eb4159af10eec49dd6f2a48db2feb25359c562e9107503a40b4d6385b"},
+        "baselineRawSha256": "9ad34908c2474db0dbfe11f4d53d44c169d9ae0919dd576b06728ada8997e022",
+        "postFixRawSha256": "5d1b39d4227e2a53478ad1981fba51393afc2a5488e4d20a8eaefbcc3edb5e25",
+        "workerExecutableSha256": "not retained in delivery evidence; do not bind these worker run results to Main's later runtime binary"
+      },
+      "bindingLimit": "Local runtime/test binary is linked to the retained selected 19-file source snapshot and delivery record, not to the full checkout or the 87b4bae release binary. No deployment or external public replay is claimed."
+    },
+    "nativeBuildBinding": {
+      "checkout": "/Users/steve/orca/workspaces/pillar-client/retest-250-20261007",
+      "sourceRevision": "87b4bae121280a67fb589f60bbd0deebafae2eab",
+      "sourceTree": "a4582f12c18e77ff48165a56a947fccd1bb2ebe2",
+      "toolchain": "rustc 1.98.1, aarch64-apple-darwin",
+      "cargoInputs": {
+        "CargoToml": "264be26c8b564e3a08d216f081872dc6f8404e5389fafe81237fad878847dd2b",
+        "CargoLock": "51a70dc1eb052efffb7db4ba497055aee8f5220fb463ce08d43f37bfd8c0dd01"
+      },
+      "runnerScript": "/Users/steve/orca/workspaces/pillar-client/retest-250-20261007/audit/review-80e0ad21-20261008/verify-candidate.sh",
+      "sourceIdentity": "/Users/steve/orca/workspaces/pillar-client/retest-250-20261007/audit/review-80e0ad21-20261008/candidate-87b4bae/final-supplychain/source-identity.json",
+      "candidateIdentity": "/Users/steve/orca/workspaces/pillar-client/retest-250-20261007/audit/review-80e0ad21-20261008/candidate-87b4bae/candidate-identity.txt",
+      "releaseBuildHashRecord": "/Users/steve/orca/workspaces/pillar-client/retest-250-20261007/audit/review-80e0ad21-20261008/candidate-87b4bae/release-binary-hash.txt",
+      "sourceConsumerRecord": "/Users/steve/orca/workspaces/pillar-client/retest-250-20261007/audit/review-80e0ad21-20261008/candidate-87b4bae/source-consumer.json",
+      "binarySha256": "1050398ac2c2f6713b83c863e2afccd866ef52c03351e3861454f841c69c433e",
+      "claimLimit": "Local candidate source/build/run linkage supported by retained script/identity and matching executable digest; not independent reproducible-build proof."
+    }
+  },
+  "cases": [
+    {
+      "caseId": "A2-FINALITY-LAG",
+      "originalFinding": "A2: Polygon/Tron finalized height below receipt height must refuse",
+      "baselineFailure": {
+        "status": "reported",
+        "rawBaseline": "not found"
+      },
+      "current": {
+        "status": "reported",
+        "evidence": "AUDIT.md §11 and audit/retest-250/verification.md report finalized-lag refusals; no per-case raw output/source-binary binding linked"
+      },
+      "normalControl": {
+        "status": "reported",
+        "evidence": "exact-height successful case reported with one signer invocation"
+      },
+      "signStage": {
+        "negative": "reported refusal",
+        "positive": "reported 1 invocation",
+        "rawCounter": false
+      },
+      "fixture": {
+        "portableSanitized": false
+      },
+      "evidenceKinds": [
+        "reported"
+      ],
+      "verified": false
+    },
+    {
+      "caseId": "A2-FINALITY-EQUAL-CONTROL",
+      "originalFinding": "A2: finalized.number == receipt.blockNumber is accepted",
+      "baselineFailure": {
+        "status": "not-observed"
+      },
+      "current": {
+        "status": "reported",
+        "evidence": "prior verification report reports exact-height success"
+      },
+      "normalControl": {
+        "status": "reported"
+      },
+      "signStage": {
+        "status": "reported 1 invocation",
+        "rawCounter": false
+      },
+      "fixture": {
+        "portableSanitized": false
+      },
+      "evidenceKinds": [
+        "reported"
+      ],
+      "verified": false
+    },
+    {
+      "caseId": "A2-FINALITY-UNAVAILABLE",
+      "originalFinding": "A2: required finalized tag unavailable must fail closed",
+      "baselineFailure": {
+        "status": "not-observed"
+      },
+      "current": {
+        "status": "reported",
+        "evidence": "AUDIT.md says no latest fallback and fail closed; every operating provider not checked"
+      },
+      "normalControl": {
+        "status": "not-observed"
+      },
+      "signStage": {
+        "status": "not-observed"
+      },
+      "fixture": {
+        "portableSanitized": false
+      },
+      "evidenceKinds": [
+        "reported",
+        "source-static"
+      ],
+      "verified": false
+    },
+    {
+      "caseId": "A3-READ-NOCODE-EMPTY",
+      "originalFinding": "A3: empty eth_call + no code is non-retryable unresolvable-command; no sign",
+      "baselineFailure": {
+        "status": "reported-original-finding",
+        "rawBaseline": "not found",
+        "note": "Original per-case baseline bytes and 351 ledger ID mapping are unavailable. Separate P2 run-07 is a pre-fix source-snapshot regression, not proof of the original finding's baseline case."
+      },
+      "current": {
+        "status": "direct-artifact-observed-source-bound-local-run",
+        "artifact": "/Users/steve/orca/workspaces/pillar-client/retest-250-20261007/audit/review-pr1-20261008/main-validation-95w4uR/read-http/http-results.json",
+        "sha256": "e8753b3e6df4e0611bbe49d6de302641c9ad011bda572bd6a4a05c7da37f60c4",
+        "case": "no_code_negative_q2",
+        "observed": "Expected/actual HTTP 400; code=UNRESOLVABLE_COMMAND, retryable=false; signer_stage_count=0.",
+        "mainRun": {
+          "runDirectory": "audit/review-pr1-20261008/main-validation-95w4uR",
+          "finishedAtKst": "2026-10-08 16:02 KST",
+          "all33ExpectedStatusesMatched": true,
+          "statusCounts": {"200": 12, "400": 4, "500": 17},
+          "negativeSignerStage": 0,
+          "positiveSignerStage": 1
+        },
+        "workerTestFirstComparison": {
+          "baselineRun": "audit/review-pr1-20261008/read-domain/run-07/http-results.json",
+          "baselineSha256": "9ad34908c2474db0dbfe11f4d53d44c169d9ae0919dd576b06728ada8997e022",
+          "baselineOutcome": "Five invalid/non-domain negative-Q2 cases returned HTTP 400 where 500 was expected; no_code_negative_q2 itself was expected 400 and passed.",
+          "postFixRun": "audit/review-pr1-20261008/read-domain/run-08/http-results.json",
+          "postFixSha256": "5d1b39d4227e2a53478ad1981fba51393afc2a5488e4d20a8eaefbcc3edb5e25",
+          "postFixOutcome": "33/33 expected statuses matched (12/4/17), negative sign stages 0, positive sign stages 1."
+        },
+        "sourceBinding": "Main runtime binary and selected 19-file source snapshot are recorded in identity.readDomainRuntimeEvidence; neither is the 87b4bae release candidate binary."
+      },
+      "normalControl": {
+        "status": "direct-artifact-observed",
+        "artifact": "/Users/steve/orca/workspaces/pillar-client/retest-250-20261007/audit/review-pr1-20261008/main-validation-95w4uR/read-http/http-results.json",
+        "cases": ["empty_call_with_0x00_code", "empty_call_with_0x6000_code", "singleton_no_code_two_good", "singleton_revert_two_good"],
+        "observed": "Each HTTP 200, signed=true, signer_stage_count=1. A singleton failing/no-code/revert provider with two healthy peers does not prevent quorum."
+      },
+      "signStage": {"negative": "0 invocation", "control": "1 invocation", "rawCounter": true},
+      "fixture": {
+        "kind": "local TCP HTTP API-handler + Reqwest provider fixture",
+        "portableSanitized": false,
+        "artifact": "http-results.json",
+        "sha256": "e8753b3e6df4e0611bbe49d6de302641c9ad011bda572bd6a4a05c7da37f60c4"
+      },
+      "evidenceKinds": ["reported", "direct-artifact-observed"],
+      "verified": false,
+      "verificationBoundary": "Local source-bound runtime result is observed, but original raw baseline and original 351 ID mapping remain unavailable; fixture is maintainer-local, and no deployed CI is claimed."
+    },
+    {
+      "caseId": "A3-READ-CODE-PRESENT-EMPTY-CONTROL",
+      "originalFinding": "A3 positive control: empty call with 0x00 or 0x6000 code remains valid",
+      "baselineFailure": {"status": "not-applicable-control"},
+      "current": {
+        "status": "direct-artifact-observed-source-bound-local-run",
+        "artifact": "/Users/steve/orca/workspaces/pillar-client/retest-250-20261007/audit/review-pr1-20261008/main-validation-95w4uR/read-http/http-results.json",
+        "sha256": "e8753b3e6df4e0611bbe49d6de302641c9ad011bda572bd6a4a05c7da37f60c4",
+        "cases": ["empty_call_with_0x00_code", "empty_call_with_0x6000_code"],
+        "observed": "Both HTTP 200, signed=true, signer_stage_count=1; valid empty READ results remain preserved."
+      },
+      "normalControl": {"status": "direct-artifact-observed", "evidence": "Both code-present empty-call cases pass in the 33-case TCP HTTP run."},
+      "signStage": {"status": "one invocation per case", "rawCounter": true},
+      "fixture": {"portableSanitized": false, "kind": "local TCP HTTP API-handler + Reqwest provider fixture"},
+      "evidenceKinds": ["direct-artifact-observed"],
+      "verified": false,
+      "binding": "HTTP raw artifact is source-bound only to the retained selected 19-file snapshot and runtime test binary recorded in identity.readDomainRuntimeEvidence; no public portable fixture or deployment is claimed."
+    },
+    {
+      "caseId": "A3-READ-REVERT",
+      "originalFinding": "A3: execution revert must classify as unresolvable-command, not Internal",
+      "baselineFailure": {
+        "status": "reported-original-finding",
+        "rawBaseline": "not found",
+        "note": "Original per-case baseline bytes and 351 ledger ID mapping are unavailable. The separate P2 test-first run-07 is a pre-fix regression observation, not a substitute for the original baseline."
+      },
+      "current": {
+        "status": "direct-artifact-observed-source-bound-local-run",
+        "artifact": "/Users/steve/orca/workspaces/pillar-client/retest-250-20261007/audit/review-pr1-20261008/main-validation-95w4uR/read-http/http-results.json",
+        "sha256": "e8753b3e6df4e0611bbe49d6de302641c9ad011bda572bd6a4a05c7da37f60c4",
+        "cases": ["revert_negative_q2", "standard_revert_negative_q2", "absent_empty_revert_equal"],
+        "observed": "All expected/actual HTTP 400; response code UNRESOLVABLE_COMMAND, retryable=false; signer_stage_count=0. no_code_negative_q2 is linked under A3-READ-NOCODE-EMPTY.",
+        "genericFailureControls": {
+          "negativeQ2": ["method_not_found_revert_message_negative_q2", "timeout_code_revert_message_negative_q2", "missing_code_revert_message_negative_q2", "string_code_revert_message_negative_q2", "null_code_revert_message_negative_q2"],
+          "observed": "HTTP 500 with no domain code/retryable fields and sign stage 0; corresponding singleton-two-good cases return HTTP 200 and sign stage 1."
+        },
+        "workerTestFirstComparison": {
+          "baselineRun": "read-domain/run-07/http-results.json",
+          "baselineSha256": "9ad34908c2474db0dbfe11f4d53d44c169d9ae0919dd576b06728ada8997e022",
+          "baselineObservation": "Five invalid/non-domain negative-Q2 cases were incorrectly HTTP 400 instead of expected 500; these are not the original A3 revert baseline.",
+          "postFixRun": "read-domain/run-08/http-results.json",
+          "postFixSha256": "5d1b39d4227e2a53478ad1981fba51393afc2a5488e4d20a8eaefbcc3edb5e25",
+          "postFixObservation": "33/33 statuses matched expected: 12 HTTP 200, 4 HTTP 400, 17 HTTP 500; negative sign stages 0, positive sign stages 1."
+        },
+        "sourceBinding": "Main execution used the Rust 1.98.1 aarch64-apple-darwin workspace runtime test binary; see identity.readDomainRuntimeEvidence. The selected source snapshot contains 19 files, not the entire checkout."
+      },
+      "normalControl": {
+        "status": "direct-artifact-observed",
+        "cases": ["singleton_revert_two_good"],
+        "observed": "HTTP 200, signed=true, signer_stage_count=1; quorum of two healthy providers succeeds despite one revert/error provider."
+      },
+      "signStage": {
+        "negative": "0 across domain refusal and generic failure cases",
+        "control": "1 invocation for successful healthy-quorum control",
+        "rawCounter": true
+      },
+      "fixture": {
+        "kind": "local TCP HTTP API-handler + Reqwest provider fixture",
+        "portableSanitized": false,
+        "rawHttpResultsSha256": "e8753b3e6df4e0611bbe49d6de302641c9ad011bda572bd6a4a05c7da37f60c4"
+      },
+      "evidenceKinds": ["reported", "direct-artifact-observed"],
+      "verified": false,
+      "verificationBoundary": "Current local source-bound execution is observed; original raw baseline/351 ID mapping and public portable fixture are unavailable. No deployed CI claim."
+    },
+    {
+      "caseId": "A4-RECEIPT-IDENTITY-AND-REMOVED",
+      "originalFinding": "A4: receipt tx mismatch, log tx/block mismatch, removed=true refused",
+      "baselineFailure": {
+        "status": "reported",
+        "rawBaseline": "not found"
+      },
+      "current": {
+        "status": "direct-artifact-observed",
+        "artifact": "/Users/steve/orca/workspaces/pillar-client/retest-250-20261007/audit/review-80e0ad21-20261008/operating-receipt-consumer/2026-10-08T02-10-21-944Z/proof.json",
+        "cases": [
+          "negative-transaction-hash",
+          "negative-block-hash",
+          "negative-removed-true",
+          "negative-removed-null",
+          "negative-removed-wrongtype",
+          "negative-log-index",
+          "negative-address",
+          "negative-topics",
+          "negative-data",
+          "negative-duplicate-index",
+          "negative-reread-change"
+        ],
+        "observed": "negative signStageDelta=0; synthetic localhost mutations of captured operating receipt; no KMS or chain transaction"
+      },
+      "normalControl": {
+        "status": "direct-artifact-observed-source-bound-local-run",
+        "artifact": "/Users/steve/orca/workspaces/pillar-client/retest-250-20261007/audit/review-80e0ad21-20261008/operating-receipt-consumer/2026-10-08T02-10-21-944Z/positive-q2-raw-receipt.json",
+        "sha256": "93190991e1dc82d1e1aa90ee45ba7c2557281095d0e568e5359cd5d3a4d4b6e0",
+        "observed": "HTTP 200, signed=true, signStageDelta=1; binary digest equals candidate native release execution."
+      },
+      "signStage": {
+        "negative": "0 delta",
+        "normalControl": "1 delta"
+      },
+      "fixture": {
+        "kind": "captured receipt with local mutations",
+        "rawReceiptSha256": "b29db0d1293e78e8dc72333de01c847c038f864f29b91887e3441e810b161f91",
+        "portableSanitized": false,
+        "originalBytesModified": false,
+        "proofSha256": "cecb6a7ec238a015e587225ead20fe74062d9137c478c22f7838a2ddfadd9000"
+      },
+      "binary": {
+        "sha256": "1050398ac2c2f6713b83c863e2afccd866ef52c03351e3861454f841c69c433e"
+      },
+      "evidenceKinds": [
+        "direct-artifact-observed"
+      ],
+      "verified": false,
+      "binding": "Native candidate release is linked by local runner/identity records and exact digest matches receipt proof and source consumer. This is limited local source-bound execution evidence, not independent reproducible-build proof. Original baseline ledger-ID mapping remains unavailable, so not fixed_verified.",
+      "currentResult": {
+        "status": "direct-artifact-observed-source-bound-local-run",
+        "artifacts": [
+          {
+            "path": "/Users/steve/orca/workspaces/pillar-client/retest-250-20261007/audit/review-80e0ad21-20261008/operating-receipt-consumer/2026-10-08T02-10-21-944Z/proof.json",
+            "sha256": "cecb6a7ec238a015e587225ead20fe74062d9137c478c22f7838a2ddfadd9000"
+          },
+          {
+            "path": "/Users/steve/orca/workspaces/pillar-client/retest-250-20261007/audit/review-80e0ad21-20261008/candidate-87b4bae/source-consumer.json",
+            "sha256": "dabc8cc0eb6dc3d3adecfba83da8071fdbe9c6d148d836bc9cd0aa3b8944a680"
+          }
+        ],
+        "cases": [
+          {
+            "case": "receipt-for-other-tx",
+            "artifact": "candidate-87b4bae/source-consumer.json",
+            "observed": "HTTP 500, rejected, sign-stage delta 0"
+          },
+          {
+            "case": "negative-transaction-hash",
+            "artifact": "operating receipt proof",
+            "observed": "log.transactionHash mismatch; HTTP 500, signStageDelta 0"
+          },
+          {
+            "case": "negative-block-hash",
+            "artifact": "operating receipt proof",
+            "observed": "log.blockHash mismatch; HTTP 500, signStageDelta 0"
+          },
+          {
+            "case": "negative-removed-true",
+            "artifact": "operating receipt proof",
+            "observed": "removed=true vote; HTTP 500, signStageDelta 0"
+          },
+          {
+            "case": "removed-log",
+            "artifact": "candidate-87b4bae/source-consumer.json",
+            "observed": "HTTP 500, rejected, sign-stage delta 0"
+          }
+        ],
+        "binarySha256": "1050398ac2c2f6713b83c863e2afccd866ef52c03351e3861454f841c69c433e",
+        "sourceRevision": "87b4bae121280a67fb589f60bbd0deebafae2eab",
+        "sourceTree": "a4582f12c18e77ff48165a56a947fccd1bb2ebe2",
+        "sourceBindingLevel": "local candidate source/build/run linkage from verify-candidate.sh plus matching release/source-consumer/proof binary digests"
+      },
+      "resultClassification": "source-bound-local-runtime-observed; original finding closure incomplete",
+      "verificationBoundary": "Not fixed_verified because baseline same-case replay and original 351 ledger ID mapping remain unavailable; not because of a presumed need for independent bit-for-bit rebuild."
+    },
+    {
+      "caseId": "B3-RECEIPT-SEMANTIC-QUORUM-METADATA-CONTROL",
+      "originalFinding": "B3: irrelevant receipt metadata such as l1Fee must not split semantic quorum",
+      "baselineFailure": {
+        "status": "reported",
+        "original500": "described in PILLAR_CHANGES.md",
+        "rawBaseline": "not found"
+      },
+      "current": {
+        "status": "direct-artifact-observed",
+        "artifact": "/Users/steve/orca/workspaces/pillar-client/retest-250-20261007/audit/review-80e0ad21-20261008/operating-receipt-consumer/2026-10-08T02-10-21-944Z/proof.json",
+        "cases": [
+          "positive-metadata-only",
+          "positive-removed-mixed-omitted-false",
+          "positive-q2-raw-receipt"
+        ],
+        "observed": "successful local loopback runs; AUDIT §12 reports same payload/signature for l1Fee metadata-only and q2 controls"
+      },
+      "normalControl": {
+        "status": "direct-artifact-observed-source-bound-local-run",
+        "artifact": "/Users/steve/orca/workspaces/pillar-client/retest-250-20261007/audit/review-80e0ad21-20261008/candidate-87b4bae/source-consumer.json",
+        "case": "valid-q2-l1fee-only",
+        "sha256": "dabc8cc0eb6dc3d3adecfba83da8071fdbe9c6d148d836bc9cd0aa3b8944a680",
+        "observed": "same payload/signature bytes as non-metadata q2 case; sign-stage delta 1."
+      },
+      "signStage": {
+        "metadataVariant": "valid-q2-l1fee-only accepted; delta 1",
+        "normalControl": "accepted; delta 1",
+        "payloadSignatureEquality": "direct source-consumer artifact q2L1FeeEquality records both true"
+      },
+      "fixture": {
+        "kind": "local synthetic receipt mutation",
+        "rawReceiptSha256": "b29db0d1293e78e8dc72333de01c847c038f864f29b91887e3441e810b161f91",
+        "portableSanitized": false,
+        "originalBytesModified": false,
+        "sourceConsumerSha256": "dabc8cc0eb6dc3d3adecfba83da8071fdbe9c6d148d836bc9cd0aa3b8944a680",
+        "proofSha256": "cecb6a7ec238a015e587225ead20fe74062d9137c478c22f7838a2ddfadd9000"
+      },
+      "binary": {
+        "sha256": "1050398ac2c2f6713b83c863e2afccd866ef52c03351e3861454f841c69c433e",
+        "sourceRevision": "87b4bae121280a67fb589f60bbd0deebafae2eab",
+        "sourceTree": "a4582f12c18e77ff48165a56a947fccd1bb2ebe2",
+        "sourceBindingLevel": "local candidate source/build/run linkage from verify-candidate.sh plus matching binary digest"
+      },
+      "evidenceKinds": [
+        "reported",
+        "direct-artifact-observed"
+      ],
+      "verified": false,
+      "binding": "The l1Fee acceptance is directly recorded in candidate source-consumer.json with the executed binary digest, which matches receipt proof and candidate release-binary-hash.txt. Separate proof case positive-metadata-only mutates log.blockTimestamp, not l1Fee. Local source-bound execution is established for the candidate; this is not independent reproducible-build proof. Original B3 comparison-ID mapping and baseline raw replay remain unavailable.",
+      "currentResult": {
+        "status": "direct-artifact-observed-source-bound-local-run",
+        "artifact": "/Users/steve/orca/workspaces/pillar-client/retest-250-20261007/audit/review-80e0ad21-20261008/candidate-87b4bae/source-consumer.json",
+        "sha256": "dabc8cc0eb6dc3d3adecfba83da8071fdbe9c6d148d836bc9cd0aa3b8944a680",
+        "case": "valid-q2-l1fee-only",
+        "observed": "accepted, HTTP 200, signed, sign-stage delta 1; q2L1FeeEquality.samePayloadBytes=true and sameSignatureBytes=true."
+      },
+      "resultClassification": "source-bound-local-runtime-observed; original finding closure incomplete",
+      "verificationBoundary": "Not fixed_verified because baseline same-case replay and original 351 ledger ID mapping remain unavailable; not because of a presumed need for independent bit-for-bit rebuild."
+    }
+  ],
+  "contextEvidence": [
+    {
+      "caseId": "TON-HTTP-LIFECYCLE-CONTEXT",
+      "originalFinding": null,
+      "note": "Related lifecycle evidence only; not A2/A3/A4/B3.",
+      "artifact": "/Users/steve/orca/workspaces/pillar-client/retest-250-20261007/audit/review-80e0ad21-20261008/linux-ton/evidence/final-linux-ton-http-e2e-run2.log",
+      "sourceCommit": "87b4bae121280a67fb589f60bbd0deebafae2eab",
+      "testSourceSha256": "9f37e682b6d4a577c37bf55b9193c56abd53a6fac74c9708f60a117d0815a1c3",
+      "imageId": "sha256:0cd8016db467a9560fbd61d7c60c790b62389a4f99ed4b95b94cc29631b88a62",
+      "sourceBinding": {
+        "imageBuildLog": "/Users/steve/orca/workspaces/pillar-client/retest-250-20261007/audit/review-80e0ad21-20261008/linux-ton/evidence/linux-image-build.log",
+        "imageBuildLogSha256": "c1844ebb035e702af4613a9877eb529f39aea35cc7f788ca5b72a8aa619983b1",
+        "dockerfile": "/Users/steve/orca/workspaces/pillar-client/retest-250-20261007/audit/review-80e0ad21-20261008/linux-ton/Dockerfile",
+        "buildContextNote": "Dockerfile copies Cargo files and crates from local build context; build log has no source revision/tree or production crate hashes.",
+        "runLog": "/Users/steve/orca/workspaces/pillar-client/retest-250-20261007/audit/review-80e0ad21-20261008/linux-ton/evidence/final-linux-ton-http-e2e-run2.log",
+        "runLogSha256": "3a3ae47ea8a50bda92de3ee88d16786ca0afb100bf22a36ac42058b9d3ff3806",
+        "mountNote": "Run mounts only transport_wire_tests.rs read-only; production crate is from the built image.",
+        "bindingLog": "/Users/steve/orca/workspaces/pillar-client/retest-250-20261007/audit/review-80e0ad21-20261008/linux-ton/evidence/final-source-binding.log",
+        "bindingLogSha256": "182fd1976c9f1a5d2ec9559e1c0dd7bebbcab335df8a9049c2311f5e0c7a8418",
+        "finding": "Test file and Cargo.toml/Cargo.lock match commit 87b4bae and in-container hashes; production source in the image is not source-revision-bound by retained build record. Keep as lifecycle execution observation only."
+      },
+      "observation": "Linux x86_64 release lifecycle/depth output. Test source/Cargo inputs hash-link to commit 87b4bae, while production crate in image is not source-revision-bound by retained build record; not current production-source verification.",
+      "macos": {
+        "status": "not-observed-for-current-source",
+        "priorReportedBytes": 29261824,
+        "note": "Prior reported run predates Linux time fix. Await worker final macOS raw artifact."
+      },
+      "evidenceKinds": [
+        "CI-artifact-observed",
+        "reported"
+      ],
+      "verified": false
+    }
+  ],
+  "coverage": {
+    "requestedFindings": [
+      "A2",
+      "A3",
+      "A4",
+      "B3"
+    ],
+    "linkedStableCases": 8,
+    "original351ComparisonsCovered": 0,
+    "complete": false,
+    "reason": "Original ledger IDs/full denominator unavailable. Requirement-to-stable-case mapping and current source-bound local artifacts are recorded where present; no original 351 comparison population or baseline/current same-ID comparison is claimed."
+  },
+  "report": {
+    "path": "pr1-case-evidence.md",
+    "language": "ko"
+  },
+  "pr1FollowupEvidence": {
+    "observedAtKst": "2026-10-08 23:01:32 KST (Main-reported SELF forward stop and five-port lsof check)",
+    "original351": {"status": "unavailable", "coverageClaim": false, "complete": false, "note": "No original case ID ledger or same-case baseline/current replay; do not mark original findings globally fixed_verified."},
+    "RE-002": {"hostedRun": "37749547883", "hostedJobs": {"count": 6, "conclusion": "success"}, "sourceHead": "9e29dc93acbeaf13bc65a6eaf85ef4de0ac71473", "ciCheckout": "ff3fb4ad19e790ba5193011b88a62ee840521bd7", "tree": "fb07731b2ff2d96b9ad5e06159473822915bd3bd", "workspace": {"passed": 970, "failed": 0, "ignored": 15, "unique": 985}, "readHttp": {"cases": 33, "statusCounts": {"200": 12, "400": 4, "500": 17}, "statusMismatches": 0, "quorumNoCodeAndRevert": "400 UNRESOLVABLE_COMMAND retryable=false, signer stage 0", "timeoutTransportAndAmbiguous": "500, signer stage 0", "oneBadTwoGoodControl": "healthy quorum succeeds"}, "actualCiImageSmoke": {"cases": 6, "artifact": "audit/review-pr1-20261008/ci-image-http-smoke/smoke-results.json", "boundary": "Docker CLI actual-image READ smoke; not Kubernetes genuine KMS signature proof"}, "mainLocalWorkspace": {"runtimePassed": 496, "failed": 1, "ignored": 15, "failure": "existing log-capture fixture; kept separate from hosted results"}},
+    "RE-001": {"operationalImage": "ghcr.io/fp-validated/pillar-dvn-client:ci-ff3fb4ad19e7-r37749547883-a1@sha256:4ac2cbcd560b7bc1607f7846027509d42c881aacbf557d8d882100d804e80aae", "deployment": {"replicas": 3, "updated": 3, "ready": 3, "available": 3}, "readyHttp": 200, "signerInfo": "existing signer identity observed", "configChange": "only Hyperliquid URI to existing Alchemy-backed hyperliquid-pinned alias; existing chains/entities/quorum retained", "configMapChecksum": "985bee4a4f0dda1da8d743765536e6e95c744cbab284a792dde36c3b9fbf795c", "livePinControls": "historical number/hash call/code match and absent hash error observed via same-provider selector comparison", "operationalKmsMessageSignature": "not observed"},
+    "liveSigningMetrics": {"artifact": "audit/review-pr1-20261008/operating-rollout/metrics.prom", "signBudgetStarted": 0, "signBudgetSuccess": 0, "signBudgetError": 0, "interpretation": "no production sign-budget MESSAGE signing observed; startup Azure signer configuration is not a successful KMS signature"},
+    "startupConfigurationReport": {"source": "Main-reported startup log observation", "signer": "existing Azure signer", "chains": 18, "quorum": "any:1", "apiAuth": "disabled", "changedByRollout": false},
+    "gitopsFollowup": {"head": "f26c3fb57388599dbf1ce9c03ed59b60ec8f691a", "ownershipValidatorRun": {"id": 37768428872, "conclusion": "success"}, "harborMirrorRun": {"id": 37768428871, "conclusion": "failure", "scope": "scan-only", "lookupResult": "MANIFEST_UNKNOWN"}, "mirrorEvidence": ["audit/review-pr1-20261008/operating-rollout/gitops-followup-ci.json", "audit/review-pr1-20261008/operating-rollout/mirror-secret-metadata.json", "Main-reported gitops-mirror-full.log"], "boundary": "workflow had contents:read only and no GHCR_MIRROR_USERNAME/TOKEN repository secrets; failure indicates a GHCR source-read/auth issue in this workflow, not unpublished image. Main local authenticated lookup and actual 3-Pod pull read the same digest.", "sourceReadPermissionRemediation": "needed; not approved or executed", "packagePermissionOrCredentialChange": "not approved or executed", "rawFailurePreserved": true},
+    "independentReview": {"artifact": "audit/review-pr1-20261008/operating-rollout/INDEPENDENT-REVIEW.md", "sha256": "1b0f13b28c8072abfed7ff333f1bfadae2c768d4dd438aa919d9eb735f03af84", "lastLiveObservationKst": "2026-10-08 20:40:20", "laterByteConfirmationKst": "2026-10-08 22:36 (administrative confirmation, not an observation)"},
+    "finalDeploymentRecheck": {"captureTimeKst": "2026-10-08 22:38 (Main-reported capture)", "artifact": "audit/review-pr1-20261008/operating-rollout/pillar-deployment-final.json", "replicas": 3, "updated": 3, "ready": 3, "available": 3},
+    "timestampedLiveSigningMetrics": {"artifact": "audit/review-pr1-20261008/operating-rollout/metrics.prom", "headers": "audit/review-pr1-20261008/operating-rollout/metrics.headers", "observedAtKst": "2026-10-08 20:34:18", "signBudgetStarted": 0, "signBudgetSuccess": 0, "signBudgetError": 0, "interpretation": "Only this timestamped metrics snapshot supports 0/0/0; do not attribute it to the 22:38 deployment recheck or later."},
+    "freshCanaryDiscovery": {"windows": {"arbitrum": {"windowBlocks": 64, "packetSent": 0, "supportedCandidates": 0, "observedAtKst": "2026-10-08 20:32:41"}, "bsc": {"window": "single fresh source window", "sourceCandidates": 0, "lastRpcEndedAtKst": "2026-10-08 20:36:15"}, "base": {"windowBlocks": 64, "packetSent": 5, "supportedCandidates": 0, "excludedDestinationEids": [30168, 30302], "headObservedAtKst": "2026-10-08 20:36:28"}}, "boundary": "One bounded window per chain only; no global normal-path impossibility inference. These scans caused no normal API POST, KMS signing, signature, or chain transaction.", "priorEthereumCandidates": "Main-reported three previously Verified candidates are separate retained evidence, not part of these fresh windows."},
+    "independentProviderControl": {"quickNode": {"observationKst": "2026-10-08 22:37:59-22:38:00", "artifact": "audit/review-pr1-20261008/pin-independent-control.json", "chainIdentity": true, "blockIdentity": true, "reportedCodeIdentity": false, "historicalCallIdentity": false, "correction": {"artifact": "audit/review-pr1-20261008/pin-independent-comparison.json", "codeIdentity": true, "codeBytes": 2041, "historicalCallIdentity": false, "comparisonAtKst": "2026-10-08 22:42:24"}, "eligibility": "QuickNode remains excluded; no independent PIN-VALID completion claim."}, "alchemyTemporalControl": {"artifact": "audit/review-pr1-20261008/pin-temporal-control.json", "startedAtKst": "2026-10-08 22:42:24.691", "finishedAtKst": "2026-10-08 22:42:28.448", "baselineHistoricalObservedAtKst": "2026-10-08 20:22:48.008", "historicalNumberHashCallRepeated": true, "latestCallChanged": true, "boundary": "Same deployed Alchemy route temporal repeatability only; not independent oracle, actual fork, or failure injection."}},
+    "rollbackPlan": {"artifact": "audit/review-pr1-20261008/minimal-existing-rollout/apply-plan.md", "order": ["revert consumer source two fields", "rollback Target2 ConfigMap/Deployment", "wait for three-Pod rollout completion", "revert proxy source alias", "rollback Target1 and wait for rollout completion"], "executed": false, "prohibited": ["live-only rollback leaving source unchanged", "whole-app sync"]},
+    "threeProviderHistoricalControl": {"artifact": "audit/review-pr1-20261008/operating-rollout/pin-three-provider-state.json", "startedAtKst": "2026-10-08 22:49:35.620", "finishedAtKst": "2026-10-08 22:49:52.496", "historicalBlock": {"number": "0x2dc3f31", "hash": "0xb9dea23449cb0d58d846784fcef02260c94dfb769f66981c70edb497523a0ab1", "testedNumbers": ["0x2dc3f30", "0x2dc3f31", "0x2dc3f32"]}, "target": "0x5555555555555555555555555555555555555555", "selector": "0x18160ddd", "self": {"count": 3, "result": "transport-or-JSON observation unavailable"}, "quickNode": {"count": 3, "allCurrentResults": "0x00000000000000000000000000000000000000000002ab8e9f684f43da10c3b6", "currentNdiffersFrom2026-10-08T13:38Z": true, "eligibility": "remains excluded"}, "alchemy": {"count": 3, "allResults": "0x00000000000000000000000000000000000000000002ab169fb0aa81ce948969", "matchesPriorHistoricalObservationAtKst": "2026-10-08 20:22:48.008"}, "boundary": "Nine read-only observations; no independent PIN-VALID completion. Zero StateRoot limits Ethereum state-proof evidence but does not alone prove request pin impossibility."},
+    "rollbackRisk": {"runbook": "audit/review-pr1-20261008/minimal-existing-rollout/apply-plan.md", "procedure": "consumer and proxy rollback are separate strict-mode bash subshells; source alias revert and re-read are required between them", "consumerTimeoutOrError": "stop immediately and do not remove proxy alias", "reintroducedRisk": "RE-001 risk returns with general Hyperliquid route and v2.5.0", "proxyCapacity": "maxUnavailable 1; rolling may halve capacity", "mirrorFailure": "scan-only source-read failure is separate from cluster rollback", "rollbackExecuted": false, "signingOrPermissionChangesExecuted": false},
+    "taskForwardCleanup": {"source": "Main-reported process and lsof inspection", "observedAtKst": "2026-10-08 23:01:32", "taskOwnedForwardCount": 5, "portsChecked": [18545, 18546, 18547, 19873, 19874], "newSelfForwardPid": 90100, "exactPidAndCommandReviewed": true, "allOwnedForwardsStopped": true, "lsofResiduals": false, "userPort18080Touched": false, "operatingWorkloadsMaintained": true, "duKiB": {"operating-rollout": 428, "hosted-ci": 201480, "source-checkouts": 2264}, "retained": ["raw evidence", "original CI tar", "source Git metadata"], "notDeleted": ["shared build caches", "previous Docker artifacts", "8 spookfish-owned files"], "cleanupZeroClaim": false},
+    "selfServiceHistoricalControl": {"artifact": "audit/review-pr1-20261008/operating-rollout/pin-self-service-control.json", "startedAtKst": "2026-10-08 22:57:33.375", "finishedAtKst": "2026-10-08 22:57:36.747", "targetService": "ovh-cluster/rpc-mainnet/rpc-hyperliquid-mainnet-node-01-rpc:3001/evm", "readCount": 5, "secretReadForThisDirectQuery": false, "chainId": "0x3e7", "historicalBlock": {"number": "0x2dc3f31", "hash": "0xb9dea23449cb0d58d846784fcef02260c94dfb769f66981c70edb497523a0ab1", "callBlockNumbers": ["0x2dc3f30", "0x2dc3f31", "0x2dc3f32"]}, "selfCallResults": ["0x00000000000000000000000000000000000000000002ab88d99c0f8c248f52f9", "0x00000000000000000000000000000000000000000002ab88d99c0f8c248f52f9", "0x00000000000000000000000000000000000000000002ab88d99c0f8c248f52f9"], "alchemyCallResultsInPinThreeProviderState": ["0x00000000000000000000000000000000000000000002ab169fb0aa81ce948969", "0x00000000000000000000000000000000000000000002ab169fb0aa81ce948969", "0x00000000000000000000000000000000000000000002ab169fb0aa81ce948969"], "chainIdentity": true, "blockIdentity": true, "independentHistoricalCall": false, "hashPinnedReadEligible": false, "normalIndependentPinValid": false, "fullArchiveConsistency": false, "boundary": "Direct existing SELF service; number-selected historical calls only."},
+    "credentialBoundary": {"preparationStageSecretRead": false, "thisSelfQuerySecretRead": false, "earlierMainDirectProbesAtKst": ["2026-10-08 22:38", "2026-10-08 22:49"], "earlierProbeEndpointSource": "Secret payload read into memory only", "credentialStoredDisclosedOrChanged": false},
+    "fixedVerifiedPolicy": "Existing per-case verified flags and original351 coverage are not promoted by hosted/rollout evidence; retain false/incomplete unless original case identity and same-case baseline/current linkage are demonstrated."
+  },
+  "confirmedAtKst": "2026-10-08T23:01:32+09:00"
+}

@@ -46,7 +46,11 @@ impl RuntimeValidationChecks for FixedValidationChecks {
         Ok(())
     }
 
-    async fn validate_extra_context(&self, _sent_event: &LzSentEvent) -> Result<(), AppCoreError> {
+    async fn validate_extra_context(
+        &self,
+        _sent_event: &LzSentEvent,
+        _signing_context: &SigningContext,
+    ) -> Result<(), AppCoreError> {
         self.calls.lock().unwrap().push("extra".to_string());
         Ok(())
     }

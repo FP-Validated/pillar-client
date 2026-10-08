@@ -25,6 +25,7 @@ const DST_EID_V1: u32 = 101;
 const SENDER: &str = "0x1111111111111111111111111111111111111111";
 const RECEIVER: &str = "0x2222222222222222222222222222222222222222";
 const MESSAGE: &str = "0xdeadbeefcafe";
+const ROUTE_TX_HASH: &str = "0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a";
 const BLOCK_CONFIRMATION: i64 = 12;
 const SOURCE_BLOCK: &str = "0xabababababababababababababababababababababababababababababababab";
 const REORGED_SOURCE_BLOCK: &str =
@@ -243,15 +244,24 @@ fn legacy_packet_receipt(block_hash: &str) -> Value {
     );
     let uln = contract("bsc", "UltraLightNodeV2").to_lowercase();
     json!({"result": {
+        "transactionHash": ROUTE_TX_HASH,
         "blockHash": block_hash,
         "blockNumber": "0x60",
         "status": "0x1",
         "logs": [{
+            "transactionHash": ROUTE_TX_HASH,
+            "blockHash": block_hash,
+            "blockNumber": "0x60",
+            "removed": false,
             "address": uln,
             "logIndex": "0x0",
             "topics": [pillar_layerzero::ULN_V2_RELAYER_PARAMS_TOPIC],
             "data": relayer_params,
         }, {
+            "transactionHash": ROUTE_TX_HASH,
+            "blockHash": block_hash,
+            "blockNumber": "0x60",
+            "removed": false,
             "address": uln,
             "logIndex": "0x1",
             "topics": [pillar_layerzero::LEGACY_ULN_V2_PACKET_TOPIC],

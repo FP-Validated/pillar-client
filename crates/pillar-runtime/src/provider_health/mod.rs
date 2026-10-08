@@ -47,6 +47,7 @@ mod source_probes;
 mod ton;
 mod transport;
 pub(crate) use rpc_context::rpc_scope;
+pub(crate) use transport::drop_json_value_safely;
 mod tron;
 mod types;
 mod uri_common;

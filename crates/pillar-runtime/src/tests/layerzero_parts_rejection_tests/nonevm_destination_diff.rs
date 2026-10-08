@@ -425,7 +425,7 @@ fn upstream_fixture_pins_missing_move_v301_endpoint_ids() {
 
 fn core_error_status(error: &AppCoreError) -> u16 {
     match error {
-        AppCoreError::BadRequest(_) => 400,
+        AppCoreError::BadRequest(_) | AppCoreError::UnresolvableCommand(_) => 400,
         AppCoreError::Internal(_) => 500,
         AppCoreError::Admission(_) => panic!("unexpected admission error in differential fixture"),
     }

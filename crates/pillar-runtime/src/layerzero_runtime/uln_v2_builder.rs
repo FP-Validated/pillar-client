@@ -36,6 +36,7 @@ where
         &self,
         src_chain_name: &str,
         tx_hash: &str,
+        source_evidence: Option<&pillar_core::EvmSourceEvidence>,
     ) -> Result<UlnV2HashInfo, AppCoreError> {
         crate::provider_health::rpc_scope(src_chain_name, async {
             let snapshot = self.providers.load();
@@ -52,12 +53,20 @@ where
                 let (url, headers) = provider_uri_parts(uri);
                 let transport = self.transport.clone();
                 let tx_hash = tx_hash.to_string();
+                let source_evidence = source_evidence.cloned();
                 requests.push(async move {
                     if !delay.is_zero() {
                         tokio::time::sleep(delay).await;
                     }
                     let observation = provider_response(
-                        observe_uln_v2_mpt_hash_info(transport, url, headers, &tx_hash).await,
+                        observe_uln_v2_mpt_hash_info(
+                            transport,
+                            url,
+                            headers,
+                            &tx_hash,
+                            source_evidence.as_ref(),
+                        )
+                        .await,
                     );
                     let observation = observation.map(|observation| {
                         observation
@@ -201,8 +210,12 @@ where
                 }
             }
             "1" => {
-                self.mpt_hash_info_with_quorum(src_chain_name, &sent_event.tx_hash)
-                    .await?
+                self.mpt_hash_info_with_quorum(
+                    src_chain_name,
+                    &sent_event.tx_hash,
+                    sent_event.source_evidence.as_ref(),
+                )
+                .await?
             }
             proof_type => {
                 return Err(AppCoreError::Internal(format!(

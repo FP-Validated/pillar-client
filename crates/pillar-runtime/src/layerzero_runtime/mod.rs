@@ -37,7 +37,7 @@ use std::{
 use tokio::sync::Semaphore;
 
 use crate::provider_health::{
-    block_matches_resolved_timestamp, eth_call_at_block, extra_context_sent_event_payload,
+    block_matches_resolved_timestamp, evm_receipt_fingerprint, extra_context_sent_event_payload,
     is_http_not_found, lz_message_id_matches, lz_message_identity_matches, normalize_address,
     normalize_address_map, numeric_response, observe_block_confirmations, observe_block_time,
     observe_payload_signed, observe_receive_uln_version, observe_solana_transaction_from,

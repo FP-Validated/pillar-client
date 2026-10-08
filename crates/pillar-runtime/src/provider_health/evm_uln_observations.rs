@@ -1,10 +1,12 @@
 use super::*;
+use pillar_core::EvmSourceEvidence;
 
 pub(crate) async fn observe_uln_v2_mpt_hash_info<T>(
     transport: T,
     url: String,
     headers: HashMap<String, String>,
     tx_hash: &str,
+    source_evidence: Option<&EvmSourceEvidence>,
 ) -> Result<UlnV2HashInfoObservation, AppCoreError>
 where
     T: JsonRpcTransport,
@@ -23,10 +25,26 @@ where
         )
         .await
         .map_err(AppCoreError::from)?;
-    let block_hash = receipt
+    let receipt_result = receipt
         .get("result")
         .filter(|result| !result.is_null())
-        .and_then(|result| result.get("blockHash"))
+        .ok_or_else(|| AppCoreError::Internal("Missing transaction receipt".to_string()))?;
+    let receipt_tx_hash = receipt_result
+        .get("transactionHash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| AppCoreError::Internal("Missing receipt transactionHash".to_string()))?;
+    if !evm_transaction_hash_matches(receipt_tx_hash, tx_hash) {
+        return Err(AppCoreError::Internal(
+            "Receipt transactionHash does not match requested transaction".to_string(),
+        ));
+    }
+    if let Some(evidence) = source_evidence {
+        validate_receipt_binding(&receipt, evidence, tx_hash).map_err(|reason| {
+            AppCoreError::BadRequest(format!("source receipt binding changed: {reason}"))
+        })?;
+    }
+    let block_hash = receipt_result
+        .get("blockHash")
         .and_then(Value::as_str)
         .map(str::to_ascii_lowercase)
         .ok_or_else(|| AppCoreError::Internal("Missing receipt blockHash".to_string()))?;
@@ -36,16 +54,24 @@ where
             headers,
             json!({
                 "method": "eth_getBlockByHash",
-                "params": [block_hash, true],
+                "params": [block_hash.clone(), true],
                 "id": 1,
                 "jsonrpc": "2.0",
             }),
         )
         .await
         .map_err(AppCoreError::from)?;
+    let actual_block_hash = block
+        .pointer("/result/hash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| AppCoreError::Internal("Missing returned block hash".to_string()))?;
+    if !actual_block_hash.eq_ignore_ascii_case(&block_hash) {
+        return Err(AppCoreError::Internal(
+            "Returned MPT block hash differs from receipt blockHash".to_string(),
+        ));
+    }
     parse_uln_v2_mpt_hash_info_observation(&block)
 }
-
 pub(crate) async fn observe_uln_v2_inbound_proof_type<T>(
     transport: T,
     url: String,

@@ -139,31 +139,39 @@ where
         let block = json!({ "blockHash": pin.block_hash, "requireCanonical": true });
         let mut requests = FuturesUnordered::new();
         for (index, uri) in provider_config.uris.iter().enumerate() {
-            let transport = self.transport.clone();
             let (url, headers) = provider_uri_parts(uri);
+            let transport = self.transport.clone();
             let to = to.to_string();
             let call_data = call_data.to_string();
             let block = block.clone();
             let rpc_permits = self.rpc_permits.clone();
             requests.push(async move {
                 let observation = match rpc_permits.acquire_owned().await {
-                    Ok(_permit) => {
-                        eth_call_at_block(transport, url, headers, &to, &call_data, block).await
-                    }
-                    Err(_) => Err(AppCoreError::Admission(pillar_core::execution::BudgetError::Closed)),
+                    Ok(_permit) => crate::provider_health::eth_call_read_observation_at_block(
+                        transport, url, headers, &to, &call_data, block,
+                    )
+                    .await
+                    .map_err(RpcError::from),
+                    Err(_) => Err(RpcError::Admission(
+                        pillar_core::execution::BudgetError::Closed,
+                    )),
                 };
-                (index, observation)
+                let vote = observation.map(|(fingerprint, observation)| {
+                    Some((fingerprint, observation))
+                });
+                (index, vote)
             });
         }
         let mut accumulator = ExactQuorumAccumulator::new(quorum, 0..provider_config.uris.len());
         while let Some((index, observation)) = requests.next().await {
-            accumulator.record_result(index, observation.map(|value| Some((value.clone(), value))).map_err(RpcError::from))?;
+            accumulator.record_result(index, observation)?;
             if let Some(result) = accumulator.unambiguous_result() {
-                return Ok(result);
+                return read_observation_result(result);
             }
         }
-        accumulator.finish("ReadV1002 eth_call")
-        }).await
+        read_observation_result(accumulator.finish("ReadV1002 eth_call")?)
+        })
+        .await
     }
 
     async fn resolve_request_payload(
@@ -276,5 +284,20 @@ where
             }
             Ok(resolved_payload)
         }
+    }
+}
+
+fn read_observation_result(
+    observation: crate::provider_health::ReadCallObservation,
+) -> Result<String, AppCoreError> {
+    use crate::provider_health::ReadCallObservation;
+    match observation {
+        ReadCallObservation::Data { value } => Ok(value),
+        ReadCallObservation::NoCode => Err(AppCoreError::UnresolvableCommand(
+            "ReadV1002 command is unresolvable: target has no code at the pinned block".into(),
+        )),
+        ReadCallObservation::ExecutionRevert { .. } => Err(AppCoreError::UnresolvableCommand(
+            "ReadV1002 command is unresolvable: execution reverted at the pinned block".into(),
+        )),
     }
 }

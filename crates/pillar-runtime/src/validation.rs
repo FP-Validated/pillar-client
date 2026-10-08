@@ -35,7 +35,11 @@ pub trait RuntimeValidationChecks: Send + Sync + 'static {
         dst_chain_name: &str,
     ) -> Result<(), AppCoreError>;
 
-    async fn validate_extra_context(&self, sent_event: &LzSentEvent) -> Result<(), AppCoreError>;
+    async fn validate_extra_context(
+        &self,
+        sent_event: &LzSentEvent,
+        signing_context: &SigningContext,
+    ) -> Result<(), AppCoreError>;
 
     async fn uln_receive_version(
         &self,
@@ -141,8 +145,14 @@ where
             .await
     }
 
-    async fn validate_extra_context(&self, sent_event: &LzSentEvent) -> Result<(), AppCoreError> {
-        self.checks.validate_extra_context(sent_event).await
+    async fn validate_extra_context(
+        &self,
+        sent_event: &LzSentEvent,
+        signing_context: &SigningContext,
+    ) -> Result<(), AppCoreError> {
+        self.checks
+            .validate_extra_context(sent_event, signing_context)
+            .await
     }
 
     async fn uln_receive_version(
