@@ -10,6 +10,10 @@ const PACKET_SENT_SUBTOPIC: &str = "Channel::event::PACKET_SENT";
 const CHANNEL_CLASS_NAME: &str = "channel";
 const FIELD_INFO_WIDTH: usize = 18;
 const T_REF: u8 = 9;
+// Each trace edge adds an object and children array to the returned JSON tree.
+const MAX_TON_TRACE_OUTPUT_DEPTH: usize = 512;
+const MAX_TON_TRACE_NODES: usize = 512;
+const MAX_TON_TRACE_PROJECTED_STRING_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub(crate) struct TonPacketSentEvent {
@@ -35,79 +39,167 @@ pub(crate) fn normalize_ton_address(value: &str) -> String {
 /// upstream `TonClient3.transformToTransactionTrace` turns the first item into a
 /// `{transaction, children}` tree, which `/transactionTrace` already returns.
 pub(crate) fn ton_transaction_trace_tree(response: &Value) -> Option<Value> {
-    if response.get("transaction").is_some() {
-        return Some(clone_json_value_safely(response));
-    }
-    let item = response
-        .get("traces")
-        .or_else(|| response.get("events"))?
-        .as_array()?
-        .first()?;
-    let transactions = item.get("transactions")?.as_object()?;
-    let root = item.get("trace")?;
-    let mut pending = vec![(root, false)];
-    let mut built = Vec::new();
-    while let Some((node, expanded)) = pending.pop() {
-        let Some(children) = node.get("children").and_then(Value::as_array) else {
-            drop_json_value_safely(Value::Array(built));
-            return None;
-        };
-        if expanded {
-            let Some(transaction) = node
-                .get("tx_hash")
-                .and_then(Value::as_str)
-                .and_then(|hash| transactions.get(hash))
-                .map(clone_json_value_safely)
-            else {
-                drop_json_value_safely(Value::Array(built));
-                return None;
-            };
-            let Some(start) = built.len().checked_sub(children.len()) else {
-                drop_json_value_safely(Value::Array(built));
-                return None;
-            };
-            let child_trees = built.drain(start..).collect::<Vec<_>>();
-            built.push(json!({ "transaction": transaction, "children": child_trees }));
+    let (root, transactions): (&Value, Option<&serde_json::Map<String, Value>>) =
+        if response.get("transaction").is_some() {
+            (response, None)
         } else {
-            pending.push((node, true));
-            pending.extend(children.iter().rev().map(|child| (child, false)));
-        }
+            let item = response
+                .get("traces")
+                .or_else(|| response.get("events"))?
+                .as_array()?
+                .first()?;
+            (
+                item.get("trace")?,
+                Some(item.get("transactions")?.as_object()?),
+            )
+        };
+    let plan = ton_trace_preflight(root, transactions)?;
+    let mut built = Vec::with_capacity(plan.len());
+    for (transaction, child_count) in plan {
+        let transaction = project_ton_transaction(transaction)?;
+        let start = built.len().checked_sub(child_count)?;
+        let child_trees = built.drain(start..).collect::<Vec<_>>();
+        let mut tree = serde_json::Map::new();
+        tree.insert("transaction".to_string(), transaction);
+        tree.insert("children".to_string(), Value::Array(child_trees));
+        built.push(Value::Object(tree));
     }
     (built.len() == 1).then(|| built.pop()).flatten()
 }
-fn clone_json_value_safely(root: &Value) -> Value {
-    let mut pending = vec![(root, false)];
-    let mut built = Vec::new();
-    while let Some((value, expanded)) = pending.pop() {
-        match value {
-            Value::Array(children) if expanded => {
-                let start = built.len() - children.len();
-                let cloned = built.drain(start..).collect();
-                built.push(Value::Array(cloned));
+
+fn ton_trace_children(node: &Value) -> Option<&[Value]> {
+    match node.get("children") {
+        None => Some(&[]),
+        Some(Value::Array(children)) => Some(children),
+        Some(_) => None,
+    }
+}
+
+fn ton_trace_preflight<'a>(
+    root: &'a Value,
+    transactions: Option<&'a serde_json::Map<String, Value>>,
+) -> Option<Vec<(&'a Value, usize)>> {
+    enum Work<'a> {
+        Visit(&'a Value, usize),
+        Build(&'a Value, usize),
+    }
+    let mut pending = vec![Work::Visit(root, 1)];
+    let mut plan = Vec::new();
+    let mut seen_hashes = HashSet::new();
+    let mut projected_bytes = 0usize;
+    let mut discovered = 1usize;
+    while let Some(work) = pending.pop() {
+        match work {
+            Work::Visit(node, depth) => {
+                if depth.checked_mul(2)?.checked_add(2)? > MAX_TON_TRACE_OUTPUT_DEPTH {
+                    return None;
+                }
+                let children = ton_trace_children(node)?;
+                discovered = discovered.checked_add(children.len())?;
+                if discovered > MAX_TON_TRACE_NODES {
+                    return None;
+                }
+                let transaction = if let Some(transactions) = transactions {
+                    let hash = node.get("tx_hash")?.as_str()?;
+                    if !seen_hashes.insert(hash) {
+                        return None;
+                    }
+                    transactions.get(hash)?
+                } else {
+                    node.get("transaction")?
+                };
+                if transactions.is_none() {
+                    if let Some(hash) = transaction.get("hash") {
+                        let hash = hash.as_str()?;
+                        if !seen_hashes.insert(hash) {
+                            return None;
+                        }
+                    }
+                }
+                account_ton_transaction(transaction, &mut projected_bytes)?;
+                pending.push(Work::Build(transaction, children.len()));
+                pending.extend(
+                    children
+                        .iter()
+                        .rev()
+                        .map(|child| Work::Visit(child, depth + 1)),
+                );
             }
-            Value::Object(children) if expanded => {
-                let start = built.len() - children.len();
-                let cloned = children
-                    .iter()
-                    .zip(built.drain(start..))
-                    .map(|((key, _), value)| (key.clone(), value))
-                    .collect();
-                built.push(Value::Object(cloned));
+            Work::Build(transaction, child_count) => plan.push((transaction, child_count)),
+        }
+    }
+    Some(plan)
+}
+
+fn account_ton_transaction(transaction: &Value, projected_bytes: &mut usize) -> Option<()> {
+    let transaction = transaction.as_object()?;
+    for field in ["hash", "mc_block_seqno"] {
+        if let Some(value) = transaction.get(field) {
+            account_ton_scalar(value, projected_bytes)?;
+        }
+    }
+    if let Some(message) = transaction.get("in_msg") {
+        if !message.is_null() {
+            let message = message.as_object()?;
+            for field in ["destination", "opcode", "source", "hash", "bounced"] {
+                if let Some(value) = message.get(field) {
+                    account_ton_scalar(value, projected_bytes)?;
+                }
             }
-            Value::Array(children) => {
-                pending.push((value, true));
-                pending.extend(children.iter().rev().map(|child| (child, false)));
-            }
-            Value::Object(children) => {
-                pending.push((value, true));
-                pending.extend(children.values().rev().map(|child| (child, false)));
-            }
-            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
-                built.push(value.clone());
+            if let Some(content) = message.get("message_content") {
+                let content = content.as_object()?;
+                if let Some(body) = content.get("body") {
+                    account_ton_scalar(body, projected_bytes)?;
+                }
             }
         }
     }
-    built.pop().expect("root clone is complete")
+    Some(())
+}
+
+fn account_ton_scalar(value: &Value, projected_bytes: &mut usize) -> Option<()> {
+    let size = match value {
+        Value::String(text) => text.len(),
+        Value::Null | Value::Bool(_) | Value::Number(_) => 0,
+        Value::Array(_) | Value::Object(_) => return None,
+    };
+    *projected_bytes = projected_bytes.checked_add(size)?;
+    (*projected_bytes <= MAX_TON_TRACE_PROJECTED_STRING_BYTES).then_some(())
+}
+
+fn project_ton_transaction(transaction: &Value) -> Option<Value> {
+    let mut projected = serde_json::Map::new();
+    for field in ["hash", "mc_block_seqno"] {
+        if let Some(value) = transaction.get(field) {
+            projected.insert(field.to_string(), clone_ton_scalar(value)?);
+        }
+    }
+    if let Some(message) = transaction.get("in_msg") {
+        if message.is_null() {
+            projected.insert("in_msg".to_string(), Value::Null);
+        } else {
+            let mut projected_message = serde_json::Map::new();
+            for field in ["destination", "opcode", "source", "hash", "bounced"] {
+                if let Some(value) = message.get(field) {
+                    projected_message.insert(field.to_string(), clone_ton_scalar(value)?);
+                }
+            }
+            if let Some(body) = message.pointer("/message_content/body") {
+                let mut content = serde_json::Map::new();
+                content.insert("body".to_string(), clone_ton_scalar(body)?);
+                projected_message.insert("message_content".to_string(), Value::Object(content));
+            }
+            projected.insert("in_msg".to_string(), Value::Object(projected_message));
+        }
+    }
+    Some(Value::Object(projected))
+}
+
+fn clone_ton_scalar(value: &Value) -> Option<Value> {
+    match value {
+        Value::String(_) | Value::Null | Value::Bool(_) | Value::Number(_) => Some(value.clone()),
+        Value::Array(_) | Value::Object(_) => None,
+    }
 }
 
 /// Upstream `TonClient3.getTransactionTrace`: `/events`, then `/traces`, then

@@ -9,11 +9,11 @@ the Prometheus metric names.
 ### Security
 
 - `polygon`과 `tron`의 MESSAGE readiness는 요청한 confirmation 수와 finalized head를 함께 확인한다. Receipt 높이의 canonical header number와 hash도 receipt와 같아야 한다. 이 결속은 reference보다 엄격하다. 다른 EVM chain과 `amoy`의 정책은 바꾸지 않는다.
-- EVM receipt quorum은 서명에 사용하는 receipt와 log 필드만 정규화한다. `l1Fee` 같은 추가 metadata는 표를 나누지 않는다. Receipt와 log의 transaction/block identity가 다르거나 log의 `removed`가 false가 아니면 거부한다. Transaction hash의 optional `0x` prefix와 대소문자는 같은 값으로 비교한다. Readiness와 ULNv2 MPT 재조회는 resolution의 packet log 내용과 block에 다시 결속된다.
-- READ의 `eth_call`이 정확히 `0x`이면 같은 provider에서 같은 EIP-1898 block hash로 `eth_getCode`를 조회한다. Code도 `0x`이거나 조회에 실패하면 해당 provider는 표를 얻지 못한다. 별도 call/code quorum과 latest fallback은 없다.
+- EVM receipt quorum은 서명에 사용하는 receipt와 log 필드만 정규화한다. `l1Fee` 같은 추가 metadata는 표를 나누지 않는다. Receipt와 log의 transaction/block identity가 다르거나 log index가 중복되면 거부한다. `removed` 생략은 false로 정규화한다. true, null과 잘못된 타입은 거부한다. Transaction hash의 optional `0x` prefix와 대소문자는 같은 값으로 비교한다. Readiness와 ULNv2 MPT 재조회는 resolution의 packet log 내용과 block에 다시 결속된다.
+- READ는 `eth_call`과 `eth_getCode`의 JSON string, 정확한 `0x` prefix, 짝수 길이와 hex octets를 검증한다. `eth_call`이 `0x`이면 같은 provider와 headers로 같은 EIP-1898 block hash의 code를 조회한다. `0x00`처럼 실제 byte가 있는 code는 정상 empty return을 허용한다. 빈 code와 잘못된 DATA는 해당 provider의 표만 잃는다. 두 정상 provider는 다른 불량 provider가 있어도 quorum 2를 만족한다. 별도 call/code quorum과 latest fallback은 없다.
 - Extra-context HTTP와 Lambda에 기존 typed `signingContext`를 전달한다. Strict-schema policy consumer는 새 필드를 허용해야 한다. 설정하지 않은 policy와 strict boolean-true gate의 동작은 유지한다.
 - Ethereum-style signature 변환은 모든 ECDSA signer에서 recovery ID 2/3을 거부한다. 기존 low-S 정규화 순서와 non-EVM raw recovery ID 형식은 유지한다. KMS 호출 뒤에 거부하므로 cloud signing call 자체를 방지하는 변경은 아니다.
-- TON 전용 HTTP JSON decoder는 기존 4 MiB 제한과 명시적인 512-level JSON container nesting 제한을 적용한다. 다른 chain의 JSON parser는 바꾸지 않는다. 원본 JSON 순회와 해제는 반복형이다. 변환된 trace tree의 일반 해제는 허용된 depth로 제한한다. JSON nesting과 trace node 수는 다른 단위다.
+- TON 전용 HTTP JSON decoder는 기존 4 MiB 응답 제한과 512-level JSON container nesting 제한을 적용한다. Trace 변환은 transaction hash 중복, 잘못된 topology, 512개 초과 node와 변환 후 512 container 초과 깊이를 조립 전에 거부한다. 서명과 confirmation에 필요한 scalar 필드만 투영한다. Object와 Array를 직접 조립해 subtree 재직렬화를 제거한다. 생략된 leaf children은 빈 배열로 처리한다. 원본 JSON은 반복형으로 순회하고 해제한다. JSON nesting과 trace node 수는 다른 단위다.
 
 ### Audit
 

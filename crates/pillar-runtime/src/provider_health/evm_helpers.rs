@@ -111,7 +111,7 @@ pub(crate) struct EvmReceiptLog {
     pub(crate) block_number: String,
     #[serde(rename = "logIndex")]
     pub(crate) log_index: String,
-    // Standard JSON-RPC receipts must state whether each log was removed by a reorg.
+    #[serde(default)]
     pub(crate) removed: bool,
 }
 
@@ -164,6 +164,12 @@ impl EvmTransactionReceipt {
                 topic.make_ascii_lowercase();
             }
             log.data.make_ascii_lowercase();
+        }
+        let mut log_indices = std::collections::HashSet::with_capacity(self.logs.len());
+        for log in &self.logs {
+            if !log_indices.insert(log.log_index.as_str()) {
+                return Err("receipt contains duplicate logIndex".to_string());
+            }
         }
         Ok(self)
     }

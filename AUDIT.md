@@ -505,3 +505,19 @@ Main은 2026-10-07 17:36:52 KST에 공식 공개 Solana mainnet RPC로 계정 `E
 - 원본 보고서는 checksummed target과 bytes32-padded sender/receiver의 `debugInfo` 차이를 293건으로 집계했고 signature는 같다고 보고했다. Malformed JSON과 READ-on-V302는 같은 status code에서 error text가 달랐다고 보고했다. 이는 작성자 보고이며 Main의 새 reference replay가 아니다. 이 진단 형식은 바꾸지 않았다. Finalized lag의 confirmation 표시값은 reference의 `-1`과 다르지만 두 구현 모두 signing을 거부한다. 오류 종류와 sign-stage 진입 여부를 검증했다.
 
 근거: audit/retest-250/verification.md와 원본 리테스트 보고서 · 시각 미상
+
+## 12. `80e0ad21` 감사 후속 개발, 2026-10-08
+
+정상 입력의 처리와 서명 성공을 acceptance로 유지한다. 거부 시나리오만 통과한 결과는 완료로 취급하지 않는다.
+
+- TON 변환은 bounded postorder plan을 만든 뒤 필요한 scalar만 투영한다. 같은 transaction을 여러 node에 복제하지 않는다. Duplicate hash와 잘못된 topology를 거부한다. 최대 node 수는 512다. 변환 후 JSON container depth도 512로 제한한다. 생략된 leaf children은 빈 배열로 처리한다. 이 정규화는 children 누락에서 오류가 나는 upstream quorum 함수와 의도적으로 다르다. `/events`와 legacy `/transactionTrace`의 HTTP 경로로 이 차이를 검증한다. 입력의 미사용 metadata는 output에 복제하지 않는다. Object와 Array를 직접 조립한다.
+- 실제 HTTP TON fixture를 별도 release 프로세스에서 실행했다. Stack은 2 MiB다. 정상 chain, 512-node star, 4 MiB 미만 큰 metadata 입력과 depth-505 입력을 처리했다. Malformed 입력 뒤의 정상 요청도 성공했다. Quorum 조기 반환, loser 해제와 cancellation을 확인했다. `/usr/bin/time -l`이 관측한 최대 RSS는 29,261,824 bytes다. macOS의 OS 강제 RSS 제한이라고 주장하지 않는다.
+- 실제 HTTP `ReqwestJsonRpcTransport`와 `RuntimeServerApp`으로 READ 서명을 실행했다. Empty call과 code `0x00` 및 `0x6000`은 기준과 같은 signature를 반환했다. Provider 3개 중 정상 2개는 불량 1개가 있어도 quorum 2로 서명했다. 잘못된 DATA와 서로 다른 provider의 부분 observation은 signer에 진입하지 않았다. Call과 code의 provider header 및 EIP-1898 pin을 함께 확인했다. HTTP가 생성한 `Content-Length`는 요청 body 길이에 따라 다르므로 provider header 비교에서 제외했다.
+- Receipt의 생략된 `removed`를 false로 정규화했다. true, null과 잘못된 타입은 거부한다. 실제 CLI에서 정상 quorum 2, `l1Fee` 차이, 모든 `removed` 생략과 생략/false 혼합이 동일 payload와 signature로 성공했다. Log index 중복은 최초 resolution과 readiness 재조회에서 거부한다.
+- 운영 `ovh-cluster/rpc-mainnet/lz-rpc`의 Ethereum과 Polygon RPC를 읽기 전용으로 확인했다. Finalized head, receipt/canonical block 결속, EIP-1898 call/code와 존재하지 않는 hash의 거부를 관측했다. 첫 Polygon probe는 code가 없는 잘못된 주소를 사용했다. 원시 실패 자료를 보존하고 운영 receipt에서 관측한 token 주소로 수정해 정상 결과를 확인했다. 운영 provider 설정에는 Tron이 없다.
+
+Maintainer-local 근거는 `audit/review-80e0ad21-20261008/`에 보존한다. `verify-candidate.sh`는 committed source와 HEAD의 일치를 검사한다. Runner는 candidate SHA, toolchain과 Cargo 입력 hash를 기록한다. 이어서 fmt, clippy, workspace test, release CLI smoke와 MSRV check를 실행한다. 로컬 runner 결과와 hosted CI 결과를 구분한다. 기존 `80e0ad21`의 CI 성공으로 새 candidate를 인증하지 않는다.
+
+이 source 변경은 registry 게시나 production 배포를 포함하지 않는다. Section 11의 관측은 과거 근거로 유지한다. 원본 351 comparison ledger와 축약 reference hash의 대상은 확인된 자료로만 연결한다.
+
+근거: TON release HTTP 및 READ full-consumer 실행, receipt CLI smoke, 운영 RPC 원시 응답 · 시각 미상

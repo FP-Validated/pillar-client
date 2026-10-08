@@ -275,22 +275,23 @@ pub(crate) fn validate_receipt_binding(
         .get("logs")
         .and_then(Value::as_array)
         .ok_or_else(|| "source receipt logs are missing".to_string())?;
-    let packet_log = logs
-        .iter()
-        .find(|log| {
-            log.get("logIndex")
-                .and_then(numeric_response)
-                .and_then(|index| index.parse::<u64>().ok())
-                == Some(evidence.packet_log_index)
-        })
-        .ok_or_else(|| {
-            format!(
-                "source PacketSent log index {} is no longer present",
-                evidence.packet_log_index
-            )
-        })?;
-    if packet_log.get("removed").and_then(Value::as_bool) != Some(false) {
-        return Err("source PacketSent log is removed or has no removed state".to_string());
+    let mut matching_logs = logs.iter().filter(|log| {
+        log.get("logIndex")
+            .and_then(numeric_response)
+            .and_then(|index| index.parse::<u64>().ok())
+            == Some(evidence.packet_log_index)
+    });
+    let packet_log = matching_logs.next().ok_or_else(|| {
+        format!(
+            "source PacketSent log index {} is no longer present",
+            evidence.packet_log_index
+        )
+    })?;
+    if matching_logs.next().is_some() {
+        return Err("source receipt contains duplicate PacketSent log index".to_string());
+    }
+    if !matches!(packet_log.get("removed"), None | Some(Value::Bool(false))) {
+        return Err("source PacketSent log is removed or has an invalid removed state".to_string());
     }
     let log_tx_hash = packet_log
         .get("transactionHash")

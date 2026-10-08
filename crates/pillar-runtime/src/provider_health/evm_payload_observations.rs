@@ -312,12 +312,33 @@ where
         )
         .await
         .map_err(AppCoreError::from)?;
-    response
+    let result = response
         .get("result")
         .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
-        .ok_or_else(|| AppCoreError::Internal("Missing eth_call result".to_string()))
+        .ok_or_else(|| {
+            AppCoreError::Internal("eth_call result must be a DATA string".to_string())
+        })?;
+    validate_evm_data(result, "eth_call")?;
+    Ok(result.to_owned())
 }
+
+fn validate_evm_data(data: &str, method: &str) -> Result<(), AppCoreError> {
+    let digits = data.strip_prefix("0x").ok_or_else(|| {
+        AppCoreError::Internal(format!("{method} DATA must have a lowercase 0x prefix"))
+    })?;
+    if digits.len() % 2 != 0 {
+        return Err(AppCoreError::Internal(format!(
+            "{method} DATA must contain even-length hex octets"
+        )));
+    }
+    if !digits.as_bytes().iter().all(u8::is_ascii_hexdigit) {
+        return Err(AppCoreError::Internal(format!(
+            "{method} DATA must contain only hex octets"
+        )));
+    }
+    Ok(())
+}
+
 /// Shares the READ call's EIP-1898 pin when validating an empty result's target code.
 pub(crate) async fn eth_get_code_at_block<T>(
     transport: T,
@@ -342,11 +363,14 @@ where
         )
         .await
         .map_err(AppCoreError::from)?;
-    response
+    let result = response
         .get("result")
         .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
-        .ok_or_else(|| AppCoreError::Internal("Missing eth_getCode result".to_string()))
+        .ok_or_else(|| {
+            AppCoreError::Internal("eth_getCode result must be a DATA string".to_string())
+        })?;
+    validate_evm_data(result, "eth_getCode")?;
+    Ok(result.to_owned())
 }
 
 pub(crate) fn strip_hex_prefix(value: &str) -> &str {

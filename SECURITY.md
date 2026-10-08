@@ -569,7 +569,8 @@ Addresses live in `stellar_uln_302_for_environment`,
   Treat a chain, deployment or status that changed upstream as unsupported here
   until a maintainer regenerates and the diff is reviewed.
 - EVM source resolution은 receipt와 모든 log의 transaction hash를 요청한 source transaction에 결속한다.
-  Log의 block hash와 number도 receipt와 같아야 한다. `removed`는 명시적으로 false여야 한다.
+  Log의 block hash와 number도 receipt와 같아야 한다. `removed` 생략은 false로 정규화한다.
+  true, null과 잘못된 타입은 거부한다. 정규화한 log index는 중복될 수 없다.
   Quorum은 정규화한 typed receipt와 log를 비교한다. `l1Fee` 같은 추가 metadata는 비교하지 않는다.
   Resolution은 `EvmSourceEvidence`에 transaction hash, block hash와 number, execution status,
   PacketSent log의 index, address, topics와 data를 보관한다.
@@ -584,6 +585,15 @@ Addresses live in `stellar_uln_302_for_environment`,
   Canonical header 결속은 upstream보다 엄격한 fail-closed 정책이다.
   Transaction hash 비교는 optional `0x` prefix와 대소문자를 정규화한다. RPC 요청 값은 바꾸지 않는다.
   Evidence 필드 확장으로 validation audit hash는 이전 버전과 byte 단위로 비교할 수 없다.
+- TON 전용 decoder는 4 MiB 응답과 512 JSON container nesting을 허용한다.
+  Trace 변환은 transaction hash 중복과 잘못된 topology를 조립 전에 거부한다.
+  변환된 tree는 node 512개와 JSON container depth 512개를 넘을 수 없다.
+  Projection은 서명과 confirmation에 필요한 scalar 필드만 유지한다.
+  깊은 미사용 metadata는 복제하거나 재직렬화하지 않는다.
+  생략된 leaf children은 빈 배열로 정규화한다. 원본 JSON 해제는 반복형이다.
+  이 정규화는 children 누락에서 오류가 나는 upstream quorum 함수와 의도적으로 다르다.
+  Legacy `/transactionTrace`도 중복 hash와 문자열이 아닌 hash를 거부한다.
+  Container 비용은 node cap으로 별도 제한한다. Projected string byte cap은 4 MiB다.
 - TON block confirmations count from the masterchain seqno of the `PacketSent`
   transaction itself, found by hash inside the provider's trace, and readiness
   refuses when that transaction is absent from the trace. Upstream reads the
@@ -619,11 +629,13 @@ Addresses live in `stellar_uln_302_for_environment`,
   not change: the read is still only as final as the marker's
   `blockConfirmation` makes it, and a reorg deeper than that *after* signing is
   a finality question this service cannot answer.
-- READ의 `eth_call`이 정확히 `0x`이면 같은 provider와 headers로 `eth_getCode`를 조회한다.
+- READ는 `eth_call`과 `eth_getCode`에서 정확한 `0x` prefix와 짝수 길이의 hex octets를 가진 JSON string만 DATA로 허용한다.
+  `eth_call`이 `0x`이면 같은 provider와 headers로 `eth_getCode`를 조회한다.
   두 요청은 readiness가 검증한 같은 EIP-1898 block hash와 `requireCanonical:true`를 사용한다.
   Code가 `0x`이거나 code 조회가 실패하면 그 provider는 표를 얻지 못한다.
-  Code가 있는 contract의 정상 empty return은 허용한다. 별도 call/code quorum은 없다.
-  Nonempty return과 RPC revert의 동작은 바꾸지 않는다.
+  `0x00` 등 실제 byte가 있는 code는 정상 empty return을 허용한다. 별도 call/code quorum은 없다.
+  불량 provider 하나가 있어도 서로 다른 정상 entity 두 개는 quorum 2를 만족한다.
+  유효한 nonempty DATA와 RPC revert의 동작은 바꾸지 않는다.
 - Extra-context의 HTTP와 Lambda 요청은 `sentEvent`, `from`, typed `signingContext`를 포함한다.
   MESSAGE와 READ의 기존 Serde 형식과 optional omission을 유지한다.
   Closed-schema policy handler는 새 필드를 허용해야 한다.

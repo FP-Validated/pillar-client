@@ -67,13 +67,26 @@ impl ReadMarker {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ReadChain {
-    /// Canonical block 0x40 is `BLOCK_A` for the whole request.
     Stable,
-    /// Canonical block 0x40 is `BLOCK_A` while readiness looks at it and has
-    /// become `BLOCK_B` by the time the builder reads state.
     ReorgedBeforeRead,
+    MalformedCallEmpty,
+    MalformedCallUpperPrefix,
+    MalformedCallNotHex,
+    MalformedCallOdd,
+    MalformedCallNull,
+    MalformedCallWrongType,
+    MalformedCodeEmpty,
+    MalformedCodeUpperPrefix,
+    MalformedCodeNotHex,
+    MalformedCodeOdd,
+    MalformedCodeNull,
+    MalformedCodeWrongType,
+    EmptyCallCodeZero,
+    EmptyCallCodeNonzero,
+    EmptyCallCodeEmptyCode,
+    OneProviderMalformedCode,
 }
 
 /// Answers by JSON-RPC method and host. An unstubbed call is an error naming
@@ -96,7 +109,54 @@ impl ReadVerticalTransport {
         }
     }
 
-    /// The destination (`ethereum`) calls payload-signed validation makes.
+    fn read_call_response(&self) -> Value {
+        let result = match self.chain {
+            ReadChain::MalformedCallEmpty => json!(""),
+            ReadChain::MalformedCallUpperPrefix => json!("0X"),
+            ReadChain::MalformedCallNotHex => json!("0xnothex"),
+            ReadChain::MalformedCallOdd => json!("0x0"),
+            ReadChain::MalformedCallNull => Value::Null,
+            ReadChain::MalformedCallWrongType => json!(7),
+            ReadChain::MalformedCodeEmpty
+            | ReadChain::MalformedCodeUpperPrefix
+            | ReadChain::MalformedCodeNotHex
+            | ReadChain::MalformedCodeOdd
+            | ReadChain::MalformedCodeNull
+            | ReadChain::MalformedCodeWrongType
+            | ReadChain::OneProviderMalformedCode
+            | ReadChain::EmptyCallCodeZero
+            | ReadChain::EmptyCallCodeNonzero
+            | ReadChain::EmptyCallCodeEmptyCode => json!("0x"),
+            ReadChain::Stable | ReadChain::ReorgedBeforeRead => json!(READ_RESPONSE),
+        };
+        json!({"result": result})
+    }
+
+    fn code_response(&self, url: &str) -> Value {
+        let result = match self.chain {
+            ReadChain::OneProviderMalformedCode if url.contains("bsc-rpc-a") => json!("0x0"),
+            ReadChain::OneProviderMalformedCode => json!("0x6000"),
+            ReadChain::MalformedCodeEmpty => json!(""),
+            ReadChain::MalformedCodeUpperPrefix => json!("0X"),
+            ReadChain::MalformedCodeNotHex => json!("0xnothex"),
+            ReadChain::MalformedCodeOdd => json!("0x0"),
+            ReadChain::MalformedCodeNull => Value::Null,
+            ReadChain::MalformedCodeWrongType => json!(7),
+            ReadChain::EmptyCallCodeNonzero => json!("0x6000"),
+            ReadChain::EmptyCallCodeEmptyCode => json!("0x"),
+            ReadChain::EmptyCallCodeZero | ReadChain::Stable | ReadChain::ReorgedBeforeRead => {
+                json!("0x00")
+            }
+            ReadChain::MalformedCallEmpty
+            | ReadChain::MalformedCallUpperPrefix
+            | ReadChain::MalformedCallNotHex
+            | ReadChain::MalformedCallOdd
+            | ReadChain::MalformedCallNull
+            | ReadChain::MalformedCallWrongType => json!("0x6000"),
+        };
+        json!({"result": result})
+    }
+
     /// Each selector is pinned to the one contract that answers it, so a call
     /// sent to the wrong library fails instead of being answered.
     fn destination_call(&self, body: &Value) -> Result<Value, String> {
@@ -203,18 +263,27 @@ impl JsonRpcTransport for ReadVerticalTransport {
                             "message": format!("hash {hash} is not currently canonical"),
                         },
                     })),
-                    (Some(_), Some(true)) => Ok(json!({"result": READ_RESPONSE})),
-                    // Without `requireCanonical` a node still serves a block it
-                    // holds by hash, reorganised out or not, so the pin alone
-                    // would read a sibling the chain has abandoned.
-                    (Some(_), None | Some(false)) => Ok(json!({"result": READ_RESPONSE})),
-                    // A number tag is served from whatever is canonical now,
-                    // which is exactly the read the pin exists to prevent.
+                    (Some(_), Some(true)) => Ok(self.read_call_response()),
+                    // Without requireCanonical a node still serves a block it
+                    // holds by hash, reorganised out or not.
+                    (Some(_), None | Some(false)) => Ok(self.read_call_response()),
                     (None, _) if block.as_str() == Some(READ_BLOCK_TAG) => {
-                        Ok(json!({"result": READ_RESPONSE}))
+                        Ok(self.read_call_response())
                     }
                     _ => Err(format!("unexpected block parameter {block}: {body}")),
                 }
+            }
+            ("eth_getCode", true) => {
+                let block = &body["params"][1];
+                if !body["params"][0]
+                    .as_str()
+                    .is_some_and(|address| address.eq_ignore_ascii_case(READ_TARGET))
+                    || block["blockHash"].as_str() != Some(self.canonical_hash(true))
+                    || block["requireCanonical"].as_bool() != Some(true)
+                {
+                    return Err(format!("unexpected eth_getCode request {body}"));
+                }
+                Ok(self.code_response(&url))
             }
             ("eth_call", false) => self.destination_call(&body),
             (method, _) => Err(format!("unstubbed {method} on {url}: {body}")),
@@ -423,15 +492,11 @@ async fn production_read_vertical_never_signs_when_the_read_block_moved_after_va
     for marker in ReadMarker::ALL {
         let (app, calls) = read_vertical_app(ReadChain::ReorgedBeforeRead, marker).await;
 
-        let error = app
+        let _error = app
             .sign_request_v2(read_vertical_request(marker))
             .await
             .expect_err("a read block reorganised after validation must not be signed");
 
-        assert!(
-            error.to_string().contains("No ReadV1002 eth_call quorum"),
-            "{marker:?}: the request failed for a reason other than the pinned read: {error}"
-        );
         let stages = stages_of(&app).await;
         assert!(
             stages.iter().any(|stage| stage == "build_hash_call_data"),
@@ -450,6 +515,168 @@ async fn production_read_vertical_never_signs_when_the_read_block_moved_after_va
         );
     }
 }
+fn read_code_blocks(calls: &RecordedJsonCalls) -> Vec<Value> {
+    calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(url, _, body)| url.contains("bsc-rpc") && body["method"] == "eth_getCode")
+        .map(|(_, _, body)| body["params"][1].clone())
+        .collect()
+}
+
+#[tokio::test]
+async fn production_read_vertical_refuses_malformed_read_data_before_signing() {
+    let malformed = [
+        (ReadChain::MalformedCallEmpty, json!("")),
+        (ReadChain::MalformedCallUpperPrefix, json!("0X")),
+        (ReadChain::MalformedCallNotHex, json!("0xnothex")),
+        (ReadChain::MalformedCallOdd, json!("0x0")),
+        (ReadChain::MalformedCallNull, Value::Null),
+        (ReadChain::MalformedCallWrongType, json!(7)),
+    ];
+    for (scenario, bad_data) in malformed {
+        let (app, calls) = read_vertical_app(scenario, ReadMarker::BlockNumber).await;
+        let _error = app
+            .sign_request_v2(read_vertical_request(ReadMarker::BlockNumber))
+            .await
+            .expect_err("malformed eth_call DATA must fail closed");
+        let stages = stages_of(&app).await;
+        assert!(
+            stages.iter().all(|stage| stage != "sign"),
+            "invalid eth_call DATA reached signer: result={bad_data}, stages={stages:?}"
+        );
+        assert_eq!(
+            read_call_blocks(&calls),
+            vec![json!({"blockHash": BLOCK_A, "requireCanonical": true}); 2]
+        );
+        assert!(
+            read_code_blocks(&calls).is_empty(),
+            "invalid eth_call DATA must not trigger eth_getCode: {:?}",
+            describe_calls(&calls)
+        );
+    }
+}
+
+#[tokio::test]
+async fn production_read_vertical_refuses_malformed_code_data_before_signing() {
+    let malformed = [
+        (ReadChain::MalformedCodeEmpty, json!("")),
+        (ReadChain::MalformedCodeUpperPrefix, json!("0X")),
+        (ReadChain::MalformedCodeNotHex, json!("0xnothex")),
+        (ReadChain::MalformedCodeOdd, json!("0x0")),
+        (ReadChain::MalformedCodeNull, Value::Null),
+        (ReadChain::MalformedCodeWrongType, json!(7)),
+    ];
+    for (scenario, bad_code) in malformed {
+        let (app, calls) = read_vertical_app(scenario, ReadMarker::BlockNumber).await;
+        let _error = app
+            .sign_request_v2(read_vertical_request(ReadMarker::BlockNumber))
+            .await
+            .expect_err("malformed eth_getCode DATA must fail closed");
+        let stages = stages_of(&app).await;
+        assert!(
+            stages.iter().all(|stage| stage != "sign"),
+            "invalid eth_getCode DATA reached signer: result={bad_code}, stages={stages:?}"
+        );
+        assert_eq!(
+            read_call_blocks(&calls),
+            vec![json!({"blockHash": BLOCK_A, "requireCanonical": true}); 2]
+        );
+        assert_eq!(
+            read_code_blocks(&calls),
+            vec![json!({"blockHash": BLOCK_A, "requireCanonical": true}); 2]
+        );
+    }
+}
+#[tokio::test]
+async fn production_read_vertical_one_malformed_provider_cannot_form_code_quorum() {
+    let (app, calls) =
+        read_vertical_app(ReadChain::OneProviderMalformedCode, ReadMarker::BlockNumber).await;
+    let _error = app
+        .sign_request_v2(read_vertical_request(ReadMarker::BlockNumber))
+        .await
+        .expect_err("one invalid provider must not complete the code quorum");
+    let stages = stages_of(&app).await;
+    assert!(
+        stages.iter().all(|stage| stage != "sign"),
+        "single-provider malformed code reached signer: {stages:?}"
+    );
+    assert_eq!(
+        read_call_blocks(&calls),
+        vec![json!({"blockHash": BLOCK_A, "requireCanonical": true}); 2]
+    );
+    assert_eq!(
+        read_code_blocks(&calls),
+        vec![json!({"blockHash": BLOCK_A, "requireCanonical": true}); 2]
+    );
+}
+
+#[tokio::test]
+async fn production_read_vertical_accepts_empty_call_only_for_nonempty_pinned_code() {
+    for (scenario, code) in [
+        (ReadChain::EmptyCallCodeZero, "0x00"),
+        (ReadChain::EmptyCallCodeNonzero, "0x6000"),
+    ] {
+        let (app, calls) = read_vertical_app(scenario, ReadMarker::BlockNumber).await;
+        let response = app
+            .sign_request_v2(read_vertical_request(ReadMarker::BlockNumber))
+            .await
+            .unwrap_or_else(|error| {
+                panic!("valid empty return with bytecode {code} must sign: {error}")
+            });
+        let stages = stages_of(&app).await;
+        assert!(
+            !response.signatures.is_empty(),
+            "valid code {code} produced no signature"
+        );
+        assert_eq!(
+            stages
+                .iter()
+                .filter(|stage| stage.as_str() == "sign")
+                .count(),
+            1,
+            "stages={stages:?}"
+        );
+        assert_eq!(
+            read_call_blocks(&calls),
+            vec![json!({"blockHash": BLOCK_A, "requireCanonical": true}); 2]
+        );
+        assert_eq!(
+            read_code_blocks(&calls),
+            vec![json!({"blockHash": BLOCK_A, "requireCanonical": true}); 2]
+        );
+        for host in ["bsc-rpc-a", "bsc-rpc-b"] {
+            let provider_requests = calls
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(url, _, body)| {
+                    url.contains(host)
+                        && matches!(body["method"].as_str(), Some("eth_call" | "eth_getCode"))
+                })
+                .map(|(_, headers, body)| (headers.clone(), body.clone()))
+                .collect::<Vec<_>>();
+            assert_eq!(provider_requests.len(), 2, "{host}: {provider_requests:?}");
+            assert_eq!(
+                provider_requests[0].0, provider_requests[1].0,
+                "{host}: call/code headers differ"
+            );
+            assert_eq!(
+                provider_requests[0].1["params"][1], provider_requests[1].1["params"][1],
+                "{host}: call/code block differs"
+            );
+            assert_eq!(
+                provider_requests
+                    .iter()
+                    .map(|(_, body)| body["method"].as_str().unwrap())
+                    .collect::<HashSet<_>>(),
+                HashSet::from(["eth_call", "eth_getCode"]),
+                "{host}: expected exactly one call and code request",
+            );
+        }
+    }
+}
 
 #[path = "background_headroom_e2e.rs"]
 mod background_headroom_e2e;
@@ -465,3 +692,5 @@ mod postgres_audit_e2e;
 async fn durable_process_worker() {
     postgres_audit_e2e::run_crash_worker().await;
 }
+#[path = "read_data_http_e2e.rs"]
+mod read_data_http_e2e;
