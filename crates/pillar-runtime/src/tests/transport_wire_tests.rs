@@ -405,8 +405,13 @@ async fn real_reqwest_source_calls_capture_solana_tron_and_ton_wire_shapes() {
 async fn ton_depth_limit_and_trace_traversal_are_worker_safe_over_http() {
     if std::env::var_os("PILLAR_TON_ISOLATED_CHILD").is_none() {
         let executable = std::env::current_exe().expect("current test executable");
-        let mut child = std::process::Command::new("/usr/bin/time")
-            .arg("-l")
+        let mut time_command = std::process::Command::new("/usr/bin/time");
+        if cfg!(target_os = "macos") {
+            time_command.arg("-l");
+        } else {
+            time_command.args(["-f", "%M maximum resident set size"]);
+        }
+        let mut child = time_command
             .arg(executable)
             .args(["--exact", "tests::transport_wire_tests::ton_depth_limit_and_trace_traversal_are_worker_safe_over_http", "--nocapture"])
             .env("PILLAR_TON_ISOLATED_CHILD", "1")
@@ -431,12 +436,17 @@ async fn ton_depth_limit_and_trace_traversal_are_worker_safe_over_http() {
             .wait_with_output()
             .expect("collect child resource report");
         let time_report = String::from_utf8_lossy(&output.stderr);
-        let peak_rss_bytes = time_report
+        let reported_peak_rss = time_report
             .lines()
             .find(|line| line.contains("maximum resident set size"))
             .and_then(|line| line.split_whitespace().next())
             .and_then(|number| number.parse::<u64>().ok())
-            .expect("macOS time reports maximum resident set size");
+            .expect("time reports maximum resident set size");
+        let peak_rss_bytes = if cfg!(target_os = "macos") {
+            reported_peak_rss
+        } else {
+            reported_peak_rss * 1024
+        };
         let rss_budget_bytes = 512 * 1024 * 1024u64;
         println!(
             "ton-child-resource-evidence: {}",
@@ -445,7 +455,13 @@ async fn ton_depth_limit_and_trace_traversal_are_worker_safe_over_http() {
                 "rss_budget_bytes": rss_budget_bytes,
                 "rss_within_budget": peak_rss_bytes <= rss_budget_bytes,
                 "rss_limit_enforced_by_os": false,
-                "resource_source": "/usr/bin/time -l"
+                "resource_source": if cfg!(target_os = "macos") {
+                    "/usr/bin/time -l (bytes)"
+                } else {
+                    "/usr/bin/time -f '%M maximum resident set size' (KiB converted to bytes)"
+                },
+                "reported_peak_rss": reported_peak_rss,
+                "reported_peak_rss_unit": if cfg!(target_os = "macos") { "bytes" } else { "KiB" }
             })
         );
         assert!(

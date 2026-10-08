@@ -13,11 +13,11 @@ the Prometheus metric names.
 - READ는 `eth_call`과 `eth_getCode`의 JSON string, 정확한 `0x` prefix, 짝수 길이와 hex octets를 검증한다. `eth_call`이 `0x`이면 같은 provider와 headers로 같은 EIP-1898 block hash의 code를 조회한다. `0x00`처럼 실제 byte가 있는 code는 정상 empty return을 허용한다. 빈 code와 잘못된 DATA는 해당 provider의 표만 잃는다. 두 정상 provider는 다른 불량 provider가 있어도 quorum 2를 만족한다. 별도 call/code quorum과 latest fallback은 없다.
 - Extra-context HTTP와 Lambda에 기존 typed `signingContext`를 전달한다. Strict-schema policy consumer는 새 필드를 허용해야 한다. 설정하지 않은 policy와 strict boolean-true gate의 동작은 유지한다.
 - Ethereum-style signature 변환은 모든 ECDSA signer에서 recovery ID 2/3을 거부한다. 기존 low-S 정규화 순서와 non-EVM raw recovery ID 형식은 유지한다. KMS 호출 뒤에 거부하므로 cloud signing call 자체를 방지하는 변경은 아니다.
-- TON 전용 HTTP JSON decoder는 기존 4 MiB 응답 제한과 512-level JSON container nesting 제한을 적용한다. Trace 변환은 transaction hash 중복, 잘못된 topology, 512개 초과 node와 변환 후 512 container 초과 깊이를 조립 전에 거부한다. 서명과 confirmation에 필요한 scalar 필드만 투영한다. Object와 Array를 직접 조립해 subtree 재직렬화를 제거한다. 생략된 leaf children은 빈 배열로 처리한다. 원본 JSON은 반복형으로 순회하고 해제한다. JSON nesting과 trace node 수는 다른 단위다.
+- TON 전용 HTTP JSON decoder는 기존 4 MiB 응답 제한과 512-level JSON container nesting 제한을 적용한다. Trace 변환은 transaction hash 중복, 잘못된 topology, 512개 초과 node와 변환 후 512 container 초과 깊이를 조립 전에 거부한다. 서명과 confirmation에 필요한 scalar 필드만 투영한다. Object와 Array를 직접 조립해 subtree 재직렬화를 제거한다. 생략된 leaf children은 빈 배열로 처리한다. 이 정규화는 children 누락을 거부하는 upstream quorum 함수와 의도적으로 다르다. 원본 JSON은 반복형으로 순회하고 해제한다. JSON nesting과 trace node 수는 다른 단위다.
 
 ### Audit
 
-- Azure Solana fixture의 64-byte `X||Y`는 공개 mainnet 계정의 finalized slot `454171112` 응답과 일치했다. 이 관측은 실제 deployed program version과 독립 Azure immutable key response를 검증하지 않는다. 따라서 Azure binding 전체는 아직 미확인이다. TON의 보고된 266-depth 원본 응답도 찾지 못했다. 합성 depth 검증은 원본 replay를 대신하지 않는다.
+- 2026-10-08의 읽기 전용 조회에서 immutable Azure key version의 공개키, 운영 Pillar의 공개키와 Solana DVN config의 64-byte signer가 일치했다. Config의 finalized slot은 `454395711`이다. Owner program은 executable이며 program-data의 배포 slot은 `432734589`이다. Deployed program과 source의 재현 가능한 대응은 아직 미확인이다. Live KMS 서명과 on-chain 서명 검증은 실행하지 않았다. TON의 보고된 266-depth 원본 응답도 찾지 못했다. 합성 depth 검증은 원본 replay를 대신하지 않는다.
 - 리테스트의 `78bdd20e…`와 기존 source manifest의 `8ad87eb6…`는 hash 대상이 확인될 때까지 별개 식별자로 유지한다. 이번에 확인한 archive SHA-256은 `2e94b7cdc0e9f4bdfecba47ac391b3e619bfd9ad6d0dfc069ae4c498ef42d090`이다.
 
 ## 2.5.0 - 2026-10-06

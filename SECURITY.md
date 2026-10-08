@@ -287,13 +287,14 @@ not reproduce:
   `base58` of the first 32 bytes of SEC1 `04‖X‖Y`. For an Azure key this service
   answers `base58(X)` (`signer_address_for_provider`,
   `crates/pillar-signer/src/chain_address/chains.rs`). Upstream 1.2.66 has no Azure
-  adapter, so there is no upstream value to compare. The tests check that rule
-  against a fixed public-key fixture only; nothing in this repository reads an
-  on-chain Solana DVN account or proves which key encoding the Solana DVN verifier
-  binds. Whether the Azure-derived address is the binding the verifier expects is
-  an **open question under review**; do not treat the reported Azure address as
-  verified. The address is a response label: the public key and signature bytes
-  are unchanged.
+  adapter, so there is no upstream value to compare. On 2026-10-08, a read-only
+  probe matched the immutable Azure key version public key, the operating Pillar
+  signer public key and the finalized Solana DVN config signer as 64-byte `X||Y`.
+  The config slot was `454395711`; its owner was an executable upgradeable program.
+  The program-data deployment slot was `432734589`. A reproducible deployed-program
+  source correspondence remains unverified. No live KMS signature or on-chain
+  signature verification was performed. The address is a response label, not the
+  Solana DVN config account address; the public key and signature bytes are unchanged.
 - Error bodies also mask AWS ARNs and GCP key-ring paths; URL masking is upstream's.
 - Extra-context policies must answer the boolean `true` (only when configured).
 - ReadV1002 reads are pinned to the validated block hash, source receipts are
