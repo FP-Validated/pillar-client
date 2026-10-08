@@ -266,6 +266,9 @@ Optional:
 | `PILLAR_AUDIT_MAX_ATTEMPTS` | Retained-attempt quota per namespace (default 100000, maximum 1000000); no TTL or automatic deletion. |
 
 KMS resource strings are not normalized across key spellings. Azure charges the one-time public-key fetch to the configured key id and every signature (including hedges) to the resolved key reference the fetch returns; GCP charges both to the configured version name; AWS charges a public-key lookup to the configured key id (or to an id already resolved for the other key type) and ECDSA signing to the immutable key id that lookup returns, resolved on first use, while Ed25519 signing without audit is charged to the configured key id until a public-key lookup for that key type has populated the cache and to the resolved key id afterwards (`crates/pillar-signer/src/{azure/adapter.rs,gcp.rs,aws.rs}`). Resolutions are cached for the process lifetime without invalidation. The budget is therefore not a physical-key or remote-quota guarantee.
+For Solana, the `/signer-info` response uses a signer address label. Mnemonic, AWS
+and GCP keys use `base58` of the first 32 bytes of SEC1 `04||X||Y`; Azure uses
+`base58(X)`. The `publicKey` field contains `X||Y` for every signer kind.
 
 Resource waits and SDK calls inherit one absolute deadline. Local admission failures
 remain legacy 500 envelopes; the CLI's 58s deadline closes the socket without a
@@ -274,8 +277,13 @@ Successful GET/HEAD terminal logs are debug-level; failures remain visible.
 
 The caps are per process, not fleet-wide rate limits. Background RPC rounds have
 their own 10s deadline and reduced lane capacity; speculative Azure hedges never
-wait for a permit. These defaults have synthetic load evidence, **not live peak
-calibration**. Do not treat them as a production sizing recommendation.
+wait for a permit. Synthetic load scenarios cover these defaults; operators must
+calibrate production limits against their workload.
+
+For every `ReadV1002` target, select archive providers whose configured endpoint
+honors the EIP-1898 block hash and `requireCanonical`. Restrict failover and entity
+quorum to eligible providers. Reject READ requests when this quorum cannot be met.
+See [Operator responsibilities](SECURITY.md#operator-responsibilities) for the controls.
 
 Audit-on commits validated intent and immutable effective signing identity before
 each wallet effect, then signature fingerprints before 200. It is not a queue,

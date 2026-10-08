@@ -290,11 +290,12 @@ not reproduce:
   adapter, so there is no upstream value to compare. On 2026-10-08, a read-only
   probe matched the immutable Azure key version public key, the operating Pillar
   signer public key and the finalized Solana DVN config signer as 64-byte `X||Y`.
-  The config slot was `454395711`; its owner was an executable upgradeable program.
-  The program-data deployment slot was `432734589`. A reproducible deployed-program
-  source correspondence remains unverified. No live KMS signature or on-chain
-  signature verification was performed. The address is a response label, not the
-  Solana DVN config account address; the public key and signature bytes are unchanged.
+  The config slot was `454395711`; its owner is executable and upgradeable, with
+  program-data deployment slot `432734589`. The deployed program has not been
+  reproducibly linked to source, and no live Azure KMS signature or on-chain
+  signature verification has been observed. Audit closure of Azure-backed Solana
+  binding requires these three evidence classes. The address is a response label,
+  not the Solana DVN config account address; public-key and signature bytes are unchanged.
 - Error bodies also mask AWS ARNs and GCP key-ring paths; URL masking is upstream's.
 - Extra-context policies must answer the boolean `true` (only when configured).
 - ReadV1002 reads are pinned to the validated block hash, source receipts are

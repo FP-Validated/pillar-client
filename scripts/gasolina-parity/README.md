@@ -27,53 +27,30 @@ rather than this repository's opinion of it.
 
 `emit-ton-v302-destination.ts` derives the mainnet and sandbox ULN/connection addresses from upstream TON constructors and builds V302 cells with upstream `buildDvnVerifyCallData`. From `apps/gasolina`, run it through `sandbox-exec -f /tmp/gasolina-run/sb/offline.sb bash boundary/run-emitter.sh parity-v18-ton-v302 emit-ton-v302-destination.ts ton-v302-destination.json` after copying the script into that subdirectory. Its supplied implementation models only `getImplementationContract`'s not-deployed/not-a-proxy fallback. It does not prove a live/on-chain result or the proxy branch.
 
-`emit-ton-trace-quorum.ts` runs `multiprovider/src/ton.ts:tonTransactionTraceMessagesQuorumFn`
-itself. Its boundary report lists one replaced module,
-`packages/chain-abstractions/lz-definitions/src/cantonArtifactSubkeys.ts`, replaced
-only because its path names Canton: `lz-definitions/src/index.ts:2` re-exports it, so
-loading the package reaches it, and the report's `reads: 0, calls: 0` shows the
-quorum function never touched an export of it. The fingerprints are therefore
-upstream's own code over the recorded trace, not this repository's projection.
+`emit-ton-trace-quorum.ts` runs upstream
+`tonTransactionTraceMessagesQuorumFn` over the recorded trace. Its fixture records
+upstream's own projection and fingerprints, rather than this repository's projection.
 
-`emit-aptos-v301-payload-signed.ts` runs upstream's `getUlnReceiveDetails`, then
-`UlnAptosSdk.getDstUlnConfig` and `hasPayloadSigned` - the chain
-`App.validatePayloadSigned` calls - against a stub Move provider, recording every
-request (`functionArguments` and `functionArgumentTypes`) and the verdict for eleven
-scenarios on mainnet and testnet. The stub answers in the shape the public fullnode
-returns (`u64` as strings, `u8` as numbers, `verifiable` as a `u8` state `0`-`5`), for
-the recorded V1 receivers with EndpointV1 source ids 101/10161. Its boundary report
-lists six replaced modules (Canton and Stellar multiprovider, endpoint and util
-modules reached through package indexes) with `reads: 0, calls: 0`.
+`emit-aptos-v301-payload-signed.ts` runs upstream receive-details, destination
+config and `hasPayloadSigned` calls against a stub Move provider for eleven scenarios
+on mainnet and testnet. It records typed arguments and verdicts for the recorded V1
+receivers and EndpointV1 source ids 101/10161; it does not contact a live node.
 
-`emit-aptos-transport-wire.ts` runs the upstream `AptosMultiProvider`,
-`UlnAptosSdk`, and `getUlnReceiveDetails` against a `127.0.0.1` HTTP server, with
-recorded Aptos and Movement public responses replayed from `aptos-exchanges/` and
-`movement-exchanges/` staged beside the emitter. It captures the actual Aptos SDK
-1.39.0 request method, path, headers, BCS body bytes and response hash, and retains
-typed Move arguments immediately before the provider serializes them. It executes
-Aptos V301 receive details and `hasPayloadSigned`, plus Aptos and Movement V302
-configuration and `hasPayloadSigned` calls. Recorded receive-library/configuration,
-Channels, and table responses are replayed unchanged; V301/V302 confirmation and
-verifiable calls without a public recorded response receive explicitly marked synthetic
-zero responses. The emitter refuses every other unrecorded request and uses no live RPC.
-The provider construction is upstream `packages/multiprovider/src/aptos.ts:63-105`;
-its `view` forwards to the real client at `:337-352`. The upstream Move ULN call path
-is `packages/sdks/lz-v2-sdk/src/uln/move/index.ts:137-194`, with Aptos versioned reads
-in `packages/sdks/lz-v2-sdk/src/uln/aptos/index.ts:270-340,401-455,695-770`. The
-repo adapter `packages/common-aptos/src/transactions.ts:34-99` maps declared Move
-types into SDK `U8`/`U32`/`U64`, `AccountAddress`, and `MoveVector` values; upstream
-SDK `1.39.0` `src/internal/view.ts:15-40` BCS-serializes the typed view payload,
-then POSTs `/view` with `MimeType.BCS_VIEW_FUNCTION`. Its separate `viewJson` path
-at `:42-58` is not used by this provider call. The Rust loopback test compares
-function names and typed argument values after normalizing Move integers to decimal
-strings; it strips the upstream `/v1` base prefix for route comparison, and checks
-JSON `u8/u16/u32` numbers versus `u64/u128` decimal strings explicitly.
+The boundary reports record one replaced Canton module for the TON emitter and
+six replaced modules for the Aptos V301 emitter, including Canton and Stellar
+definitions. Both report `reads: 0, calls: 0` for these replacements.
 
-That capture does not start at `App.validatePayloadSigned`, so it has no V302
-`endpoint::get_effective_receive_library` request. The loopback test checks only that
-the service's lookup comes first, on the EndpointV2 module the capture used, with the
-receiver and `srcEid`, and counts it apart from upstream's requests. It is not compared
-against upstream bytes.
+`emit-aptos-transport-wire.ts` runs the upstream Aptos SDK 1.39.0 and ULN calls
+against a loopback server. It replays recorded Aptos/Movement responses, captures the
+SDK's HTTP/BCS request and checks typed arguments against the Rust transport's
+normalized JSON arguments. Recorded receive-library/configuration, Channels and table
+responses are replayed; missing V301/V302 confirmation and `verifiable` responses
+are explicitly synthetic zeroes. Other unrecorded requests are refused, and no live
+RPC is used. This capture does not start at `App.validatePayloadSigned`: the
+EndpointV2 `endpoint::get_effective_receive_library` lookup is not part of the
+upstream capture, so the Rust test checks its order and arguments but does not claim
+byte-level parity for that lookup.
+
 
 All of them are read-only in the sense that matters: no external RPC, no writes to the
 upstream checkout, and no network beyond the local loopback replay/emitter boundaries.
