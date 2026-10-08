@@ -478,6 +478,9 @@ async fn nonevm_refusal_arms_match_upstream_and_pillar_builder_errors() {
         };
         let (variant, status, reason) = match &error {
             AppCoreError::BadRequest(reason) => ("BadRequest", 400, reason.as_str()),
+            AppCoreError::UnresolvableCommand(reason) => {
+                ("UnresolvableCommand", 400, reason.as_str())
+            }
             AppCoreError::Internal(reason) => ("Internal", 500, reason.as_str()),
             AppCoreError::Admission(_) => panic!(
                 "unexpected admission error for {}/{}/{}",

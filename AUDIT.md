@@ -523,3 +523,60 @@ Maintainer-local 근거는 `audit/review-80e0ad21-20261008/`에 보존한다. `v
 이 source 변경은 registry 게시나 production 배포를 포함하지 않는다. Section 11의 관측은 과거 근거로 유지한다. 원본 351 comparison ledger와 축약 reference hash의 대상은 확인된 자료로만 연결한다.
 
 근거: audit/review-80e0ad21-20261008의 원시 실행 기록과 hyperliquid-archive-upstreams.json · 2026-10-08 11:09 KST
+
+## 13. PR #1 리뷰 후속 조치, 2026-10-08
+
+### RE-002: 결정적 READ 거절과 장애의 구분
+
+Runtime은 DATA, pinned NoCode와 execution revert를 별도 observation으로 집계한다.
+Runtime은 기존 category와 entity 정책으로 유일한 quorum을 확인한 뒤 domain refusal을 반환한다.
+단일 불량 provider는 정상 provider quorum을 거절로 바꾸지 않는다. 서로 다른 결과의 quorum이 동시에 성립하면 signer에 진입하지 않는다.
+
+Revert 분류는 numeric code `3` 또는 numeric code `-32000`과 정확한 `execution reverted` 메시지의 조합만 인정한다. 메시지의 대소문자는 구분하지 않는다.
+Runtime은 제공된 revert DATA를 검증하고 fingerprint에 포함한다. 생략과 유효한 `0x`는 같은 빈 DATA이며, null·잘못된 타입·잘못된 hex는 vote를 얻지 못한다.
+Timeout, transport 장애와 다른 RPC error는 non-retryable domain refusal로 바꾸지 않는다. HTTP consumer 계약은 [README.md](./README.md)에 명시했다.
+
+실제 TCP API handler와 Reqwest provider fixture의 관측은 다음과 같다.
+
+| 결과 | Case 수 | HTTP status | Sign-stage |
+|---|---:|---:|---:|
+| 정상 처리 | 12 | 200 | 각 1회 |
+| Quorum으로 확인한 domain refusal | 4 | 400 | 0회 |
+| 장애·불완전 DATA·모호한 quorum | 17 | 500 | 0회 |
+
+각 case의 실제 status는 기대값과 일치했다. Empty call의 code `0x00` 및 `0x6000`과 1-bad/2-good 정상 control을 유지했다.
+원시 요청·응답·pin·provider header와 signer counter는 `audit/review-pr1-20261008/main-validation-95w4uR/read-http/http-results.json`에 보존한다.
+이 파일의 SHA-256은 `e8753b3e6df4e0611bbe49d6de302641c9ad011bda572bd6a4a05c7da37f60c4`다.
+실행한 runtime test binary의 SHA-256은 `a4089ef24da7720e083a89f3eb8f9547eaae3203c1b9d0e89a8b2d1db610eaf9`다.
+이 실행은 아직 commit하지 않은 후속 source를 Rust 1.98.1로 검증한 로컬 실행이다. HEAD `87b4bae`의 기존 CI나 운영 배포 실행으로 표현하지 않는다.
+
+독립 리뷰에서 발견한 잘못된 revert 분류는 같은 case ID로 수정 전과 후를 대조했다.
+`read-domain/run-07/http-results.json`의 SHA-256은 `9ad34908c2474db0dbfe11f4d53d44c169d9ae0919dd576b06728ada8997e022`다.
+수정 전에는 method-not-found, timeout 및 잘못된 code 형식의 5개 case가 domain refusal로 오분류됐다.
+`read-domain/run-08/http-results.json`의 SHA-256은 `5d1b39d4227e2a53478ad1981fba51393afc2a5488e4d20a8eaefbcc3edb5e25`다.
+수정 후에는 이 case들이 internal 오류로 남고 정상 독립 provider의 quorum은 성공했다. 원본 351 comparison의 case ID로 임의 매핑하지 않는다.
+
+### 전체 검증과 CI 증거의 경계
+
+Rust 1.98.1과 `RUSTFLAGS=-D warnings`의 fmt 및 workspace all-targets clippy는 통과했다.
+같은 workspace test는 전체 성공이 아니다. Runtime 결과는 496 passed, 1 failed, 15 ignored다.
+실패한 기존 `provider_config_refresh_failure_logs_the_position_but_not_the_value`는 빈 log capture를 관측했다. 해당 source와 보안 assert는 바꾸지 않았다.
+원시 workspace log의 SHA-256은 `129b54eac4740fbc1e18e21957f8d0f45e94f0385dc338180e1b8b0e39e1fbe6`다.
+조사 작업자는 독립 harness에서 다른 NoSubscriber thread의 첫 callsite 등록으로 tracing InterestCache가 로그를 누락하는 메커니즘을 재현했다고 보고했다. 원본 실행의 registration 순서는 미확인이므로 원본 실패 원인은 추론으로 남긴다.
+이 조사는 `audit/review-pr1-20261008/refresh-log-investigation/`에 보존한다. 새 READ HTTP 경로와 직접 연결되는 subscriber 변경은 찾지 못했다.
+
+후속 CI는 기존 job을 유지하고 source identity가 연결된 container archive와 macOS release TON lifecycle gate를 추가한다.
+Container artifact는 OCI revision, config digest와 archive SHA-256을 구분한다. Build, save와 preflight의 실패 로그 및 실제 종료 시각도 보존한다.
+Workspace test는 READ HTTP 원시 artifact를 별도로 게시한다. 아직 실행하지 않은 후속 hosted CI를 PASS로 기록하지 않는다.
+기존 Linux TON의 test-source mount 확인은 production crate 전체의 source binding을 대신하지 않는다. 원본 raw266 replay도 별도 미확인 범위다.
+
+### RE-001: 기존 운영 Deployment의 한정 교체
+
+운영 적용 대상은 기존 `ovh-cluster/rpc-mainnet/lz-rpc`와 `ovh-cluster/layerzero-mainnet/pillar-dvn-client-mainnet`이다. 별도 테스트 Deployment는 만들지 않는다.
+준비한 `hyperliquid-pinned` alias는 기존 Alchemy URL reference만 사용한다. Generic Hyperliquid route와 다른 chain, Secret, signer identity 및 entity quorum 정책은 유지한다.
+Pillar의 Hyperliquid URI만 alias로 바꾸고 CI가 만든 image를 기존 private registry 경로에서 digest로 고정한다.
+정확한 image와 ConfigMap diff, 기존 resource identity, rolling 전략 및 rollback을 운영 승인 전에 함께 제시한다. 전체 Argo Application의 기존 drift는 반영하지 않는다.
+정상 historical hash와 존재하지 않는 hash의 call/code, 미준수 upstream으로의 failover 차단 및 실제 정상 MESSAGE 서명을 적용 후 확인한다.
+현재 이 section의 실행은 로컬 source 검증이다. Registry 게시, 운영 설정 변경과 live KMS 서명은 아직 수행하지 않았다.
+
+근거: main-validation-95w4uR의 원시 실행 기록 · 2026-10-08 16:02 KST

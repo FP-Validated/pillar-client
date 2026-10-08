@@ -37,19 +37,18 @@ use std::{
 use tokio::sync::Semaphore;
 
 use crate::provider_health::{
-    block_matches_resolved_timestamp, eth_call_at_block, evm_receipt_fingerprint,
-    extra_context_sent_event_payload, is_http_not_found, lz_message_id_matches,
-    lz_message_identity_matches, normalize_address, normalize_address_map, numeric_response,
-    observe_block_confirmations, observe_block_time, observe_payload_signed,
-    observe_receive_uln_version, observe_solana_transaction_from, observe_transaction_from,
-    observe_uln_v2_inbound_proof_type, observe_uln_v2_mpt_hash_info, parse_block_timestamp_seconds,
-    pathway_extra_string_value, pathway_extra_u32, pathway_extra_u64, plan_dispatch,
-    provider_response, provider_uri_parts, required_provider_quorum, resolve_provider_quorum,
-    strip_hex_prefix, timestamp_validity, ton_v3_provider_uri_parts, uln_version_value,
-    AwsLambdaInvokeClient, BlockConfirmationObservation, BlockConfirmationValidity, BlockTime,
-    DispatchEntry, EvmPayloadSignedObservation, EvmTransactionReceipt, ExactQuorumAccumulator,
-    JsonRpcTransport, PayloadSignedValidity, ProviderRankTracker, ReceiveUlnVersion, RpcError,
-    TimestampValidity,
+    block_matches_resolved_timestamp, evm_receipt_fingerprint, extra_context_sent_event_payload,
+    is_http_not_found, lz_message_id_matches, lz_message_identity_matches, normalize_address,
+    normalize_address_map, numeric_response, observe_block_confirmations, observe_block_time,
+    observe_payload_signed, observe_receive_uln_version, observe_solana_transaction_from,
+    observe_transaction_from, observe_uln_v2_inbound_proof_type, observe_uln_v2_mpt_hash_info,
+    parse_block_timestamp_seconds, pathway_extra_string_value, pathway_extra_u32,
+    pathway_extra_u64, plan_dispatch, provider_response, provider_uri_parts,
+    required_provider_quorum, resolve_provider_quorum, strip_hex_prefix, timestamp_validity,
+    ton_v3_provider_uri_parts, uln_version_value, AwsLambdaInvokeClient,
+    BlockConfirmationObservation, BlockConfirmationValidity, BlockTime, DispatchEntry,
+    EvmPayloadSignedObservation, EvmTransactionReceipt, ExactQuorumAccumulator, JsonRpcTransport,
+    PayloadSignedValidity, ProviderRankTracker, ReceiveUlnVersion, RpcError, TimestampValidity,
 };
 use crate::provider_snapshot::ChainDispatch;
 use crate::validation::{ExpirationValidRange, RuntimeAppValidator, RuntimeValidationChecks};

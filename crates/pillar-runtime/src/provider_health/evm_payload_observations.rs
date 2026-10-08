@@ -283,6 +283,85 @@ where
     eth_call_at_block(transport, url, headers, to, data, json!("latest")).await
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ReadCallObservation {
+    Data { value: String },
+    NoCode,
+    ExecutionRevert { data: Option<String> },
+}
+
+/// A provider's domain observation must remain a vote until entity quorum resolves it.
+pub(crate) async fn eth_call_read_observation_at_block<T>(
+    transport: T,
+    url: String,
+    headers: HashMap<String, String>,
+    to: &str,
+    data: &str,
+    block: Value,
+) -> Result<(String, ReadCallObservation), AppCoreError>
+where
+    T: JsonRpcTransport,
+{
+    let response = transport
+        .post_json_scoped(
+            url.clone(),
+            headers.clone(),
+            json!({
+                "method": "eth_call",
+                "params": [{"to": to, "data": data}, block],
+                "id": 1,
+                "jsonrpc": "2.0",
+            }),
+        )
+        .await
+        .map_err(AppCoreError::from)?;
+
+    if let Some(error) = response.get("error").and_then(Value::as_object) {
+        let code = error.get("code").and_then(Value::as_i64);
+        let message = error
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if code == Some(3)
+            || (code == Some(-32000) && message.eq_ignore_ascii_case("execution reverted"))
+        {
+            let data = match error.get("data") {
+                None => None,
+                Some(value) => {
+                    let value = value.as_str().ok_or_else(|| {
+                        AppCoreError::Internal("eth_call revert DATA must be a string".into())
+                    })?;
+                    validate_evm_data(value, "eth_call revert")?;
+                    Some(value.to_ascii_lowercase())
+                }
+            };
+            // Absent and empty DATA both report no returned revert bytes, so they share a fingerprint.
+            let fingerprint = format!("execution-revert:{}", data.as_deref().unwrap_or("0x"));
+            return Ok((fingerprint, ReadCallObservation::ExecutionRevert { data }));
+        }
+        return Err(AppCoreError::Internal(
+            "JSON-RPC eth_call returned an error".into(),
+        ));
+    }
+
+    let value = response
+        .get("result")
+        .and_then(Value::as_str)
+        .ok_or_else(|| AppCoreError::Internal("Missing eth_call result".into()))?;
+    validate_evm_data(value, "eth_call")?;
+    if value == "0x" {
+        let code = eth_get_code_at_block(transport, url, headers, to, block).await?;
+        if code == "0x" {
+            return Ok(("no-code".into(), ReadCallObservation::NoCode));
+        }
+    }
+    let canonical = value.to_ascii_lowercase();
+    Ok((
+        format!("data:{canonical}"),
+        ReadCallObservation::Data { value: canonical },
+    ))
+}
+
 /// `block` is a JSON-RPC block parameter: a tag string, or an EIP-1898 object
 /// such as `{"blockHash": ..., "requireCanonical": true}`.
 pub(crate) async fn eth_call_at_block<T>(

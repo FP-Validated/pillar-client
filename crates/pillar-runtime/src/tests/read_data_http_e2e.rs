@@ -3,10 +3,31 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 
+#[derive(Clone, Copy, Debug)]
+enum HttpBehavior {
+    Chain(ReadChain),
+    Revert,
+    RevertEmpty,
+    RevertUpperData,
+    RevertDifferentData,
+    RevertMalformed,
+    RevertWrongType,
+    StandardRevert,
+    MisleadingError,
+    MethodNotFoundRevertMessage,
+    TimeoutRevertMessage,
+    MissingCodeRevertMessage,
+    StringCodeRevertMessage,
+    NullCodeRevertMessage,
+    Timeout,
+    Disconnect,
+}
+
 #[derive(Clone)]
 struct HttpFixtureState {
     receipt: Value,
     chains_by_path: HashMap<String, ReadChain>,
+    behaviors_by_path: HashMap<String, HttpBehavior>,
     wire_requests: Arc<parking_lot::Mutex<Vec<CapturedHttpRequest>>>,
     failures: Arc<parking_lot::Mutex<Vec<String>>>,
 }
@@ -25,6 +46,11 @@ struct HttpRequest {
 
 #[derive(Debug)]
 struct CaseResult {
+    status: u16,
+    body: Value,
+    raw_body: String,
+    response_headers: HashMap<String, String>,
+    wire_requests: Vec<Value>,
     signed: bool,
     signatures: Vec<Signature>,
     signer_stage_count: usize,
@@ -130,6 +156,62 @@ async fn serve_one(stream: TcpStream, state: &HttpFixtureState) -> Result<(), St
         headers: request.headers.clone(),
         body: request.body.clone(),
     });
+    if request.body["method"] == "eth_call" && request.body["params"][0]["to"] == READ_TARGET {
+        let error = match state.behaviors_by_path.get(&request.path) {
+            Some(HttpBehavior::Revert) => {
+                Some(json!({"code": 3, "message": "VM execution error", "data": "0xabcd"}))
+            }
+            Some(HttpBehavior::RevertEmpty) => {
+                Some(json!({"code": 3, "message": "execution reverted", "data": "0x"}))
+            }
+            Some(HttpBehavior::RevertUpperData) => {
+                Some(json!({"code": 3, "message": "execution reverted", "data": "0xABCD"}))
+            }
+            Some(HttpBehavior::RevertDifferentData) => {
+                Some(json!({"code": 3, "message": "execution reverted", "data": "0xabce"}))
+            }
+            Some(HttpBehavior::RevertMalformed) => {
+                Some(json!({"code": 3, "message": "execution reverted", "data": "0x0"}))
+            }
+            Some(HttpBehavior::RevertWrongType) => {
+                Some(json!({"code": 3, "message": "execution reverted", "data": 7}))
+            }
+            Some(HttpBehavior::StandardRevert) => {
+                Some(json!({"code": -32000, "message": "execution reverted"}))
+            }
+            Some(HttpBehavior::MisleadingError) => Some(
+                json!({"code": -32000, "message": "upstream timeout: execution reverted is unavailable"}),
+            ),
+            Some(HttpBehavior::MethodNotFoundRevertMessage) => {
+                Some(json!({"code": -32601, "message": "execution reverted"}))
+            }
+            Some(HttpBehavior::TimeoutRevertMessage) => {
+                Some(json!({"code": -32002, "message": "execution reverted"}))
+            }
+            Some(HttpBehavior::MissingCodeRevertMessage) => {
+                Some(json!({"message": "execution reverted"}))
+            }
+            Some(HttpBehavior::StringCodeRevertMessage) => {
+                Some(json!({"code": "-32000", "message": "execution reverted"}))
+            }
+            Some(HttpBehavior::NullCodeRevertMessage) => {
+                Some(json!({"code": null, "message": "execution reverted"}))
+            }
+            Some(HttpBehavior::Timeout) => {
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                return Ok(());
+            }
+            Some(HttpBehavior::Disconnect) => return Ok(()),
+            _ => None,
+        };
+        if let Some(error) = error {
+            return respond_json(
+                &mut stream,
+                &json!({"jsonrpc": "2.0", "id": request.body["id"], "error": error}),
+            )
+            .await;
+        }
+    }
     let chain = state
         .chains_by_path
         .get(&request.path)
@@ -163,15 +245,23 @@ async fn serve_http_fixture(
     state: HttpFixtureState,
     mut shutdown: oneshot::Receiver<()>,
 ) {
+    let mut connections = tokio::task::JoinSet::new();
     loop {
         tokio::select! {
-            _ = &mut shutdown => return,
+            _ = &mut shutdown => {
+                connections.abort_all();
+                while connections.join_next().await.is_some() {}
+                return;
+            },
             accepted = listener.accept() => {
                 match accepted {
                     Ok((stream, _)) => {
-                        if let Err(error) = serve_one(stream, &state).await {
-                            state.failures.lock().push(error);
-                        }
+                        let state = state.clone();
+                        connections.spawn(async move {
+                            if let Err(error) = serve_one(stream, &state).await {
+                                state.failures.lock().push(error);
+                            }
+                        });
                     }
                     Err(error) => state.failures.lock().push(error.to_string()),
                 }
@@ -189,9 +279,17 @@ fn is_read_target_request(request: &CapturedHttpRequest) -> bool {
 }
 
 async fn run_full_consumer_case(
-    bsc_chains: &[ReadChain],
+    behaviors: &[HttpBehavior],
     quorum: usize,
+    same_entity: bool,
 ) -> (CaseResult, Vec<String>) {
+    let bsc_chains = behaviors
+        .iter()
+        .map(|behavior| match behavior {
+            HttpBehavior::Chain(chain) => *chain,
+            _ => ReadChain::EmptyCallCodeZero,
+        })
+        .collect::<Vec<_>>();
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind local JSON-RPC endpoint");
@@ -214,6 +312,11 @@ async fn run_full_consumer_case(
     let state = HttpFixtureState {
         receipt: read_vertical_receipt(ReadMarker::BlockNumber),
         chains_by_path,
+        behaviors_by_path: bsc_paths
+            .iter()
+            .cloned()
+            .zip(behaviors.iter().copied())
+            .collect(),
         wire_requests: wire_requests.clone(),
         failures: failures.clone(),
     };
@@ -221,18 +324,51 @@ async fn run_full_consumer_case(
     let server = tokio::spawn(serve_http_fixture(listener, state, shutdown_rx));
 
     let transport = ReqwestJsonRpcTransport::new().expect("production Reqwest transport");
-    let app = RuntimeServerApp::from_env_map_with_runtime_core(
-        http_provider_env(&ethereum_url, &bsc_urls, quorum),
-        transport,
-        || 1_767_323_045_000,
-    )
+    let mut variables = http_provider_env(&ethereum_url, &bsc_urls, quorum);
+    if same_entity {
+        let mut providers: Value = serde_json::from_str(&variables[LZ_PROVIDER_CONFIG]).unwrap();
+        providers["chains"]["bsc"]["rpc"][1]["entity"] = json!("bsc-0");
+        variables.insert(LZ_PROVIDER_CONFIG.to_string(), providers.to_string());
+    }
+    let app = RuntimeServerApp::from_env_map_with_runtime_core(variables, transport, || {
+        1_767_323_045_000
+    })
     .await
     .unwrap_or_else(|error| panic!("production READ HTTP app did not assemble: {error}"));
-    let response = app
-        .sign_request_v2(read_vertical_request(ReadMarker::BlockNumber))
-        .await;
-    let stages = stages_of(&app).await;
-    drop(app);
+    let metrics = app.metrics().expect("production metrics registry");
+    let inbound = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let inbound_address = inbound.local_addr().unwrap();
+    let router = pillar_api::router(app, "read-domain-e2e");
+    let api = tokio::spawn(async move { axum::serve(inbound, router).await.unwrap() });
+    let response = reqwest::Client::new()
+        .post(format!("http://{inbound_address}/v2/resolve-and-sign"))
+        .bearer_auth("test-token-0123456789abcdef0123456789")
+        .json(&read_vertical_request(ReadMarker::BlockNumber))
+        .send()
+        .await
+        .expect("actual inbound HTTP response");
+    let status = response.status().as_u16();
+    let response_headers = response
+        .headers()
+        .iter()
+        .map(|(name, value)| (name.to_string(), value.to_str().unwrap().to_string()))
+        .collect();
+    let raw_body = response.text().await.expect("raw HTTP response body");
+    let body: Value = serde_json::from_str(&raw_body).expect("HTTP JSON envelope");
+    let rendered = metrics
+        .lock()
+        .await
+        .render_prometheus("mainnet", "read-domain-e2e");
+    let stages = rendered
+        .lines()
+        .filter(|line| line.starts_with("pillar_sign_stage_duration_seconds_count"))
+        .filter_map(|line| {
+            let rest = &line[line.find("stage=\"")? + 7..];
+            Some(rest[..rest.find('"')?].to_string())
+        })
+        .collect::<Vec<_>>();
+    api.abort();
+    let _ = api.await;
     let _ = shutdown_tx.send(());
     server.await.expect("local JSON-RPC server joined");
 
@@ -282,12 +418,18 @@ async fn run_full_consumer_case(
     let failures = failures.lock().clone();
     assert!(failures.is_empty(), "HTTP fixture failures: {failures:?}");
 
-    let (signed, signatures) = match response {
-        Ok(response) => (!response.signatures.is_empty(), response.signatures),
-        Err(_) => (false, Vec::new()),
-    };
+    let signatures: Vec<Signature> = body["body"]
+        .get("signatures")
+        .map(|value| serde_json::from_value(value.clone()).unwrap())
+        .unwrap_or_default();
+    let signed = !signatures.is_empty();
     (
         CaseResult {
+            status,
+            body,
+            wire_requests: requests.iter().map(|request| json!({"path": request.path, "headers": request.headers, "body": request.body})).collect(),
+            raw_body,
+            response_headers,
             signed,
             signatures,
             signer_stage_count: stages
@@ -304,91 +446,300 @@ async fn run_full_consumer_case(
 
 #[tokio::test]
 async fn reqwest_http_full_consumer_enforces_read_data_and_provider_quorum() {
-    let (mock_app, _) =
-        read_vertical_app(ReadChain::EmptyCallCodeZero, ReadMarker::BlockNumber).await;
-    let baseline = mock_app
-        .sign_request_v2(read_vertical_request(ReadMarker::BlockNumber))
-        .await
-        .expect("normal empty return with nonempty code signs")
-        .signatures;
-    drop(mock_app);
+    use HttpBehavior::*;
+    let good = Chain(ReadChain::EmptyCallCodeZero);
+    let no_code = Chain(ReadChain::EmptyCallCodeEmptyCode);
+    let malformed = Chain(ReadChain::MalformedCodeOdd);
     let cases = [
+        ("empty_call_with_0x00_code", vec![good; 2], 200, false),
         (
-            "empty_call_with_0x00_code",
-            vec![ReadChain::EmptyCallCodeZero; 2],
+            "empty_call_with_0x6000_code",
+            vec![Chain(ReadChain::EmptyCallCodeNonzero); 2],
+            200,
+            false,
+        ),
+        (
+            "singleton_no_code_two_good",
+            vec![no_code, good, good],
+            200,
+            false,
+        ),
+        (
+            "singleton_revert_two_good",
+            vec![Revert, good, good],
+            200,
+            false,
+        ),
+        (
+            "singleton_malformed_two_good",
+            vec![malformed, good, good],
+            200,
+            false,
+        ),
+        (
+            "singleton_timeout_two_good",
+            vec![Timeout, good, good],
+            200,
+            false,
+        ),
+        (
+            "singleton_transport_two_good",
+            vec![Disconnect, good, good],
+            200,
+            false,
+        ),
+        (
+            "method_not_found_revert_message_negative_q2",
+            vec![MethodNotFoundRevertMessage; 2],
+            500,
+            false,
+        ),
+        (
+            "method_not_found_revert_message_singleton_two_good",
+            vec![MethodNotFoundRevertMessage, good, good],
+            200,
+            false,
+        ),
+        (
+            "timeout_code_revert_message_negative_q2",
+            vec![TimeoutRevertMessage; 2],
+            500,
+            false,
+        ),
+        (
+            "timeout_code_revert_message_singleton_two_good",
+            vec![TimeoutRevertMessage, good, good],
+            200,
+            false,
+        ),
+        (
+            "missing_code_revert_message_negative_q2",
+            vec![MissingCodeRevertMessage; 2],
+            500,
+            false,
+        ),
+        (
+            "missing_code_revert_message_singleton_two_good",
+            vec![MissingCodeRevertMessage, good, good],
+            200,
+            false,
+        ),
+        (
+            "string_code_revert_message_negative_q2",
+            vec![StringCodeRevertMessage; 2],
+            500,
+            false,
+        ),
+        (
+            "string_code_revert_message_singleton_two_good",
+            vec![StringCodeRevertMessage, good, good],
+            200,
+            false,
+        ),
+        (
+            "null_code_revert_message_negative_q2",
+            vec![NullCodeRevertMessage; 2],
+            500,
+            false,
+        ),
+        (
+            "null_code_revert_message_singleton_two_good",
+            vec![NullCodeRevertMessage, good, good],
+            200,
+            false,
+        ),
+        (
+            "no_code_negative_q2",
+            vec![no_code, no_code, good],
+            400,
+            false,
+        ),
+        (
+            "revert_negative_q2",
+            vec![Revert, RevertUpperData, good],
+            400,
+            false,
+        ),
+        (
+            "standard_revert_negative_q2",
+            vec![StandardRevert; 2],
+            400,
+            false,
+        ),
+        (
+            "absent_empty_revert_equal",
+            vec![StandardRevert, RevertEmpty],
+            400,
+            false,
+        ),
+        (
+            "timeout_singleton_no_code",
+            vec![Timeout, no_code],
+            500,
+            false,
+        ),
+        (
+            "timeout_singleton_revert",
+            vec![Timeout, Revert],
+            500,
+            false,
+        ),
+        (
+            "same_entity_two_uri_no_code",
+            vec![no_code, no_code, malformed],
+            500,
             true,
         ),
         (
-            "empty_call_with_0x6000_code",
-            vec![ReadChain::EmptyCallCodeNonzero; 2],
+            "same_entity_two_uri_revert",
+            vec![Revert, Revert, malformed],
+            500,
             true,
+        ),
+        (
+            "positive_q2_negative_q2_ambiguous",
+            vec![good, good, no_code, no_code],
+            500,
+            false,
+        ),
+        (
+            "positive_q2_revert_q2_ambiguous",
+            vec![good, good, Revert, Revert],
+            500,
+            false,
+        ),
+        (
+            "different_revert_data",
+            vec![Revert, RevertDifferentData],
+            500,
+            false,
+        ),
+        (
+            "malformed_revert_data_not_absent",
+            vec![RevertMalformed, StandardRevert],
+            500,
+            false,
+        ),
+        (
+            "wrong_type_revert_data_not_absent",
+            vec![RevertWrongType, StandardRevert],
+            500,
+            false,
+        ),
+        (
+            "arbitrary_revert_substring",
+            vec![MisleadingError; 2],
+            500,
+            false,
         ),
         (
             "malformed_call_odd_hex",
-            vec![ReadChain::MalformedCallOdd; 2],
+            vec![Chain(ReadChain::MalformedCallOdd); 2],
+            500,
             false,
         ),
-        (
-            "malformed_code_odd_hex",
-            vec![ReadChain::MalformedCodeOdd; 2],
-            false,
-        ),
-        (
-            "one_bad_two_good_quorum_2",
-            vec![
-                ReadChain::OneProviderMalformedCode,
-                ReadChain::EmptyCallCodeZero,
-                ReadChain::EmptyCallCodeZero,
-            ],
-            true,
-        ),
-        (
-            "cross_provider_partial_observations",
-            vec![
-                ReadChain::EmptyCallCodeEmptyCode,
-                ReadChain::EmptyCallCodeZero,
-                ReadChain::EmptyCallCodeEmptyCode,
-            ],
-            false,
-        ),
+        ("malformed_code_odd_hex", vec![malformed; 2], 500, false),
     ];
     let mut evidence = Vec::new();
-    for (name, providers, expected_signed) in cases {
-        let (result, stages) = run_full_consumer_case(&providers, 2).await;
+    let mut baseline = None;
+    let mut status_mismatches = Vec::new();
+    for (name, providers, expected_status, same_entity) in cases {
+        let (result, stages) = run_full_consumer_case(&providers, 2, same_entity).await;
+        println!(
+            "{}",
+            json!({"case": name, "status": result.status, "body": result.body, "stages": stages})
+        );
+        evidence.push(
+            json!({"name": name, "providers": format!("{providers:?}"), "same_entity": same_entity,
+            "status": result.status, "expected_status": expected_status, "body": result.body, "signed": result.signed,
+            "raw_body": result.raw_body, "response_headers": result.response_headers,
+            "wire_requests": result.wire_requests,
+            "signer_stage_count": result.signer_stage_count, "stages": stages,
+            "same_provider_headers_and_pin": result.pinned_provider_pairs,
+            "read_call_count": result.read_call_count, "read_code_count": result.read_code_count}),
+        );
+        if result.status != expected_status {
+            status_mismatches.push(format!(
+                "{name}: expected {expected_status}, got {}",
+                result.status
+            ));
+            continue;
+        }
+        let expected_signed = expected_status == 200;
         assert_eq!(result.signed, expected_signed, "{name}: {result:?}");
         assert_eq!(
             result.signer_stage_count,
             usize::from(expected_signed),
             "{name}"
         );
-        assert!(result.read_call_count >= 2, "{name}");
         if expected_signed {
-            assert_eq!(result.signatures, baseline, "{name}");
+            let baseline = baseline.get_or_insert_with(|| result.signatures.clone());
+            assert_eq!(&result.signatures, baseline, "{name}");
             assert!(result.pinned_provider_pairs, "{name}");
+            assert!(result.body.get("code").is_none(), "{name}");
+            assert!(result.body.get("retryable").is_none(), "{name}");
+            assert_eq!(result.body["statusCode"], 200);
+            assert_eq!(
+                result
+                    .body
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<HashSet<_>>(),
+                HashSet::from(["statusCode", "body"])
+            );
         } else {
             assert!(stages.iter().all(|stage| stage != "sign"), "{name}");
+            assert_eq!(result.body["statusCode"], expected_status, "{name}");
+            assert!(result.body["body"].is_string(), "{name}");
+            let keys = result
+                .body
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect::<HashSet<_>>();
+            if expected_status == 400 {
+                assert_eq!(result.body["code"], "UNRESOLVABLE_COMMAND", "{name}");
+                assert_eq!(result.body["retryable"], false, "{name}");
+                assert_eq!(
+                    keys,
+                    HashSet::from(["statusCode", "body", "code", "retryable"])
+                );
+                let reason = if providers
+                    .iter()
+                    .any(|provider| matches!(provider, Chain(ReadChain::EmptyCallCodeEmptyCode)))
+                {
+                    "ReadV1002 command is unresolvable: target has no code at the pinned block"
+                } else {
+                    "ReadV1002 command is unresolvable: execution reverted at the pinned block"
+                };
+                assert_eq!(result.body["body"], reason, "{name}");
+            } else {
+                assert_eq!(keys, HashSet::from(["statusCode", "body"]), "{name}");
+            }
         }
-        if name == "malformed_call_odd_hex" {
-            assert_eq!(result.read_code_count, 0);
-        } else {
-            assert!(result.read_code_count >= 2, "{name}");
-        }
-        evidence.push(json!({"name": name, "signed": result.signed,
-            "signer_stage_count": result.signer_stage_count,
-            "signature_matches_baseline": expected_signed.then(|| result.signatures == baseline),
-            "same_provider_headers_and_pin": result.pinned_provider_pairs,
-            "read_call_count": result.read_call_count, "read_code_count": result.read_code_count}));
     }
-    let artifact = json!({"schema_version": 1, "transport": "ReqwestJsonRpcTransport",
-        "consumer": "RuntimeServerApp<ReqwestJsonRpcTransport>",
+    let artifact = json!({"schema_version": 2, "transport": "ReqwestJsonRpcTransport",
+        "consumer": "RuntimeServerApp<ReqwestJsonRpcTransport>", "inbound": "POST /v2/resolve-and-sign",
+        "request": read_vertical_request(ReadMarker::BlockNumber), "receipt": read_vertical_receipt(ReadMarker::BlockNumber),
         "block": {"blockHash": BLOCK_A, "requireCanonical": true}, "cases": evidence});
-    let output_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../audit/review-80e0ad21-20261008/read-data");
-    std::fs::create_dir_all(&output_dir).expect("create READ E2E evidence directory");
-    std::fs::write(
-        output_dir.join("reqwest-read-full-consumer.json"),
-        serde_json::to_vec_pretty(&artifact).expect("encode READ E2E evidence"),
-    )
-    .expect("retain READ E2E evidence");
+    if let Some(output_dir) = std::env::var_os("READ_DOMAIN_ARTIFACT_DIR") {
+        let output_dir = std::path::PathBuf::from(output_dir);
+        assert!(output_dir.is_absolute());
+        std::fs::create_dir_all(&output_dir).unwrap();
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(output_dir.join("http-results.json"))
+            .expect("new, immutable evidence file");
+        serde_json::to_writer_pretty(file, &artifact).unwrap();
+    }
     println!("{artifact}");
+    assert!(
+        status_mismatches.is_empty(),
+        "{}",
+        status_mismatches.join("; ")
+    );
 }

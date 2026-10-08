@@ -442,6 +442,9 @@ pub trait LegacyChainNameResolver: Send + Sync + 'static {
 pub enum AppCoreError {
     #[error("{0}")]
     BadRequest(String),
+    /// Domain refusals are separate so provider failures cannot become non-retryable HTTP errors.
+    #[error("{0}")]
+    UnresolvableCommand(String),
     #[error("{0}")]
     Internal(String),
     #[error("{0}")]
@@ -577,6 +580,9 @@ impl PillarApp {
         .map_err(|error| match error {
             AppCoreError::BadRequest(message) => {
                 AppCoreError::BadRequest(message.replace(&v2_order, &v1_order))
+            }
+            AppCoreError::UnresolvableCommand(message) => {
+                AppCoreError::UnresolvableCommand(message.replace(&v2_order, &v1_order))
             }
             AppCoreError::Internal(message) => {
                 AppCoreError::Internal(message.replace(&v2_order, &v1_order))

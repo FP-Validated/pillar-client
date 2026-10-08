@@ -143,10 +143,20 @@ pub struct SignerInfo {
     pub public_key: Option<String>,
 }
 
+#[derive(serde::Serialize)]
+struct UnresolvableCommandEnvelope {
+    #[serde(flatten)]
+    envelope: ResponseEnvelope<String>,
+    code: &'static str,
+    retryable: bool,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
     #[error("{0}")]
     BadRequest(String),
+    #[error("{0}")]
+    UnresolvableCommand(String),
     #[error("{message}")]
     Http { status: StatusCode, message: String },
     #[error("{0}")]
@@ -167,6 +177,7 @@ impl From<AppCoreError> for AppError {
     fn from(value: AppCoreError) -> Self {
         match value {
             AppCoreError::BadRequest(message) => Self::BadRequest(message),
+            AppCoreError::UnresolvableCommand(message) => Self::UnresolvableCommand(message),
             AppCoreError::Internal(message) => Self::Internal(message),
             AppCoreError::Admission(error) => Self::Admission(error),
         }
@@ -176,7 +187,7 @@ impl From<AppCoreError> for AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let status = match &self {
-            AppError::BadRequest(_) => StatusCode::BAD_REQUEST,
+            AppError::BadRequest(_) | AppError::UnresolvableCommand(_) => StatusCode::BAD_REQUEST,
             AppError::Http { status, .. } => *status,
             AppError::MalformedJson(_) => StatusCode::BAD_REQUEST,
             AppError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -184,6 +195,7 @@ impl IntoResponse for AppError {
         };
         let message = match &self {
             AppError::BadRequest(message)
+            | AppError::UnresolvableCommand(message)
             | AppError::MalformedJson(message)
             | AppError::Internal(message) => obfuscate_urls(message),
             _ => self.to_string(),
@@ -207,14 +219,22 @@ impl IntoResponse for AppError {
         } else {
             None
         };
-        let mut response = (
-            status,
-            Json(ResponseEnvelope {
-                status_code: status.as_u16(),
-                body: message,
-            }),
-        )
-            .into_response();
+        let envelope = ResponseEnvelope {
+            status_code: status.as_u16(),
+            body: message,
+        };
+        let mut response = match &self {
+            AppError::UnresolvableCommand(_) => (
+                status,
+                Json(UnresolvableCommandEnvelope {
+                    envelope,
+                    code: "UNRESOLVABLE_COMMAND",
+                    retryable: false,
+                }),
+            )
+                .into_response(),
+            _ => (status, Json(envelope)).into_response(),
+        };
         if let Some(outcome) = outcome {
             response.extensions_mut().insert(outcome);
         }
@@ -846,6 +866,7 @@ async fn sign_v2(
         Err(error) => {
             let error_class = match &error {
                 AppError::BadRequest(_) => "bad_request",
+                AppError::UnresolvableCommand(_) => "unresolvable_command",
                 AppError::Http { .. } => "http",
                 AppError::MalformedJson(_) => "malformed_json",
                 AppError::Internal(_) => "internal",
@@ -2275,7 +2296,10 @@ mod tests {
         for path in ["/", "/v2/resolve-and-sign"] {
             let (status, body) = send(Method::POST, path, false, valid).await;
             assert_eq!(status, StatusCode::UNAUTHORIZED, "{path}");
-            assert_eq!(body, r#"{"statusCode":401,"body":"Unauthorized"}"#);
+            assert_eq!(
+                serde_json::from_str::<Value>(&body).unwrap(),
+                json!({"statusCode": 401, "body": "Unauthorized"})
+            );
             for payload in [valid, "{", ""] {
                 let (status, body) = send(Method::POST, path, true, payload).await;
                 assert_eq!(
@@ -2283,7 +2307,10 @@ mod tests {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "{path} {payload}"
                 );
-                assert_eq!(body, r#"{"statusCode":500,"body":"resource_draining"}"#);
+                assert_eq!(
+                    serde_json::from_str::<Value>(&body).unwrap(),
+                    json!({"statusCode": 500, "body": "resource_draining"})
+                );
             }
         }
         assert!(app.v1_requests.lock().await.is_empty());

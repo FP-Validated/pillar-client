@@ -46,6 +46,14 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets
       - run: cargo test --workspace --locked
+        env:
+          READ_DOMAIN_ARTIFACT_DIR: ${{ runner.temp }}/pillar-read-domain-http
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: read-domain-http-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pillar-read-domain-http/
+          if-no-files-found: warn
       - name: Release build used by the container image
         run: cargo build --locked --release -p pillar-cli --bin pillar
 
@@ -86,24 +94,101 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Capture checked-out source identity
+        run: node scripts/ci-container-artifact.mjs prepare "$RUNNER_TEMP/pillar-image-artifact"
+        env:
+          GITHUB_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
+          GITHUB_PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
       - uses: docker/setup-buildx-action@v4
       - name: Build the runtime image
         run: |
+          out="$RUNNER_TEMP/pillar-image-artifact"
+          TZ=Asia/Seoul date '+%Y-%m-%d %H:%M KST' > "$out/docker-build-started-at-kst.txt"
+          set +e
           docker build \
             --build-arg PILLAR_IMAGE_VERSION=${GITHUB_SHA::12} \
             --build-arg VCS_REVISION=${GITHUB_SHA} \
-            -t pillar-client:ci .
-      - name: Image records the commit it was built from
+            -t pillar-client:ci . > "$out/docker-build.log" 2>&1
+          status=$?
+          printf '%s\n' "$status" > "$out/docker-build-exit-status.txt"
+          TZ=Asia/Seoul date '+%Y-%m-%d %H:%M KST' > "$out/docker-build-finished-at-kst.txt"
+          set -e
+          cat "$out/docker-build.log"
+          exit "$status"
+      - name: Save and identify the tested image
         run: |
-          revision=$(docker image inspect pillar-client:ci \
-            --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')
-          test "$revision" = "$GITHUB_SHA"
+          out="$RUNNER_TEMP/pillar-image-artifact"
+          TZ=Asia/Seoul date '+%Y-%m-%d %H:%M KST' > "$out/save-identify-started-at-kst.txt"
+          set +e
+          (
+            set -Eeuo pipefail
+            docker image inspect pillar-client:ci > "$out/image-inspect.json"
+            revision=$(docker image inspect pillar-client:ci \
+              --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')
+            test "$revision" = "$GITHUB_SHA"
+            docker save --output "$out/pillar-client-ci.tar" pillar-client:ci
+            test -s "$out/pillar-client-ci.tar"
+            node scripts/ci-container-artifact.mjs finalize "$out"
+          ) > "$out/save-identify.log" 2>&1
+          status=$?
+          printf '%s\n' "$status" > "$out/save-identify-exit-status.txt"
+          TZ=Asia/Seoul date '+%Y-%m-%d %H:%M KST' > "$out/save-identify-finished-at-kst.txt"
+          set -e
+          cat "$out/save-identify.log"
+          exit "$status"
+        env:
+          GITHUB_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
+          GITHUB_PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+
       - name: Refuse to start without required configuration
         run: |
+          out="$RUNNER_TEMP/pillar-image-artifact"
+          TZ=Asia/Seoul date '+%Y-%m-%d %H:%M KST' > "$out/container-preflight-started-at-kst.txt"
           set +e
-          output=$(docker run --rm pillar-client:ci 2>&1)
+          docker run --rm pillar-client:ci > "$out/container-preflight.log" 2>&1
           status=$?
+          printf '%s\n' "$status" > "$out/container-preflight-exit-status.txt"
+          TZ=Asia/Seoul date '+%Y-%m-%d %H:%M KST' > "$out/container-preflight-finished-at-kst.txt"
           set -e
-          echo "$output"
-          test "$status" -ne 0
-          echo "$output" | grep -q "Missing required environment variable"
+          cat "$out/container-preflight.log"
+          if grep -q "Missing required environment variable" "$out/container-preflight.log"; then
+            message_observed=true
+          else
+            message_observed=false
+          fi
+          if [[ "$status" -ne 0 && "$message_observed" == true ]]; then
+            step_passed=true
+          else
+            step_passed=false
+          fi
+          printf '{"actualExitStatus":%s,"missingConfigMessageObserved":%s,"stepPassed":%s}\n' \
+            "$status" "$message_observed" "$step_passed" > "$out/container-preflight-result.json"
+          test "$step_passed" = true
+      - name: Finalize image diagnostics report
+        if: always()
+        run: node scripts/ci-container-artifact.mjs report "$RUNNER_TEMP/pillar-image-artifact"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: pillar-ci-image-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pillar-image-artifact/
+          if-no-files-found: error
+          retention-days: 14
+  macos-ton-release:
+    name: macOS TON release lifecycle
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: Swatinem/rust-cache@v2
+      - name: Run exact TON release lifecycle and capture resources
+        run: bash scripts/ci-ton-release-gate.sh
+        env:
+          CI_TON_ARTIFACT_DIR: ${{ runner.temp }}/pillar-ton-release-gate
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: macos-ton-release-${{ github.sha }}
+          path: ${{ runner.temp }}/pillar-ton-release-gate/
+          if-no-files-found: error

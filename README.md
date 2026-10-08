@@ -293,6 +293,22 @@ are not JSON and carry no envelope: `GET /` returns the bare string `HEALTHY`,
 and `GET /metrics` returns Prometheus text. Framework-level responses for
 unmatched routes are not enveloped either.
 
+READ의 pinned `NoCode` 또는 execution revert가 유일한 entity quorum을 얻으면 API는 다음 domain refusal 형식을 사용한다.
+
+```json
+{
+  "statusCode": 400,
+  "body": "ReadV1002 command is unresolvable: target has no code at the pinned block",
+  "code": "UNRESOLVABLE_COMMAND",
+  "retryable": false
+}
+```
+
+Execution revert의 `body`는 `ReadV1002 command is unresolvable: execution reverted at the pinned block`이다.
+API는 두 거절 모두 signer 호출 전에 반환한다. 단일 부정 관측은 quorum을 대신하지 않는다.
+Timeout, transport 장애, malformed DATA와 일반 RPC 오류는 기존 internal/quorum 오류이며 이 domain refusal로 분류하지 않는다.
+Strict-schema 오류 consumer는 `code`와 `retryable` 필드를 허용해야 한다. 다른 오류와 정상 응답의 envelope는 바꾸지 않는다.
+
 As upstream does, an EVM, Starknet or Stellar source transaction with no trusted
 `PacketSent` matching the request (another nonce or sender, an untrusted
 emitter, or a reverted EVM transaction) returns HTTP 400 with `statusCode: 400`

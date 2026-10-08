@@ -33,7 +33,9 @@ impl From<AppCoreError> for RpcError {
     fn from(error: AppCoreError) -> Self {
         match error {
             AppCoreError::Admission(error) => Self::Admission(error),
-            AppCoreError::Internal(error) | AppCoreError::BadRequest(error) => Self::Remote(error),
+            AppCoreError::Internal(error)
+            | AppCoreError::BadRequest(error)
+            | AppCoreError::UnresolvableCommand(error) => Self::Remote(error),
         }
     }
 }

@@ -633,10 +633,17 @@ Addresses live in `stellar_uln_302_for_environment`,
 - READ는 `eth_call`과 `eth_getCode`에서 정확한 `0x` prefix와 짝수 길이의 hex octets를 가진 JSON string만 DATA로 허용한다.
   `eth_call`이 `0x`이면 같은 provider와 headers로 `eth_getCode`를 조회한다.
   두 요청은 readiness가 검증한 같은 EIP-1898 block hash와 `requireCanonical:true`를 사용한다.
-  Code가 `0x`이거나 code 조회가 실패하면 그 provider는 표를 얻지 못한다.
-  `0x00` 등 실제 byte가 있는 code는 정상 empty return을 허용한다. 별도 call/code quorum은 없다.
-  불량 provider 하나가 있어도 서로 다른 정상 entity 두 개는 quorum 2를 만족한다.
-  유효한 nonempty DATA와 RPC revert의 동작은 바꾸지 않는다.
+  Code가 정확한 `0x`이면 runtime은 `NoCode` 관측을 entity quorum의 표로 기록한다.
+  `0x00` 등 byte가 있는 code는 정상 empty return을 허용한다. 별도 call/code quorum은 없다.
+  Runtime은 numeric error code `3`, 또는 code `-32000`과 정확한 `execution reverted` 메시지의 조합만 `ExecutionRevert`로 분류한다.
+  Runtime은 제공된 revert DATA의 타입과 hex octet을 검증하고 대소문자를 정규화한다.
+  생략된 DATA와 유효한 `0x`는 반환 byte가 없다는 같은 관측이다. 서로 다른 nonempty DATA는 같은 표가 아니다.
+  Runtime은 `NoCode` 또는 `ExecutionRevert`의 유일한 entity quorum만 non-retryable domain refusal로 변환한다.
+  API는 이 거절에 HTTP 400, `code=UNRESOLVABLE_COMMAND`, `retryable=false`를 반환하며 signer에 진입하지 않는다.
+  Timeout, transport 장애, malformed DATA와 일반 RPC 오류는 표를 얻지 못한다. Quorum 부족은 domain refusal이 아니라 기존 internal 오류다.
+  불량 provider 하나가 있어도 서로 다른 정상 entity 두 개는 quorum 2로 정상 서명한다.
+  정상과 부정 관측이 각각 quorum을 만족하면 runtime은 모호한 결과를 거부한다.
+  운영자는 hash pin을 준수하는 provider만 READ route에 구성하고 미준수 provider로의 failover를 차단해야 한다. EIP-1898 파라미터 전송만으로 provider의 준수를 입증하지 않는다.
 - Extra-context의 HTTP와 Lambda 요청은 `sentEvent`, `from`, typed `signingContext`를 포함한다.
   MESSAGE와 READ의 기존 Serde 형식과 optional omission을 유지한다.
   Closed-schema policy handler는 새 필드를 허용해야 한다.

@@ -576,7 +576,7 @@ async fn runtime_evm_read_payload_resolver_applies_map_reduce_compute() {
 async fn reqwest_read_empty_call_smoke_covers_code_and_pinned_quorum() {
     let (no_code, no_code_servers) =
         run_reqwest_read_code_case(vec![json!({ "result": "0x" })], 1).await;
-    assert!(no_code.is_err());
+    assert!(matches!(no_code, Err(AppCoreError::UnresolvableCommand(_))));
     let no_code_requests = collect_local_read_rpc_requests(no_code_servers).await;
     assert_eq!(no_code_requests.len(), 2);
 
@@ -596,7 +596,7 @@ async fn reqwest_read_empty_call_smoke_covers_code_and_pinned_quorum() {
         1,
     )
     .await;
-    assert!(pin_rejected.is_err());
+    assert!(matches!(pin_rejected, Err(AppCoreError::Internal(_))));
     let pin_requests = collect_local_read_rpc_requests(pin_servers).await;
     assert_eq!(pin_requests.len(), 2);
 
@@ -613,7 +613,7 @@ async fn reqwest_read_empty_call_smoke_covers_code_and_pinned_quorum() {
         2,
     )
     .await;
-    assert!(one_paired_vote.is_err());
+    assert!(matches!(one_paired_vote, Err(AppCoreError::Internal(_))));
     let paired_requests = collect_local_read_rpc_requests(paired_servers).await;
     assert_eq!(paired_requests.len(), 4);
 
@@ -650,7 +650,7 @@ async fn reqwest_read_empty_call_smoke_covers_code_and_pinned_quorum() {
         json!({
             "cases": {
                 "no_code": {
-                    "asserted_outcome": "rejected",
+                    "asserted_outcome": "UnresolvableCommand",
                     "rpc_trace": no_code_requests,
                 },
                 "deployed_empty_return": {
