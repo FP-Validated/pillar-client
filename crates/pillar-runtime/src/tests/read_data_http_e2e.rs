@@ -53,10 +53,97 @@ struct CaseResult {
     wire_requests: Vec<Value>,
     signed: bool,
     signatures: Vec<Signature>,
-    signer_stage_count: usize,
+    sign_stage_observation_count: u64,
     read_call_count: usize,
     read_code_count: usize,
     pinned_provider_pairs: bool,
+}
+#[derive(Clone, Debug, serde::Serialize)]
+struct StageObservation {
+    stage: String,
+    src_chain: String,
+    dst_chain: String,
+    status: String,
+    count: u64,
+}
+
+fn parse_stage_observations(rendered: &str) -> Vec<StageObservation> {
+    const METRIC_PREFIX: &str = "pillar_sign_stage_duration_seconds_count";
+    rendered
+        .lines()
+        .filter(|line| line.starts_with(METRIC_PREFIX))
+        .map(|line| {
+            let labels_and_count = line
+                .strip_prefix(METRIC_PREFIX)
+                .expect("matching stage metric prefix");
+            let labels_and_count = labels_and_count
+                .strip_prefix('{')
+                .expect("matching stage metric must have labels");
+            let (labels, count) = labels_and_count
+                .split_once("} ")
+                .expect("matching stage metric must have labels and a numeric count");
+            let count = count
+                .parse()
+                .expect("matching stage metric count must be an unsigned number");
+            let mut stage = None;
+            let mut src_chain = None;
+            let mut dst_chain = None;
+            let mut status = None;
+            for label in labels.split(',') {
+                let (name, value) = label
+                    .split_once('=')
+                    .expect("matching stage metric label must contain a value");
+                let value = value
+                    .strip_prefix('"')
+                    .and_then(|value| value.strip_suffix('"'))
+                    .expect("matching stage metric label value must be quoted");
+                match name {
+                    "stage" => assert!(
+                        stage.replace(value.to_owned()).is_none(),
+                        "duplicate stage label"
+                    ),
+                    "src_chain" => assert!(
+                        src_chain.replace(value.to_owned()).is_none(),
+                        "duplicate src_chain label"
+                    ),
+                    "dst_chain" => assert!(
+                        dst_chain.replace(value.to_owned()).is_none(),
+                        "duplicate dst_chain label"
+                    ),
+                    "status" => assert!(
+                        status.replace(value.to_owned()).is_none(),
+                        "duplicate status label"
+                    ),
+                    _ => panic!("unexpected matching stage metric label {name:?}"),
+                }
+            }
+            StageObservation {
+                stage: stage.expect("matching stage metric is missing stage label"),
+                src_chain: src_chain.expect("matching stage metric is missing src_chain label"),
+                dst_chain: dst_chain.expect("matching stage metric is missing dst_chain label"),
+                status: status.expect("matching stage metric is missing status label"),
+                count,
+            }
+        })
+        .collect()
+}
+
+fn stage_observation_count(
+    observations: &[StageObservation],
+    stage: &str,
+    src_chain: &str,
+    dst_chain: &str,
+    status: &str,
+) -> u64 {
+    observations
+        .iter()
+        .find(|observation| {
+            observation.stage == stage
+                && observation.src_chain == src_chain
+                && observation.dst_chain == dst_chain
+                && observation.status == status
+        })
+        .map_or(0, |observation| observation.count)
 }
 
 fn http_provider_env(
@@ -282,7 +369,7 @@ async fn run_full_consumer_case(
     behaviors: &[HttpBehavior],
     quorum: usize,
     same_entity: bool,
-) -> (CaseResult, Vec<String>) {
+) -> (CaseResult, Vec<StageObservation>) {
     let bsc_chains = behaviors
         .iter()
         .map(|behavior| match behavior {
@@ -359,14 +446,7 @@ async fn run_full_consumer_case(
         .lock()
         .await
         .render_prometheus("mainnet", "read-domain-e2e");
-    let stages = rendered
-        .lines()
-        .filter(|line| line.starts_with("pillar_sign_stage_duration_seconds_count"))
-        .filter_map(|line| {
-            let rest = &line[line.find("stage=\"")? + 7..];
-            Some(rest[..rest.find('"')?].to_string())
-        })
-        .collect::<Vec<_>>();
+    let stages = parse_stage_observations(&rendered);
     api.abort();
     let _ = api.await;
     let _ = shutdown_tx.send(());
@@ -432,16 +512,79 @@ async fn run_full_consumer_case(
             response_headers,
             signed,
             signatures,
-            signer_stage_count: stages
-                .iter()
-                .filter(|stage| stage.as_str() == "sign")
-                .count(),
+            sign_stage_observation_count: stage_observation_count(
+                &stages, "sign", "ethereum", "ethereum", "ok",
+            ),
             read_call_count: bsc_read_calls,
             read_code_count: bsc_read_code_calls,
             pinned_provider_pairs,
         },
         stages,
     )
+}
+
+#[tokio::test]
+async fn sign_stage_metric_observations_are_not_series_cardinality() {
+    let metrics =
+        std::sync::Arc::new(tokio::sync::Mutex::new(pillar_metrics::PillarMetrics::new()));
+    let observer = pillar_metrics::PillarMetricsStageObserver::new(metrics.clone());
+    for _ in 0..2 {
+        pillar_core::SignStageObserver::observe_stage(
+            &observer,
+            "sign",
+            "ethereum",
+            "bsc",
+            pillar_core::SignStageStatus::Success,
+            0.01,
+        )
+        .await;
+    }
+    for (stage, src_chain, status) in [
+        ("sign", "ethereum", pillar_core::SignStageStatus::Failure),
+        ("sign", "optimism", pillar_core::SignStageStatus::Success),
+        (
+            "validate",
+            "ethereum",
+            pillar_core::SignStageStatus::Success,
+        ),
+    ] {
+        pillar_core::SignStageObserver::observe_stage(
+            &observer, stage, src_chain, "bsc", status, 0.02,
+        )
+        .await;
+    }
+    let rendered = metrics.lock().await.render_prometheus("mainnet", "test");
+    let observations = parse_stage_observations(&rendered);
+    assert_eq!(
+        stage_observation_count(&observations, "sign", "ethereum", "bsc", "ok"),
+        2
+    );
+    assert_eq!(
+        stage_observation_count(&observations, "sign", "ethereum", "bsc", "error"),
+        1
+    );
+    assert_eq!(
+        stage_observation_count(&observations, "sign", "optimism", "bsc", "ok"),
+        1
+    );
+    assert_eq!(
+        stage_observation_count(&observations, "validate", "ethereum", "bsc", "ok"),
+        1
+    );
+    assert_eq!(
+        stage_observation_count(&observations, "sign", "ethereum", "missing", "ok"),
+        0
+    );
+    for malformed_sample in [
+        "pillar_sign_stage_duration_seconds_count{stage=\"sign\",src_chain=\"ethereum\",dst_chain=\"bsc\",status=\"ok\"} not-a-number",
+        "pillar_sign_stage_duration_seconds_count{stage=\"sign\",src_chain=\"ethereum\",dst_chain=\"bsc\"} 1",
+    ] {
+        let malformed_rendered = format!("{rendered}\n{malformed_sample}\n");
+        assert!(
+            std::panic::catch_unwind(|| parse_stage_observations(&malformed_rendered)).is_err(),
+            "matching metric rows must reject malformed count or labels: {malformed_sample}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -654,7 +797,7 @@ async fn reqwest_http_full_consumer_enforces_read_data_and_provider_quorum() {
             "status": result.status, "expected_status": expected_status, "body": result.body, "signed": result.signed,
             "raw_body": result.raw_body, "response_headers": result.response_headers,
             "wire_requests": result.wire_requests,
-            "signer_stage_count": result.signer_stage_count, "stages": stages,
+            "sign_stage_observation_count": result.sign_stage_observation_count, "stage_observations": stages,
             "same_provider_headers_and_pin": result.pinned_provider_pairs,
             "read_call_count": result.read_call_count, "read_code_count": result.read_code_count}),
         );
@@ -668,8 +811,8 @@ async fn reqwest_http_full_consumer_enforces_read_data_and_provider_quorum() {
         let expected_signed = expected_status == 200;
         assert_eq!(result.signed, expected_signed, "{name}: {result:?}");
         assert_eq!(
-            result.signer_stage_count,
-            usize::from(expected_signed),
+            result.sign_stage_observation_count,
+            u64::from(expected_signed),
             "{name}"
         );
         if expected_signed {
@@ -690,7 +833,7 @@ async fn reqwest_http_full_consumer_enforces_read_data_and_provider_quorum() {
                 HashSet::from(["statusCode", "body"])
             );
         } else {
-            assert!(stages.iter().all(|stage| stage != "sign"), "{name}");
+            assert!(stages.iter().all(|stage| stage.stage != "sign"), "{name}");
             assert_eq!(result.body["statusCode"], expected_status, "{name}");
             assert!(result.body["body"].is_string(), "{name}");
             let keys = result
@@ -721,7 +864,7 @@ async fn reqwest_http_full_consumer_enforces_read_data_and_provider_quorum() {
             }
         }
     }
-    let artifact = json!({"schema_version": 2, "transport": "ReqwestJsonRpcTransport",
+    let artifact = json!({"schema_version": 3, "transport": "ReqwestJsonRpcTransport",
         "consumer": "RuntimeServerApp<ReqwestJsonRpcTransport>", "inbound": "POST /v2/resolve-and-sign",
         "request": read_vertical_request(ReadMarker::BlockNumber), "receipt": read_vertical_receipt(ReadMarker::BlockNumber),
         "block": {"blockHash": BLOCK_A, "requireCanonical": true}, "cases": evidence});

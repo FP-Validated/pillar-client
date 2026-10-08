@@ -27,53 +27,30 @@ rather than this repository's opinion of it.
 
 `emit-ton-v302-destination.ts` derives the mainnet and sandbox ULN/connection addresses from upstream TON constructors and builds V302 cells with upstream `buildDvnVerifyCallData`. From `apps/gasolina`, run it through `sandbox-exec -f /tmp/gasolina-run/sb/offline.sb bash boundary/run-emitter.sh parity-v18-ton-v302 emit-ton-v302-destination.ts ton-v302-destination.json` after copying the script into that subdirectory. Its supplied implementation models only `getImplementationContract`'s not-deployed/not-a-proxy fallback. It does not prove a live/on-chain result or the proxy branch.
 
-`emit-ton-trace-quorum.ts` runs `multiprovider/src/ton.ts:tonTransactionTraceMessagesQuorumFn`
-itself. Its boundary report lists one replaced module,
-`packages/chain-abstractions/lz-definitions/src/cantonArtifactSubkeys.ts`, replaced
-only because its path names Canton: `lz-definitions/src/index.ts:2` re-exports it, so
-loading the package reaches it, and the report's `reads: 0, calls: 0` shows the
-quorum function never touched an export of it. The fingerprints are therefore
-upstream's own code over the recorded trace, not this repository's projection.
+`emit-ton-trace-quorum.ts` runs upstream
+`tonTransactionTraceMessagesQuorumFn` over the recorded trace. Its fixture records
+upstream's own projection and fingerprints, rather than this repository's projection.
 
-`emit-aptos-v301-payload-signed.ts` runs upstream's `getUlnReceiveDetails`, then
-`UlnAptosSdk.getDstUlnConfig` and `hasPayloadSigned` - the chain
-`App.validatePayloadSigned` calls - against a stub Move provider, recording every
-request (`functionArguments` and `functionArgumentTypes`) and the verdict for eleven
-scenarios on mainnet and testnet. The stub answers in the shape the public fullnode
-returns (`u64` as strings, `u8` as numbers, `verifiable` as a `u8` state `0`-`5`), for
-the recorded V1 receivers with EndpointV1 source ids 101/10161. Its boundary report
-lists six replaced modules (Canton and Stellar multiprovider, endpoint and util
-modules reached through package indexes) with `reads: 0, calls: 0`.
+`emit-aptos-v301-payload-signed.ts` runs upstream receive-details, destination
+config and `hasPayloadSigned` calls against a stub Move provider for eleven scenarios
+on mainnet and testnet. It records typed arguments and verdicts for the recorded V1
+receivers and EndpointV1 source ids 101/10161; it does not contact a live node.
 
-`emit-aptos-transport-wire.ts` runs the upstream `AptosMultiProvider`,
-`UlnAptosSdk`, and `getUlnReceiveDetails` against a `127.0.0.1` HTTP server, with
-recorded Aptos and Movement public responses replayed from `aptos-exchanges/` and
-`movement-exchanges/` staged beside the emitter. It captures the actual Aptos SDK
-1.39.0 request method, path, headers, BCS body bytes and response hash, and retains
-typed Move arguments immediately before the provider serializes them. It executes
-Aptos V301 receive details and `hasPayloadSigned`, plus Aptos and Movement V302
-configuration and `hasPayloadSigned` calls. Recorded receive-library/configuration,
-Channels, and table responses are replayed unchanged; V301/V302 confirmation and
-verifiable calls without a public recorded response receive explicitly marked synthetic
-zero responses. The emitter refuses every other unrecorded request and uses no live RPC.
-The provider construction is upstream `packages/multiprovider/src/aptos.ts:63-105`;
-its `view` forwards to the real client at `:337-352`. The upstream Move ULN call path
-is `packages/sdks/lz-v2-sdk/src/uln/move/index.ts:137-194`, with Aptos versioned reads
-in `packages/sdks/lz-v2-sdk/src/uln/aptos/index.ts:270-340,401-455,695-770`. The
-repo adapter `packages/common-aptos/src/transactions.ts:34-99` maps declared Move
-types into SDK `U8`/`U32`/`U64`, `AccountAddress`, and `MoveVector` values; upstream
-SDK `1.39.0` `src/internal/view.ts:15-40` BCS-serializes the typed view payload,
-then POSTs `/view` with `MimeType.BCS_VIEW_FUNCTION`. Its separate `viewJson` path
-at `:42-58` is not used by this provider call. The Rust loopback test compares
-function names and typed argument values after normalizing Move integers to decimal
-strings; it strips the upstream `/v1` base prefix for route comparison, and checks
-JSON `u8/u16/u32` numbers versus `u64/u128` decimal strings explicitly.
+The boundary reports record one replaced Canton module for the TON emitter and
+six replaced modules for the Aptos V301 emitter, including Canton and Stellar
+definitions. Both report `reads: 0, calls: 0` for these replacements.
 
-That capture does not start at `App.validatePayloadSigned`, so it has no V302
-`endpoint::get_effective_receive_library` request. The loopback test checks only that
-the service's lookup comes first, on the EndpointV2 module the capture used, with the
-receiver and `srcEid`, and counts it apart from upstream's requests. It is not compared
-against upstream bytes.
+`emit-aptos-transport-wire.ts` runs the upstream Aptos SDK 1.39.0 and ULN calls
+against a loopback server. It replays recorded Aptos/Movement responses, captures the
+SDK's HTTP/BCS request and checks typed arguments against the Rust transport's
+normalized JSON arguments. Recorded receive-library/configuration, Channels and table
+responses are replayed; missing V301/V302 confirmation and `verifiable` responses
+are explicitly synthetic zeroes. Other unrecorded requests are refused, and no live
+RPC is used. This capture does not start at `App.validatePayloadSigned`: the
+EndpointV2 `endpoint::get_effective_receive_library` lookup is not part of the
+upstream capture, so the Rust test checks its order and arguments but does not claim
+byte-level parity for that lookup.
+
 
 All of them are read-only in the sense that matters: no external RPC, no writes to the
 upstream checkout, and no network beyond the local loopback replay/emitter boundaries.
@@ -83,17 +60,19 @@ well-known test mnemonic that exists only in that file.
 
 They have to run *inside* the upstream pnpm workspace, because they import
 `@monorepo/*` packages that only resolve from a workspace member's directory.
-Copying them in is the whole setup:
+Copying them in is the whole setup. Start inside this repository; every later path is
+absolute, so the `cd`s below cannot break a copy:
 
 ```bash
+PILLAR="$(git rev-parse --show-toplevel)"
 UPSTREAM=/path/to/gasolina-audit            # the checkout PILLAR_AUDIT_ROOT points at
 cd "$UPSTREAM"
 pnpm install --frozen-lockfile --filter '@monorepo/gasolina...'
 
-mkdir -p apps/gasolina/parity
-cp scripts/gasolina-parity/*.ts apps/gasolina/parity/
+mkdir -p "$UPSTREAM/apps/gasolina/parity"
+cp "$PILLAR"/scripts/gasolina-parity/*.ts "$UPSTREAM/apps/gasolina/parity/"
 
-cd apps/gasolina
+cd "$UPSTREAM/apps/gasolina"
 RUN="node_modules/.bin/ts-node --transpile-only -P tsconfig.json"
 
 $RUN parity/emit-evm-signing-path.ts > evm_signing_path.json
@@ -103,7 +82,7 @@ $RUN parity/emit-ton-dvn-verify.ts   > ton_dvn_verify.json
 `emit-historical-smoke.ts` additionally needs `historical_pathways.json` beside it:
 
 ```bash
-cp crates/pillar-runtime/tests/gasolina_parity/historical_pathways.json \
+cp "$PILLAR/crates/pillar-runtime/tests/gasolina_parity/historical_pathways.json" \
    "$UPSTREAM/apps/gasolina/parity/"
 $RUN parity/emit-historical-smoke.ts > historical_smoke.json
 ```
@@ -114,15 +93,18 @@ $RUN parity/emit-historical-smoke.ts > historical_smoke.json
 `emit-v2-v3-route.ts` targets the later `213cd500` tree, where the service lives under
 `migrated/offchain-monorepo/apps/gasolina` and the packages are `@offchain-monorepo/*`.
 That tree pins Node 24.15.0 and `pnpm@11.17.0`, and three contract packages generate
-their typechain/wagmi sources at build time, so the setup differs:
+their typechain/wagmi sources at build time, so the setup differs. Point `UPSTREAM` at
+that checkout and start from its root:
 
 ```bash
+cd "$UPSTREAM"
 pnpm install --frozen-lockfile --filter '@offchain-monorepo/gasolina...'
 pnpm --filter @offchain-monorepo/lz-evm-sdk-v2-contracts --filter @offchain-monorepo/custom-contracts \
      --filter @offchain-monorepo/layerzero-core-contracts run build
-mkdir -p migrated/offchain-monorepo/apps/gasolina/parity
-cp scripts/gasolina-parity/emit-v2-v3-route.ts migrated/offchain-monorepo/apps/gasolina/parity/
-cd migrated/offchain-monorepo/apps/gasolina
+mkdir -p "$UPSTREAM/migrated/offchain-monorepo/apps/gasolina/parity"
+cp "$PILLAR/scripts/gasolina-parity/emit-v2-v3-route.ts" \
+   "$UPSTREAM/migrated/offchain-monorepo/apps/gasolina/parity/"
+cd "$UPSTREAM/migrated/offchain-monorepo/apps/gasolina"
 node --import tsx parity/emit-v2-v3-route.ts > v2_v3_route.json
 ```
 
@@ -157,22 +139,24 @@ report shows zero reads and zero calls. The two emitters above, and
 `emit-historical-smoke.ts` adapted to the `213cd500` App constructor, were run this way
 with outbound network denied.
 
-Copy each emitted JSON to the path in the table above, keeping its `_provenance`
-block, then run:
+Copy each emitted JSON to the path in the table above (relative to `$PILLAR`), keeping
+its `_provenance` block, then run:
 
 ```bash
+cd "$PILLAR"
 cargo test -p pillar-runtime gasolina_parity
 cargo test -p pillar-layerzero other_non_evm::ton
 ```
 
-Remove `apps/gasolina/parity/` afterwards; the upstream checkout is a reference,
-not a workspace to leave litter in.
+Remove the `parity/` directories from the upstream checkout afterwards; it is a
+reference, not a workspace to leave litter in.
 
 ### Canton emitters
 
-Canton is not in this service's roster (`UNSUPPORTED_CHAIN_TYPES` in `pillar-config`),
-and the Rust helpers these fixtures pin (`pillar_layerzero::other_non_evm::canton`) are
-not wired into the runtime. The two emitters reach four Canton source modules that are
+These two emitters pin the pure Canton helpers in `pillar_layerzero::other_non_evm::canton`:
+the ULN302 verify digest and the signer address Gasolina publishes. For what the service
+supports on Canton today, see the [README](../../README.md) and
+[SECURITY.md](../../SECURITY.md#known-caveats). The two emitters reach four Canton source modules that are
 pure functions, and `boundary/excluded-chain-boundary.mjs` lets exactly those load
 (`CANTON_PURE_ALLOWLIST`): `apps/gasolina/src/app/sdks/gasolinaSdk/canton/hashes.ts`,
 `packages/adapters/gasolina-signer-adapter/src/canton/index.ts`,
@@ -199,16 +183,17 @@ modules by absolute path under `/tmp/gasolina-run/work`, the root the boundary i
 to; edit both together if the tree lives elsewhere. A run is valid only when its
 `boundary-report.json` shows `reads: 0`, `calls: 0` and `cantonAllowedModules` equal to
 the four modules above. Copy `out.json` to the fixture path, then run
-`cargo test -p pillar-layerzero canton`.
+`cd "$PILLAR" && cargo test -p pillar-layerzero canton`.
 
-What these fixtures do **not** establish: Canton verification recovers the signer's
-key from an ECDSA signature over the *raw* keccak verify digest with an
-*untransformed* recovery id (`gasolina-signer-adapter/src/canton/index.ts:6-14`). The
-signer backends can produce that shape (`prepare_data` identity and
-`transform_recovery_id: false` are the `ChainAddress` defaults), but no Canton
-`ChainType` exists, so no request reaches them that way and no signature over a Canton
-digest has been produced or recovered. Source resolution, readiness and
-payload-signed reads also remain unported, because they need `canton-sequencer-sdk`.
+What these fixtures do **not** establish: they pin a digest and an address, not a
+signature. Canton verification recovers the signer's key from an ECDSA signature over
+the *raw* keccak verify digest with an *untransformed* recovery id
+(`gasolina-signer-adapter/src/canton/index.ts:6-14`). The signature bytes
+`ChainType::Canton` produces are pinned against upstream's own signer by a separate
+fixture (`crates/pillar-signer/tests/gasolina_parity/canton_sign.json`, from
+`emit-ve3-sign.ts`), and the sequencer path (source resolution, readiness,
+already-signed) by `canton_sequencer.json` (from `emit-ve3-sequencer.ts`). None of these
+is a signature accepted by a live Canton ledger, nor production OAuth2/ledger acceptance.
 
 ## Why the fixtures are compared field by field
 
