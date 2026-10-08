@@ -357,7 +357,7 @@ The direct SELF probe and three-provider historical probe are read-only; their r
 
 ## 13. PR #1 READ policy and bounded rollout (2026-10-08; merged 2026-10-09)
 
-RE-002 keeps DATA, pinned NoCode and execution revert as distinct provider observations. A non-retryable `UNRESOLVABLE_COMMAND` refusal is returned only after the configured category/entity quorum uniquely agrees. One provider's NoCode cannot override a healthy DATA quorum; ambiguous competing quorums, timeout, transport errors, malformed DATA and other RPC errors do not become domain refusals. Revert classification accepts only numeric code `3` or `-32000` with exact `execution reverted` text (case-insensitive), and validates/fingerprints revert DATA. Consumer contract: [README.md](./README.md).
+RE-002 keeps DATA, pinned NoCode and execution revert as distinct provider observations. A non-retryable `UNRESOLVABLE_COMMAND` refusal is returned only after the configured category/entity quorum uniquely agrees. One provider's NoCode cannot override a healthy DATA quorum; ambiguous competing quorums, timeout, transport errors, malformed DATA and other RPC errors do not become domain refusals. Revert classification accepts numeric code `3` with any message, or numeric code `-32000` only with the exact `execution reverted` message (case-insensitive), and validates/fingerprints revert DATA. Consumer contract: [README.md](./README.md).
 
 | Evidence | Result and boundary |
 | --- | --- |

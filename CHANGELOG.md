@@ -20,6 +20,7 @@ the Prometheus metric names.
 - 2026-10-08의 읽기 전용 조회에서 immutable Azure key version의 공개키와 운영 Pillar/Solana DVN config의 64-byte `X||Y` 공개키가 일치했고, config slot `454395711`을 확인했다. 이 항목은 공개키 관측이며, deployed program/source 대응과 live Azure KMS 및 on-chain signature acceptance 조건은 [SECURITY](SECURITY.md#where-responses-still-differ-from-upstream)에 별도로 명시한다.
 - TON HTTP 검증은 합성 JSON depth 266과 512를 처리하고 513을 거절했다. Release lifecycle 검증은 topology, quorum 조기 반환과 취소 시 해제를 확인한다. 합성 fixture 결과와 원본 266-depth 응답의 replay 범위는 [AUDIT](AUDIT.md)의 §13에서 구분한다.
 - READ HTTP E2E는 정확한 stage/source/destination/status tuple의 Prometheus `_count` 숫자를 읽는다. 같은 series의 중복 관측을 정확하게 계산한다. Test artifact schema 3은 `sign_stage_observation_count`와 tuple별 `stage_observations`로 stage 관측 횟수를 기록한다.
+- Gasolina parity README의 재현 절차는 `$PILLAR`와 `$UPSTREAM` 절대 경로로 복사하고 `cargo test`를 `$PILLAR`에서 실행한다. 이전 절차는 upstream checkout 안에서 Pillar 상대 경로를 복사해 실패했다. Canton emitter 절의 미지원 설명은 현재 README/SECURITY 참조와 fixture 증거 범위로 바꿨다. AUDIT §13은 revert code 3에는 message 조건이 없음을 명시한다.
 
 ## 2.5.0 - 2026-10-06
 
