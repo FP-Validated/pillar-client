@@ -42,6 +42,37 @@ struct TonPayloadSignedObservation<'a> {
     nonce: u64,
     verifier_be: &'a [u8; 32],
 }
+/// The UlnReceiveConfig has two linked DVN address lists, each holding at most
+/// three 256-bit addresses per cell. With Uln root + config root, depth 1,024
+/// allows at most 1,023 cells per list (2,047 config-reachable cells total).
+/// One extra cell is retained as a small margin.
+const MAX_DEFAULT_RECEIVE_CONFIG_CELLS: usize = 2_048;
+
+fn ton_cell_count_at_most(root: &TonStorageCell, limit: usize) -> Option<usize> {
+    let mut pending = vec![root.clone()];
+    let mut visited = std::collections::HashSet::new();
+    while let Some(cell) = pending.pop() {
+        let refs = cell.refs();
+        // The refs slice points into the Arc-backed CellData, including for leaf cells.
+        if !visited.insert(refs.as_ptr() as usize) {
+            continue;
+        }
+        if visited.len() > limit {
+            return None;
+        }
+        pending.extend(refs.iter().cloned());
+    }
+    Some(visited.len())
+}
+
+fn serialize_default_receive_config(config: &TonStorageCell) -> Result<String, AppCoreError> {
+    if ton_cell_count_at_most(config, MAX_DEFAULT_RECEIVE_CONFIG_CELLS).is_none() {
+        return Err(AppCoreError::Internal(format!(
+            "TON default receive config exceeds {MAX_DEFAULT_RECEIVE_CONFIG_CELLS} cells"
+        )));
+    }
+    ton_boc_to_base64(config)
+}
 
 impl<T> RuntimeRpcValidationChecks<T>
 where
@@ -197,7 +228,8 @@ where
     let Ok(default_receive_config) = uln_default_receive_config(&uln_storage) else {
         return undecodable();
     };
-    let Ok(default_receive_config_boc) = ton_boc_to_base64(&default_receive_config) else {
+    let Ok(default_receive_config_boc) = serialize_default_receive_config(&default_receive_config)
+    else {
         return undecodable();
     };
 
@@ -427,5 +459,130 @@ mod boc_header_tests {
         let bytes = [0xb5, 0xee, 0x9c, 0x72, 1, 1, 255, 1, 0, 1, 0, 0, 0, 0];
         let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
         assert!(!ton_boc_cell_count_fits(&encoded));
+    }
+}
+#[cfg(test)]
+mod default_receive_config_tests {
+    use super::*;
+    use std::collections::VecDeque;
+    use ton_core::cell::TonCell;
+
+    fn wide_config_cell(count: usize) -> TonCell {
+        let internal = (count - 1).div_ceil(4);
+        let leaves = count - internal;
+        let mut cells = VecDeque::with_capacity(count);
+        for id in 0..leaves {
+            let mut builder = TonCell::builder();
+            builder.write_bits((id as u32).to_be_bytes(), 32).unwrap();
+            cells.push_back(builder.build().unwrap());
+        }
+        let deficit = 4 * internal - (count - 1);
+        for id in 0..internal {
+            let degree = 4 - if id + 1 == internal { deficit } else { 0 };
+            let mut builder = TonCell::builder();
+            builder
+                .write_bits(((leaves + id) as u32).to_be_bytes(), 32)
+                .unwrap();
+            for _ in 0..degree {
+                builder.write_ref(cells.pop_front().unwrap()).unwrap();
+            }
+            cells.push_back(builder.build().unwrap());
+        }
+        assert_eq!(cells.len(), 1);
+        cells.pop_front().unwrap()
+    }
+
+    #[test]
+    fn over_bound_default_receive_config_is_refused_before_serialization() {
+        let config = wide_config_cell(MAX_DEFAULT_RECEIVE_CONFIG_CELLS + 1);
+        let error = serialize_default_receive_config(&config)
+            .expect_err("over-bound config must be refused");
+        println!("refused over-bound config: {error}");
+    }
+
+    fn node(id: u32, children: &[TonCell]) -> TonCell {
+        let mut builder = TonCell::builder();
+        builder.write_bits(id.to_be_bytes(), 32).unwrap();
+        for child in children {
+            builder.write_ref(child.clone()).unwrap();
+        }
+        builder.build().unwrap()
+    }
+
+    fn deepest_config_at_cell_limit() -> TonCell {
+        let wide = wide_config_cell(1_023);
+        let mut chain = node(1_000_000, &[]);
+        for id in (0..1_022).rev() {
+            chain = if id == 0 {
+                node(id, &[chain.clone(), wide.clone()])
+            } else {
+                node(id, &[chain])
+            };
+        }
+        let q = node(2_000_000, &[chain.clone()]);
+        node(3_000_000, &[chain, q])
+    }
+
+    #[test]
+    fn default_receive_config_at_cell_limit_serializes_in_bounded_time() {
+        let config = deepest_config_at_cell_limit();
+        assert_eq!(
+            ton_cell_count_at_most(&config, usize::MAX),
+            Some(MAX_DEFAULT_RECEIVE_CONFIG_CELLS)
+        );
+        assert_eq!(config.depth().unwrap(), 1_024);
+        let start = std::time::Instant::now();
+        let boc = serialize_default_receive_config(&config).unwrap();
+        assert!(!boc.is_empty());
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "serialization at the configured cell/depth bound took {:?}",
+            start.elapsed()
+        );
+    }
+    #[test]
+    fn live_mainnet_uln_storage_preserves_default_receive_config_boc() {
+        let data =
+            include_str!("../../tests/onchain_provenance/ton_mainnet_uln_storage.b64").trim();
+        let storage = boc_from_base64_with_limits(data, MAX_ACCOUNT_STATE_CELLS, true).unwrap();
+        let config = uln_default_receive_config(&storage).unwrap();
+        let cells = ton_cell_count_at_most(&config, usize::MAX).unwrap();
+        let serialized = serialize_default_receive_config(&config).unwrap();
+        println!("mainnet Uln storage cells=532, default receive config cells={cells}");
+        assert_eq!(cells, 2);
+        assert_eq!(
+            serialized,
+            include_str!("../../tests/onchain_provenance/ton_mainnet_default_receive_config.b64")
+                .trim()
+        );
+    }
+
+    #[test]
+    fn live_testnet_uln_storage_preserves_default_receive_config_boc() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/onchain_provenance/ton_testnet_delivered_packet.json"
+        ))
+        .unwrap();
+        let data = fixture["ulnStorage"]["response"]["result"]["data"]
+            .as_str()
+            .unwrap();
+        let storage = boc_from_base64_with_limits(data, MAX_ACCOUNT_STATE_CELLS, true).unwrap();
+        let config = uln_default_receive_config(&storage).unwrap();
+        let cells = ton_cell_count_at_most(&config, usize::MAX).unwrap();
+        let serialized = serialize_default_receive_config(&config).unwrap();
+        let expected = fixture["committableView"]["request"]["stack"][2][1]
+            .as_str()
+            .unwrap();
+        println!("testnet default receive config cells={cells}");
+        assert_eq!(
+            pillar_layerzero::boc_from_base64(&serialized)
+                .unwrap()
+                .hash()
+                .unwrap(),
+            pillar_layerzero::boc_from_base64(expected)
+                .unwrap()
+                .hash()
+                .unwrap()
+        );
     }
 }
