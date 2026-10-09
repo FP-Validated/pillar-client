@@ -595,6 +595,13 @@ mod tests {
         const TWO: &str =
             r#"{"bsc":{"uris":["https://bsc-a.example","https://bsc-b.example"],"quorum":2}}"#;
         const ONE: &str = r#"{"bsc":{"uris":["https://bsc-a.example"],"quorum":1}}"#;
+        // Register the warning callsite before `set_default` (see the refresh-failure test).
+        refresh_with(
+            &owner_serving(TWO),
+            &Arc::new(Mutex::new(PillarMetrics::new())),
+            Ok(refreshed_snapshot(ONE)),
+        )
+        .await;
         let logs = Arc::new(parking_lot::Mutex::new(Vec::new()));
         let writer = LogBuffer(logs.clone());
         let _subscriber = tracing::subscriber::set_default(
@@ -712,6 +719,14 @@ mod tests {
                 "quorum-strategy.json: JSON data error: unknown field at line 1 column ",
             ),
         ];
+        // tracing caches interest per callsite; registering it here first keeps a racing first
+        // registration on another test thread from caching `never` past `set_default` below.
+        refresh_with(
+            &owner_serving(SERVING_PROVIDERS),
+            &Arc::new(Mutex::new(PillarMetrics::new())),
+            Err(String::new()),
+        )
+        .await;
         for (name, providers, strategy, expected) in cases {
             let owner = RemoteProviderConfigOwner::with_loader_for_test(
                 provider_configs(SERVING_PROVIDERS),

@@ -379,8 +379,11 @@ fn unmatched_strategy_chain_and_endpoint_keys_warn_without_rejecting() {
     let subscriber = tracing_subscriber::fmt()
         .with_writer(move || writer.clone())
         .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
     let strategy = r#"{"default":{"allOf":[{"any":1}]},"chains":{"ghost":{"rpc":{"allOf":[{"any":1}]}},"ethereum":{"rest":{"allOf":[{"any":1}]}}}}"#;
+    // Register the warning callsites before `set_default`, so a racing first registration
+    // on another test thread cannot cache them as disabled for this subscriber.
+    assert!(load(PROVIDERS, strategy).is_ok());
+    let _guard = tracing::subscriber::set_default(subscriber);
     assert!(load(PROVIDERS, strategy).is_ok());
     let logged = String::from_utf8(logs.lock().unwrap().clone()).unwrap();
     assert!(

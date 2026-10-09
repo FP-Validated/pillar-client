@@ -292,6 +292,9 @@ mod tests {
             None,
         )
         .unwrap();
+        // Register the warning callsite before `set_default`, so a racing first registration
+        // on another test thread cannot cache it as disabled for this subscriber.
+        warn_mainnet_provider_uris(&config, &["bsc".to_string()]);
         let logs = Arc::new(parking_lot::Mutex::new(Vec::new()));
         let writer = Buffer(logs.clone());
         let _guard = tracing::subscriber::set_default(
