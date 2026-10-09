@@ -41,25 +41,20 @@ pub(crate) fn abi_dynamic_bytes(
     head_words: usize,
 ) -> Result<Vec<u8>, AppCoreError> {
     let offset = abi_word_usize(data, index, head_words)?;
-    if offset + 32 > data.len() {
-        return Err(AppCoreError::Internal(
-            "dynamic bytes offset out of range".to_string(),
-        ));
-    }
-    let len = abi_word_value(&data[offset..offset + 32])?;
+    let start = offset
+        .checked_add(32)
+        .filter(|start| *start <= data.len())
+        .ok_or_else(|| AppCoreError::Internal("dynamic bytes offset out of range".to_string()))?;
+    let len = abi_word_value(&data[offset..start])?;
     if len > usize::MAX as u128 {
         return Err(AppCoreError::Internal(
             "dynamic bytes length overflows usize".to_string(),
         ));
     }
-    let len = len as usize;
-    let start = offset + 32;
-    let end = start + len;
-    if end > data.len() {
-        return Err(AppCoreError::Internal(
-            "dynamic bytes body out of range".to_string(),
-        ));
-    }
+    let end = start
+        .checked_add(len as usize)
+        .filter(|end| *end <= data.len())
+        .ok_or_else(|| AppCoreError::Internal("dynamic bytes body out of range".to_string()))?;
     Ok(data[start..end].to_vec())
 }
 

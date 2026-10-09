@@ -23,6 +23,12 @@ the Prometheus metric names.
 - Ethereum-style signature 변환은 모든 ECDSA signer에서 recovery ID 2/3을 거부한다. 기존 low-S 정규화 순서와 non-EVM raw recovery ID 형식은 유지한다. KMS 호출 뒤에 거부하므로 cloud signing call 자체를 방지하는 변경은 아니다.
 - Sui read는 fullnode JSON-RPC 폐지에 따라 GraphQL을 쓴다. upstream gasolina는 아직 `sui_*`/`suix_*` JSON-RPC를 쓰므로 의도적인 차이다. Payload 검증은 GraphQL `simulateTransaction`을 직접 호출한다. Mainnet capture에서 shared object의 `version` 값은 서버가 검증하지 않았다. `iotal1`은 `iota_*` JSON-RPC를 유지한다.
 - TON 전용 HTTP JSON decoder는 기존 4 MiB 응답 제한과 512-level JSON container nesting 제한을 적용한다. Trace 변환은 transaction hash 중복, 잘못된 topology, 512개 초과 node와 변환 후 512 container 초과 깊이를 조립 전에 거부한다. 서명과 confirmation에 필요한 scalar 필드만 투영한다. Object와 Array를 직접 조립해 subtree 재직렬화를 제거한다. 생략된 leaf children은 빈 배열로 처리한다. 이 정규화는 children 누락을 거부하는 upstream quorum 함수와 의도적으로 다르다. 원본 JSON은 반복형으로 순회하고 해제한다. JSON nesting과 trace node 수는 다른 단위다.
+- EVM PacketSent log의 ABI offset이나 길이가 `2^64-1`이면 decoder가 정수 overflow로 panic했다. 이제 다른 잘못된 log처럼 `Internal` 오류를 반환하고, resolver는 그 log를 건너뛴다. 이전에는 어떤 source-chain contract든 정상 send와 같은 tx에서 이런 log를 emit하면 그 tx의 resolve가 매번 중단됐다. 오류 문구는 바뀌지 않는다.
+
+### Build
+
+- CI의 모든 GitHub Action을 commit SHA로 고정했다. `cargo-audit`, `cargo-deny`, `cargo-cyclonedx`의 버전도 고정했다. Supply-chain job도 Rust 1.98.1을 쓴다.
+- Container builder를 `rust:1.98.1-bookworm` digest로 고정했다. 출하 binary는 CI가 test한 compiler로 빌드된다. 이전 builder는 Rust 1.97.1이었다.
 
 ### Audit
 
