@@ -174,9 +174,9 @@ impl ReadVerticalTransport {
                     "1"
                 ),
             ),
-            // getUlnConfig(address,uint32) on the READ library, read as one
-            // word of required confirmations (`abi.rs:344-350`).
-            "0x43ea4fa9" => (ethereum_contract("ReadLib1002"), format!("0x{:0>64}", "1")),
+            "0x43ea4fa9" => {
+                return Err("execution reverted".to_string());
+            }
             // verifiable(bytes,bytes32) on the READ library's view: 0 is
             // `Verifying`, so the packet is still collecting verifications.
             "0x27d12cd9" => (

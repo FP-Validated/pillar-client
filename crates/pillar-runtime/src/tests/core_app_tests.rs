@@ -984,6 +984,15 @@ async fn assert_vertical_completes(env: &VerticalEnvironment) {
         "the extra-context body did not carry the sent event: {payload}"
     );
     assert_eq!(
+        payload["sentEvent"]["onChainEvent"]["blockHash"],
+        "0xabababababababababababababababababababababababababababababababab",
+        "the extra-context body did not carry the EVM source block hash: {payload}"
+    );
+    assert_eq!(
+        payload["sentEvent"]["onChainEvent"]["blockNumber"], 96,
+        "the extra-context body did not carry the EVM source block number: {payload}"
+    );
+    assert_eq!(
         payload["signingContext"],
         json!({
             "protocolType": "MESSAGE",

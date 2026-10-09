@@ -64,19 +64,19 @@ where
                 )));
             }
 
-            let latest = self
-                .block_time_for_tag_with_quorum(&marker.chain_name, "latest")
-                .await?;
             let required_block_number = marker
                 .block_number
                 .checked_add(marker.block_confirmation)
                 .ok_or_else(|| {
                     AppCoreError::BadRequest("block confirmation range overflow".to_string())
                 })?;
-            if required_block_number > latest.number {
+            if !self
+                .block_confirmation_satisfied_with_quorum(&marker.chain_name, required_block_number)
+                .await?
+            {
                 return Err(AppCoreError::BadRequest(format!(
                     "Block confirmation for chainName {} for time marker is greater than current block number: {} > {}",
-                    marker.chain_name, required_block_number, latest.number
+                    marker.chain_name, required_block_number, "latest"
                 )));
             }
         }
@@ -101,22 +101,16 @@ where
                 })?;
             match marker.marker {
                 ReadTimeMarker::Timestamp { timestamp } => {
-                    let Some(resolved) = resolved_markers.iter().find(|resolved| {
+                    let Some(_resolved) = resolved_markers.iter().find(|resolved| {
                         !resolved.is_block_number
                             && resolved.chain_name == *chain_name
                             && resolved.timestamp == timestamp as i64
+                            && resolved.block_confirmation == marker.block_confirmation as i64
                     }) else {
                         return Err(AppCoreError::BadRequest(format!(
-                            "Missing resolved timestamp time marker for chainName {chain_name} timestamp {timestamp}"
+                            "Missing resolved timestamp time marker for chainName {chain_name} timestamp {timestamp} and blockConfirmation {}", marker.block_confirmation
                         )));
                     };
-                    if resolved.block_confirmation != marker.block_confirmation as i64 {
-                        return Err(AppCoreError::BadRequest(format!(
-                            "Resolved timestamp time marker blockConfirmation mismatch for chainName {chain_name} timestamp {timestamp}: {} != {}",
-                            resolved.block_confirmation,
-                            marker.block_confirmation
-                        )));
-                    }
                 }
                 ReadTimeMarker::BlockNumber { block_number } => {
                     if block_number > i64::MAX as u64 {
@@ -132,9 +126,6 @@ where
                         .block_time_with_quorum(chain_name, block_number as i64)
                         .await?;
                     push_read_block_pin(pins, chain_name, &block)?;
-                    let latest = self
-                        .block_time_for_tag_with_quorum(chain_name, "latest")
-                        .await?;
                     let required_block_number = (block_number as i64)
                         .checked_add(i64::from(marker.block_confirmation))
                         .ok_or_else(|| {
@@ -142,10 +133,12 @@ where
                                 "block confirmation range overflow".to_string(),
                             )
                         })?;
-                    if required_block_number > latest.number {
+                    if !self
+                        .block_confirmation_satisfied_with_quorum(chain_name, required_block_number)
+                        .await?
+                    {
                         return Err(AppCoreError::BadRequest(format!(
-                            "Block confirmation for chainName {chain_name} for read command block marker is greater than current block number: {required_block_number} > {}",
-                            latest.number
+                            "Block confirmation for chainName {chain_name} for read command block marker is greater than current block number: {required_block_number} > latest"
                         )));
                     }
                 }
@@ -161,6 +154,51 @@ where
     ) -> Result<BlockTime, AppCoreError> {
         self.block_time_for_tag_with_quorum(chain_name, &format!("0x{block_number:x}"))
             .await
+    }
+
+    async fn block_confirmation_satisfied_with_quorum(
+        &self,
+        chain_name: &str,
+        required_block_number: i64,
+    ) -> Result<bool, AppCoreError> {
+        crate::provider_health::rpc_scope(chain_name, async {
+            let owned_chain = chain_name.to_string();
+            let chain_type = static_chain_type_by_chain_name(std::slice::from_ref(&owned_chain))
+                .ok()
+                .and_then(|types| types.get(chain_name).cloned());
+            if chain_type.as_deref() != Some("EVM") {
+                return Err(AppCoreError::Internal(format!(
+                    "Unsupported chain type: {} (read time markers are EVM-only) for chain {chain_name}",
+                    chain_type.as_deref().unwrap_or("unknown")
+                )));
+            }
+            let snapshot = self.providers.load();
+            let dispatch = snapshot.dispatch(&self.rank_tracker, chain_name).await?;
+            let ChainDispatch { config, quorum, plan } = dispatch;
+            let requests = FuturesUnordered::new();
+            for DispatchEntry { index, uri, delay } in plan {
+                let (url, headers) = provider_uri_parts(uri);
+                let transport = self.transport.clone();
+                requests.push(async move {
+                    if !delay.is_zero() {
+                        tokio::time::sleep(delay).await;
+                    }
+                    let vote = provider_response(
+                        observe_block_time(transport, url, headers, "latest").await,
+                    )
+                    .map(|result| {
+                        result.map(|block| {
+                            let sufficient = block.block.number >= required_block_number;
+(if sufficient { "sufficient".to_string() } else { "insufficient".to_string() }, sufficient)
+                        })
+                    });
+                    (index, vote)
+                });
+            }
+            let context = format!("READ block confirmation threshold for chain {chain_name}");
+            resolve_provider_quorum(requests, config.uris.len(), quorum, &context).await
+        })
+        .await
     }
 
     async fn block_time_for_tag_with_quorum(

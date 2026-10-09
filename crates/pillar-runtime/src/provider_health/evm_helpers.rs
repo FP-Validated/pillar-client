@@ -71,14 +71,16 @@ pub(crate) fn extra_context_sent_event_payload(sent_event: &LzSentEvent) -> Valu
             "chainName": sent_event.lz_message_id.pathway_id.src_chain_name,
             "txHash": sent_event.tx_hash,
             "blockHash": sent_event
-                .extra
-                .get("blockHash")
-                .and_then(Value::as_str)
+                .source_evidence
+                .as_ref()
+                .map(|evidence| evidence.block_hash.as_str())
+                .or_else(|| sent_event.extra.get("blockHash").and_then(Value::as_str))
                 .unwrap_or_default(),
             "blockNumber": sent_event
-                .extra
-                .get("blockNumber")
-                .and_then(Value::as_i64)
+                .source_evidence
+                .as_ref()
+                .map(|evidence| evidence.block_number)
+                .or_else(|| sent_event.extra.get("blockNumber").and_then(Value::as_i64))
                 .unwrap_or_default(),
         }),
     );

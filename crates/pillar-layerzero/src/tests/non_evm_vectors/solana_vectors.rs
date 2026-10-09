@@ -53,6 +53,21 @@ async fn solana_vector_builds_execute_transaction_digest_like_upstream() {
         .find(|vector| vector["id"] == "solana-uln-v3-execute-transaction-digest")
         .unwrap();
     let expected = &solana_vector["sourceBackedExpected"];
+    let hex_dvn_pda = format!(
+        "0x{}",
+        hex::encode(bs58::decode(SOLANA_DVN_PDA).into_vec().unwrap())
+    );
+    let hex_result = builder
+        .build_uln_v3_verify_payload(
+            &solana_sent_event(),
+            64,
+            1_900_000_000,
+            "168".to_string(),
+            Some(&hex_dvn_pda),
+        )
+        .await
+        .unwrap();
+    assert_eq!(hex_result.hash_call_data, result.hash_call_data);
 
     assert_eq!(
         result.hash_call_data,

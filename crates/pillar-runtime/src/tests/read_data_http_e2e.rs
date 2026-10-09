@@ -822,6 +822,24 @@ async fn reqwest_http_full_consumer_enforces_read_data_and_provider_quorum() {
             assert!(result.body.get("code").is_none(), "{name}");
             assert!(result.body.get("retryable").is_none(), "{name}");
             assert_eq!(result.body["statusCode"], 200);
+            if name == "empty_call_with_0x00_code" {
+                let request_payload = result.body["body"]["debugInfo"]["details"]["proof"]
+                    ["payload"]
+                    .as_str()
+                    .unwrap();
+                assert_eq!(
+                    result.body["body"]["debugInfo"]["details"]["proof"]["resolvedPayload"], "",
+                    "the HTTP fixture must exercise the empty resolved-payload fallback"
+                );
+                let expected_payload = request_payload
+                    .strip_prefix("0x")
+                    .unwrap_or(request_payload);
+                assert_eq!(result.body["body"]["payload"], expected_payload);
+                assert!(!result.body["body"]["payload"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("0x"));
+            }
             assert_eq!(
                 result
                     .body
