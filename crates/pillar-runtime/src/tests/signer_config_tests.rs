@@ -67,6 +67,34 @@ fn runtime_signer_config_loads_aws_mnemonic_wallets_from_env() {
     );
 }
 
+#[test]
+fn runtime_signer_config_refuses_configured_chains_without_wallets() {
+    let cases = [
+        (
+            config_wallet_json("wallet-a", "SOLANA", "secret-a"),
+            "no wallet defines its ChainType",
+        ),
+        (
+            config_wallet_json_with_supported_chain_names("wallet-a", "EVM", "secret-a", "bsc"),
+            "supportedChainNames excludes it",
+        ),
+    ];
+    for (wallets, reason) in cases {
+        let error = runtime_signer_config_from_env_map(
+            &HashMap::from([
+                (SIGNER_TYPE.to_string(), "MNEMONIC".to_string()),
+                (pillar_config::LZ_WALLETS.to_string(), wallets),
+            ]),
+            &["ethereum".to_string()],
+            &HashMap::from([("ethereum".to_string(), "EVM".to_string())]),
+        )
+        .err()
+        .unwrap();
+        assert!(error.contains("ethereum"), "{error}");
+        assert!(error.contains(reason), "{error}");
+    }
+}
+
 #[tokio::test]
 async fn aws_mnemonic_signer_assembly_loads_wallet_secrets_like_typescript() {
     let vars = HashMap::from([

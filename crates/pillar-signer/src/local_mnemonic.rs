@@ -68,28 +68,33 @@ impl LocalMnemonicRawSignerAdapter {
             .to_vec())
     }
 
+    fn bip39_seed(&self) -> Result<&[u8; 64], SignerError> {
+        self.seeds
+            .bip39
+            .get_or_init(|| {
+                Mnemonic::parse_in_normalized(Language::English, &self.mnemonic.mnemonic)
+                    .map(|parsed| Zeroizing::new(parsed.to_seed("")))
+                    .map_err(|error| error.to_string())
+            })
+            .as_ref()
+            .map(|seed| &**seed)
+            .map_err(|error| SignerError::Message(error.clone()))
+    }
+
     fn seed(&self, seed_kind: SeedKind) -> Result<&[u8; 64], SignerError> {
         match seed_kind {
-            SeedKind::Bip39 => self
-                .seeds
-                .bip39
-                .get_or_init(|| {
-                    Mnemonic::parse_in_normalized(Language::English, &self.mnemonic.mnemonic)
-                        .map(|parsed| Zeroizing::new(parsed.to_seed("")))
-                        .map_err(|error| error.to_string())
-                })
-                .as_ref()
-                .map(|seed| &**seed)
-                .map_err(|error| SignerError::Message(error.clone())),
-            SeedKind::Ton => self
-                .seeds
-                .ton
-                .get_or_init(|| {
-                    ton_hd_seed(&self.mnemonic.mnemonic, "").map_err(|error| error.to_string())
-                })
-                .as_ref()
-                .map(|seed| &**seed)
-                .map_err(|error| SignerError::Message(error.clone())),
+            SeedKind::Bip39 => self.bip39_seed(),
+            SeedKind::Ton => {
+                self.bip39_seed()?;
+                self.seeds
+                    .ton
+                    .get_or_init(|| {
+                        ton_hd_seed(&self.mnemonic.mnemonic, "").map_err(|error| error.to_string())
+                    })
+                    .as_ref()
+                    .map(|seed| &**seed)
+                    .map_err(|error| SignerError::Message(error.clone()))
+            }
         }
     }
 
