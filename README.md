@@ -201,7 +201,7 @@ refused at startup with a message naming it. By `PROVIDER_CONFIG_TYPE`:
 | `LAYERZERO_PROVIDER_CONFIG_FILE_PATH` | `LOCAL` | `providers-v2.json` from a file; wins over the inline form. |
 | `LAYERZERO_QUORUM_STRATEGY_CONFIG_FILE_PATH` | `LOCAL` | `quorum-strategy.json` from a file, required with the providers file. |
 | `CONFIG_BUCKET_NAME` | `S3`, `GCS` | Bucket holding `providers-v2.json` and `quorum-strategy.json`; both are read on every load. |
-| `LAYERZERO_CDK_DEPLOY_REGION` | `S3`, Lambda extra-context | AWS region (defaults to `us-east-1` for `S3`; required when `EXTRA_CONTEXT_AWS_LAMBDA_NAME` is set). |
+| `LAYERZERO_CDK_DEPLOY_REGION` | `S3`, Lambda extra-context, `MNEMONIC`, `KMS` + `AWS` | AWS region. `S3` defaults to `us-east-1`; Lambda extra-context requires it; the `MNEMONIC` signer's Secrets Manager uses it, else the AWS SDK default region chain (`AWS_REGION`, profile, instance metadata), else `us-east-1`; AWS KMS uses it, else the SDK default region chain. |
 | `GCP_PROJECT_ID` | `GCS` | Required by configuration validation; the bucket is addressed by name, so the value does not select it. |
 
 `category` is `internal`, `dedicated_external` or `shared_external`; every `entity`
@@ -260,7 +260,7 @@ Signer configuration:
 | `LAYERZERO_KMS_IDS` | `KMS` | Comma-separated key identifiers. |
 | `AZURE_KEY_VAULT_URL` | `KMS` + `AZURE` | Key Vault base URL. |
 | `GCP_PROJECT_ID`, `GCP_KEY_RING_ID` | `KMS` + `GCP` | Key ring location. |
-| `LAYERZERO_WALLETS` / `LAYERZERO_WALLETS_FILE_PATH` | all | Wallet definitions per chain type. |
+| `LAYERZERO_WALLETS` / `LAYERZERO_WALLETS_FILE_PATH` | all | Wallet definitions per chain type. A wallet serves a chain only when its `byChainType` defines that chain's type and, if set, its `supportedChainNames` names the chain; startup refuses a configured chain that no wallet serves. |
 | `LAYERZERO_WALLET_MNEMONIC_MAPPING` / `..._FILE_PATH` | `LOCAL_MNEMONIC` | Mnemonic and derivation path per wallet. |
 
 Optional:

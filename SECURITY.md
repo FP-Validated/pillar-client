@@ -757,13 +757,16 @@ Addresses live in `stellar_uln_302_for_environment`,
   so refuse the request in their builders regardless; like upstream, Solana and
   Stellar report a missing or empty address as a `500` at the build stage, after
   resolution and validation.
-- The connection lifetime ceiling is checked before each read and write rather
-  than only when the underlying socket returns `Pending`
-  (`IdleTimeoutIo`, `crates/pillar-cli/src/main.rs`), so a client that keeps the
-  socket continuously readable cannot renew the sliding idle window past the
-  300s ceiling. `poll_flush` and `poll_shutdown` delegate straight to the
-  socket, so the guarantee is that no application-level read or write is
-  serviced after the ceiling, not that every syscall stops.
+- At the 300s connection lifetime the server stops taking new requests on that
+  connection and closes it after the in-flight response (`Connection: close`).
+  The absolute IO ceiling is 300s plus the 10s header-read deadline plus the 58s
+  request deadline. It is checked before each read and write rather than only
+  when the underlying socket returns `Pending` (`IdleTimeoutIo`,
+  `crates/pillar-cli/src/main.rs`), so a client that keeps the socket
+  continuously readable cannot renew the sliding idle window past it.
+  `poll_flush` and `poll_shutdown` delegate straight to the socket, so the
+  guarantee is that no application-level read or write is serviced after the
+  ceiling, not that every syscall stops.
 - `srcChainName` and `dstChainName` are checked at the HTTP boundary, before
   anything logs them, against the roster and the shape 1-128 characters of
   `[0-9a-zA-Z_-]` (`crates/pillar-api/src/lib.rs`), and a caller-supplied
