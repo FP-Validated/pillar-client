@@ -100,7 +100,10 @@ fn convert(legacy: &str, labels: &str, out_dir: &str) -> Result<(), String> {
             }
             entries.push(Value::Object(entry));
         }
-        let quorum = config.get("quorum").and_then(Value::as_u64).unwrap_or(1);
+        let quorum = config
+            .get("quorum")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| format!("chain {chain}: missing legacy quorum"))?;
         chains.insert(chain.clone(), json!({ "rpc": entries }));
         strategies.insert(
             chain.clone(),
@@ -129,7 +132,7 @@ fn convert(legacy: &str, labels: &str, out_dir: &str) -> Result<(), String> {
     let providers = serde_json::to_string_pretty(&ProvidersFile { entities, chains })
         .map_err(|error| error.to_string())?;
     let strategy = serde_json::to_string_pretty(&StrategyFile {
-        default: json!({ "allOf": [{ "any": 1 }] }),
+        default: json!({ "allOf": [{ "any": 2 }] }),
         chains: strategies,
     })
     .map_err(|error| error.to_string())?;

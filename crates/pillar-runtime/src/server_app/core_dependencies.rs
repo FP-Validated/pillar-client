@@ -18,13 +18,13 @@ where
         metrics: Arc<Mutex<PillarMetrics>>,
     ) -> Result<Self, String> {
         let runtime_config = load_from_map(vars.clone()).map_err(|error| error.to_string())?;
-        let provider_config = match &remote_provider_config {
-            Some(owner) => owner.snapshot()?,
-            None => runtime_provider_config_from_env_map(&vars, &runtime_config).await?,
-        };
-        // The roster the handle was published with, not a recomputation: the
-        // signers assembled below must match the chains actually serving.
-        let available_chain_names = providers.load().available_chain_names().to_vec();
+        let serving_generation = providers.load();
+        let provider_config = pillar_config::StaticProviderConfig::new(
+            serving_generation.provider_configs().clone(),
+            None,
+        )
+        .map_err(|error| error.to_string())?;
+        let available_chain_names = serving_generation.available_chain_names().to_vec();
         let controls =
             crate::execution::RuntimeControls::new(&runtime_config, &available_chain_names).await?;
         metrics
@@ -102,6 +102,31 @@ where
                 chains = ?single_provider_chains,
                 "configured chains let one provider entity alone satisfy the quorum strategy"
             );
+        }
+        if runtime_config.environment.as_deref() == Some("mainnet") {
+            for chain_name in &available_chain_names {
+                if provider_config
+                    .get_provider_config(chain_name)
+                    .is_some_and(|config| {
+                        config.uris.iter().any(|provider| {
+                            let uri = match provider {
+                                pillar_config::ProviderUri::Uri(uri)
+                                | pillar_config::ProviderUri::UriWithHeaders { uri, .. } => uri,
+                            };
+                            reqwest::Url::parse(uri).map_or(true, |url| {
+                                url.scheme() != "https"
+                                    && !(url.scheme() == "http"
+                                        && url
+                                            .host_str()
+                                            .and_then(|host| host.parse::<std::net::IpAddr>().ok())
+                                            .is_some_and(|ip| ip.is_loopback()))
+                            })
+                        })
+                    })
+                {
+                    tracing::warn!(chain = %chain_name, "mainnet provider config contains a non-HTTPS RPC URI");
+                }
+            }
         }
         let signing_app = core_api_app_from_runtime_parts(RuntimeCoreAppParts {
             runtime_config: runtime_config.clone(),

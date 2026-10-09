@@ -122,8 +122,7 @@ PILLAR_API_AUTH_TOKENS="$(openssl rand -hex 24)" \
 
 Startup prints a redacted configuration report (provider URLs, headers and key
 identifiers are masked, tokens are shown only as a count) and then binds
-`0.0.0.0:$SERVER_PORT`. The process refuses to start if `PILLAR_API_AUTH_TOKENS`
-is missing or holds a token shorter than 32 characters.
+`0.0.0.0:$SERVER_PORT`. Authentication is enabled by default: when `PILLAR_API_AUTH_ENABLED=false`, every route is public and tokens are optional. Keep that mode behind network-edge controls. Otherwise, startup refuses if `PILLAR_API_AUTH_TOKENS` is missing or contains a token shorter than 32 characters.
 
 Sui provider entries under `chains.sui.rpc` must use a Sui GraphQL RPC URL (for
 example `https://graphql.mainnet.sui.io/graphql` or the corresponding testnet
@@ -407,7 +406,7 @@ log line on its own.
   value; alert above ~300. Absent under `PROVIDER_CONFIG_TYPE=LOCAL`, which runs
   no refresh loop.
 - `pillar_background_task_heartbeat_age_seconds{task}` — seconds since each
-  background loop last *completed* an iteration, for `provider_config_refresh`
+  background loop last began an iteration, for `provider_config_refresh`
   (60s interval, remote provider config only), `provider_rank_refresh` (150s)
   and `provider_health_cache_refresh` (15s). Also computed at scrape time, which
   is what makes a loop that panicked, hung or was never started visible at all:
@@ -430,7 +429,7 @@ log line on its own.
 ## Development
 
 CI (`.github/workflows/ci.yml`) runs on pushes to `main`, `v*` tags, pull requests
-and a weekly schedule, in five jobs: fmt, Clippy, tests and the release build with
+and a weekly schedule, in six jobs: fmt, Clippy, tests and the release build with
 Rust 1.98.1; `cargo check` at the declared MSRV 1.94.1; the generated-config
 integrity and acceptance-matrix checks; `cargo audit`, `cargo deny` and a CycloneDX
 SBOM; and a container build that checks the revision label and that the binary
@@ -442,16 +441,13 @@ stay on the pinned toolchain:
 ```bash
 cargo +1.98.1 fmt --all --check
 cargo +1.98.1 clippy --workspace --all-targets
-cargo +1.98.1 test --workspace --locked   # 13 tests are #[ignore], opt-in; see AUDIT.md
+cargo +1.98.1 test --workspace --locked   # 15 tests are #[ignore], opt-in; see AUDIT.md
 cargo audit && cargo deny check     # dependency and license policy
 ```
 
 `crates/pillar-config/src/generated_layerzero_evm.rs`,
-`generated_layerzero_environment.rs`, `generated_ton_layerzero.rs` and
-`generated_layerzero_legacy_chain_ids.rs` are generated tables — never edit them by
-hand. There is one generator per file; the first three read the upstream LayerZero
-deployment configuration from the path given by `PILLAR_AUDIT_ROOT`, the last only
-the lz-definitions package:
+`generated_layerzero_environment.rs`, `generated_ton_layerzero.rs`,
+`generated_layerzero_legacy_chain_ids.rs` and `generated_chain_metadata.rs` are generated tables; never edit them by hand. The associated generator scripts document their inputs.
 
 ```bash
 # gasolina-audit 213cd500 (1.2.66): the app root, not the repository root

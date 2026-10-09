@@ -138,6 +138,29 @@ pub fn check_strategy_config_with_restrictions(
         ));
     };
     let mut errors = Vec::new();
+    for (source, strategy) in std::iter::once(("default", default)).chain(
+        strategy_file.chains.values().flat_map(|endpoints| {
+            endpoints
+                .values()
+                .map(|strategy| ("chain override", strategy))
+        }),
+    ) {
+        for requirement in strategy.all_of.iter().chain(&strategy.one_of) {
+            for category in requirement.keys() {
+                if !PROVIDER_CATEGORIES.contains(&category.as_str())
+                    && category != PROVIDER_CATEGORY_ANY
+                {
+                    errors.push(format!(
+                        "{source}: unlisted category {}",
+                        category_label(category)
+                    ));
+                }
+            }
+        }
+    }
+    if !errors.is_empty() {
+        return validation_result("Strategy config validation failed", errors);
+    }
     for (chain, endpoints) in &file.chains {
         for (endpoint, entries) in endpoints {
             let raw = strategy_file

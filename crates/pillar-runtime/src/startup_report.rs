@@ -64,28 +64,41 @@ impl StartupReport {
         available_chain_names: &[String],
         mode: RuntimeMode,
     ) -> Result<Self, String> {
-        let configured_chains = available_chain_names
-            .iter()
-            .map(|chain_name| {
-                let config = provider_config
-                    .get_provider_config(chain_name)
-                    .ok_or_else(|| format!("missing provider config for {chain_name}"))?;
-                Ok(StartupChainReport {
-                    chain_name: chain_name.clone(),
-                    provider_count: config.uris.len(),
-                    quorum: pillar_config::provider_validation::canonical_strategy_key(
-                        &config.strategy,
-                    ),
-                    entities: config
-                        .voters
-                        .iter()
-                        .map(|voter| format!("{}/{}", voter.category, voter.entity))
-                        .collect(),
-                    single_provider_trust_root: config.single_entity_trust_root(),
-                    providers: config.uris.iter().map(redact_provider_uri).collect(),
+        let configured_chains =
+            available_chain_names
+                .iter()
+                .map(|chain_name| {
+                    let config = provider_config
+                        .get_provider_config(chain_name)
+                        .ok_or_else(|| format!("missing provider config for {chain_name}"))?;
+                    Ok(StartupChainReport {
+                        chain_name: chain_name.clone(),
+                        provider_count: config.uris.len(),
+                        quorum: pillar_config::provider_validation::canonical_strategy_key(
+                            &config.strategy,
+                        ),
+                        entities: config
+                            .voters
+                            .iter()
+                            .map(|voter| {
+                                format!(
+                                    "{}/{}",
+                                    voter.category,
+                                    if voter.entity.bytes().all(|byte| byte.is_ascii_alphanumeric()
+                                        || b"._-".contains(&byte))
+                                    {
+                                        voter.entity.as_str()
+                                    } else {
+                                        "<unlisted entity>"
+                                    }
+                                )
+                            })
+                            .collect(),
+                        single_provider_trust_root: config.single_entity_trust_root(),
+                        providers: config.uris.iter().map(redact_provider_uri).collect(),
+                    })
                 })
-            })
-            .collect::<Result<Vec<_>, String>>()?;
+                .collect::<Result<Vec<_>, String>>()?;
         let total_provider_count = configured_chains
             .iter()
             .map(|chain| chain.provider_count)

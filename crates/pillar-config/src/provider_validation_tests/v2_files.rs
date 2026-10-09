@@ -305,13 +305,13 @@ fn provider_and_strategy_diagnostics_never_echo_input_keys_or_values() {
             format!(
                 r#"{{"default": {{"allOf": [{{"{SENTINEL}": "max"}}]}}, "restrictions": {{"minimumMaxEntities": 1}}}}"#
             ),
-            "RestrictionViolationError: category=<unlisted category>, resolved=0",
+            "<unlisted category>",
         ),
         (
             "strategy category key unsatisfiable",
             PROVIDERS.into(),
             format!(r#"{{"default": {{"allOf": [{{"{SENTINEL}": 1}}]}}}}"#),
-            r#"Strategy: {"allOf":[{"<unlisted category>":1}],"oneOf":[]}"#,
+            "<unlisted category>",
         ),
         (
             "syntax error after a value",
@@ -327,6 +327,17 @@ fn provider_and_strategy_diagnostics_never_echo_input_keys_or_values() {
     }
 }
 
+#[test]
+fn unknown_strategy_categories_are_rejected_in_defaults_and_overrides() {
+    for strategy in [
+        r#"{"default":{"allOf":[{"typo":0}]}}"#,
+        r#"{"default":{"allOf":[{"any":2}]},"chains":{"ethereum":{"rpc":{"oneOf":[{"typo":0}]}}}}"#,
+    ] {
+        let error = message(load(PROVIDERS, strategy));
+        assert!(error.contains("<unlisted category>"), "{error}");
+    }
+    assert!(load(PROVIDERS, r#"{"default":{"allOf":[{"any":1}]}}"#).is_ok());
+}
 #[test]
 fn any_is_a_separate_threshold_that_overlaps_category_slots() {
     // `internal: 1` plus `any: 2` is met by two entities, not three.
