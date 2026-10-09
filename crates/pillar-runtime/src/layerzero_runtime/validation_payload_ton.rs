@@ -303,10 +303,59 @@ where
     else {
         return Ok(TonStorageRead::Inactive);
     };
+    if !ton_boc_cell_count_fits(data) {
+        return Ok(TonStorageRead::Unavailable);
+    }
     Ok(match boc_from_base64(data) {
         Ok(cell) => TonStorageRead::Cell(data.to_string(), cell),
         Err(_) => TonStorageRead::Unavailable,
     })
+}
+
+fn ton_boc_cell_count_fits(encoded: &str) -> bool {
+    use base64::Engine;
+    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(encoded) else {
+        return false;
+    };
+    if bytes.len() < 6 || bytes[..4] != [0xb5, 0xee, 0x9c, 0x72] {
+        return true;
+    }
+    let size_bytes = usize::from(bytes[4] & 0x07);
+    let offset_bytes = usize::from(bytes[5]);
+    if size_bytes == 0 || size_bytes > 4 || offset_bytes == 0 || offset_bytes > 8 {
+        return false;
+    }
+    let mut cursor = 6usize;
+    let mut read_uint = |width: usize| -> Option<usize> {
+        let end = cursor.checked_add(width)?;
+        let chunk = bytes.get(cursor..end)?;
+        cursor = end;
+        chunk.iter().try_fold(0usize, |value, byte| {
+            value.checked_mul(256)?.checked_add(usize::from(*byte))
+        })
+    };
+    let Some(cells) = read_uint(size_bytes) else {
+        return false;
+    };
+    let Some(roots) = read_uint(size_bytes) else {
+        return false;
+    };
+    let Some(_absent) = read_uint(size_bytes) else {
+        return false;
+    };
+    let Some(total_size) = read_uint(offset_bytes) else {
+        return false;
+    };
+    let Some(root_bytes) = roots.checked_mul(size_bytes) else {
+        return false;
+    };
+    let Some(data_start) = cursor.checked_add(root_bytes) else {
+        return false;
+    };
+    let Some(data_end) = data_start.checked_add(total_size) else {
+        return false;
+    };
+    total_size >= cells.saturating_mul(2) && data_end <= bytes.len()
 }
 
 /// `provider.v2.getView(address, 'committableView', args)`: the returned stack's
@@ -361,5 +410,18 @@ where
     match trimmed.strip_prefix("0x") {
         Some(hex_value) => u64::from_str_radix(hex_value, 16).map_err(|_| RpcError::Unavailable),
         None => trimmed.parse::<u64>().map_err(|_| RpcError::Unavailable),
+    }
+}
+
+#[cfg(test)]
+mod boc_header_tests {
+    use super::*;
+
+    #[test]
+    fn rejects_fourteen_byte_boc_with_impossible_declared_cell_count() {
+        use base64::Engine;
+        let bytes = [0xb5, 0xee, 0x9c, 0x72, 1, 1, 255, 1, 0, 1, 0, 0, 0, 0];
+        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+        assert!(!ton_boc_cell_count_fits(&encoded));
     }
 }

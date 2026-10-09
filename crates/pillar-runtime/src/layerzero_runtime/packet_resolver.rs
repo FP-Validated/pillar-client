@@ -383,7 +383,7 @@ where
             chain_name,
             json!({
                 "method": sui_rpc_method(chain_name, "queryEvents"),
-                "params": [{"Transaction": src_tx_hash}, null, null, true],
+                "params": [{"Transaction": src_tx_hash}, null, null, false],
                 "id": 1,
                 "jsonrpc": "2.0",
             }),
@@ -489,10 +489,10 @@ where
             let snapshot = self.providers.load();
             let provider_config = snapshot.provider_config(chain_name)?;
             let quorum = required_provider_quorum(provider_config, chain_name)?;
-            let receipt_expected_tx_hash = (body.get("method").and_then(Value::as_str)
-                == Some("eth_getTransactionReceipt"))
-            .then(|| body.pointer("/params/0").and_then(Value::as_str))
-            .flatten();
+            let method = body.get("method").and_then(Value::as_str);
+            let receipt_expected_tx_hash = (method == Some("eth_getTransactionReceipt"))
+                .then(|| body.pointer("/params/0").and_then(Value::as_str)).flatten();
+            let stellar_transaction = chain_name == "stellar" && method == Some("getTransaction");
             let mut requests = FuturesUnordered::new();
             for (index, uri) in provider_config.uris.iter().enumerate() {
                 let transport = self.transport.clone();
@@ -527,6 +527,16 @@ where
                                             .map_err(|error| RpcError::Remote(error.to_string()))?;
                                         Ok((fingerprint, value))
                                     })
+                            } else if stellar_transaction {
+                                let fields = json!({
+                                    "status": result.get("status"),
+                                    "ledger": result.get("ledger"),
+                                    "envelopeXdr": result.get("envelopeXdr"),
+                                    "contractEventsXdr": result.pointer("/events/contractEventsXdr"),
+                                });
+                                serde_json::to_string(&fields)
+                                    .map(|fingerprint| (fingerprint, result))
+                                    .map_err(|error| RpcError::Remote(error.to_string()))
                             } else {
                                 serde_json::to_string(&result)
                                     .map(|fingerprint| (fingerprint, result))
@@ -1744,7 +1754,9 @@ where
                     .map(|evidence| evidence.block_number)
             })
             .ok_or_else(|| AppCoreError::Internal("Invalid receipt block number".to_string()))?;
-        let mut from_block = center - half;
+        let mut from_block = center.checked_sub(half).ok_or_else(|| {
+            AppCoreError::Internal("ULNv2 refresh lower block bound overflow".to_string())
+        })?;
         if from_block < 0 {
             // ethers resolves a negative block tag against the latest block.
             let latest = self
@@ -1757,7 +1769,12 @@ where
             let latest = numeric_response(&latest)
                 .and_then(|number| number.parse::<i64>().ok())
                 .ok_or_else(|| AppCoreError::Internal("Invalid block number".to_string()))?;
-            from_block = (latest + from_block).max(0);
+            from_block = latest
+                .checked_add(from_block)
+                .ok_or_else(|| {
+                    AppCoreError::Internal("ULNv2 refresh lower block bound overflow".to_string())
+                })?
+                .max(0);
         }
         let logs = self
             .get_quorum_rpc_result(
@@ -1766,7 +1783,7 @@ where
                     "eth_getLogs",
                     json!([{
                         "fromBlock": format!("0x{from_block:x}"),
-                        "toBlock": format!("0x{:x}", center + half),
+                        "toBlock": format!("0x{:x}", center.checked_add(half).ok_or_else(|| AppCoreError::Internal("ULNv2 refresh upper block bound overflow".to_string()))?),
                         "address": uln,
                         "topics": [pillar_layerzero::ULN_V2_PACKET_TOPIC],
                     }]),

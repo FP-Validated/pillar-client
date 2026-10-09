@@ -1,14 +1,14 @@
 use serde_json::{json, Value};
 
-pub(super) fn request(body: &Value) -> Option<(String, Value)> {
+pub(super) fn request(body: &Value, after: Option<&str>) -> Option<(String, Value)> {
     let method = body.get("method")?.as_str()?;
     let params = body.get("params").and_then(Value::as_array)?;
     let request = match method {
         "suix_queryEvents" => {
             let digest = params.first()?.get("Transaction")?.as_str()?;
             (
-                "query($digest: String!) { transaction(digest: $digest) { effects { events(last: 50) { nodes { contents { type { repr } json } } pageInfo { hasNextPage } } } } }".to_string(),
-                json!({"digest": digest}),
+                "query($digest: String!, $after: String) { transaction(digest: $digest) { digest effects { events(first: 50, after: $after) { nodes { contents { type { repr } json } } pageInfo { hasNextPage endCursor } } } } }".to_string(),
+                json!({"digest": digest, "after": after}),
                 method,
             )
         }
@@ -103,9 +103,7 @@ pub(super) fn response(method: &str, graphql: Value) -> Value {
             else {
                 return error_response("Sui GraphQL event page has no pagination state");
             };
-            if has_next_page {
-                return error_response("Sui GraphQL event page is truncated");
-            }
+            let _ = has_next_page;
             let Some(mapped) = events
                 .iter()
                 .map(|event| {
@@ -361,17 +359,23 @@ mod tests {
     }
 
     #[test]
-    fn event_query_is_paginated_and_transaction_mapping_keeps_bcs() {
-        let (_, query) =
-            request(&json!({"method":"suix_queryEvents","params":[{"Transaction":"tx"}]})).unwrap();
+    fn event_query_requests_ascending_cursor_pages_and_transaction_mapping_keeps_bcs() {
+        let (_, query) = request(
+            &json!({"method":"suix_queryEvents","params":[{"Transaction":"tx"}]}),
+            None,
+        )
+        .unwrap();
         assert!(query["query"]
             .as_str()
             .unwrap()
-            .contains("events(last: 50)"));
-        assert!(query["query"]
-            .as_str()
-            .unwrap()
-            .contains("pageInfo { hasNextPage }"));
+            .contains("events(first: 50, after: $after)"));
+        assert_eq!(query["variables"]["after"], Value::Null);
+        let (_, next) = request(
+            &json!({"method":"suix_queryEvents","params":[{"Transaction":"tx"}]}),
+            Some("cursor-1"),
+        )
+        .unwrap();
+        assert_eq!(next["variables"]["after"], "cursor-1");
         let mapped = response(
             "sui_getTransactionBlock",
             json!({"data":{"transaction":{"digest":"d","transactionBcs":"AQI=","sender":{"address":"0xs"},"effects":{"checkpoint":{"sequenceNumber":12},"status":"SUCCESS"}}}}),
@@ -381,11 +385,15 @@ mod tests {
             "AQI="
         );
         assert_eq!(mapped["result"]["checkpoint"], 12);
-        assert!(request(&json!({"method":"sui_devInspectTransactionBlock","params":[]})).is_none());
+        assert!(request(
+            &json!({"method":"sui_devInspectTransactionBlock","params":[]}),
+            None
+        )
+        .is_none());
     }
 
     #[test]
-    fn required_graphql_data_and_full_event_page_fail_closed() {
+    fn required_graphql_data_and_complete_event_mapping() {
         for (method, raw) in [
             (
                 "sui_getLatestCheckpointSequenceNumber",
@@ -408,8 +416,11 @@ mod tests {
             assert!(mapped.get("error").is_some());
             assert!(mapped.get("result").is_none());
         }
-        let page = json!({"data":{"transaction":{"effects":{"events":{"nodes":[],"pageInfo":{"hasNextPage":true}}}}}});
-        assert!(response("suix_queryEvents", page).get("error").is_some());
+        let page = json!({"data":{"transaction":{"effects":{"events":{"nodes":[],"pageInfo":{"hasNextPage":false}}}}}});
+        assert_eq!(
+            response("suix_queryEvents", page)["result"]["data"],
+            json!([])
+        );
     }
 
     #[test]
