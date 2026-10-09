@@ -504,10 +504,9 @@ where
         // A provider's malformed version is a provider failure, not a meaningful
         // not-yet-confirmed observation; do not build a block URL from it.
         let Some(url) = move_block_by_version_url(&base, &version) else {
-            return Ok(BlockConfirmationObservation {
-                validity: BlockConfirmationValidity::Missing,
-                current_confirmations: None,
-            });
+            return Err(RpcError::Remote(
+                "Move provider transaction response has malformed version".to_string(),
+            ));
         };
         let block = super::validation_readiness::readiness_response(
             transport.get_json_scoped(url, headers.clone()).await,
@@ -1025,15 +1024,12 @@ mod tests {
                 "0xtx",
                 8,
             )
-            .await
-            .unwrap();
+            .await;
 
             assert!(
-                matches!(observation.validity, BlockConfirmationValidity::Missing),
-                "{hostile:?} must fail closed, got {:?}",
-                observation.validity
+                matches!(observation, Err(RpcError::Remote(_))),
+                "{hostile:?} must be a provider failure, got {observation:?}"
             );
-            assert_eq!(observation.current_confirmations, None);
             let calls = calls.lock().unwrap();
             assert_eq!(
                 calls.len(),
@@ -1046,6 +1042,47 @@ mod tests {
                 "https://aptos.example/transactions/by_hash/0xtx"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn malformed_aptos_provider_version_does_not_vote_missing_in_quorum() {
+        use pillar_config::ProviderConfigGetter;
+        let configs = pillar_config::test_support::provider_configs_from_uris_json(
+            r#"{"aptos":{"uris":["https://aptos-a.example","https://aptos-b.example"],"quorum":2}}"#,
+        );
+        let config = pillar_config::StaticProviderConfig::new(configs, None).unwrap();
+        let provider_config = config.get_provider_config("aptos").unwrap();
+        let quorum = required_provider_quorum(provider_config, "aptos").unwrap();
+        let requests = FuturesUnordered::new();
+        for (index, response) in [
+            json!({"version": ".."}),
+            json!({"type": "pending_transaction"}),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let (transport, _) = transport(vec![Ok(response)]);
+            requests.push(async move {
+                let result = observe_move_block_confirmations(
+                    transport,
+                    "aptos",
+                    format!("https://aptos-{index}.example"),
+                    HashMap::new(),
+                    "0xtx",
+                    8,
+                )
+                .await
+                .map(|observation| Some((format!("{:?}", observation.validity), observation)));
+                (index, result)
+            });
+        }
+        let result =
+            resolve_provider_quorum(requests, 2, quorum, "Aptos transaction block confirmation")
+                .await;
+        assert!(
+            result.is_err(),
+            "one provider failure plus one genuine Missing vote must not satisfy quorum"
+        );
     }
 
     #[tokio::test]
