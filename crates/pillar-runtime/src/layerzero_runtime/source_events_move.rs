@@ -485,6 +485,11 @@ where
                     .ok()
             })
     } else {
+        if ledger_version.is_none() && transaction.get("version").is_none() {
+            return Err(RpcError::Remote(
+                "Move transaction response is missing version".to_string(),
+            ));
+        }
         let version = ledger_version.clone().unwrap_or_else(|| {
             transaction
                 .get("version")
@@ -499,9 +504,10 @@ where
         // A provider's malformed version is a provider failure, not a meaningful
         // not-yet-confirmed observation; do not build a block URL from it.
         let Some(url) = move_block_by_version_url(&base, &version) else {
-            return Err(RpcError::Remote(
-                "Move transaction response is missing a usable version".to_string(),
-            ));
+            return Ok(BlockConfirmationObservation {
+                validity: BlockConfirmationValidity::Missing,
+                current_confirmations: None,
+            });
         };
         let block = super::validation_readiness::readiness_response(
             transport.get_json_scoped(url, headers.clone()).await,

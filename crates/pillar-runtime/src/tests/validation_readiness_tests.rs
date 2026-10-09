@@ -1260,6 +1260,7 @@ impl JsonRpcTransport for SolanaReadinessByUrlTransport {
             return Err("HTTP 500".to_string());
         }
         match body["method"].as_str() {
+            Some("getTransaction") if url.contains("-null.example") => Ok(json!({"result": null})),
             Some("getTransaction") => Ok(json!({"result": {"slot": 1000}})),
             Some("getSlot") => Ok(json!({"result": 1200})),
             method => Err(format!("unexpected Solana method {method:?}")),
@@ -1305,4 +1306,39 @@ async fn solana_readiness_two_of_four_transport_failures_are_non_votes() {
         )
         .await
         .expect("two confirmed providers satisfy the absolute 2-of-4 strategy");
+}
+
+#[tokio::test]
+async fn solana_finalized_null_transaction_remains_a_missing_vote() {
+    let uris = ["a-null", "b-null"]
+        .into_iter()
+        .map(|name| ProviderUri::Uri(format!("https://solana-{name}.example")))
+        .collect();
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "solana".to_string(),
+            ProviderConfig::with_distinct_entities(uris, 2),
+        )]),
+        Some(&["solana".to_string()]),
+    )
+    .unwrap();
+    let checks = RuntimeRpcValidationChecks::from_getter(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        SolanaReadinessByUrlTransport,
+    );
+    let error = checks
+        .validate_readiness(
+            &solana_readiness_sent_event(),
+            &SigningContext::Message {
+                expiration: 1,
+                skip_v_id: None,
+                dvn_address: None,
+                block_confirmation: 128,
+            },
+        )
+        .await
+        .expect_err("two finalized null responses are missing votes, not successful confirmations");
+    assert!(error
+        .to_string()
+        .contains("Transaction receipt or block not found for"));
 }
