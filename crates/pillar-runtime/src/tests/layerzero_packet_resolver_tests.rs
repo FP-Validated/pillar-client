@@ -711,13 +711,16 @@ async fn evm_packet_sent_resolver_uses_uln301_log_address_as_send_library() {
 
 #[tokio::test]
 async fn packet_sent_resolver_decodes_solana_program_return_packet() {
+    let mut options = vec![0, 3, 1, 0, 21, 5];
+    options.extend_from_slice(&[0; 16]);
+    options.extend_from_slice(&[0, 0, 0, 8]);
     let calls = Arc::new(Mutex::new(Vec::new()));
     let transport = RecordingTransport {
         calls: calls.clone(),
         responses: Arc::new(Mutex::new(vec![Ok(json!({
             "jsonrpc": "2.0",
             "id": 1,
-            "result": solana_packet_sent_transaction_data(),
+            "result": solana_packet_sent_transaction_data_with_options(&options),
         }))])),
     };
     let getter = StaticProviderConfig::new(
@@ -752,7 +755,7 @@ async fn packet_sent_resolver_decodes_solana_program_return_packet() {
         "hyperliquid"
     );
     assert_eq!(sent_event.lz_message_id.nonce, 286);
-    assert!(sent_event.extra["options"].is_object());
+    assert_eq!(sent_event.extra["options"], json!({"ordered": false}));
     assert_eq!(
         sent_event.extra["guid"],
         "0xef08c522ae69e298671d4cb1f58084a21e5be098ed9a5170afa468e26a53a9fc"
@@ -778,7 +781,7 @@ async fn packet_sent_resolver_decodes_solana_program_return_packet() {
     );
 }
 #[tokio::test]
-async fn packet_sent_resolver_skips_solana_packet_with_undecodable_options() {
+async fn packet_sent_resolver_errors_on_solana_packet_with_undecodable_options() {
     let transport = RecordingTransport {
         calls: Arc::new(Mutex::new(Vec::new())),
         responses: Arc::new(Mutex::new(vec![Ok(json!({
@@ -808,7 +811,7 @@ async fn packet_sent_resolver_skips_solana_packet_with_undecodable_options() {
         .await
         .unwrap_err();
     assert!(
-        matches!(error, AppCoreError::Internal(message) if message.contains("Could not find sentEvent"))
+        matches!(error, AppCoreError::Internal(message) if message.contains("Solana options decode error"))
     );
 }
 

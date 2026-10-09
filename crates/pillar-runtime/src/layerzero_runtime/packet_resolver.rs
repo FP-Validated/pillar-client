@@ -667,13 +667,11 @@ where
         pathway_extra.insert("receiver".to_string(), Value::from(packet.receiver));
         let mut extra = IndexMap::new();
         extra.insert("guid".to_string(), Value::from(packet.guid));
-        let options = match super::relayer_options::decode_evm_relayer_options(
-            &event.options,
-            &dst_chain_name,
-        ) {
-            Ok(options) => options,
-            Err(_) => return Ok(SourceEventConversion::NotOurs),
-        };
+        let options =
+            super::relayer_options::decode_move_relayer_options(&event.options, &dst_chain_name)
+                .map_err(|error| {
+                    AppCoreError::Internal(format!("Solana options decode error: {error}"))
+                })?;
         extra.insert("options".to_string(), options);
         extra.insert("sendLibrary".to_string(), Value::from(event.send_library));
         extra.insert(

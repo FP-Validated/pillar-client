@@ -269,3 +269,21 @@ fn decode_relayer_options(
     }
     Ok(Value::Object(out))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn solana_options_ignore_read_option_like_upstream() {
+        let mut bytes = vec![0, 3, 1, 0, 21, 5];
+        bytes.extend_from_slice(&[0; 16]);
+        bytes.extend_from_slice(&[0, 0, 0, 8]);
+        let decoded = decode_move_relayer_options(&bytes, "ethereum").unwrap();
+        assert_eq!(decoded, json!({"ordered": false}));
+        assert!(
+            decode_evm_relayer_options(&bytes, "ethereum").unwrap()["lzReceive"]["dataSize"]
+                .is_string()
+        );
+    }
+}
