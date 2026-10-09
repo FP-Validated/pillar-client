@@ -142,15 +142,146 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         body: Value,
     ) -> Result<Value, RpcError> {
         let target = rpc_target_for_call()?;
+        if target.as_ref() == "iota"
+            && body.get("method").and_then(Value::as_str) == Some("iotax_queryEvents")
+        {
+            let mut page_body = body.clone();
+            let mut cursor = Value::Null;
+            let mut events = Vec::new();
+            for page in 0..21 {
+                page_body["params"][1] = cursor.clone();
+                page_body["params"][2] = Value::from(50);
+                page_body["params"][3] = Value::Bool(false);
+                let response = limited_rpc(
+                    &target,
+                    self.post_json(url.clone(), headers.clone(), page_body.clone()),
+                )
+                .await?;
+                let Some(items) = response.pointer("/result/data").and_then(Value::as_array) else {
+                    return Ok(response);
+                };
+                events.extend(items.iter().cloned());
+                if events.len() > 1024 {
+                    return Err(RpcError::Remote(
+                        "IOTA transaction exceeds 1024 events".into(),
+                    ));
+                }
+                let Some(has_next) = response
+                    .pointer("/result/hasNextPage")
+                    .and_then(Value::as_bool)
+                else {
+                    return Err(RpcError::Unavailable);
+                };
+                if !has_next {
+                    let mut complete = response;
+                    complete["result"]["data"] = Value::Array(events);
+                    complete["result"]["hasNextPage"] = Value::Bool(false);
+                    return Ok(complete);
+                }
+                if page == 20 {
+                    return Err(RpcError::Remote(
+                        "IOTA transaction exceeds 1024 events".into(),
+                    ));
+                }
+                cursor = response
+                    .pointer("/result/nextCursor")
+                    .cloned()
+                    .filter(|value| !value.is_null())
+                    .ok_or(RpcError::Unavailable)?;
+            }
+            unreachable!();
+        }
         if target.as_ref() == "sui" {
             if body.get("query").and_then(Value::as_str).is_some()
                 && body.get("variables").is_some_and(Value::is_object)
             {
                 return limited_rpc(&target, self.post_json(url, headers, body)).await;
             }
-            let (method, query) =
-                super::sui_graphql::request(&body).ok_or(RpcError::Unavailable)?;
+            let (method, mut query) =
+                super::sui_graphql::request(&body, None).ok_or(RpcError::Unavailable)?;
+            let expected_digest = body
+                .pointer("/params/0/Transaction")
+                .or_else(|| body.pointer("/params/0"))
+                .and_then(Value::as_str);
+            if method == "suix_queryEvents" {
+                let mut nodes = Vec::new();
+                let mut after: Option<String> = None;
+                for page in 0..21 {
+                    let (_, page_query) = super::sui_graphql::request(&body, after.as_deref())
+                        .ok_or(RpcError::Unavailable)?;
+                    query = page_query;
+                    let response = limited_rpc(
+                        &target,
+                        self.post_json(url.clone(), headers.clone(), query.clone()),
+                    )
+                    .await?;
+                    if let Some(expected) = expected_digest {
+                        if response
+                            .pointer("/data/transaction/digest")
+                            .and_then(Value::as_str)
+                            != Some(expected)
+                        {
+                            return Ok(super::sui_graphql::response(
+                                &method,
+                                json!({"errors":[{"message":"Sui GraphQL transaction digest mismatch"}]}),
+                            ));
+                        }
+                    }
+                    let Some(page_nodes) = response
+                        .pointer("/data/transaction/effects/events/nodes")
+                        .and_then(Value::as_array)
+                    else {
+                        return Ok(super::sui_graphql::response(&method, response));
+                    };
+                    nodes.extend(page_nodes.iter().cloned());
+                    if nodes.len() > 1024 {
+                        return Ok(super::sui_graphql::response(
+                            &method,
+                            json!({"errors":[{"message":"Sui transaction exceeds 1024 events"}]}),
+                        ));
+                    }
+                    let page_info = response.pointer("/data/transaction/effects/events/pageInfo");
+                    let has_next = page_info
+                        .and_then(|info| info.get("hasNextPage"))
+                        .and_then(Value::as_bool)
+                        .ok_or(RpcError::Unavailable)?;
+                    if !has_next {
+                        let mut complete = response;
+                        complete["data"]["transaction"]["effects"]["events"]["nodes"] =
+                            Value::Array(nodes);
+                        complete["data"]["transaction"]["effects"]["events"]["pageInfo"]
+                            ["hasNextPage"] = Value::Bool(false);
+                        return Ok(super::sui_graphql::response(&method, complete));
+                    }
+                    if page == 20 {
+                        return Ok(super::sui_graphql::response(
+                            &method,
+                            json!({"errors":[{"message":"Sui transaction exceeds 1024 events"}]}),
+                        ));
+                    }
+                    after = page_info
+                        .and_then(|info| info.get("endCursor"))
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                    if after.is_none() {
+                        return Err(RpcError::Unavailable);
+                    }
+                }
+                unreachable!();
+            }
             let response = limited_rpc(&target, self.post_json(url, headers, query)).await?;
+            if let Some(expected) = expected_digest {
+                if response
+                    .pointer("/data/transaction/digest")
+                    .and_then(Value::as_str)
+                    != Some(expected)
+                {
+                    return Ok(super::sui_graphql::response(
+                        &method,
+                        json!({"errors":[{"message":"Sui GraphQL transaction digest mismatch"}]}),
+                    ));
+                }
+            }
             return Ok(super::sui_graphql::response(&method, response));
         }
         limited_rpc(&target, self.post_json(url, headers, body)).await

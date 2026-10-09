@@ -18,18 +18,27 @@ const UNKNOWN_DESTINATION_EID_DIVERGENCES: &[&str] = &["unknown destination eid"
 #[derive(Clone)]
 struct ScriptedStellar {
     transaction: Value,
+    vary_ledgers: bool,
 }
 
 #[async_trait]
 impl JsonRpcTransport for ScriptedStellar {
     async fn post_json(
         &self,
-        _: String,
+        url: String,
         _: HashMap<String, String>,
         body: Value,
     ) -> Result<Value, String> {
         assert_eq!(body["method"], "getTransaction");
-        Ok(json!({"jsonrpc": "2.0", "id": 1, "result": self.transaction}))
+        let mut transaction = self.transaction.clone();
+        if self.vary_ledgers {
+            let offset = if url.contains("stellar-a") { 0 } else { 1 };
+            transaction["latestLedger"] = json!(100 + offset);
+            transaction["oldestLedger"] = json!(10 + offset);
+            transaction["latestLedgerCloseTime"] = json!(format!("2026-10-09T00:00:0{offset}Z"));
+            transaction["oldestLedgerCloseTime"] = json!(format!("2026-10-08T23:59:0{offset}Z"));
+        }
+        Ok(json!({"jsonrpc": "2.0", "id": 1, "result": transaction}))
     }
 
     async fn get_json(&self, url: String, _: HashMap<String, String>) -> Result<Value, String> {
@@ -58,6 +67,7 @@ fn scripted_resolver(
         &ProviderSnapshotHandle::from_getter(&providers),
         ScriptedStellar {
             transaction: transaction.clone(),
+            vary_ledgers: false,
         },
         config.packet_sent_resolver_config,
     )
@@ -68,6 +78,47 @@ fn is_identity_mismatch(result: &Result<LzSentEvent, AppCoreError>) -> bool {
         result,
         Err(AppCoreError::BadRequest(text)) if text.contains(pillar_core::PACKET_IDENTITY_MISMATCH_ERROR_SUFFIX)
     )
+}
+
+#[tokio::test]
+async fn stellar_transaction_quorum_ignores_latest_and_oldest_ledger_window() {
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let matching = fixture["scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|scenario| scenario["name"] == "match")
+        .unwrap();
+    let names = ["stellar".to_string(), "ethereum".to_string()];
+    let config =
+        runtime_evm_layerzero_config(fixture["environment"].as_str().unwrap(), &names).unwrap();
+    let providers = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "stellar".to_string(),
+            ProviderConfig::with_distinct_entities(
+                vec![
+                    ProviderUri::Uri("https://stellar-a.example/".to_string()),
+                    ProviderUri::Uri("https://stellar-b.example/".to_string()),
+                ],
+                2,
+            ),
+        )]),
+        Some(&["stellar".to_string()]),
+    )
+    .unwrap();
+    let resolver = EvmPacketSentResolver::new(
+        &ProviderSnapshotHandle::from_getter(&providers),
+        ScriptedStellar {
+            transaction: matching["transaction"].clone(),
+            vary_ledgers: true,
+        },
+        config.packet_sent_resolver_config,
+    );
+    let request: LzMessageId = serde_json::from_value(matching["request"].clone()).unwrap();
+    assert!(resolver
+        .get_lz_sent_event(fixture["txHash"].as_str().unwrap(), &request)
+        .await
+        .is_ok());
 }
 
 #[tokio::test]

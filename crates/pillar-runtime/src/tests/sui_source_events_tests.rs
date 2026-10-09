@@ -48,7 +48,12 @@ impl JsonRpcTransport for ScriptedSui {
                 body["method"].as_str().unwrap().starts_with("iota"),
                 "{body}"
             );
-            return Ok(json!({"jsonrpc":"2.0","id":1,"result":self.events}));
+            let all = self.events["data"].as_array().unwrap();
+            assert_eq!(body["params"][3], false, "IOTA events must be ascending");
+            let start = if body["params"][1].is_null() { 0 } else { 50 };
+            let end = (start + 50).min(all.len());
+            let page = json!({"data":all[start..end],"hasNextPage":end < all.len(),"nextCursor":if end < all.len() {Value::from("page-1")} else {Value::Null}});
+            return Ok(json!({"jsonrpc":"2.0","id":1,"result":page}));
         }
         assert!(
             body["query"]
@@ -57,9 +62,14 @@ impl JsonRpcTransport for ScriptedSui {
                 .contains("transaction(digest: $digest)"),
             "{body}"
         );
-        let nodes = self.events["data"].as_array().unwrap().iter().map(|event| json!({"contents":{"type":{"repr":event["type"]},"json":event["parsedJson"]}})).collect::<Vec<_>>();
+        let all = self.events["data"].as_array().unwrap();
+        let after = body["variables"]["after"].as_str();
+        let start = if after.is_some() { 50 } else { 0 };
+        let end = (start + 50).min(all.len());
+        let nodes = all[start..end].iter().map(|event| json!({"contents":{"type":{"repr":event["type"]},"json":event["parsedJson"]}})).collect::<Vec<_>>();
+        let has_next = end < all.len();
         Ok(
-            json!({"data":{"transaction":{"effects":{"events":{"nodes":nodes,"pageInfo":{"hasNextPage":false}}}}}}),
+            json!({"data":{"transaction":{"digest":body["variables"]["digest"],"effects":{"events":{"nodes":nodes,"pageInfo":{"hasNextPage":has_next,"endCursor":if has_next {"page-1"} else {"page-2"}}}}}}}),
         )
     }
 
@@ -173,6 +183,85 @@ async fn sui_source_events_match_gasolina() {
     assert_eq!(dst_name_refused, 11);
 }
 
+/// The resolver must retain the first event across ascending pages and reject a transaction
+/// whose event list exceeds the protocol bound.
+#[tokio::test]
+async fn sui_source_resolution_includes_leading_packet_and_rejects_overbound_transactions() {
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let scenario = fixture["scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|scenario| scenario["chain"] == "sui" && scenario["name"] == "V302 match")
+        .unwrap();
+    let mut source = scenario["response"].clone();
+    let mut events = source["data"].as_array().unwrap().clone();
+    let packet_event = events
+        .iter()
+        .find(|event| {
+            event["type"]
+                .as_str()
+                .is_some_and(|kind| kind.ends_with("PacketSentEvent"))
+        })
+        .unwrap()
+        .clone();
+    let noise = json!({"type":"0x2::noise::Noise","parsedJson":{}});
+    events.resize(51, noise.clone());
+    events[0] = packet_event.clone();
+    source["data"] = Value::Array(events);
+    let request: LzMessageId = serde_json::from_value(scenario["request"].clone()).unwrap();
+    let resolver = scripted_resolver(fixture["environment"].as_str().unwrap(), "sui", &source);
+    resolver
+        .get_lz_sent_event(fixture["digest"].as_str().unwrap(), &request)
+        .await
+        .unwrap();
+
+    let mut oversized = source;
+    let mut events = oversized["data"].as_array().unwrap().clone();
+    events.resize(1025, noise);
+    events[0] = packet_event;
+    oversized["data"] = Value::Array(events);
+    let resolver = scripted_resolver(fixture["environment"].as_str().unwrap(), "sui", &oversized);
+    let error = resolver
+        .get_lz_sent_event(fixture["digest"].as_str().unwrap(), &request)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, AppCoreError::Internal(ref message) if message.starts_with("No Sui transaction events quorum")),
+        "{error:?}"
+    );
+}
+
+#[tokio::test]
+async fn iota_source_resolution_follows_ascending_event_cursors() {
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let scenario = fixture["scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|scenario| scenario["chain"] == "iotal1" && scenario["name"] == "V302 match")
+        .unwrap();
+    let mut source = scenario["response"].clone();
+    let mut events = source["data"].as_array().unwrap().clone();
+    let packet = events
+        .iter()
+        .find(|event| {
+            event["type"]
+                .as_str()
+                .is_some_and(|kind| kind.ends_with("PacketSentEvent"))
+        })
+        .unwrap()
+        .clone();
+    events.resize(51, json!({"type":"0x2::noise::Noise","parsedJson":{}}));
+    events[0] = packet;
+    source["data"] = Value::Array(events);
+    let request: LzMessageId = serde_json::from_value(scenario["request"].clone()).unwrap();
+    let resolver = scripted_resolver(fixture["environment"].as_str().unwrap(), "iotal1", &source);
+    resolver
+        .get_lz_sent_event(fixture["digest"].as_str().unwrap(), &request)
+        .await
+        .unwrap();
+}
 /// Two URLs of one entity agreeing on the events are one vote, as on every quorum read.
 #[tokio::test]
 async fn sui_events_from_two_urls_of_one_entity_do_not_meet_a_two_entity_quorum() {

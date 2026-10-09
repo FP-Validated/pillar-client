@@ -395,45 +395,74 @@ impl<'a> XdrReader<'a> {
         Some(bytes)
     }
     fn sc_val(&mut self) -> Option<ScVal> {
+        self.sc_val_depth(0)
+    }
+    fn sc_val_depth(&mut self, depth: usize) -> Option<ScVal> {
+        if depth > 8 {
+            return None;
+        }
         match self.u32()? {
-            0 | 1 | 2 | 4 | 6 | 7 | 8 | 10 | 11 | 12 | 14 | 19 | 20 | 21 => Some(ScVal::Other),
-            3 => {
+            0 => {
                 self.u32()?;
                 Some(ScVal::Other)
             }
-            5 | 9 => {
+            1 => Some(ScVal::Other),
+            2 => {
+                self.u32()?;
+                self.u32()?;
+                Some(ScVal::Other)
+            }
+            3 | 4 => {
+                self.u32()?;
+                Some(ScVal::Other)
+            }
+            5..=8 => {
                 self.u64()?;
                 Some(ScVal::Other)
             }
+            9 | 10 => {
+                self.take(16)?;
+                Some(ScVal::Other)
+            }
+            11 | 12 => {
+                self.take(32)?;
+                Some(ScVal::Other)
+            }
             13 => Some(ScVal::Bytes(self.opaque()?)),
+            14 => {
+                self.opaque()?;
+                Some(ScVal::Other)
+            }
             15 => Some(ScVal::Symbol(String::from_utf8(self.opaque()?).ok()?)),
-            // `SCV_VEC` and `SCV_MAP` hold optional pointers: a presence flag, then the items.
-            16 => {
-                if self.u32()? == 1 {
+            16 => match self.u32()? {
+                0 => Some(ScVal::Vec),
+                1 => {
                     let count = self.u32()? as usize;
-                    for _ in 0..count {
-                        self.sc_val()?;
+                    if count > self.remaining() / 4 {
+                        return None;
                     }
+                    for _ in 0..count {
+                        self.sc_val_depth(depth + 1)?;
+                    }
+                    Some(ScVal::Vec)
                 }
-                Some(ScVal::Vec)
-            }
-            17 => {
-                if self.u32()? != 1 {
-                    return Some(ScVal::Other);
+                _ => None,
+            },
+            17 => match self.u32()? {
+                0 => Some(ScVal::Other),
+                1 => {
+                    let count = self.u32()? as usize;
+                    if count > self.remaining() / 8 {
+                        return None;
+                    }
+                    let mut values = Vec::with_capacity(count);
+                    for _ in 0..count {
+                        values.push((self.sc_val_depth(depth + 1)?, self.sc_val_depth(depth + 1)?));
+                    }
+                    Some(ScVal::Map(values))
                 }
-                let count = self.u32()? as usize;
-                // Each pair is two `sc_val`s of at least 4 bytes each, so the
-                // remaining input bounds the count. See the topic-count guard.
-                if count > self.remaining() / 8 {
-                    return None;
-                }
-                let mut values = Vec::with_capacity(count);
-                for _ in 0..count {
-                    values.push((self.sc_val()?, self.sc_val()?));
-                }
-                Some(ScVal::Map(values))
-            }
-            // An account address is a `PublicKey` union (ed25519 only), a contract one a hash.
+                _ => None,
+            },
             18 => match self.u32()? {
                 0 => {
                     if self.u32()? != 0 {
@@ -450,6 +479,39 @@ impl<'a> XdrReader<'a> {
                 }),
                 _ => None,
             },
+            19 => {
+                self.u32()?;
+                match self.u32()? {
+                    0 => {
+                        self.take(32)?;
+                    }
+                    1 => {}
+                    _ => return None,
+                }
+                match self.u32()? {
+                    0 => {}
+                    1 => {
+                        let count = self.u32()? as usize;
+                        if count > self.remaining() / 8 {
+                            return None;
+                        }
+                        for _ in 0..count {
+                            self.sc_val_depth(depth + 1)?;
+                            self.sc_val_depth(depth + 1)?;
+                        }
+                    }
+                    _ => return None,
+                }
+                Some(ScVal::Other)
+            }
+            20 => {
+                self.take(32)?;
+                Some(ScVal::Other)
+            }
+            21 => {
+                self.u64()?;
+                Some(ScVal::Other)
+            }
             _ => None,
         }
     }
@@ -476,5 +538,58 @@ mod tests {
             stellar_transaction_source_from_envelope_xdr(&encoded).unwrap(),
             "MA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVAAAAAAAAAAAAAJLK"
         );
+    }
+
+    #[test]
+    fn consumes_xdr_payloads_for_skipped_scval_variants_and_limits_recursion() {
+        let mut cases = Vec::new();
+        for (tag, bytes) in [
+            (0, 4),
+            (1, 0),
+            (2, 8),
+            (3, 4),
+            (4, 4),
+            (5, 8),
+            (6, 8),
+            (7, 8),
+            (8, 8),
+            (9, 16),
+            (10, 16),
+            (11, 32),
+            (12, 32),
+            (20, 32),
+            (21, 8),
+        ] {
+            let mut encoded = tag_u32(tag);
+            encoded.resize(4 + bytes, 0);
+            cases.push(encoded);
+        }
+        let mut string = tag_u32(14);
+        string.extend_from_slice(&4_u32.to_be_bytes());
+        string.extend_from_slice(b"skip");
+        cases.push(string);
+        let mut contract = tag_u32(19);
+        contract.extend_from_slice(&0_u32.to_be_bytes());
+        contract.extend_from_slice(&1_u32.to_be_bytes());
+        contract.extend_from_slice(&0_u32.to_be_bytes());
+        cases.push(contract);
+        for encoded in cases {
+            let mut reader = XdrReader::new(&encoded);
+            assert!(reader.sc_val().is_some());
+            assert_eq!(reader.remaining(), 0);
+        }
+
+        let mut nested = Vec::new();
+        for _ in 0..10 {
+            nested.extend_from_slice(&16_u32.to_be_bytes());
+            nested.extend_from_slice(&1_u32.to_be_bytes());
+            nested.extend_from_slice(&1_u32.to_be_bytes());
+        }
+        nested.extend_from_slice(&1_u32.to_be_bytes());
+        assert!(XdrReader::new(&nested).sc_val().is_none());
+    }
+
+    fn tag_u32(tag: u32) -> Vec<u8> {
+        tag.to_be_bytes().to_vec()
     }
 }
