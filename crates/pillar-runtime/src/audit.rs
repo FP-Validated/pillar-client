@@ -27,9 +27,6 @@ CREATE TABLE IF NOT EXISTS pillar_audit_intent (
  wallet_hash text NOT NULL, backend text NOT NULL, key_reference_hash text NOT NULL,
  key_version_hash text NOT NULL, key_reference text NOT NULL, key_version text NOT NULL, public_key_hash text NOT NULL, signed_digest text NOT NULL,
  algorithm text NOT NULL, PRIMARY KEY(namespace,request_hash,wallet_hash,backend,key_reference_hash,key_version_hash));
-CREATE TABLE IF NOT EXISTS pillar_audit_packet (
- namespace text NOT NULL REFERENCES pillar_audit_namespace(namespace), packet_hash text NOT NULL,
- attempts bigint NOT NULL DEFAULT 0 CHECK(attempts >= 0), PRIMARY KEY(namespace,packet_hash));
 CREATE TABLE IF NOT EXISTS pillar_audit_attempt (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, namespace text NOT NULL REFERENCES pillar_audit_namespace(namespace),
  request_hash text NOT NULL, validation_hash text NOT NULL, wallet_hash text NOT NULL, backend text NOT NULL,
@@ -292,22 +289,11 @@ impl PostgresAuditStore {
             .await
             .map_err(unavailable)?;
         let namespace = &self.config.namespace;
-        let namespace_row = tx.query_one("SELECT attempt_count,max_attempts FROM pillar_audit_namespace WHERE namespace=$1 FOR UPDATE", &[namespace]).await.map_err(unavailable)?;
-        let packet_hash = &intent.validated.packet_hash;
-        let inserted_packet = tx.execute("INSERT INTO pillar_audit_packet(namespace,packet_hash) VALUES($1,$2) ON CONFLICT DO NOTHING", &[namespace, packet_hash]).await.map_err(unavailable)? == 1;
-        if inserted_packet && namespace_row.get::<_, i64>(0) >= namespace_row.get::<_, i64>(1) {
+        let row = tx.query_one("SELECT attempt_count,max_attempts FROM pillar_audit_namespace WHERE namespace=$1 FOR UPDATE", &[namespace]).await.map_err(unavailable)?;
+        let has_capacity_after_attempt = row.get::<_, i64>(0) + 1 < row.get::<_, i64>(1);
+        if row.get::<_, i64>(0) >= row.get::<_, i64>(1) {
             return Err(Failure::Quota);
         }
-        let packet_row = tx.query_opt("UPDATE pillar_audit_packet SET attempts=attempts+1 WHERE namespace=$1 AND packet_hash=$2 AND attempts < 64 RETURNING attempts", &[namespace, packet_hash]).await.map_err(unavailable)?;
-        if packet_row.is_none() {
-            return Err(Failure::Quota);
-        }
-        if inserted_packet {
-            tx.execute("UPDATE pillar_audit_namespace SET attempt_count=attempt_count+1 WHERE namespace=$1", &[namespace]).await.map_err(unavailable)?;
-        }
-        let has_capacity_after_attempt = namespace_row.get::<_, i64>(0)
-            + i64::from(inserted_packet)
-            < namespace_row.get::<_, i64>(1);
         let reference = fingerprint(intent.key.reference.as_bytes());
         let version = fingerprint(intent.key.version.as_bytes());
         let identity: &[&(dyn tokio_postgres::types::ToSql + Sync)] = &[
@@ -332,6 +318,12 @@ impl PostgresAuditStore {
             i64::try_from(intent.validated.provider_generation).map_err(unavailable)?;
         let row = tx.query_one("INSERT INTO pillar_audit_attempt(namespace,request_hash,validation_hash,wallet_hash,backend,key_reference_hash,key_version_hash,public_key_hash,signed_digest,algorithm,source_chain,destination_chain,expiration,provider_generation,key_reference,key_version) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id", &[namespace,&intent.validated.request_hash,&intent.validated.validation_hash,&intent.wallet_hash,&intent.key.backend,&reference,&version,&intent.key.public_key_hash,&intent.signed_digest,&intent.algorithm,&intent.validated.source_chain,&intent.validated.destination_chain,&intent.validated.expiration,&generation,&intent.key.reference,&intent.key.version]).await.map_err(unavailable)?;
         let id = row.get(0);
+        tx.execute(
+            "UPDATE pillar_audit_namespace SET attempt_count=attempt_count+1 WHERE namespace=$1",
+            &[namespace],
+        )
+        .await
+        .map_err(unavailable)?;
         tx.commit().await.map_err(unavailable)?;
         self.reachable
             .store(has_capacity_after_attempt, Ordering::Release);
@@ -427,12 +419,17 @@ impl SigningAuditStore for PostgresAuditStore {
                     }
                     result
                 };
-                matches!(within_deadline(remaining, probe).await, Ok(Ok(true)))
+                let healthy = matches!(within_deadline(remaining, probe).await, Ok(Ok(true)));
+                // Cache before releasing the lane so the next queued probe reuses this result.
+                *self.health_cache.lock().await = Some((tokio::time::Instant::now(), healthy));
+                healthy
             }
-            Err(_) => false,
+            Err(_) => {
+                *self.health_cache.lock().await = Some((tokio::time::Instant::now(), false));
+                false
+            }
         };
         self.reachable.store(healthy, Ordering::Release);
-        *self.health_cache.lock().await = Some((tokio::time::Instant::now(), healthy));
         healthy
     }
 }
@@ -746,7 +743,6 @@ mod tests {
     fn intent() -> AttemptIntent {
         AttemptIntent {
             validated: ValidatedIntent {
-                packet_hash: "packet".into(),
                 request_hash: "request".into(),
                 validation_hash: "validation".into(),
                 source_chain: "ethereum".into(),

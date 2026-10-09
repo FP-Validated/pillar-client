@@ -145,7 +145,6 @@ async fn postgres_audit_waiter_timeout_preserves_active_commit_and_session() {
     .unwrap();
     let intent = AttemptIntent {
         validated: ValidatedIntent {
-            packet_hash: "packet".into(),
             request_hash: "request".into(),
             validation_hash: "validation".into(),
             source_chain: "ethereum".into(),

@@ -303,7 +303,6 @@ async fn azure_wire_missing_kid_rejected_inside_owned_audit_worker() {
     });
     let workers = Arc::new(AuditWorkers::new(1));
     let intent = ValidatedIntent {
-        packet_hash: "packet".into(),
         request_hash: "request".into(),
         validation_hash: "validation".into(),
         source_chain: "ethereum".into(),
@@ -364,7 +363,6 @@ async fn audit_worker_capacity_refused_before_arming_an_attempt() {
     let reservation = workers.reserve().unwrap();
     workers.spawn(reservation, std::future::pending());
     let intent = ValidatedIntent {
-        packet_hash: "packet".into(),
         request_hash: "request".into(),
         validation_hash: "validation".into(),
         source_chain: "ethereum".into(),

@@ -12,7 +12,6 @@ pub fn fingerprint(bytes: &[u8]) -> String {
 }
 #[derive(Clone)]
 pub struct ValidatedIntent {
-    pub packet_hash: String,
     pub request_hash: String,
     pub validation_hash: String,
     pub source_chain: String,
@@ -153,7 +152,6 @@ pub fn prepare(
         | crate::SigningContext::Read { expiration, .. } => *expiration,
     };
     Ok(Some(ValidatedIntent {
-        packet_hash: canonical(&(&event.lz_message_id, &event.tx_hash))?,
         request_hash: canonical(request)?,
         validation_hash: canonical(&(event, &event.source_evidence, pins, hash_call_data))?,
         source_chain: request.lz_message_id.pathway_id.src_chain_name.clone(),

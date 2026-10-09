@@ -28,7 +28,6 @@ impl SigningAuditStore for FaultStore {
 }
 fn intent() -> ValidatedIntent {
     ValidatedIntent {
-        packet_hash: fingerprint(b"packet"),
         request_hash: fingerprint(b"request"),
         validation_hash: fingerprint(b"validated"),
         source_chain: "ethereum".into(),
