@@ -459,7 +459,7 @@ Rollback 절차: `ovh-chain-repo`에서 `f9af3f9`를 revert하고 같은 방식�
 
 ## 16. 2026-10-09 전체 리뷰
 
-2.6.0 문서 커밋 `548c691`을 기준으로 코드와 문서 전체를 라운드 단위로 리뷰했다. 라운드마다 영역별 독립 reviewer가 정적 검토와 upstream 1.2.66 로컬 사본 대조를 했다. 코드 수정은 회귀 테스트, 해당 crate의 test suite 또는 CI 검사 스크립트로 확인했고, 회귀 테스트와 suite의 실행 출력은 maintainer-local `.full-review-20261009/evidence/`에 있다. 다음 라운드는 직전 라운드의 수정과 그 주변을 다시 검토했고, 실질 항목이 나오지 않은 라운드에서 반복을 마쳤다.
+2.6.0 문서 커밋 `548c691`을 기준으로 코드와 문서 전체를 라운드 단위로 리뷰했다. 라운드마다 영역별 독립 reviewer가 정적 검토와 upstream 1.2.66 로컬 사본 대조를 했다. 코드 수정은 회귀 테스트, 해당 crate의 test suite 또는 CI 검사 스크립트로 확인했고, 회귀 테스트와 suite의 실행 출력은 maintainer-local `.full-review-20261009/evidence/`에 있다. 다음 라운드는 직전 라운드의 수정과 그 주변을 다시 검토했다. 라운드 7에서 코드 항목이 나오지 않았고, 그 라운드가 찾은 문서 한 문장을 코드와 대조해 고친 뒤 반복을 마쳤다.
 
 | 라운드 (검토 대상) | 영역 | 찾은 항목 | 조치 커밋 |
 | --- | --- | --- | --- |
@@ -484,7 +484,8 @@ Rollback 절차: `ovh-chain-repo`에서 `f9af3f9`를 revert하고 같은 방식�
 | 5 (`b87be2b`) | TON | 65,536 cell 상한 아래의 깊은 선형 chain BoC(depth 65,534)를 drop할 때 2 MiB worker stack이 넘침, hash 기준 방문 집합 때문에 level mask를 속인 parent 아래의 exotic cell이 검사를 통과함, provider가 만든 큰 default receive config(65,013 cell, depth 1,012)의 직렬화가 test profile에서 24.7초 걸림 | `a052fa0`, `a0ad592` |
 | 5 | Readiness | Aptos tx-hash 경로에서 block 요청을 만들 수 없는 `version`이 `Missing` 표가 됨 | `a5af7ad` |
 | 6 (`7731afd`) | TON | depth 사전 검사가 hash를 저장한 cell(descriptor bit 4)의 hash와 depth byte를 건너뛰지 않아 그 형식의 BoC를 거부함 | `ae88839` |
-| 6 | 문서 | 비EVM readiness의 형식 오류 범위, Aptos `null` 응답 기술, mainnet Uln storage fixture 출처, 측정 workload 기술 | 이 절의 라운드 6 문서 커밋 |
+| 6 | 문서 | 비EVM readiness의 형식 오류 범위, Aptos `null` 응답 기술, mainnet Uln storage fixture 출처, 측정 workload 기술 | `b7ecb00` |
+| 7 (`b7ecb00`) | 전체 | 코드 항목 없음. 이 절의 Aptos `null` transaction 기술 한 문장 | 이 절을 마무리한 커밋 |
 
 라운드 중 내린 결정은 다음과 같다.
 - Durable audit quota는 문서화된 per-attempt 방식이다. 같은 packet의 재전송도 quota를 쓰므로 SECURITY는 audit을 켤 때 signing route에 인증이나 edge rate limit을 두도록 안내한다.
@@ -494,6 +495,21 @@ Rollback 절차: `ovh-chain-repo`에서 `f9af3f9`를 revert하고 같은 방식�
 - TON BoC cell 상한은 mainnet config param 43(toncenter `getConfigParam` 읽기)의 값을 쓴다. Account storage는 `max_acc_state_cells` 65,536, message와 trace body는 `max_msg_cells` 8,192다. 측정한 mainnet storage는 UlnConnection 15 cell, Uln 532 cell, UlnManager 1,223 cell이고, attestation 600 nonce의 connection storage fixture도 이 상한 안에서 읽힌다. 참조와 data가 없는 cell로 상한까지 채운 BoC를 parse한 test process의 peak RSS는 account 65,536 cell에서 60,850,176 byte, message 8,192 cell에서 11,403,264 byte다.
 - TON BoC depth 상한은 TON node의 cell 구조 상한 `CellTraits::max_depth`(1,024, `ton-blockchain/ton` `crypto/vm/cells/CellTraits.h`)다. Config param 43의 `max_vm_data_depth`(512)는 이와 별개인 더 좁은 on-chain 제한이다. Parser는 raw BoC의 reference graph에서 depth를 계산해 cell 객체를 만들기 전에 거부하며, 이 계산은 `ton_core`처럼 cell에 저장된 hash와 depth byte를 건너뛴다. Exotic 검사는 pop한 cell마다 하고, 하위 ref는 cell node identity마다 한 번 펼친다. 방문 key는 provider가 조작할 수 있는 representation hash가 아니라 node identity다.
 - Default receive config 직렬화 상한은 고유 cell 2,048개다. Mainnet Uln storage(532 cell)의 config는 2 cell, testnet fixture의 config는 3 cell이고, depth 상한 아래에서 required/optional DVN chain 두 개가 가질 수 있는 최대 크기는 2,047 cell이다. 상한 크기 config의 직렬화는 release build에서 24 ms였다. Mainnet fixture `ton_mainnet_uln_storage.b64`는 Uln `EQAXRMTd2d1IW72G7U71RuGNiP2M2NfQp5U69W667far3CYo`에 대한 toncenter `getAddressInformation` 응답의 `data`이며, masterchain seqno 97941002, 2026-10-09 23:06 KST에 읽었다.
-- 비EVM readiness에서 필드가 빠지거나 형식이 맞지 않는 200 응답은 provider 실패로 표에서 뺀다. Upstream Aptos `aptosBlockHeightQuorumFn`은 `null` block과 `block_height`가 빠진 block을 같은 bucket에 넣는다. Pillar는 ledger-version 경로에서 `null` block을, tx-hash 경로에서 `null` transaction을 `Missing` 표로 세고, tx-hash 경로에서 transaction 뒤의 `null` block은 provider 실패로 처리한다.
+- 비EVM readiness에서 필드가 빠지거나 형식이 맞지 않는 200 응답은 provider 실패로 표에서 뺀다. Upstream Aptos `aptosBlockHeightQuorumFn`은 `null` block과 `block_height`가 빠진 block을 같은 bucket에 넣는다. Pillar는 Aptos ledger-version 경로의 `null` block과 Initia의 `null` transaction을 `Missing` 표로 세고, Aptos와 Movement tx-hash 경로의 `null` transaction과 transaction 뒤의 `null` block은 provider 실패로 처리한다.
 
 §15 F-5 행의 동작은 이 리뷰에서 바뀌었다. Readiness receipt 재조회의 RPC 실패는 `Missing` 표로 세지 않고 표에서 뺀다(`7a2c33f`, `4779729`). EVM에서 성공한 provider가 없을 때의 응답은 F-5와 같은 500 `Transaction receipt or block not found for <tx>`다.
+
+최종 코드 커밋 `b7ecb00`의 검증 결과는 다음과 같다.
+
+| 검증 | 결과 |
+| --- | --- |
+| `cargo +1.98.1 fmt --all --check` | 통과 |
+| `cargo +1.98.1 clippy --workspace --all-targets --locked -- -D warnings` | 통과 |
+| `cargo +1.98.1 test --workspace --locked` | 1079 passed, 0 failed, 15 ignored |
+| `cargo +1.98.1 test -p pillar-runtime --locked postgres_audit -- --ignored --test-threads=1` (local PostgreSQL) | 11 passed, 0 failed |
+| `node scripts/check-generated-config-integrity.mjs` | 통과 |
+| `cargo +1.94.1 check --workspace --locked --all-targets` | 통과 |
+| `docker build` 뒤 설정 없이 실행 | `Missing required environment variable PILLAR_API_AUTH_TOKENS`로 기동 거부 |
+| Image 실행(`LOCAL_MNEMONIC`, BSC testnet provider 2개, quorum 2) | Docker health `healthy`, `pillar healthcheck` exit 0, `/ready` 200, `/provider-health` `{"bsc":true}`, `pillar_provider_single_entity_chains 0`, bearer 없는 `/signer-info` 401, image 안에 `curl` 없음, uid 10001 |
+
+근거: `.full-review-20261009/evidence/round6-integration`의 fmt/clippy/test/PostgreSQL/integrity/MSRV 출력과 image 실행 기록, 라운드별 reviewer 보고와 red/green 출력 · 2026-10-09 23:48 KST
