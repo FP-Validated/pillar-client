@@ -27,7 +27,7 @@ jobs:
     name: generated config integrity
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: node scripts/check-generated-config-integrity.mjs
       - run: node scripts/build-acceptance-matrix.mjs --check
 
@@ -38,17 +38,18 @@ jobs:
       # Full debug info for the workspace test build fills the hosted runner's disk.
       CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.98.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
+          toolchain: 1.98.1
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets
       - run: cargo test --workspace --locked
         env:
           READ_DOMAIN_ARTIFACT_DIR: ${{ runner.temp }}/pillar-read-domain-http
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: read-domain-http-${{ github.sha }}-${{ github.run_attempt }}
@@ -61,29 +62,31 @@ jobs:
     name: minimum supported rust version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Read rust-version from the workspace manifest
         id: msrv
         run: echo "version=$(grep -m1 '^rust-version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo check --workspace --locked --all-targets
 
   supply-chain:
     name: audit, deny, sbom
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo install --locked cargo-audit cargo-deny cargo-cyclonedx
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo install --locked cargo-audit@0.22.2 cargo-deny@0.20.2 cargo-cyclonedx@0.5.9
       - run: cargo audit
       - run: cargo deny check
       - name: Generate CycloneDX SBOM
         run: cargo cyclonedx --all --format json
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sbom
           path: "**/*.cdx.json"
@@ -93,13 +96,13 @@ jobs:
     name: container image
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Capture checked-out source identity
         run: node scripts/ci-container-artifact.mjs prepare "$RUNNER_TEMP/pillar-image-artifact"
         env:
           GITHUB_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
           GITHUB_PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Build the runtime image
         run: |
           out="$RUNNER_TEMP/pillar-image-artifact"
@@ -167,7 +170,7 @@ jobs:
       - name: Finalize image diagnostics report
         if: always()
         run: node scripts/ci-container-artifact.mjs report "$RUNNER_TEMP/pillar-image-artifact"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: pillar-ci-image-${{ github.sha }}-${{ github.run_attempt }}
@@ -179,14 +182,16 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.98.1
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: 1.98.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Run exact TON release lifecycle and capture resources
         run: bash scripts/ci-ton-release-gate.sh
         env:
           CI_TON_ARTIFACT_DIR: ${{ runner.temp }}/pillar-ton-release-gate
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: macos-ton-release-${{ github.sha }}
