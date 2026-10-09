@@ -3,19 +3,30 @@ use crate::chain_address::bytes_to_hex;
 use crate::{PublicKeyRequest, RawSignerAdapter, SeedKind, SignRequest, SignatureType};
 
 #[test]
-fn local_mnemonic_signing_reuses_zeroized_derived_seed_storage() {
+fn local_mnemonic_derives_each_seed_kind_lazily_once() {
     let signer = LocalMnemonicRawSignerAdapter::new(LocalMnemonic {
         mnemonic: Zeroizing::new(
             "test test test test test test test test test test test junk".to_string(),
         ),
         path: "m/44'/60'/0'/0/0".to_string(),
     });
-    let seed_address = signer.seed(SeedKind::Bip39).unwrap().as_ptr();
+    assert!(signer.seeds.bip39.get().is_none());
+    assert!(signer.seeds.ton.get().is_none());
 
+    let bip39_address = signer.seed(SeedKind::Bip39).unwrap().as_ptr();
+    assert!(signer.seeds.bip39.get().is_some());
+    assert!(signer.seeds.ton.get().is_none());
     for _ in 0..4 {
         let _key = signer.ecdsa_signing_key(SeedKind::Bip39).unwrap();
-        assert_eq!(signer.seed(SeedKind::Bip39).unwrap().as_ptr(), seed_address);
+        assert_eq!(
+            signer.seed(SeedKind::Bip39).unwrap().as_ptr(),
+            bip39_address
+        );
     }
+
+    let ton_address = signer.seed(SeedKind::Ton).unwrap().as_ptr();
+    assert!(signer.seeds.ton.get().is_some());
+    assert_eq!(signer.seed(SeedKind::Ton).unwrap().as_ptr(), ton_address);
 }
 
 #[tokio::test]

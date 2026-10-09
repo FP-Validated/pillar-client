@@ -748,7 +748,6 @@ pub fn provider_configs_from_v2(
             }
         }
     }
-    check_strategy_config_with_restrictions(&file, &strategy, &restrictions)?;
     let resolved = precompute_resolved_strategy(&file, &strategy, &restrictions)
         .map_err(ConfigError::ProviderValidation)?;
     let mut configs = ProviderConfigs::new();

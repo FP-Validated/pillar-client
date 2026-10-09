@@ -103,8 +103,8 @@ pub trait ServerApp: Send + Sync + 'static {
     fn get_environment(&self) -> String;
     async fn get_provider_health(&self) -> Result<ProviderHealthSnapshot, AppError>;
     async fn get_provider_health_report(&self) -> Result<Value, AppError>;
-    fn auth_tokens(&self) -> Vec<String> {
-        Vec::new()
+    fn auth_tokens(&self) -> &[String] {
+        &[]
     }
     fn auth_token_matches(&self, token: &[u8]) -> bool {
         self.auth_tokens()
@@ -380,7 +380,8 @@ fn authorized(state: &ApiState, req: &Request<Body>) -> bool {
     };
     state.app.auth_token_matches(token.as_bytes())
 }
-fn constant_time_token_match(provided: &[u8], expected: &[u8]) -> bool {
+/// Compares bearer tokens without returning early on a differing byte.
+pub fn constant_time_token_match(provided: &[u8], expected: &[u8]) -> bool {
     // Fold the length mismatch as a boolean. `(a ^ b) as u8` truncates, so any
     // length difference that is an exact multiple of 256 became 0 and the byte
     // loop then compared the absent bytes against an implicit zero — a token
@@ -1191,8 +1192,8 @@ impl ServerApp for CoreApiApp {
         Ok(self.provider_health.clone())
     }
 
-    fn auth_tokens(&self) -> Vec<String> {
-        self.auth_tokens.clone()
+    fn auth_tokens(&self) -> &[String] {
+        &self.auth_tokens
     }
 
     fn public_sign_routes(&self) -> bool {
@@ -1260,8 +1261,8 @@ impl ServerApp for StaticApp {
     async fn get_provider_health_report(&self) -> Result<Value, AppError> {
         Ok(json!({}))
     }
-    fn auth_tokens(&self) -> Vec<String> {
-        self.auth_tokens.clone()
+    fn auth_tokens(&self) -> &[String] {
+        &self.auth_tokens
     }
 
     fn public_sign_routes(&self) -> bool {
@@ -1580,8 +1581,8 @@ mod tests {
             }))
         }
 
-        fn auth_tokens(&self) -> Vec<String> {
-            vec![TEST_AUTH_TOKEN.to_string()]
+        fn auth_token_matches(&self, token: &[u8]) -> bool {
+            constant_time_token_match(token, TEST_AUTH_TOKEN.as_bytes())
         }
     }
 

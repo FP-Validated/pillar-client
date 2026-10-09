@@ -109,7 +109,7 @@ impl PillarMetrics {
             ),
             background_task_heartbeat_age_seconds: DerivedAgeGauge::keyed(
                 "pillar_background_task_heartbeat_age_seconds",
-                "Seconds since each Pillar background loop began its last iteration.",
+                "Seconds since each Pillar background loop last stamped its heartbeat.",
                 "task",
             ),
             signer_errors_total: CounterMetric::new(

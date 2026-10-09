@@ -121,8 +121,12 @@ jobs:
           out="$RUNNER_TEMP/pillar-image-artifact"
           TZ=Asia/Seoul date '+%Y-%m-%d %H:%M KST' > "$out/docker-build-started-at-kst.txt"
           set +e
+          image_version="${GITHUB_SHA::12}"
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            image_version="$GITHUB_REF_NAME"
+          fi
           docker build \
-            --build-arg PILLAR_IMAGE_VERSION=${GITHUB_SHA::12} \
+            --build-arg PILLAR_IMAGE_VERSION="$image_version" \
             --build-arg VCS_REVISION=${GITHUB_SHA} \
             -t pillar-client:ci . > "$out/docker-build.log" 2>&1
           status=$?

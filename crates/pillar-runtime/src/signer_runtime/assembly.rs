@@ -96,15 +96,19 @@ pub async fn aws_mnemonic_signer_assembly_from_config_with_metrics(
 pub async fn production_aws_mnemonic_secret_client(
     region: Option<&String>,
 ) -> Result<AwsSecretsManagerMnemonicClient, String> {
-    let mut config_loader = aws_config::defaults(aws_config::BehaviorVersion::latest());
-    if let Some(region) = region {
-        config_loader =
-            config_loader.region(aws_sdk_secretsmanager::config::Region::new(region.clone()));
-    }
-    let config = config_loader.load().await;
+    let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+        .region(aws_sdk_secretsmanager::config::Region::new(
+            secrets_manager_region(region.map(String::as_str)).to_string(),
+        ))
+        .load()
+        .await;
     Ok(AwsSecretsManagerMnemonicClient::new(
         aws_sdk_secretsmanager::Client::new(&config),
     ))
+}
+
+fn secrets_manager_region(region: Option<&str>) -> &str {
+    region.unwrap_or("us-east-1")
 }
 
 pub async fn aws_mnemonic_signer_assembly_from_secret_client<C>(
@@ -356,5 +360,16 @@ pub async fn production_kms_raw_signer_factory_from_options(
                 AzureKeyVaultKmsClient::new(client),
             ))) as Arc<dyn RawSignerAdapterFactory>)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::secrets_manager_region;
+
+    #[test]
+    fn unset_secrets_manager_region_defaults_to_us_east_1() {
+        assert_eq!(secrets_manager_region(None), "us-east-1");
+        assert_eq!(secrets_manager_region(Some("eu-west-1")), "eu-west-1");
     }
 }

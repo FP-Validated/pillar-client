@@ -788,12 +788,15 @@ pub fn build_wallets_by_chain_name(
             let wallets = wallet_definitions
                 .iter()
                 .filter(|wallet| {
-                    wallet
-                        .supported_chain_names
-                        .as_ref()
-                        .is_none_or(|supported| {
-                            supported.iter().any(|supported| supported == chain_name)
-                        })
+                    let chain_type = static_chain_type_name(chain_name)
+                        .expect("configured chain has a static type");
+                    wallet.by_chain_type.contains_key(chain_type)
+                        && wallet
+                            .supported_chain_names
+                            .as_ref()
+                            .is_none_or(|supported| {
+                                supported.iter().any(|supported| supported == chain_name)
+                            })
                 })
                 .map(|wallet| wallet.name.clone())
                 .collect::<Vec<_>>();
@@ -2828,6 +2831,21 @@ mod tests {
             build_wallets_by_chain_name(&wallets, &["ethereum".to_string(), "bsc".to_string()]);
         assert_eq!(by_chain["ethereum"], vec!["wallet-a", "wallet-b"]);
         assert_eq!(by_chain["bsc"], vec!["wallet-b"]);
+    }
+    #[test]
+    fn build_wallets_by_chain_name_filters_wallets_without_chain_type_definitions() {
+        let wallets = wallet_definitions_from_env_map(&HashMap::from([(
+            LZ_WALLETS.to_string(),
+            r#"[
+                {"name":"w-evm","walletSetName":"set-evm","byChainType":{"EVM":{"secretName":"evm","signerType":"Mnemonic"}}},
+                {"name":"w-sol","walletSetName":"set-sol","byChainType":{"SOLANA":{"secretName":"sol","signerType":"Mnemonic"}}}
+            ]"#.to_string(),
+        )]))
+        .unwrap();
+        let by_chain =
+            build_wallets_by_chain_name(&wallets, &["ethereum".to_string(), "solana".to_string()]);
+        assert_eq!(by_chain["ethereum"], vec!["w-evm"]);
+        assert_eq!(by_chain["solana"], vec!["w-sol"]);
     }
 
     #[test]

@@ -395,20 +395,20 @@ async fn a_loop_hung_inside_its_work_reports_a_growing_age() {
         "the first refresh completed, so the loop is keeping up"
     );
 
-    // The second read hangs, and the clock runs on for an hour.
+    // The second read hangs while still inside the refresh timeout.
     tick_one_refresh().await;
-    tokio::time::advance(std::time::Duration::from_secs(3_600)).await;
+    tokio::time::advance(std::time::Duration::from_secs(20)).await;
     settle().await;
 
     assert_eq!(
         reads.load(std::sync::atomic::Ordering::SeqCst),
         4,
-        "the loop must be stuck in its second refresh's two object reads, not spinning \
+        "the loop must still be in its second refresh's two object reads, not spinning \
          through more"
     );
     assert!(
-        heartbeat_age(&rendered(&metrics).await, "provider_config_refresh") >= 3_600.0,
-        "a loop that has not completed an iteration for an hour has to read that way"
+        heartbeat_age(&rendered(&metrics).await, "provider_config_refresh") >= 20.0,
+        "the still-pending refresh must age the heartbeat"
     );
     drop(owner);
 }
