@@ -159,7 +159,10 @@ docker run --rm -p 8080:8080 --env-file ./pillar.env pillar-client:local
 ```
 
 The image runs as a non-root user, pins its base images by digest, defaults to
-`SERVER_PORT=8080`, and health-checks `GET /ready`. Use `GET /` for liveness.
+`SERVER_PORT=8080`, and health-checks `GET /ready` with `pillar healthcheck`,
+which exits 0 only on a 200. The runtime stage installs no packages: the CA bundle
+is copied from the digest-pinned builder, and the image has no `curl`. Use `GET /`
+for liveness.
 
 ### Source and release images
 
@@ -277,7 +280,7 @@ Optional:
 | `PILLAR_AUDIT_DATABASE_URL` | Required when audit is enabled; remote PostgreSQL uses `sslmode=require` with rustls/WebPKI certificate and hostname checks (not `verify-full`/`verify-ca`); plaintext is limited to literal loopback/Unix sockets. |
 | `PILLAR_AUDIT_NAMESPACE` | Required audit scope, 1–128 characters of `[A-Za-z0-9._-]`; replicas must share it and the same quota. |
 | `PILLAR_AUDIT_TIMEOUT_MS` | Database operation deadline, including connection/lock/COMMIT (default 2000, maximum 5000), bounded by the caller deadline. |
-| `PILLAR_AUDIT_MAX_ATTEMPTS` | Retained-attempt quota per namespace (default 100000, maximum 1000000); no TTL or automatic deletion. |
+| `PILLAR_AUDIT_MAX_ATTEMPTS` | Retained-attempt quota per namespace (default 100000, maximum 1000000); every attempt counts, including repeated deliveries of one packet; no TTL or automatic deletion. |
 
 KMS resource strings are not normalized across key spellings. Azure charges the one-time public-key fetch to the configured key id and every signature (including hedges) to the resolved key reference the fetch returns; GCP charges both to the configured version name; AWS charges a public-key lookup to the configured key id (or to an id already resolved for the other key type) and ECDSA signing to the immutable key id that lookup returns, resolved on first use, while Ed25519 signing without audit is charged to the configured key id until a public-key lookup for that key type has populated the cache and to the resolved key id afterwards (`crates/pillar-signer/src/{azure/adapter.rs,gcp.rs,aws.rs}`). Resolutions are cached for the process lifetime without invalidation, so a key rotation takes effect only after a restart ([SECURITY.md](SECURITY.md#operator-responsibilities)). The budget is therefore not a physical-key or remote-quota guarantee.
 For Solana, the `/signer-info` response uses a signer address label. Mnemonic, AWS
@@ -408,6 +411,10 @@ log line on its own.
   a loop that has stopped reads as growing rather than as its last written
   value; alert above ~300. Absent under `PROVIDER_CONFIG_TYPE=LOCAL`, which runs
   no refresh loop.
+- `pillar_provider_single_entity_chains` — number of serving chains whose
+  quorum strategy one provider entity can satisfy alone; set at startup and on
+  every accepted refresh. Alert above 0 unless a chain is single-entity on
+  purpose.
 - `pillar_background_task_heartbeat_age_seconds{task}` — seconds since each
   background loop last stamped its heartbeat: `provider_config_refresh` (60s
   interval, remote provider config only) stamps after each refresh attempt
@@ -513,7 +520,8 @@ is checked by `git diff --stat crates/pillar-config/src/generated_*.rs` being em
 Only that regeneration proves the values match upstream.
 `scripts/check-generated-config-integrity.mjs`, which runs in CI, needs no upstream
 source: it reconciles each file against the row counts and the body sha256 in its
-own provenance header, so it catches any edit that was not made by the generator.
+own provenance header. That catches an accidental hand edit; an edit that also
+rewrites the header digest is caught only by review and by regeneration.
 
 Benchmarks are opt-in: `cargo bench -p pillar-bench`.
 

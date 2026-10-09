@@ -70,8 +70,10 @@ The following are deployment-side controls the software cannot enforce for you:
   require the response to name a key.
 - Require at least two distinct entities for every chain's `rpc` strategy, for
   example `{ "allOf": [{ "any": 2 }] }`. A strategy that one entity can satisfy
-  makes that operator the trust root for the event you attest to; the startup
-  report flags such chains as `single-provider-trust-root`.
+  makes that operator the trust root for the event you attest to. Startup flags
+  such chains as `single-provider-trust-root`, a refresh that changes the set of
+  such chains logs a warning naming them, and `pillar_provider_single_entity_chains`
+  reports how many the serving configuration has.
 - Label entities truthfully. Votes are counted per `(category, entity)` as
   upstream `gasolina-audit` `213cd500` counts them
   (`packages/common-utils/src/multiFallbackQuorum.ts:107-147`), so two URIs of one
@@ -83,7 +85,11 @@ The following are deployment-side controls the software cannot enforce for you:
   otherwise weaken or silently misread a quorum: unknown fields are refused, except
   the `_`-prefixed top-level documentation keys upstream passes through in
   `quorum-strategy.json` (`dynamic-config/src/providerConfig/index.ts:102-104`), so a
-  misspelled `allOf` cannot become an empty requirement; a strategy that zero
+  misspelled `allOf` cannot become an empty requirement; a category key other
+  than `internal`, `dedicated_external`, `shared_external` or `any` is refused, so
+  a misspelled category with `"max"` cannot resolve to zero; strategy chain or
+  endpoint keys that match no configured provider are named in a startup warning;
+  a strategy that zero
   entities satisfy (`{}`, `{ "any": 0 }`) is refused (upstream treats the empty
   strategy as trivial); only the `rpc` pool is dispatched, so upstream's TON
   `v2`/`v3`, Aptos/Initia `eventIndexer`, Sui `grpc`/`graphql` and TRON `tronWeb`
@@ -139,8 +145,9 @@ The following are deployment-side controls the software cannot enforce for you:
   the orchestrator termination grace period longer than G. Kubernetes
   SIGTERM/preStop behavior has not been exercised, so withdrawal races are
   reduced rather than eliminated.
-- Give the Prometheus scrape a token. `GET /metrics` is authenticated, so a
-  scrape job without `Authorization` receives 401 and monitoring goes dark.
+- Give the Prometheus scrape a token while API auth is enabled. `GET /metrics` is
+  then authenticated, so a scrape job without `Authorization` receives 401 and
+  monitoring goes dark.
 - Serve `ReadV1002` targets from providers that implement EIP-1898 block
   parameters with `requireCanonical`. Every READ `eth_call` is pinned to the
   block hash readiness validated and is never retried by number, so a provider
@@ -185,7 +192,10 @@ the runtime aborts unfinished workers without asserting remote failure. Audit-on
 disables Azure hedging. A fresh retry repeats validation and appends a new attempt;
 it neither deletes old uncertainty nor returns a retained signature. The same
 caller request and immutable key identity cannot silently change its signing
-input/public key; a different immutable key version has a distinct intent.
+input/public key; a different immutable key version has a distinct intent. Every
+attempt counts against `PILLAR_AUDIT_MAX_ATTEMPTS`, including repeated deliveries
+of the same packet, so with audit enabled keep the signing routes authenticated or
+rate-limited at the edge.
 
 Configuration is listed in `README.md`. PostgreSQL operations have bounded
 connect/lock/COMMIT deadlines and explicitly use `synchronous_commit=on`.
@@ -205,9 +215,11 @@ Unknown and partial attempts must survive any operator-approved retention plan.
 Each process serializes audit writes through one session mutex. Readiness uses a
 second, separate connection, so a probe never holds the write session; probes
 queue for that one readiness connection, and the whole probe (waiting, connecting
-and querying) shares one `PILLAR_AUDIT_TIMEOUT_MS` budget. A probe whose budget runs
-out while it waits does not dial. A cancelled or timed-out probe drops its
-connection. Participating
+and querying) shares one `PILLAR_AUDIT_TIMEOUT_MS` budget. A probe result is reused
+for 250 ms, including by probes that queued behind it, so concurrent `/ready`
+calls cost one query. A probe whose budget runs out while it waits does not dial
+and reports not ready. A cancelled or timed-out probe drops its connection.
+Participating
 replicas also serialize namespace quota updates on one PostgreSQL row; KMS
 execution holds no such row lock. There is no measured production TPS, capacity
 calibration, pool, pruning or automatic quota reset. The permanent row cap is not
@@ -640,18 +652,13 @@ Addresses live in `stellar_uln_302_for_environment`,
   Legacy `/transactionTrace`도 중복 hash와 문자열이 아닌 hash를 거부한다.
   Container 비용은 node cap으로 별도 제한한다. Projected string byte cap은 4 MiB다.
 - TON block confirmations count from the masterchain seqno of the `PacketSent`
-  transaction itself, found by hash inside the provider's trace, and readiness
-  refuses when that transaction is absent from the trace. Upstream reads the
-  trace root's `mc_block_seqno`
+  transaction itself. That seqno is part of the per-message fingerprint the
+  provider quorum agrees on during resolution, so readiness compares it with the
+  current masterchain seqno and does not re-resolve a provider-supplied
+  transaction hash. Upstream reads the trace root's `mc_block_seqno`
   (`packages/sdks/rpc-sdk/src/ton/index.ts:175-187`), which can be an earlier
   block than the emission and so overstates the depth. This is a deliberate
-  fail-closed divergence. The comparison is an exact string match against the
-  hash the same provider returned during resolution. Public toncenter v3 mainnet
-  and testnet `/events` and `/traces` were observed on 2026-10-06 to return every
-  transaction hash as canonical padded standard base64, whatever form the request
-  used, and the request hash is percent-encoded so `+`, `/` and `=` survive.
-  Other TON v3 hosts were not checked; one that returns another encoding fails
-  readiness closed rather than passing.
+  fail-closed divergence.
 - A `ReadV1002` read is pinned to the block readiness validated, which
   upstream does not do. Upstream agrees on a time marker's block through a
   quorum and then fetches the payload with `eth_call` against the block

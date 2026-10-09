@@ -76,7 +76,8 @@ JSON artifact per run under `local/e2e-runs/` (gitignored); set
 
 Not defended in code: a compromised host or KMS principal, an operator who configures
 a quorum that one entity can satisfy (flagged at startup as
-`single-provider-trust-root`), a majority of colluding providers, and fleet-wide rate
+`single-provider-trust-root`, warned on each refresh that changes those chains, and
+counted in `pillar_provider_single_entity_chains`), a majority of colluding providers, and fleet-wide rate
 limiting (budgets are per process). `SECURITY.md` "Operator responsibilities" lists
 the controls left to the deployment.
 
@@ -84,14 +85,15 @@ the controls left to the deployment.
 
 | Boundary | Trusted side assumes | Enforced in | Failure mode required |
 | --- | --- | --- | --- |
-| HTTP caller → API | Bearer token from `PILLAR_API_AUTH_TOKENS` (≥32 chars) unless the operator opens sign routes; request fields are untrusted | `crates/pillar-api/src/lib.rs` (`authorized`, request shape gates), `crates/pillar-cli/src/main.rs` (header/request deadlines, connection cap) | 401, or 400 for malformed input, before any provider or signer call |
+| HTTP caller → API | Bearer token from `PILLAR_API_AUTH_TOKENS` (≥32 chars) unless the operator opens sign routes (`PILLAR_PUBLIC_SIGN_ROUTES=true`) or turns auth off (`PILLAR_API_AUTH_ENABLED=false`, every route public); request fields are untrusted | `crates/pillar-api/src/lib.rs` (`authorized`, request shape gates), `crates/pillar-cli/src/main.rs` (header/request deadlines, connection cap) | 401, or 400 for malformed input, before any provider or signer call |
+| Provider-config source → quorum | `providers-v2.json` and `quorum-strategy.json` from a local file or an S3/GCS bucket define entities and strategies; a writer of that source sets the trust root | `crates/pillar-config/src/provider_validation.rs`, `crates/pillar-runtime/src/config_loader.rs` | Refuse unknown fields, unknown strategy categories and zero-entity strategies; a refresh that cannot sign keeps the previous snapshot; single-entity chains are logged and counted |
 | Request → packet | Only the `PacketSent` emitted by the trusted contract for the requested version and pathway is accepted | `crates/pillar-runtime/src/layerzero_runtime/packet_resolver.rs`, per-family `source_events_*.rs` | 400 on identity mismatch; never sign a packet the request does not name |
 | RPC providers → validation | Answers are counted per `(category, entity)`; differing answers never merge | `crates/pillar-runtime/src/provider_health/**` | Fail closed when the strategy is not met or two answers could each meet it |
 | Readiness / reorg | Confirmations from the validated block; READ calls pinned by block hash with `requireCanonical` | `layerzero_runtime/validation_readiness.rs`, `layerzero_runtime/read_payload.rs` | Refuse unpinned or non-canonical reads; no fallback by number |
 | Static tables → builders | Addresses, endpoint ids and `vId` come from generated tables per environment | `crates/pillar-config/src/generated_*.rs`, `crates/pillar-layerzero/src/**` | Unsupported `(chain, environment, version)` is an error, never a default |
-| Extra-context service | External yes/no over HTTPS or Lambda; URL must be absolute, without userinfo, and `https` on mainnet/testnet, checked at startup | `crates/pillar-config/src/lib.rs` (`validate_service_url`), `layerzero_runtime/validation_extra_context.rs` | Process refuses to start on a bad URL; a rejection or error stops the request before the builder and signer |
+| Extra-context service | External yes/no over HTTPS or Lambda; URL must be absolute and without userinfo, `https` on mainnet, and `https` or `http` to a literal loopback address elsewhere, checked at startup | `crates/pillar-config/src/lib.rs` (`validate_service_url`), `layerzero_runtime/validation_extra_context.rs` | Process refuses to start on a bad URL; a rejection or error stops the request before the builder and signer |
 | Canton sequencer / ledger | Sequencer reads verified against a configured committee when set; ledger read needs OAuth2 client credentials | `layerzero_runtime/canton_sequencer.rs`, `layerzero_runtime/canton_ledger.rs` | Refuse before any request without credentials; refuse on `sandbox`/`localnet` |
-| Validation → signer | Signer sees only the 32-byte digest built from validated data; key and address derivation per chain family | `crates/pillar-signer/src/**`, `crates/pillar-runtime/src/signer_runtime/assembly.rs` | Unsupported KMS provider fails clearly; secrets redacted in `Debug` and zeroized |
+| Validation → signer | Signer sees only the 32-byte digest built from validated data; key and address derivation per chain family | `crates/pillar-signer/src/**`, `crates/pillar-runtime/src/signer_runtime/assembly.rs` | Unsupported KMS provider fails clearly; secrets redacted in `Debug`; mnemonic seeds and derived keys held in `Zeroizing` buffers |
 | Signer → audit store (optional) | Intent and result committed before a 200 when `PILLAR_AUDIT_ENABLED=true` | `crates/pillar-core/src/audit.rs`, `crates/pillar-runtime/src/audit.rs` | No 200 before result commit; unknown outcomes retained, never replayed |
 | Process → logs / metrics | Caller-controlled values bounded or omitted; labels from fixed allowlists | `crates/pillar-api/src/lib.rs`, `crates/pillar-metrics/src/**`, `startup_report.rs` | No secret or caller hash in terminal logs; no unbounded label cardinality |
 
