@@ -1107,7 +1107,7 @@ async fn runtime_rpc_validation_checks_resolves_sui_and_iota_transaction_from_ad
         .unwrap();
         let calls = Arc::new(Mutex::new(Vec::new()));
         let response = if chain_name == "sui" {
-            json!({"data":{"transaction":{"digest":"0xtx","sender":{"address":"0x1234"},"effects":{"checkpoint":{"sequenceNumber":"42"},"status":"SUCCESS"}}}})
+            json!({"data":{"transaction":{"digest":"0xtx","sender":{"address":"0x1234"},"transactionBcs":"AQI=","effects":{"checkpoint":{"sequenceNumber":"42"},"status":"SUCCESS"}}}})
         } else {
             json!({"result":{"digest":"0xtx","checkpoint":"42","transaction":{"data":{"sender":"0x1234","transaction":{"kind":"ProgrammableTransaction"}}},"effects":{"status":{"status":"success"}}}})
         };

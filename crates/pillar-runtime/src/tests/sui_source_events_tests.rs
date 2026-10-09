@@ -50,7 +50,9 @@ impl JsonRpcTransport for ScriptedSui {
             "{body}"
         );
         let nodes = self.events["data"].as_array().unwrap().iter().map(|event| json!({"contents":{"type":{"repr":event["type"]},"json":event["parsedJson"]}})).collect::<Vec<_>>();
-        Ok(json!({"data":{"transaction":{"effects":{"events":{"nodes":nodes}}}}}))
+        Ok(
+            json!({"data":{"transaction":{"effects":{"events":{"nodes":nodes,"pageInfo":{"hasNextPage":false}}}}}}),
+        )
     }
 
     async fn get_json(&self, url: String, _: HashMap<String, String>) -> Result<Value, String> {

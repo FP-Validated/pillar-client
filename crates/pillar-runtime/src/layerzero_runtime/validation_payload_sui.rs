@@ -616,7 +616,7 @@ where
             json!({"kind":"PURE","pure":base64::engine::general_purpose::STANDARD.encode(bytes)})
         }
         SuiCallArg::Shared(object) => {
-            json!({"kind":"SHARED","objectId":format!("0x{}",hex::encode(object.object_id)),"initialSharedVersion":object.initial_shared_version.to_string(),"mutable":object.mutable})
+            json!({"kind":"SHARED","objectId":format!("0x{}",hex::encode(object.object_id)),"version":object.initial_shared_version.to_string(),"mutable":object.mutable})
         }
     };
     let encode_argument = |argument: &SuiArgument| match argument {

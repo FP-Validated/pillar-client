@@ -883,7 +883,7 @@ async fn runtime_rpc_validation_checks_sui_checkpoint_readiness() {
         calls: calls.clone(),
         responses: Arc::new(Mutex::new(vec![
             Ok(
-                json!({"data":{"transaction":{"effects":{"checkpoint":{"sequenceNumber":"7"},"status":"SUCCESS"}}}}),
+                json!({"data":{"transaction":{"digest":"sui-tx","sender":{"address":"0xs"},"transactionBcs":"AQI=","effects":{"checkpoint":{"sequenceNumber":"7"},"status":"SUCCESS"}}}}),
             ),
             Ok(json!({"data":{"checkpoints":{"nodes":[{"sequenceNumber":"50"}]}}})),
         ])),

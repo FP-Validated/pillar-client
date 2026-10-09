@@ -67,10 +67,10 @@
         "kind": {
           "programmableTransaction": {
             "inputs": [
-              {"kind":"SHARED","objectId":"0x8ebd7a0b102a5f7a3d4a08d84dd853fecc4ae0093be6eb02cf0d11dce7d4861f","initialSharedVersion":"635685319","mutable":false},
-              {"kind":"SHARED","objectId":"0x950f66ed27ec0a01a52bda147d74165d4cc20165f0cee0ecae6aaacde13d7741","initialSharedVersion":"635685319","mutable":false},
-              {"kind":"SHARED","objectId":"0xd45b6890fa030bcb43347c0c69a9e5a1a288d1ca7b86b428014752b472f6bf91","initialSharedVersion":"635685314","mutable":false},
-              {"kind":"SHARED","objectId":"0xbf58a7e5ddedee55e953bc38768a6a514de138317e5e1617e27767bf0892b084","initialSharedVersion":"918314621","mutable":false},
+              {"kind":"SHARED","objectId":"0x8ebd7a0b102a5f7a3d4a08d84dd853fecc4ae0093be6eb02cf0d11dce7d4861f","version":"635685319","mutable":false},
+              {"kind":"SHARED","objectId":"0x950f66ed27ec0a01a52bda147d74165d4cc20165f0cee0ecae6aaacde13d7741","version":"635685319","mutable":false},
+              {"kind":"SHARED","objectId":"0xd45b6890fa030bcb43347c0c69a9e5a1a288d1ca7b86b428014752b472f6bf91","version":"635685314","mutable":false},
+              {"kind":"SHARED","objectId":"0xbf58a7e5ddedee55e953bc38768a6a514de138317e5e1617e27767bf0892b084","version":"918314621","mutable":false},
               {"kind":"PURE","pure":"UQEAAAAAAAAAZAAAdZUAAAAAAAAAAAAAAADiSj3IiWIWEkIqZOY4iSeQFgi5HQAAdqqjVsogEPzfRNbOz87PGLc8MhiNNh453/OpasjeDex7Gw=="},
               {"kind":"PURE","pure":"IAEjRWeJq83vASNFZ4mrze8BI0VniavN7wEjRWeJq83v"}
             ],

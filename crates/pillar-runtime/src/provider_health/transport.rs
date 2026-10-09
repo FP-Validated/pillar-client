@@ -148,9 +148,8 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
             {
                 return limited_rpc(&target, self.post_json(url, headers, body)).await;
             }
-            let (method, query) = super::sui_graphql::request(&body).ok_or(
-                RpcError::Configuration("unsupported or malformed Sui JSON-RPC request"),
-            )?;
+            let (method, query) =
+                super::sui_graphql::request(&body).ok_or(RpcError::Unavailable)?;
             let response = limited_rpc(&target, self.post_json(url, headers, query)).await?;
             return Ok(super::sui_graphql::response(&method, response));
         }
@@ -162,17 +161,6 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         headers: HashMap<String, String>,
     ) -> Result<Value, RpcError> {
         let target = rpc_target_for_call()?;
-        if target.as_ref() == "sui" {
-            if let Some((endpoint, digest, query)) =
-                super::sui_graphql::transaction_sender_query(&url)
-            {
-                let response =
-                    limited_rpc(&target, self.post_json(endpoint, headers, query)).await?;
-                return Ok(super::sui_graphql::transaction_sender_response(
-                    &digest, response,
-                ));
-            }
-        }
         limited_rpc(&target, self.get_json(url, headers)).await
     }
     async fn post_text_scoped(
