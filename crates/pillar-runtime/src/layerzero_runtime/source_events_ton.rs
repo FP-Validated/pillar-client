@@ -628,13 +628,14 @@ fn flatten_cell_bytes(cell: &TonCell) -> Result<Vec<u8>, AppCoreError> {
 }
 
 fn flatten_bits(cell: &TonCell, bits: &mut Vec<bool>) -> Result<(), AppCoreError> {
-    let mut parser = cell.parser();
-    let count = parser.data_bits_left().map_err(ton_error)?;
-    for _ in 0..count {
-        bits.push(parser.read_bit().map_err(ton_error)?);
-    }
-    for child in cell.refs() {
-        flatten_bits(child, bits)?;
+    let mut current = Some(cell.clone());
+    while let Some(cell) = current {
+        let mut parser = cell.parser();
+        let count = parser.data_bits_left().map_err(ton_error)?;
+        for _ in 0..count {
+            bits.push(parser.read_bit().map_err(ton_error)?);
+        }
+        current = cell.refs().first().cloned();
     }
     Ok(())
 }
@@ -1034,5 +1035,22 @@ mod tests {
                 ),
             }
         }
+    }
+
+    #[test]
+    fn payload_flattening_follows_only_first_ref_and_handles_shared_dag() {
+        let mut leaf_builder = TonCell::builder();
+        leaf_builder.write_bit(true).unwrap();
+        let leaf = leaf_builder.build().unwrap();
+        let mut first_builder = TonCell::builder();
+        first_builder.write_bits([0b1000_0000], 2).unwrap();
+        first_builder.write_ref(leaf.clone()).unwrap();
+        let first = first_builder.build().unwrap();
+        let mut root_builder = TonCell::builder();
+        root_builder.write_bit(true).unwrap();
+        root_builder.write_ref(first).unwrap();
+        root_builder.write_ref(leaf).unwrap();
+        let root = root_builder.build().unwrap();
+        assert_eq!(flatten_cell_bytes(&root).unwrap(), vec![0b1101_0000]);
     }
 }

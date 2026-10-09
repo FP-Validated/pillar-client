@@ -149,8 +149,8 @@ mod tests {
     ///
     /// The three vectors are the cases where the cell encoding can go wrong
     /// without the others noticing: a normal single-cell message, an empty
-    /// message, and a 200-byte message that forces `hexToCells` to split on a
-    /// non byte-aligned 1023-bit boundary.
+    /// message, and a 200-byte message that forces `hexToCells` to split across
+    /// multiple byte-aligned 1016-bit cells.
     #[test]
     fn build_matches_gasolina_for_every_ton_vector() {
         let fixture: Value =

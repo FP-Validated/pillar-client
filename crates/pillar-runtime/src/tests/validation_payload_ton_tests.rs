@@ -843,7 +843,34 @@ async fn ton_quorum_lets_one_healthy_provider_outweigh_a_dead_one() {
         .await
         .expect("the one provider that answered says the payload is unsigned");
 }
-
+#[tokio::test(start_paused = true)]
+async fn ton_quorum_drops_provider_with_pruned_branch_storage() {
+    const PRUNED_BRANCH: &str = "te6ccgEBAQEAAwAoAgE=";
+    let checks = ton_quorum_checks(
+        vec![
+            (
+                "https://ton-malicious.example",
+                vec![
+                    address_information(EMPTY_CONNECTION),
+                    address_information(PRUNED_BRANCH),
+                ],
+            ),
+            (
+                "https://ton-honest.example",
+                vec![
+                    address_information(EMPTY_CONNECTION),
+                    address_information(ULN_STORAGE),
+                    committable_view(0),
+                ],
+            ),
+        ],
+        1,
+    );
+    checks
+        .validate_payload_not_signed(&ton_sent_event(), Some(CONFIGURED_VERIFIER), "ton")
+        .await
+        .expect("honest provider reaches quorum after the pruned-cell provider is dropped");
+}
 /// The mixed case the two buckets exist for: one provider reads the chain and
 /// reports a non-active contract, two others never answer.
 ///

@@ -11,7 +11,7 @@
 use base64::Engine;
 use pillar_core::AppCoreError;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use ton_core::cell::{BoC, CellBuilder, TonCell};
+use ton_core::cell::{BoC, CellBuilder, CellType, TonCell};
 use ton_core::types::TonAddress;
 
 pub fn builder() -> CellBuilder {
@@ -44,13 +44,25 @@ pub fn boc_from_bytes(bytes: Vec<u8>) -> Result<TonCell, AppCoreError> {
         return Err(map_err("invalid BOC header"));
     }
     catch_unwind(AssertUnwindSafe(|| {
-        BoC::from_bytes(std::sync::Arc::new(bytes))
+        let root = BoC::from_bytes(std::sync::Arc::new(bytes))
             .map_err(map_err)?
             .single_root()
-            .map_err(map_err)
+            .map_err(map_err)?;
+        let mut cells = vec![root.clone()];
+        while let Some(cell) = cells.pop() {
+            if cell.cell_type() != CellType::Ordinary || cell.level_mask().mask() != 0 {
+                return Err(map_err("exotic TON cells are not supported"));
+            }
+            cells.extend(cell.refs().iter().cloned());
+        }
+        root.hash().map_err(map_err)?;
+        root.depth().map_err(map_err)?;
+        Ok(root)
     }))
     .unwrap_or_else(|_| Err(map_err("BOC parser panicked")))
 }
+
+const MAX_BOC_CELLS: usize = 4096;
 
 fn boc_header_is_safe(bytes: &[u8]) -> bool {
     if bytes.len() < 10 || bytes[..4] != [0xb5, 0xee, 0x9c, 0x72] {
@@ -78,6 +90,7 @@ fn boc_header_is_safe(bytes: &[u8]) -> bool {
         return false;
     };
     if cells == 0
+        || cells > MAX_BOC_CELLS
         || cells > data_size / 2
         || roots == 0
         || roots.checked_add(absent).is_none_or(|n| n > cells)
@@ -235,5 +248,39 @@ mod tests {
                 "malformed BOC must fail without unwinding"
             );
         }
+    }
+    #[test]
+    fn rejects_pruned_branch_boc_without_panicking() {
+        let boc = [
+            0xb5, 0xee, 0x9c, 0x72, 1, 1, 1, 1, 0, 3, 0, 0x28, 0x02, 0x01,
+        ];
+        let result = catch_unwind(AssertUnwindSafe(|| boc_from_bytes(boc.to_vec())));
+        assert!(result.is_ok_and(|cell| cell.is_err()));
+    }
+
+    #[test]
+    fn rejects_cell_count_over_limit_in_header() {
+        let boc = [0xb5, 0xee, 0x9c, 0x72, 2, 1, 0x10, 0x01, 0, 0, 0, 0];
+        assert!(!boc_header_is_safe(&boc));
+    }
+    #[test]
+    fn refuses_a_chain_that_would_overflow_ton_cell_depth() {
+        let cell_count = u32::from(u16::MAX) as usize + 1;
+        let data_size = (cell_count - 1) * 5 + 2;
+        let mut boc = vec![
+            0xb5, 0xee, 0x9c, 0x72, 3, 3, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0x03, 0xff, 0xfe,
+        ];
+        boc.extend_from_slice(&[0, 0, 0]);
+        for index in 0..cell_count {
+            if index + 1 == cell_count {
+                boc.extend_from_slice(&[0, 0]);
+            } else {
+                boc.extend_from_slice(&[1, 0]);
+                let next = (index + 1) as u32;
+                boc.extend_from_slice(&next.to_be_bytes()[1..]);
+            }
+        }
+        assert_eq!(boc.len() - 21, data_size);
+        assert!(boc_from_bytes(boc).is_err());
     }
 }
