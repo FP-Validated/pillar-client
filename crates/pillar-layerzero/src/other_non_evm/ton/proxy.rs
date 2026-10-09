@@ -8,7 +8,7 @@
 
 use num_bigint::BigUint;
 
-use super::cell::{boc_from_base64, map_err};
+use super::cell::{boc_from_base64_with_limits, map_err, MAX_ACCOUNT_STATE_CELLS};
 use super::cl_declare::{cell_name, cl_get_ref};
 use pillar_core::AppCoreError;
 
@@ -19,7 +19,7 @@ const PROXY_NAME: &str = "pfProxy";
 /// cell (base64 BOC). Returns `None` when the cell is not a `Proxy` (the caller
 /// then falls back to the original DVN address, like `getImplementationContract`).
 pub fn decode_proxy_admin_target(storage_boc_base64: &str) -> Result<Option<String>, AppCoreError> {
-    let cell = boc_from_base64(storage_boc_base64)?;
+    let cell = boc_from_base64_with_limits(storage_boc_base64, MAX_ACCOUNT_STATE_CELLS, true)?;
     if cell_name(&cell)? != PROXY_NAME {
         return Ok(None);
     }
