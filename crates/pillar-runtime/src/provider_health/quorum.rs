@@ -201,6 +201,9 @@ where
     }
     let zero_successful = accumulator.successful_voter_count() == 0;
     let result = accumulator.finish(context);
+    if result.is_err() && !matches!(result, Err(AppCoreError::Admission(_))) {
+        tracing::error!(target: "pillar_runtime", "provider quorum not reached for {context}");
+    }
     result.map_err(|error| {
         if zero_successful && !matches!(error, AppCoreError::Admission(_)) {
             QuorumResolutionFailure::ZeroSuccessfulResponses
