@@ -305,13 +305,13 @@ fn provider_and_strategy_diagnostics_never_echo_input_keys_or_values() {
             format!(
                 r#"{{"default": {{"allOf": [{{"{SENTINEL}": "max"}}]}}, "restrictions": {{"minimumMaxEntities": 1}}}}"#
             ),
-            "RestrictionViolationError: category=<unlisted category>, resolved=0",
+            "<unlisted category>",
         ),
         (
             "strategy category key unsatisfiable",
             PROVIDERS.into(),
             format!(r#"{{"default": {{"allOf": [{{"{SENTINEL}": 1}}]}}}}"#),
-            r#"Strategy: {"allOf":[{"<unlisted category>":1}],"oneOf":[]}"#,
+            "<unlisted category>",
         ),
         (
             "syntax error after a value",
@@ -327,6 +327,71 @@ fn provider_and_strategy_diagnostics_never_echo_input_keys_or_values() {
     }
 }
 
+#[test]
+fn unknown_strategy_categories_are_rejected_in_defaults_and_overrides() {
+    for strategy in [
+        r#"{"default":{"allOf":[{"typo":0}]}}"#,
+        r#"{"default":{"allOf":[{"any":2}]},"chains":{"ethereum":{"rpc":{"oneOf":[{"typo":0}]}}}}"#,
+    ] {
+        let error = message(load(PROVIDERS, strategy));
+        assert!(error.contains("<unlisted category>"), "{error}");
+    }
+    assert!(load(PROVIDERS, r#"{"default":{"allOf":[{"any":1}]}}"#).is_ok());
+}
+#[test]
+fn misspelled_max_category_is_rejected_and_corrected_category_resolves() {
+    let providers = r#"{"entities":["op1","op2","alchemy"],"chains":{"ethereum":{"rpc":[
+      {"uri":"https://one.example","category":"internal","entity":"op1"},
+      {"uri":"https://two.example","category":"internal","entity":"op2"},
+      {"uri":"https://external.example","category":"dedicated_external","entity":"alchemy"}
+    ]}}}"#;
+    let error = message(load(
+        providers,
+        r#"{"default":{"allOf":[{"internal":"max"},{"dedicated-external":"max"}]}}"#,
+    ));
+    assert!(error.contains("<unlisted category>"), "{error}");
+    let loaded = load(
+        providers,
+        r#"{"default":{"allOf":[{"internal":"max"},{"dedicated_external":"max"}]}}"#,
+    )
+    .unwrap();
+    let resolved = &loaded.get_provider_configs()["ethereum"].strategy;
+    assert_eq!(
+        crate::provider_validation::canonical_strategy_key(resolved),
+        r#"{"allOf":[{"internal":2},{"dedicated_external":1}],"oneOf":[]}"#
+    );
+}
+#[test]
+fn unmatched_strategy_chain_and_endpoint_keys_warn_without_rejecting() {
+    #[derive(Clone)]
+    struct Writer(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+    impl std::io::Write for Writer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let logs = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let writer = Writer(logs.clone());
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(move || writer.clone())
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let strategy = r#"{"default":{"allOf":[{"any":1}]},"chains":{"ghost":{"rpc":{"allOf":[{"any":1}]}},"ethereum":{"rest":{"allOf":[{"any":1}]}}}}"#;
+    assert!(load(PROVIDERS, strategy).is_ok());
+    let logged = String::from_utf8(logs.lock().unwrap().clone()).unwrap();
+    assert!(
+        logged.contains("quorum strategy chain does not match"),
+        "{logged}"
+    );
+    assert!(
+        logged.contains("quorum strategy endpoint does not match"),
+        "{logged}"
+    );
+}
 #[test]
 fn any_is_a_separate_threshold_that_overlaps_category_slots() {
     // `internal: 1` plus `any: 2` is met by two entities, not three.

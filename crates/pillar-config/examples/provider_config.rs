@@ -100,7 +100,10 @@ fn convert(legacy: &str, labels: &str, out_dir: &str) -> Result<(), String> {
             }
             entries.push(Value::Object(entry));
         }
-        let quorum = config.get("quorum").and_then(Value::as_u64).unwrap_or(1);
+        let quorum = config
+            .get("quorum")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| format!("chain {chain}: missing legacy quorum"))?;
         chains.insert(chain.clone(), json!({ "rpc": entries }));
         strategies.insert(
             chain.clone(),
@@ -129,7 +132,7 @@ fn convert(legacy: &str, labels: &str, out_dir: &str) -> Result<(), String> {
     let providers = serde_json::to_string_pretty(&ProvidersFile { entities, chains })
         .map_err(|error| error.to_string())?;
     let strategy = serde_json::to_string_pretty(&StrategyFile {
-        default: json!({ "allOf": [{ "any": 1 }] }),
+        default: json!({ "allOf": [{ "any": 2 }] }),
         chains: strategies,
     })
     .map_err(|error| error.to_string())?;
@@ -187,5 +190,48 @@ fn summarize(loaded: &StaticProviderConfig) {
             },
             pool.join(", ")
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::convert;
+
+    #[test]
+    fn converter_writes_any_quorum_and_requires_legacy_quorum() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join("legacy.json");
+        let labels = dir.path().join("labels.json");
+        let out = dir.path().join("out");
+        std::fs::write(&legacy, r#"{"ethereum":{"uris":["https://one.example/rpc","https://two.example/rpc"],"quorum":2}}"#).unwrap();
+        std::fs::write(&labels, r#"{"one.example":{"category":"internal","entity":"operator"},"two.example":{"category":"shared_external","entity":"alchemy"}}"#).unwrap();
+        convert(
+            legacy.to_str().unwrap(),
+            labels.to_str().unwrap(),
+            out.to_str().unwrap(),
+        )
+        .unwrap();
+        let strategy = std::fs::read_to_string(out.join("quorum-strategy.json")).unwrap();
+        assert!(
+            strategy.contains(
+                r#""allOf": [
+      {
+        "any": 2"#
+            ),
+            "{strategy}"
+        );
+
+        std::fs::write(
+            &legacy,
+            r#"{"ethereum":{"uris":["https://one.example/rpc"]}}"#,
+        )
+        .unwrap();
+        let error = convert(
+            legacy.to_str().unwrap(),
+            labels.to_str().unwrap(),
+            out.to_str().unwrap(),
+        )
+        .unwrap_err();
+        assert!(error.contains("missing legacy quorum"), "{error}");
     }
 }

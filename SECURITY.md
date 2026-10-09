@@ -42,15 +42,9 @@ the first line of the report so it can be escalated before analysis.
 
 The following are deployment-side controls the software cannot enforce for you:
 
-- Keep `PILLAR_API_AUTH_TOKENS` secret and rotate it on staff changes. The
-  signing endpoints authorise on that token alone, unless you set
-  `PILLAR_PUBLIC_SIGN_ROUTES=true`, in which case they authorise no caller at
-  all: anyone who can reach the port can spend your signer. Set it only where
-  LayerZero DVN traffic must land, and keep the rate limiting and network
-  controls in front of it accordingly. `/signer-info`,
-  `/provider-health/report` and `/metrics` stay behind the token in both modes.
-- Never expose the service directly to the public internet. Terminate TLS in
-  front of it; the process speaks plain HTTP by design.
+- Keep `PILLAR_API_AUTH_TOKENS` secret and rotate it on staff changes. With `PILLAR_API_AUTH_ENABLED=true` (the default), signing routes require a configured token unless `PILLAR_PUBLIC_SIGN_ROUTES=true`; with auth disabled, all routes are open and tokens are optional. `PILLAR_PUBLIC_SIGN_ROUTES=true` also makes signing routes caller-anonymous: anyone who can reach the port can spend your signer. Set these options only where LayerZero DVN traffic must land, and keep rate limiting and network controls in front of it accordingly.
+- `/signer-info`, `/provider-health/report` and `/metrics` require a token only while API auth is enabled; they are unauthenticated when it is disabled.
+- Never expose the service directly to the public internet. Terminate TLS in front of it; the process speaks plain HTTP by design.
 - Use `SIGNER_TYPE=KMS` in production and scope the KMS key policy to this
   workload only. Mnemonic backends keep key material in process environment.
 - Rotate KMS keys by restarting replicas. Each signer resolves its key on first

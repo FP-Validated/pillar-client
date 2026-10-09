@@ -138,6 +138,29 @@ pub fn check_strategy_config_with_restrictions(
         ));
     };
     let mut errors = Vec::new();
+    for (source, strategy) in std::iter::once(("default", default)).chain(
+        strategy_file.chains.values().flat_map(|endpoints| {
+            endpoints
+                .values()
+                .map(|strategy| ("chain override", strategy))
+        }),
+    ) {
+        for requirement in strategy.all_of.iter().chain(&strategy.one_of) {
+            for category in requirement.keys() {
+                if !PROVIDER_CATEGORIES.contains(&category.as_str())
+                    && category != PROVIDER_CATEGORY_ANY
+                {
+                    errors.push(format!(
+                        "{source}: unlisted category {}",
+                        category_label(category)
+                    ));
+                }
+            }
+        }
+    }
+    if !errors.is_empty() {
+        return validation_result("Strategy config validation failed", errors);
+    }
     for (chain, endpoints) in &file.chains {
         for (endpoint, entries) in endpoints {
             let raw = strategy_file
@@ -713,6 +736,18 @@ pub fn provider_configs_from_v2(
             .collect(),
     };
     validate_provider_config(&file, &file.entities)?;
+    check_strategy_config_with_restrictions(&file, &strategy, &restrictions)?;
+    for (chain, endpoints) in &strategy.chains {
+        let Some(provider_endpoints) = providers.chains.get(chain) else {
+            tracing::warn!(target: "pillar_config", chain = chain_label(chain), "quorum strategy chain does not match a configured provider chain");
+            continue;
+        };
+        for endpoint in endpoints.keys() {
+            if !provider_endpoints.contains_key(endpoint) {
+                tracing::warn!(target: "pillar_config", chain = chain_label(chain), endpoint = endpoint_label(endpoint), "quorum strategy endpoint does not match a configured provider endpoint");
+            }
+        }
+    }
     check_strategy_config_with_restrictions(&file, &strategy, &restrictions)?;
     let resolved = precompute_resolved_strategy(&file, &strategy, &restrictions)
         .map_err(ConfigError::ProviderValidation)?;

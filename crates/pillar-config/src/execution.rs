@@ -62,11 +62,14 @@ fn number(
     default: usize,
     zero: bool,
 ) -> Result<usize, String> {
-    let value = map.get(name).map_or(Ok(default), |value| {
-        value
-            .parse::<usize>()
-            .map_err(|_| format!("invalid {name}"))
-    })?;
+    let value = map
+        .get(name)
+        .filter(|value| !value.is_empty())
+        .map_or(Ok(default), |value| {
+            value
+                .parse::<usize>()
+                .map_err(|_| format!("invalid {name}"))
+        })?;
     if (!zero && value == 0) || value > 1_000_000 {
         return Err(format!("invalid {name}: outside bounded range"));
     }
@@ -122,7 +125,10 @@ impl ExecutionLimits {
         if kms_key_concurrency > kms.active {
             return Err("invalid PILLAR_KMS_KEY_CONCURRENCY".into());
         }
-        let kms_lane_key_concurrency = match map.get("PILLAR_KMS_CHAIN_KEY_CONCURRENCY") {
+        let kms_lane_key_concurrency = match map
+            .get("PILLAR_KMS_CHAIN_KEY_CONCURRENCY")
+            .filter(|value| !value.is_empty())
+        {
             None => default_lane_resource_limit(kms_key_concurrency, kms.per_lane),
             Some(_) => {
                 let value = number(map, "PILLAR_KMS_CHAIN_KEY_CONCURRENCY", 0, false)?;
@@ -148,7 +154,11 @@ impl ExecutionLimits {
 }
 impl AuditConfig {
     pub fn from_map(map: &HashMap<String, String>) -> Result<Option<Self>, String> {
-        match map.get("PILLAR_AUDIT_ENABLED").map(String::as_str) {
+        match map
+            .get("PILLAR_AUDIT_ENABLED")
+            .filter(|value| !value.is_empty())
+            .map(String::as_str)
+        {
             None | Some("false") => return Ok(None),
             Some("true") => {}
             _ => return Err("PILLAR_AUDIT_ENABLED must be true or false".into()),
@@ -225,5 +235,17 @@ mod tests {
             Ok(1)
         );
         assert_eq!(ExecutionLimits::default().kms_lane_key_concurrency, 3);
+    }
+    #[test]
+    fn empty_execution_and_audit_environment_values_use_defaults() {
+        let vars = HashMap::from([
+            ("PILLAR_SIGN_CONCURRENCY".to_string(), String::new()),
+            ("PILLAR_AUDIT_ENABLED".to_string(), String::new()),
+        ]);
+        assert_eq!(
+            ExecutionLimits::from_map(&vars).unwrap(),
+            ExecutionLimits::default()
+        );
+        assert_eq!(AuditConfig::from_map(&vars).unwrap(), None);
     }
 }

@@ -247,6 +247,49 @@ fn single_gauge(rendered: &str, name: &str) -> f64 {
         .parse()
         .expect("gauge value")
 }
+#[tokio::test(start_paused = true)]
+async fn startup_single_entity_gauge_uses_the_local_serving_generation() {
+    const TWO_ENTITIES: &str =
+        r#"{"bsc":{"uris":["https://bsc-a.example","https://bsc-b.example"],"quorum":2}}"#;
+
+    for (fixture, expected) in [(SERVING, 1.0), (TWO_ENTITIES, 0.0)] {
+        let metrics = Arc::new(tokio::sync::Mutex::new(PillarMetrics::new()));
+        let provider_configs =
+            pillar_config::test_support::provider_configs_from_uris_json(fixture);
+        let providers = crate::provider_snapshot::ProviderSnapshotHandle::new(
+            provider_configs,
+            vec!["bsc".to_string()],
+        );
+        let mut vars = runtime_vars();
+        vars.insert(LZ_PROVIDER_CONFIG.to_string(), providers_json(fixture));
+        vars.insert(
+            LZ_QUORUM_STRATEGY_CONFIG.to_string(),
+            strategy_json(fixture),
+        );
+        let app = RuntimeServerApp::from_env_map_with_core_dependencies(
+            vars,
+            AlwaysOkTransport,
+            || 777,
+            core_dependencies(),
+            HashMap::from([("bsc".to_string(), "EVM".to_string())]),
+            RuntimeMode::Development,
+            Arc::new(ProviderRankTracker::new()),
+            None,
+            providers,
+            metrics.clone(),
+        )
+        .await
+        .unwrap();
+
+        let text = rendered(&metrics).await;
+        assert_eq!(
+            single_gauge(&text, "pillar_provider_single_entity_chains"),
+            expected,
+            "LOCAL startup must seed the gauge from the serving generation"
+        );
+        drop(app);
+    }
+}
 
 fn heartbeat_age(rendered: &str, task: &str) -> f64 {
     let prefix = format!("pillar_background_task_heartbeat_age_seconds{{task=\"{task}\"}} ");

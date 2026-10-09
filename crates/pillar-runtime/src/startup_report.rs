@@ -64,28 +64,41 @@ impl StartupReport {
         available_chain_names: &[String],
         mode: RuntimeMode,
     ) -> Result<Self, String> {
-        let configured_chains = available_chain_names
-            .iter()
-            .map(|chain_name| {
-                let config = provider_config
-                    .get_provider_config(chain_name)
-                    .ok_or_else(|| format!("missing provider config for {chain_name}"))?;
-                Ok(StartupChainReport {
-                    chain_name: chain_name.clone(),
-                    provider_count: config.uris.len(),
-                    quorum: pillar_config::provider_validation::canonical_strategy_key(
-                        &config.strategy,
-                    ),
-                    entities: config
-                        .voters
-                        .iter()
-                        .map(|voter| format!("{}/{}", voter.category, voter.entity))
-                        .collect(),
-                    single_provider_trust_root: config.single_entity_trust_root(),
-                    providers: config.uris.iter().map(redact_provider_uri).collect(),
+        let configured_chains =
+            available_chain_names
+                .iter()
+                .map(|chain_name| {
+                    let config = provider_config
+                        .get_provider_config(chain_name)
+                        .ok_or_else(|| format!("missing provider config for {chain_name}"))?;
+                    Ok(StartupChainReport {
+                        chain_name: chain_name.clone(),
+                        provider_count: config.uris.len(),
+                        quorum: pillar_config::provider_validation::canonical_strategy_key(
+                            &config.strategy,
+                        ),
+                        entities: config
+                            .voters
+                            .iter()
+                            .map(|voter| {
+                                format!(
+                                    "{}/{}",
+                                    voter.category,
+                                    if voter.entity.bytes().all(|byte| byte.is_ascii_alphanumeric()
+                                        || b"._-".contains(&byte))
+                                    {
+                                        voter.entity.as_str()
+                                    } else {
+                                        "<unlisted entity>"
+                                    }
+                                )
+                            })
+                            .collect(),
+                        single_provider_trust_root: config.single_entity_trust_root(),
+                        providers: config.uris.iter().map(redact_provider_uri).collect(),
+                    })
                 })
-            })
-            .collect::<Result<Vec<_>, String>>()?;
+                .collect::<Result<Vec<_>, String>>()?;
         let total_provider_count = configured_chains
             .iter()
             .map(|chain| chain.provider_count)
@@ -274,4 +287,42 @@ fn redacted_kms_key_ids(vars: &HashMap<String, String>, kms_provider: Option<&st
         .filter(|value| !value.is_empty())
         .map(|key_id| redact_kms_key_id(provider, key_id))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn startup_report_hides_undeclared_entity_labels() {
+        let vars = HashMap::from([
+            (pillar_config::SERVER_PORT.to_string(), "3000".to_string()),
+            (
+                pillar_config::PILLAR_API_AUTH_TOKENS.to_string(),
+                "test-token-0123456789abcdef0123456789".to_string(),
+            ),
+            (
+                pillar_config::LZ_PROVIDER_CONFIG_TYPE.to_string(),
+                "LOCAL".to_string(),
+            ),
+            (pillar_config::LZ_ENV.to_string(), "testnet".to_string()),
+        ]);
+        let runtime = load_from_map(vars.clone()).unwrap();
+        let providers = pillar_config::StaticProviderConfig::from_v2(
+            r#"{"entities":["unsafe entity label"],"chains":{"ethereum":{"rpc":[{"uri":"https://rpc.example","category":"internal","entity":"unsafe entity label"}]}}}"#,
+            r#"{"default":{"allOf":[{"any":1}]}}"#,
+            None,
+        ).unwrap();
+        let report = StartupReport::from_parts(
+            &vars,
+            &runtime,
+            &providers,
+            &["ethereum".to_string()],
+            RuntimeMode::Development,
+        )
+        .unwrap();
+        let output = report.to_string();
+        assert!(!output.contains("unsafe entity label"), "{output}");
+        assert!(output.contains("<unlisted entity>"), "{output}");
+    }
 }
