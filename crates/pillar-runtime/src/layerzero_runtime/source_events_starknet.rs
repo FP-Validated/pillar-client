@@ -1,3 +1,4 @@
+use super::packet_resolver::SourceEventConversion;
 use super::*;
 
 /// `hash.getSelectorFromName('PacketSent')` as upstream's filter renders it
@@ -99,17 +100,19 @@ pub(crate) fn starknet_packet_to_lz_sent_event(
     src_tx_hash: &str,
     event: StarknetPacketSentEvent,
     chain_name_by_eid: &HashMap<u32, String>,
-) -> Result<Option<LzSentEvent>, AppCoreError> {
+) -> Result<SourceEventConversion, AppCoreError> {
     let packet = event.packet;
-    let src_chain_name = chain_name_by_eid
-        .get(&packet.src_eid)
-        .cloned()
-        .ok_or_else(|| {
-            AppCoreError::Internal(format!("No chain name for endpoint id {}", packet.src_eid))
-        })?;
+    let src_chain_name = match chain_name_by_eid.get(&packet.src_eid).cloned() {
+        Some(name) => name,
+        None => {
+            return Ok(SourceEventConversion::SourceFault(AppCoreError::Internal(
+                format!("No chain name for endpoint id {}", packet.src_eid),
+            )))
+        }
+    };
     let dst_chain_name = match chain_name_for_packet_eid(chain_name_by_eid, packet.dst_eid) {
         Ok(name) => name,
-        Err(_) => return Ok(None),
+        Err(_) => return Ok(SourceEventConversion::NotOurs),
     };
     let options = hex::decode(strip_hex_prefix(&event.options))
         .map_err(|error| AppCoreError::Internal(error.to_string()))?;
@@ -128,7 +131,7 @@ pub(crate) fn starknet_packet_to_lz_sent_event(
         "packetEmitAddress".to_string(),
         Value::from(event.endpoint_address),
     );
-    Ok(Some(LzSentEvent {
+    Ok(SourceEventConversion::Converted(LzSentEvent {
         lz_message_id: LzMessageId {
             pathway_id: PathwayId {
                 src_chain_name,
