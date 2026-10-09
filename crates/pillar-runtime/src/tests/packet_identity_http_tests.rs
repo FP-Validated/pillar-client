@@ -126,7 +126,41 @@ async fn matching_trusted_event_signs_through_http() {
     assert_eq!(body["statusCode"], 200);
     assert_eq!(signer_calls.load(Ordering::SeqCst), 1);
 }
+struct FixedResolvedVersion(&'static str);
 
+#[async_trait]
+impl SentEventResolver for FixedResolvedVersion {
+    async fn get_lz_sent_event(
+        &self,
+        src_tx_hash: &str,
+        requested: &LzMessageId,
+    ) -> Result<LzSentEvent, AppCoreError> {
+        let mut event = FixedResolver
+            .get_lz_sent_event(src_tx_hash, requested)
+            .await?;
+        event.lz_message_id.uln_send_version = Value::from(self.0);
+        Ok(event)
+    }
+}
+
+#[tokio::test]
+async fn trusted_packet_resolved_with_a_different_uln_version_is_not_signed() {
+    let signer_calls = Arc::new(AtomicUsize::new(0));
+    let mut app = core_api_app();
+    app.core.sent_event_resolver = Arc::new(FixedResolvedVersion("V301"));
+    app.core.signer_getter = Arc::new(CountingSigner(signer_calls.clone()));
+    let router = pillar_api::router(app.with_public_sign_routes(true), "packet-version");
+    let (status, body) = post(router, &evm_packet_sent_request("V302")).await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(
+        body["body"].as_str().unwrap().contains(
+            "resolved PacketSent ULN version V301 does not match requested ULN version V302"
+        ),
+        "{body}"
+    );
+    assert_eq!(signer_calls.load(Ordering::SeqCst), 0);
+}
 /// Upstream's body: `JSON.stringify` of the Zod-parsed pathway, whose key order is
 /// the schema's (`common-model/src/v2/lzMessage.ts:78-85`). Spelled out, because
 /// `json!` would sort the keys.

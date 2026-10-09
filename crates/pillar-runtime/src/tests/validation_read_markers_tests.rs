@@ -446,6 +446,54 @@ async fn runtime_rpc_validation_checks_rejects_read_marker_confirmation_overflow
     assert!(error.to_string().contains("confirmation range overflow"));
 }
 
+#[derive(Clone)]
+struct ReadinessLatestTransport {
+    below_threshold_provider: bool,
+}
+
+#[async_trait]
+impl JsonRpcTransport for ReadinessLatestTransport {
+    async fn post_json(
+        &self,
+        url: String,
+        _headers: HashMap<String, String>,
+        body: Value,
+    ) -> Result<Value, String> {
+        let tag = body["params"][0].as_str().unwrap_or_default();
+        let block = match tag {
+            "latest" if url.contains("bsc-b") && self.below_threshold_provider => block_time(
+                75,
+                "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                1_700_000_099,
+            ),
+            "latest" if url.contains("bsc-a") => block_time(
+                76,
+                "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                1_700_000_100,
+            ),
+            "latest" => block_time(
+                77,
+                "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                1_700_000_101,
+            ),
+            "0x40" => block_time(64, BSC_BLOCK_64_HASH, 1_700_000_000),
+            "0x3f" => block_time(
+                63,
+                "0x3333333333333333333333333333333333333333333333333333333333333333",
+                1_699_999_999,
+            ),
+            other => return Err(format!("unexpected block tag {other}")),
+        };
+        Ok(block)
+    }
+    async fn get_json(
+        &self,
+        url: String,
+        _headers: HashMap<String, String>,
+    ) -> Result<Value, String> {
+        Err(format!("unexpected GET {url}"))
+    }
+}
 #[tokio::test]
 async fn runtime_readiness_votes_on_latest_confirmation_threshold_not_tip_identity() {
     let getter = StaticProviderConfig::new(
@@ -462,41 +510,37 @@ async fn runtime_readiness_votes_on_latest_confirmation_threshold_not_tip_identi
         Some(&["bsc".to_string()]),
     )
     .unwrap();
+    let context = read_command_signing_context(64, 1_700_000_000, 12);
+    let sent_event = read_command_sent_event(evm_read_command_with_block_marker());
     let checks = RuntimeRpcValidationChecks::from_getter(
         &ProviderSnapshotHandle::from_getter(&getter),
-        RecordingTransport {
-            calls: Arc::new(Mutex::new(Vec::new())),
-            responses: Arc::new(Mutex::new(vec![
-                Ok(block_time(64, BSC_BLOCK_64_HASH, 1_700_000_000)),
-                Ok(block_time(64, BSC_BLOCK_64_HASH, 1_700_000_000)),
-                Ok(block_time(64, BSC_BLOCK_64_HASH, 1_700_000_000)),
-                Ok(block_time(64, BSC_BLOCK_64_HASH, 1_700_000_000)),
-                Ok(block_time(64, BSC_BLOCK_64_HASH, 1_700_000_000)),
-                Ok(block_time(64, BSC_BLOCK_64_HASH, 1_700_000_000)),
-                Ok(block_time(
-                    76,
-                    "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-                    1_700_000_100,
-                )),
-                Ok(block_time(
-                    77,
-                    "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-                    1_700_000_101,
-                )),
-            ])),
+        ReadinessLatestTransport {
+            below_threshold_provider: false,
         },
     )
     .with_evm_chain_names(HashMap::from([(30_102, "bsc".to_string())]));
     let pins = checks
-        .validate_readiness(
-            &read_command_sent_event(evm_read_command_with_block_marker()),
-            &read_command_signing_context(64, 1_700_000_000, 12),
-        )
+        .validate_readiness(&sent_event, &context)
         .await
         .unwrap();
     assert_eq!(pins, vec![read_pin(64, BSC_BLOCK_64_HASH)]);
-}
 
+    let checks = RuntimeRpcValidationChecks::from_getter(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        ReadinessLatestTransport {
+            below_threshold_provider: true,
+        },
+    )
+    .with_evm_chain_names(HashMap::from([(30_102, "bsc".to_string())]));
+    let error = checks
+        .validate_readiness(&sent_event, &context)
+        .await
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("confirmation") || error.to_string().contains("quorum"),
+        "a provider below required block 76 must not satisfy any:2 readiness: {error}"
+    );
+}
 #[tokio::test]
 async fn runtime_rpc_validation_checks_rejects_non_evm_read_time_marker_chain() {
     let getter = StaticProviderConfig::new(
