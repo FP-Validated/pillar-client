@@ -456,3 +456,36 @@ Rollback 절차: `ovh-chain-repo`에서 `f9af3f9`를 revert하고 같은 방식�
 - 릴리스 커밋에서 fmt, clippy `-D warnings`, workspace test(1004 passed, 0 failed, 15 ignored), MSRV 1.94.1 check가 모두 통과했다.
 
 근거: 로컬 fmt/clippy/test/MSRV 실행, 변형 실행, 리뷰 반례 원시 출력 · 2026-10-09 17:00 KST. 운영 배포 절: hosted CI 로그와 artifact, crane digest, ArgoCD 상태, rollout과 pod image ID, 배포 전후 endpoint 비교 · 2026-10-09 17:45 KST. 2.6.0 릴리스 절: 릴리스 커밋의 로컬 fmt/clippy/test/MSRV 실행 · 2026-10-09 18:00 KST
+
+## 16. 2026-10-09 전체 리뷰
+
+2.6.0 문서 커밋 `548c691`을 기준으로 코드와 문서 전체를 라운드 단위로 리뷰했다. 라운드마다 영역별 독립 reviewer가 정적 검토와 upstream 1.2.66 로컬 사본 대조를 했다. 찾은 항목마다 회귀 테스트를 수정 전 코드에서 실패시키고 수정 후 통과시켰다. 다음 라운드는 직전 라운드의 수정과 그 주변을 다시 검토했고, 실질 항목이 나오지 않은 라운드에서 반복을 마쳤다. 라운드별 red/green 출력은 maintainer-local `.full-review-20261009/evidence/`에 있다.
+
+| 라운드 (검토 대상) | 영역 | 찾은 항목 | 조치 커밋 |
+| --- | --- | --- | --- |
+| 1 (`548c691`) | EVM readiness | receipt 재조회의 JSON-RPC `error`가 400으로 끝남, 실패한 read가 `Missing` 표로 `Sufficient`를 막음, `polygon`/`tron` confirmation 문구, MPT block 조회 형식과 source evidence가 없는 요청, TON readiness의 기준 hash | `7a2c33f` |
+| 1 | READ와 payload | `ReadV1002`가 ReadLib1002에 없는 `getUlnConfig`를 호출함, READ readiness가 provider 간 latest block 완전 일치를 요구함, timestamp marker의 `blockConfirmation`, READ 응답 `payload` 형식, extra-context `onChainEvent` 값, 해석된 ULN version 비교 | `07fb5ed`, `937a3a6` |
+| 1 | 비EVM | Sui event paging(`last: 50`), Sui digest 비교, Stellar 결과 fingerprint, IOTA event 순서와 paging, Stellar ScVal 크기와 깊이, TON BoC cell 수 선할당, ULNv2 refresh 범위 계산 | `93853af`, `759f10a` |
+| 1 | 설정, CI, image | 정의되지 않은 strategy category, provider와 맞지 않는 strategy key, refresh의 single-entity strategy, generated table digest, CI container job 순서와 provenance, image의 `curl`, 문서와 코드의 불일치 | `45af150`, `6ab8872`, `4e7711a`, `cd82438` |
+| 1 | Signer와 audit | durable audit quota, `/ready` audit probe, mnemonic seed 재유도, 중간값 zeroize | `5763ada` |
+| 2 (`b04a0d9`) | Readiness | 비EVM family에서 provider 실패가 `Missing` 표가 됨 | `469f12d`, `b27333e` |
+| 2 | 비EVM | Stellar ScVal variant 19와 20의 길이, Stellar `G…`/`C…` `dvnAddress`, Solana `options` 형식, Sui cursor | `f656cfb`, `af2eaef`, `2ddecd8` |
+| 2 | TON | BoC parsing과 message cell 분할 크기 | `cd8b10a` |
+| 2 | 설정, signer, CLI | chain type이 다른 mnemonic wallet의 chain 배정, Secrets Manager 기본 region, 연결 수명 도달 시 응답 종료 | `99f22de`, `f5ab404` |
+| 2 | READ와 audit | READ 서명 호환(빈 resolved payload 등), audit capacity flag, 라운드 1의 packet 단위 quota가 `srcTxHash` 표기 변형과 64회 상한으로 특정 packet을 막을 수 있음 | `5258287`, `86046cd`, `810692b` |
+| 3 (`8c43be0`) | Readiness | zero-voter quorum에서 admission 오류 보존, Move/Starknet/Stellar의 형식이 깨진 200 응답, Solana `null` 응답 | `4779729`, `d39168c`, `c947674`, `e33af25` |
+| 3 | TON과 Solana | exotic cell과 level mask, root hash/depth 계산의 panic, cell 수 상한, 첫 ref chain 읽기, Solana `options` decode 오류 전파, `vec-c` 출처 표기 | `c73a93f`, `eed8be4` |
+| 3 | Signer, 설정, CLI | 두 seed 종류의 BIP-39 검사, wallet이 배정되지 않는 chain, header 시간을 포함한 IO 상한, Secrets Manager region 순서 | `f6bbf6b` |
+| 3 | 문서 | README, SECURITY, AUDIT의 동작 기술 | `754de71`, `06f80f1` |
+| 4 (`06f80f1`) | TON | BoC 검사 순회가 공유 cell을 tree로 펼쳐 작은 DAG BoC(40 cell, 247 byte)에서 반환하지 않음, 단일 4,096 cell 상한이 `hashLookups`가 큰 UlnConnection storage를 거부함, trace body의 exotic cell 거부 | `0589720` |
+| 4 | Readiness와 설정 | Aptos ledger-version 경로의 형식이 깨진 block 응답, `http://[::1]` provider URI 경고 | `91337ea` |
+| 4 | 문서 | 이 절의 참조, EVM `null` receipt의 400, Solana `options` 적용 범위, strategy key 경고 시점, quorum vote error log, READ 오류 문구 | `9411227` |
+
+라운드 중 내린 결정은 다음과 같다.
+- Durable audit quota는 문서화된 per-attempt 방식이다. 같은 packet의 재전송도 quota를 쓰므로 SECURITY는 audit을 켤 때 signing route에 인증이나 edge rate limit을 두도록 안내한다.
+- Solana `dvnAddress`는 base58만 받는다. Upstream이 payload-signed 검증에서 hex를 `new PublicKey`로 거부하므로 라운드 1의 hex 수용을 라운드 2에서 되돌렸다.
+- Starknet receipt fingerprint의 projection은 유지했다. Provider 사이에 비교 대상 receipt 필드가 다르게 오는 근거가 없었다.
+- TON message cell 분할은 upstream 1.2.66 `common-ton/src/cells.ts`의 1016-bit 분할을 따른다. `ton_dvn_verify.json`의 `vec-c`는 이 저장소의 builder가 계산한 값이다.
+- TON BoC cell 상한은 mainnet config param 43(toncenter `getConfigParam` 읽기)의 값을 쓴다. Account storage는 `max_acc_state_cells` 65,536, message와 trace body는 `max_msg_cells` 8,192다. 측정한 mainnet storage는 UlnConnection 15 cell, Uln 532 cell, UlnManager 1,223 cell이고, attestation 600 nonce의 connection storage fixture도 이 상한 안에서 읽힌다.
+
+§15 F-5 행의 동작은 이 리뷰에서 바뀌었다. Readiness receipt 재조회의 RPC 실패는 `Missing` 표로 세지 않고 표에서 뺀다(`7a2c33f`, `4779729`). EVM에서 성공한 provider가 없을 때의 응답은 F-5와 같은 500 `Transaction receipt or block not found for <tx>`다.

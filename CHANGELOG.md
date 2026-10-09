@@ -19,7 +19,7 @@ the Prometheus metric names.
 
 ### Security
 
-- TON provider BoC는 하나의 parser로 읽는다. 이 parser는 header, root index, `has_idx` 크기와 선언된 cell 수(최대 4,096)를 먼저 검사하고, exotic cell과 0이 아닌 level mask를 거부하며, root hash와 depth 계산까지 panic 없이 오류로 바꾼다. 잘못된 BoC를 보낸 provider는 자기 표만 잃는다.
+- TON provider BoC는 하나의 parser로 읽는다. 이 parser는 header, root index, `has_idx` 크기와 선언된 cell 수를 먼저 검사하고(config param 43에 따라 account storage는 65,536개, message와 trace body는 8,192개까지), root hash와 depth를 panic 없이 계산하며, 고유 cell 기준으로 graph를 검사한다. Storage와 controller가 보낸 event/packet decode는 exotic cell과 0이 아닌 level mask를 거부하고, trace fingerprint는 exotic body를 받는다. 잘못된 BoC를 보낸 provider는 자기 표만 잃는다.
 - TON message bit는 upstream `cellsToHex`처럼 첫 ref chain만 따라 읽는다.
 - TON readiness는 resolution quorum이 합의한 `PacketSent` 트랜잭션의 masterchain seqno에서 confirmation을 센다.
 - Sui GraphQL과 IotaL1 transaction 조회는 요청한 digest와 다른 응답에 표를 주지 않는다.
@@ -64,7 +64,7 @@ the Prometheus metric names.
 
 ### Audit
 
-- 2026-10-09 전체 리뷰(라운드 1~3)와 조치, 검증 결과는 [AUDIT](AUDIT.md)의 §16에 있다.
+- 2026-10-09 전체 리뷰의 라운드별 항목, 조치와 검증 결과는 [AUDIT](AUDIT.md)의 §16에 있다.
 - `ton_dvn_verify.json`의 `vec-c`는 1.2.66 `hexToCells`의 1016-bit 분할을 따르며, 값은 이 저장소의 builder가 계산한다.
 - Durable audit quota는 문서화된 per-attempt 방식을 유지한다.
 
