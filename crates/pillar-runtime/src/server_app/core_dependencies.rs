@@ -1,5 +1,31 @@
 use super::*;
 
+fn warn_mainnet_provider_uris(provider_config: &impl ProviderConfigGetter, chain_names: &[String]) {
+    for chain_name in chain_names {
+        if provider_config
+            .get_provider_config(chain_name)
+            .is_some_and(|config| {
+                config.uris.iter().any(|provider| {
+                    let uri = match provider {
+                        pillar_config::ProviderUri::Uri(uri)
+                        | pillar_config::ProviderUri::UriWithHeaders { uri, .. } => uri,
+                    };
+                    reqwest::Url::parse(uri).map_or(true, |url| {
+                        url.scheme() != "https"
+                            && !(url.scheme() == "http"
+                                && url
+                                    .host_str()
+                                    .and_then(|host| host.parse::<std::net::IpAddr>().ok())
+                                    .is_some_and(|ip| ip.is_loopback()))
+                    })
+                })
+            })
+        {
+            tracing::warn!(chain = %chain_name, "mainnet provider config contains a non-HTTPS RPC URI");
+        }
+    }
+}
+
 impl<T> RuntimeServerApp<T>
 where
     T: JsonRpcTransport,
@@ -96,6 +122,10 @@ where
                     .map(|_| chain_name.as_str())
             })
             .collect::<Vec<_>>();
+        metrics
+            .lock()
+            .await
+            .set_provider_single_entity_chains(single_provider_chains.len());
         if !single_provider_chains.is_empty() {
             tracing::warn!(
                 target: "pillar_runtime",
@@ -104,29 +134,7 @@ where
             );
         }
         if runtime_config.environment.as_deref() == Some("mainnet") {
-            for chain_name in &available_chain_names {
-                if provider_config
-                    .get_provider_config(chain_name)
-                    .is_some_and(|config| {
-                        config.uris.iter().any(|provider| {
-                            let uri = match provider {
-                                pillar_config::ProviderUri::Uri(uri)
-                                | pillar_config::ProviderUri::UriWithHeaders { uri, .. } => uri,
-                            };
-                            reqwest::Url::parse(uri).map_or(true, |url| {
-                                url.scheme() != "https"
-                                    && !(url.scheme() == "http"
-                                        && url
-                                            .host_str()
-                                            .and_then(|host| host.parse::<std::net::IpAddr>().ok())
-                                            .is_some_and(|ip| ip.is_loopback()))
-                            })
-                        })
-                    })
-                {
-                    tracing::warn!(chain = %chain_name, "mainnet provider config contains a non-HTTPS RPC URI");
-                }
-            }
+            warn_mainnet_provider_uris(&provider_config, &available_chain_names);
         }
         let signing_app = core_api_app_from_runtime_parts(RuntimeCoreAppParts {
             runtime_config: runtime_config.clone(),
@@ -256,5 +264,47 @@ where
             metrics,
         )
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[derive(Clone)]
+    struct Buffer(Arc<parking_lot::Mutex<Vec<u8>>>);
+    impl Write for Buffer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn mainnet_http_provider_uri_emits_a_warning() {
+        let raw = r#"{"bsc":{"uris":["http://bsc-rpc.example"],"quorum":1}}"#;
+        let config = pillar_config::StaticProviderConfig::new(
+            pillar_config::test_support::provider_configs_from_uris_json(raw),
+            None,
+        )
+        .unwrap();
+        let logs = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let writer = Buffer(logs.clone());
+        let _guard = tracing::subscriber::set_default(
+            tracing_subscriber::fmt()
+                .with_writer(move || writer.clone())
+                .finish(),
+        );
+        warn_mainnet_provider_uris(&config, &["bsc".to_string()]);
+        let output = String::from_utf8(logs.lock().clone()).unwrap();
+        assert!(
+            output.contains("mainnet provider config contains a non-HTTPS RPC URI"),
+            "{output}"
+        );
+        assert!(output.contains("bsc"), "{output}");
     }
 }

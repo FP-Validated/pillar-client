@@ -288,3 +288,41 @@ fn redacted_kms_key_ids(vars: &HashMap<String, String>, kms_provider: Option<&st
         .map(|key_id| redact_kms_key_id(provider, key_id))
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn startup_report_hides_undeclared_entity_labels() {
+        let vars = HashMap::from([
+            (pillar_config::SERVER_PORT.to_string(), "3000".to_string()),
+            (
+                pillar_config::PILLAR_API_AUTH_TOKENS.to_string(),
+                "test-token-0123456789abcdef0123456789".to_string(),
+            ),
+            (
+                pillar_config::LZ_PROVIDER_CONFIG_TYPE.to_string(),
+                "LOCAL".to_string(),
+            ),
+            (pillar_config::LZ_ENV.to_string(), "testnet".to_string()),
+        ]);
+        let runtime = load_from_map(vars.clone()).unwrap();
+        let providers = pillar_config::StaticProviderConfig::from_v2(
+            r#"{"entities":["unsafe entity label"],"chains":{"ethereum":{"rpc":[{"uri":"https://rpc.example","category":"internal","entity":"unsafe entity label"}]}}}"#,
+            r#"{"default":{"allOf":[{"any":1}]}}"#,
+            None,
+        ).unwrap();
+        let report = StartupReport::from_parts(
+            &vars,
+            &runtime,
+            &providers,
+            &["ethereum".to_string()],
+            RuntimeMode::Development,
+        )
+        .unwrap();
+        let output = report.to_string();
+        assert!(!output.contains("unsafe entity label"), "{output}");
+        assert!(output.contains("<unlisted entity>"), "{output}");
+    }
+}

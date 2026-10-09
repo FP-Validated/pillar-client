@@ -319,6 +319,19 @@ async fn apply_refreshed_snapshot(
             let candidate = serving.candidate(snapshot.get_provider_configs().clone());
             match accept_refreshed_snapshot(&candidate, requested_csv) {
                 Ok(()) => {
+                    let weakened = candidate
+                        .available_chain_names()
+                        .iter()
+                        .filter(|chain| {
+                            candidate
+                                .get_provider_config(chain)
+                                .is_some_and(|config| config.single_entity_trust_root())
+                        })
+                        .collect::<Vec<_>>();
+                    if !weakened.is_empty() {
+                        tracing::warn!(target: "pillar_runtime", chains = ?weakened, "provider config refresh accepted chains whose quorum can be met by a single entity");
+                    }
+                    metrics.set_provider_single_entity_chains(weakened.len());
                     serving.publish(candidate);
                     metrics.record_provider_config_refresh("ok");
                     metrics.record_provider_config_success();
@@ -576,6 +589,38 @@ mod tests {
             "a usable refresh has to actually take effect"
         );
         assert!(metrics.contains(r#"result="ok""#), "{metrics}");
+    }
+    #[tokio::test]
+    async fn refresh_reports_single_entity_quorum_with_a_gauge_and_warning() {
+        const TWO: &str =
+            r#"{"bsc":{"uris":["https://bsc-a.example","https://bsc-b.example"],"quorum":2}}"#;
+        const ONE: &str = r#"{"bsc":{"uris":["https://bsc-a.example"],"quorum":1}}"#;
+        let logs = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let writer = LogBuffer(logs.clone());
+        let _subscriber = tracing::subscriber::set_default(
+            tracing_subscriber::fmt()
+                .with_writer(move || writer.clone())
+                .finish(),
+        );
+        let serving = owner_serving(TWO);
+        let registry = Arc::new(Mutex::new(PillarMetrics::new()));
+        let weakened = refresh_with(&serving, &registry, Ok(refreshed_snapshot(ONE))).await;
+        assert!(weakened.contains("# HELP pillar_provider_single_entity_chains Number of configured provider chains whose quorum can be met by a single entity."), "{weakened}");
+        assert_eq!(
+            rendered_gauge(&weakened, "pillar_provider_single_entity_chains"),
+            1.0
+        );
+        assert!(String::from_utf8(logs.lock().clone())
+            .unwrap()
+            .contains("bsc"));
+
+        let serving = owner_serving(TWO);
+        let registry = Arc::new(Mutex::new(PillarMetrics::new()));
+        let unchanged = refresh_with(&serving, &registry, Ok(refreshed_snapshot(TWO))).await;
+        assert_eq!(
+            rendered_gauge(&unchanged, "pillar_provider_single_entity_chains"),
+            0.0
+        );
     }
 
     #[tokio::test]

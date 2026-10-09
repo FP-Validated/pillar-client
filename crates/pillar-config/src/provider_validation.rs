@@ -737,6 +737,18 @@ pub fn provider_configs_from_v2(
     };
     validate_provider_config(&file, &file.entities)?;
     check_strategy_config_with_restrictions(&file, &strategy, &restrictions)?;
+    for (chain, endpoints) in &strategy.chains {
+        let Some(provider_endpoints) = providers.chains.get(chain) else {
+            tracing::warn!(target: "pillar_config", chain = chain_label(chain), "quorum strategy chain does not match a configured provider chain");
+            continue;
+        };
+        for endpoint in endpoints.keys() {
+            if !provider_endpoints.contains_key(endpoint) {
+                tracing::warn!(target: "pillar_config", chain = chain_label(chain), endpoint = endpoint_label(endpoint), "quorum strategy endpoint does not match a configured provider endpoint");
+            }
+        }
+    }
+    check_strategy_config_with_restrictions(&file, &strategy, &restrictions)?;
     let resolved = precompute_resolved_strategy(&file, &strategy, &restrictions)
         .map_err(ConfigError::ProviderValidation)?;
     let mut configs = ProviderConfigs::new();

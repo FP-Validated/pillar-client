@@ -20,10 +20,12 @@ thiserror.workspace = true
 url.workspace = true
 zeroize.workspace = true
 pillar-core = { path = "../pillar-core" }
+tracing.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
 tempfile = "3"
+tracing-subscriber.workspace = true
 
 [features]
 # Fixture constructors for dependent crates' tests; never enabled by a production build.

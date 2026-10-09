@@ -19,6 +19,7 @@ const SIGN_STAGE_DURATION_BUCKETS: &[f64] = &[0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2
 
 pub struct PillarMetrics {
     http_requests_total: CounterMetric,
+    provider_single_entity_chains: GaugeMetric,
     http_request_duration_seconds: HistogramMetric,
     build_info: GaugeMetric,
     sign_stage_duration_seconds: HistogramMetric,
@@ -97,6 +98,10 @@ impl PillarMetrics {
             provider_config_refresh_total: CounterMetric::new(
                 "pillar_provider_config_refresh_total",
                 "Provider config refresh outcomes recorded by Pillar.",
+            ),
+            provider_single_entity_chains: GaugeMetric::new(
+                "pillar_provider_single_entity_chains",
+                "Number of configured provider chains whose quorum can be met by a single entity.",
             ),
             provider_config_age_seconds: DerivedAgeGauge::single(
                 "pillar_provider_config_age_seconds",
@@ -183,6 +188,10 @@ impl PillarMetrics {
             IndexMap::from([("result".to_string(), result.to_string())]),
             1.0,
         );
+    }
+    pub fn set_provider_single_entity_chains(&mut self, count: usize) {
+        self.provider_single_entity_chains
+            .set(IndexMap::new(), count as f64);
     }
 
     /// Stamps a successful provider config load. The age itself is computed
@@ -296,6 +305,7 @@ impl PillarMetrics {
         }
         lines.extend(self.sign_stage_duration_seconds.render());
         lines.extend(self.provider_config_refresh_total.render());
+        lines.extend(self.provider_single_entity_chains.render());
         lines.extend(self.provider_config_age_seconds.render());
         lines.extend(self.background_task_heartbeat_age_seconds.render());
         lines.extend(self.signer_errors_total.render());
