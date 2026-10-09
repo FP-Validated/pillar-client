@@ -390,6 +390,43 @@ mod tests {
         )
         .unwrap()
     }
+    fn multi_key_dict(entries: &[([u8; 32], TonCell)], depth: usize) -> TonCell {
+        let mut common = 256 - depth;
+        for (key, _) in &entries[1..] {
+            let first = &entries[0].0;
+            common = (0..common)
+                .take_while(|offset| {
+                    let bit = depth + offset;
+                    (first[bit / 8] >> (7 - bit % 8)) & 1 == (key[bit / 8] >> (7 - bit % 8)) & 1
+                })
+                .count();
+        }
+        let mut node = builder();
+        node.write_bit(false).unwrap();
+        for _ in 0..common {
+            node.write_bit(true).unwrap();
+        }
+        node.write_bit(false).unwrap();
+        for offset in 0..common {
+            let bit = depth + offset;
+            node.write_bit((entries[0].0[bit / 8] >> (7 - bit % 8)) & 1 == 1)
+                .unwrap();
+        }
+        if entries.len() == 1 {
+            node.write_ref(entries[0].1.clone()).unwrap();
+        } else {
+            let branch = depth + common;
+            let split = entries
+                .iter()
+                .position(|(key, _)| (key[branch / 8] >> (7 - branch % 8)) & 1 == 1)
+                .unwrap();
+            node.write_ref(multi_key_dict(&entries[..split], branch + 1))
+                .unwrap();
+            node.write_ref(multi_key_dict(&entries[split..], branch + 1))
+                .unwrap();
+        }
+        build(node).unwrap()
+    }
 
     /// Real TON mainnet `UlnConnection` storage, read from toncenter
     /// `getAddressInformation` for
@@ -755,5 +792,52 @@ mod tests {
             dvn_attestation(&storage, &default, 7, &addr(0xaa), &addr(0x77)).unwrap(),
             DvnAttestation::Absent
         );
+    }
+    #[test]
+    fn connection_storage_with_600_attested_nonces_exceeds_legacy_cap() {
+        use super::super::cell::MAX_ACCOUNT_STATE_CELLS;
+        use base64::Engine;
+        use ton_core::cell::BoC;
+
+        let verifiers = [addr(0xaa), addr(0xbb)];
+        let attested_verifiers = [
+            addr(0x11),
+            addr(0xaa),
+            addr(0xbb),
+            addr(0xcc),
+            addr(0xdd),
+            addr(0xee),
+            addr(0xff),
+        ];
+        let mut nonces = Vec::with_capacity(600);
+        for nonce in 1..=600 {
+            let per_verifier = attested_verifiers
+                .iter()
+                .enumerate()
+                .map(|(index, verifier)| {
+                    (
+                        *verifier,
+                        attestation(&addr((nonce as u8).wrapping_add(index as u8))),
+                    )
+                })
+                .collect::<Vec<_>>();
+            nonces.push((nonce_key(nonce), multi_key_dict(&per_verifier, 0)));
+        }
+        let hash_lookups = multi_key_dict(&nonces, 0);
+        let storage = connection_storage(hash_lookups, receive_config(Some(&verifiers), Some(&[])));
+        let boc = BoC::new(storage).to_base64(true).unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&boc)
+            .unwrap();
+        let count = usize::from(bytes[6]) * 256 + usize::from(bytes[7]);
+        assert!(count > 4096, "fixture uses {count} cells");
+        assert!(count < MAX_ACCOUNT_STATE_CELLS);
+        assert!(super::super::cell::boc_from_base64_with_limits(&boc, 4096, true).is_err());
+        assert!(super::super::cell::boc_from_base64_with_limits(
+            &boc,
+            MAX_ACCOUNT_STATE_CELLS,
+            true,
+        )
+        .is_ok());
     }
 }

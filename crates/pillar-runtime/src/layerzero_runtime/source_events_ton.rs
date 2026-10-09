@@ -264,7 +264,12 @@ fn ton_message_digest(transaction: &Value, message: &Value) -> Option<String> {
     if !boc_checksum_holds(&bytes) {
         return None;
     }
-    let root = pillar_layerzero::boc_from_bytes(bytes).ok()?;
+    let root = pillar_layerzero::boc_from_bytes_with_limits(
+        bytes,
+        pillar_layerzero::MAX_MESSAGE_CELLS,
+        false,
+    )
+    .ok()?;
     // `_message.opcode ? BigInt(_message.opcode) : -1`, so JS-falsy values are -1.
     let opcode = match message.get("opcode") {
         None | Some(Value::Null) | Some(Value::Bool(false)) => None,
@@ -647,7 +652,58 @@ fn ton_error(error: impl std::fmt::Display) -> AppCoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine;
+    fn repeated_ref_dag_boc() -> Vec<u8> {
+        let mut boc = vec![0xb5, 0xee, 0x9c, 0x72, 1, 1, 40, 1, 0, 236, 0];
+        for index in 0..40 {
+            if index == 39 {
+                boc.extend_from_slice(&[0, 0]);
+            } else {
+                boc.extend_from_slice(&[4, 0]);
+                boc.extend_from_slice(&[(index + 1) as u8; 4]);
+            }
+        }
+        boc
+    }
 
+    #[test]
+    fn trace_fingerprint_accepts_repeated_reference_dag_body() {
+        let body = base64::engine::general_purpose::STANDARD.encode(repeated_ref_dag_boc());
+        let tree = serde_json::json!({
+            "transaction": {
+                "in_msg": { "message_content": { "body": body } }
+            },
+            "children": []
+        });
+        assert!(ton_trace_quorum_fingerprint(&tree).is_some());
+    }
+    #[test]
+    fn trace_fingerprint_accepts_merkle_proof_body_on_non_layerzero_message() {
+        use ton_core::cell::{BoC, CellType, TonCell};
+
+        let child = TonCell::empty().clone();
+        let mut proof_builder = TonCell::builder_extra(CellType::MerkleProof, 64);
+        proof_builder.write_num(&3u8, 8).unwrap();
+        proof_builder
+            .write_bits(child.hash().unwrap(), 256)
+            .unwrap();
+        proof_builder
+            .write_num(&child.depth().unwrap(), 16)
+            .unwrap();
+        proof_builder.write_ref(child).unwrap();
+        let proof = proof_builder.build().unwrap();
+        let body = BoC::new(proof).to_base64(true).unwrap();
+        let tree = serde_json::json!({
+            "transaction": {
+                "in_msg": {
+                    "opcode": "1",
+                    "message_content": { "body": body }
+                }
+            },
+            "children": []
+        });
+        assert!(ton_trace_quorum_fingerprint(&tree).is_some());
+    }
     #[test]
     fn canonicalizes_friendly_ton_addresses() {
         assert_eq!(

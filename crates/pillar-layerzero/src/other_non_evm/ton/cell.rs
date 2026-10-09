@@ -40,7 +40,26 @@ pub fn boc_from_base64(data: &str) -> Result<TonCell, AppCoreError> {
 }
 
 pub fn boc_from_bytes(bytes: Vec<u8>) -> Result<TonCell, AppCoreError> {
-    if !boc_header_is_safe(&bytes) {
+    boc_from_bytes_with_limits(bytes, MAX_MESSAGE_CELLS, true)
+}
+
+pub fn boc_from_base64_with_limits(
+    data: &str,
+    max_cells: usize,
+    reject_exotic: bool,
+) -> Result<TonCell, AppCoreError> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .map_err(map_err)?;
+    boc_from_bytes_with_limits(bytes, max_cells, reject_exotic)
+}
+
+pub fn boc_from_bytes_with_limits(
+    bytes: Vec<u8>,
+    max_cells: usize,
+    reject_exotic: bool,
+) -> Result<TonCell, AppCoreError> {
+    if !boc_header_is_safe(&bytes, max_cells) {
         return Err(map_err("invalid BOC header"));
     }
     catch_unwind(AssertUnwindSafe(|| {
@@ -48,23 +67,31 @@ pub fn boc_from_bytes(bytes: Vec<u8>) -> Result<TonCell, AppCoreError> {
             .map_err(map_err)?
             .single_root()
             .map_err(map_err)?;
+        root.hash().map_err(map_err)?;
+        root.depth().map_err(map_err)?;
         let mut cells = vec![root.clone()];
+        let mut visited = std::collections::HashSet::new();
         while let Some(cell) = cells.pop() {
-            if cell.cell_type() != CellType::Ordinary || cell.level_mask().mask() != 0 {
+            let hash = cell.hash().map_err(map_err)?.clone();
+            if !visited.insert(hash) {
+                continue;
+            }
+            if reject_exotic
+                && (cell.cell_type() != CellType::Ordinary || cell.level_mask().mask() != 0)
+            {
                 return Err(map_err("exotic TON cells are not supported"));
             }
             cells.extend(cell.refs().iter().cloned());
         }
-        root.hash().map_err(map_err)?;
-        root.depth().map_err(map_err)?;
         Ok(root)
     }))
     .unwrap_or_else(|_| Err(map_err("BOC parser panicked")))
 }
 
-const MAX_BOC_CELLS: usize = 4096;
+pub const MAX_MESSAGE_CELLS: usize = 1 << 13;
+pub const MAX_ACCOUNT_STATE_CELLS: usize = 1 << 16;
 
-fn boc_header_is_safe(bytes: &[u8]) -> bool {
+fn boc_header_is_safe(bytes: &[u8], max_cells: usize) -> bool {
     if bytes.len() < 10 || bytes[..4] != [0xb5, 0xee, 0x9c, 0x72] {
         return false;
     }
@@ -90,7 +117,7 @@ fn boc_header_is_safe(bytes: &[u8]) -> bool {
         return false;
     };
     if cells == 0
-        || cells > MAX_BOC_CELLS
+        || cells > max_cells
         || cells > data_size / 2
         || roots == 0
         || roots.checked_add(absent).is_none_or(|n| n > cells)
@@ -261,10 +288,18 @@ mod tests {
     #[test]
     fn rejects_cell_count_over_limit_in_header() {
         let mut boc = vec![
-            0xb5, 0xee, 0x9c, 0x72, 2, 2, 0x10, 0x01, 0, 1, 0, 0, 0x20, 0x02, 0, 0,
+            0xb5, 0xee, 0x9c, 0x72, 2, 2, 0x20, 0x01, 0, 1, 0, 0, 0x40, 0x02, 0, 0,
         ];
-        boc.resize(16 + 0x2002, 0);
-        assert!(!boc_header_is_safe(&boc));
+        boc.resize(16 + 0x4002, 0);
+        assert!(!boc_header_is_safe(&boc, MAX_MESSAGE_CELLS));
+    }
+    #[test]
+    fn rejects_account_state_cell_count_over_protocol_limit() {
+        let mut boc = vec![
+            0xb5, 0xee, 0x9c, 0x72, 3, 3, 0x01, 0x00, 0x01, 0, 0, 1, 0, 0, 0, 2, 0, 2, 0, 0, 0,
+        ];
+        boc.resize(21 + 0x2_0002, 0);
+        assert!(!boc_header_is_safe(&boc, MAX_ACCOUNT_STATE_CELLS));
     }
     #[test]
     fn refuses_a_chain_that_would_overflow_ton_cell_depth() {
@@ -285,5 +320,19 @@ mod tests {
         }
         assert_eq!(boc.len() - 21, data_size);
         assert!(boc_from_bytes(boc).is_err());
+    }
+    #[test]
+    fn validates_repeated_reference_dag_in_linear_time() {
+        let mut boc = vec![0xb5, 0xee, 0x9c, 0x72, 1, 1, 40, 1, 0, 236, 0];
+        for index in 0..40 {
+            if index == 39 {
+                boc.extend_from_slice(&[0, 0]);
+            } else {
+                boc.extend_from_slice(&[4, 0]);
+                boc.extend_from_slice(&[(index + 1) as u8; 4]);
+            }
+        }
+        assert_eq!(boc.len(), 247);
+        assert!(boc_from_bytes(boc).is_ok());
     }
 }

@@ -28,9 +28,9 @@ use super::validation_payload::payload_signed_validation_result;
 use super::*;
 
 use pillar_layerzero::{
-    boc_from_base64, committable_view_is_signed, dvn_attestation, ton_address_to_be32,
+    boc_from_base64_with_limits, committable_view_is_signed, dvn_attestation, ton_address_to_be32,
     ton_boc_to_base64, ton_payload_signed_targets, uln_default_receive_config, DvnAttestation,
-    TonContractCodeCells, TonPayloadSignedRequest, TonStorageCell,
+    TonContractCodeCells, TonPayloadSignedRequest, TonStorageCell, MAX_ACCOUNT_STATE_CELLS,
 };
 
 /// The per-pathway contract inputs an observation needs.
@@ -306,10 +306,12 @@ where
     if !ton_boc_cell_count_fits(data) {
         return Ok(TonStorageRead::Unavailable);
     }
-    Ok(match boc_from_base64(data) {
-        Ok(cell) => TonStorageRead::Cell(data.to_string(), cell),
-        Err(_) => TonStorageRead::Unavailable,
-    })
+    Ok(
+        match boc_from_base64_with_limits(data, MAX_ACCOUNT_STATE_CELLS, true) {
+            Ok(cell) => TonStorageRead::Cell(data.to_string(), cell),
+            Err(_) => TonStorageRead::Unavailable,
+        },
+    )
 }
 
 fn ton_boc_cell_count_fits(encoded: &str) -> bool {
@@ -355,7 +357,9 @@ fn ton_boc_cell_count_fits(encoded: &str) -> bool {
     let Some(data_end) = data_start.checked_add(total_size) else {
         return false;
     };
-    total_size >= cells.saturating_mul(2) && data_end <= bytes.len()
+    cells <= MAX_ACCOUNT_STATE_CELLS
+        && total_size >= cells.saturating_mul(2)
+        && data_end <= bytes.len()
 }
 
 /// `provider.v2.getView(address, 'committableView', args)`: the returned stack's
