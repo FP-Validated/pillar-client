@@ -831,14 +831,7 @@ async fn reqwest_http_full_consumer_enforces_read_data_and_provider_quorum() {
                     result.body["body"]["debugInfo"]["details"]["proof"]["resolvedPayload"], "",
                     "the HTTP fixture must exercise the empty resolved-payload fallback"
                 );
-                let expected_payload = request_payload
-                    .strip_prefix("0x")
-                    .unwrap_or(request_payload);
-                assert_eq!(result.body["body"]["payload"], expected_payload);
-                assert!(!result.body["body"]["payload"]
-                    .as_str()
-                    .unwrap()
-                    .starts_with("0x"));
+                assert_eq!(result.body["body"]["payload"], request_payload);
             }
             assert_eq!(
                 result

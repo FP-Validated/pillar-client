@@ -50,10 +50,10 @@ fn solana_public_key_decodes_base58_like_sdk() {
 }
 
 #[test]
-fn solana_public_key_accepts_equivalent_0x_hex() {
+fn solana_public_key_rejects_equivalent_0x_hex() {
     let base58 = public_key_bytes(SOLANA_ULN_PROGRAM_ID).unwrap();
     let hex = format!("0x{}", hex::encode(base58));
-    assert_eq!(public_key_bytes(&hex).unwrap(), base58);
+    assert!(public_key_bytes(&hex).is_err());
 }
 
 #[test]

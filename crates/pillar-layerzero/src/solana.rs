@@ -264,13 +264,9 @@ pub fn solana_message_library_address(program_id: &str) -> Result<String, AppCor
 }
 
 pub(crate) fn public_key_bytes(value: &str) -> Result<[u8; 32], AppCoreError> {
-    let bytes = if let Some(hex) = value.strip_prefix("0x") {
-        hex::decode(hex).map_err(|error| AppCoreError::Internal(error.to_string()))?
-    } else {
-        bs58::decode(value)
-            .into_vec()
-            .map_err(|error| AppCoreError::Internal(error.to_string()))?
-    };
+    let bytes = bs58::decode(value)
+        .into_vec()
+        .map_err(|error| AppCoreError::Internal(error.to_string()))?;
     if bytes.len() != 32 {
         return Err(AppCoreError::Internal(format!(
             "invalid Solana public key length: {}",
