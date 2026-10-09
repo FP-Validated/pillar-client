@@ -25,16 +25,24 @@ fn pillar_stricter(name: &str, digest: &str) -> Option<String> {
 #[derive(Clone)]
 struct ScriptedSui {
     events: Value,
+    /// A provider URL fragment whose reads fail, so only the others can vote.
+    unavailable_at: Option<&'static str>,
 }
 
 #[async_trait]
 impl JsonRpcTransport for ScriptedSui {
     async fn post_json(
         &self,
-        _: String,
+        url: String,
         _: HashMap<String, String>,
         body: Value,
     ) -> Result<Value, String> {
+        if self
+            .unavailable_at
+            .is_some_and(|unavailable| url.contains(unavailable))
+        {
+            return Err("provider unavailable".to_string());
+        }
         if body.get("query").and_then(Value::as_str).is_none() {
             assert!(
                 body["method"].as_str().unwrap().starts_with("iota"),
@@ -83,6 +91,7 @@ fn scripted_resolver(
         &ProviderSnapshotHandle::from_getter(&providers),
         ScriptedSui {
             events: events.clone(),
+            unavailable_at: None,
         },
         config.packet_sent_resolver_config,
     )
@@ -162,4 +171,88 @@ async fn sui_source_events_match_gasolina() {
     // Eight version/encoding refusals across both chains, plus the Sui GraphQL digit-string one.
     assert_eq!(stricter_refused, 9);
     assert_eq!(dst_name_refused, 11);
+}
+
+/// Two URLs of one entity agreeing on the events are one vote, as on every quorum read.
+#[tokio::test]
+async fn sui_events_from_two_urls_of_one_entity_do_not_meet_a_two_entity_quorum() {
+    use pillar_config::provider_validation::{
+        ProviderVoter, Quorum, QuorumStrategy, PROVIDER_CATEGORY_ANY,
+    };
+
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let environment = fixture["environment"].as_str().unwrap();
+    let digest = fixture["digest"].as_str().unwrap();
+    let scenario = fixture["scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|scenario| scenario["chain"] == "sui" && scenario["name"] == "V302 match")
+        .unwrap();
+    let request: LzMessageId = serde_json::from_value(scenario["request"].clone()).unwrap();
+    let config =
+        runtime_evm_layerzero_config(environment, &["sui".to_string(), "ethereum".to_string()])
+            .unwrap();
+    let resolve = |entities: [(&str, &str); 3]| {
+        let voters = entities
+            .iter()
+            .map(|(category, entity)| ProviderVoter {
+                category: category.to_string(),
+                entity: entity.to_string(),
+            })
+            .collect();
+        let pool = ProviderConfig::new(
+            ["sui-a", "sui-b", "sui-unavailable"]
+                .iter()
+                .map(|host| ProviderUri::Uri(format!("https://{host}.example/")))
+                .collect(),
+            voters,
+            QuorumStrategy {
+                all_of: vec![std::collections::BTreeMap::from([(
+                    PROVIDER_CATEGORY_ANY.to_string(),
+                    Quorum::Count(2),
+                )])],
+                one_of: Vec::new(),
+            },
+        )
+        .unwrap();
+        let providers = StaticProviderConfig::new(
+            indexmap::IndexMap::from([("sui".to_string(), pool)]),
+            Some(&["sui".to_string()]),
+        )
+        .unwrap();
+        EvmPacketSentResolver::new(
+            &ProviderSnapshotHandle::from_getter(&providers),
+            ScriptedSui {
+                events: scenario["response"].clone(),
+                unavailable_at: Some("sui-unavailable"),
+            },
+            config.packet_sent_resolver_config.clone(),
+        )
+    };
+
+    let distinct = resolve([
+        ("shared_external", "alchemy"),
+        ("internal", "operator"),
+        ("shared_external", "quicknode"),
+    ]);
+    distinct
+        .get_lz_sent_event(digest, &request)
+        .await
+        .expect("two distinct entities meet any:2");
+
+    let one_entity = resolve([
+        ("shared_external", "alchemy"),
+        ("shared_external", "alchemy"),
+        ("internal", "operator"),
+    ]);
+    let error = one_entity
+        .get_lz_sent_event(digest, &request)
+        .await
+        .expect_err("two URLs of one entity cannot meet any:2");
+    assert!(
+        matches!(&error, AppCoreError::Internal(message)
+            if message.starts_with("No Sui transaction events quorum")),
+        "{error:?}"
+    );
 }

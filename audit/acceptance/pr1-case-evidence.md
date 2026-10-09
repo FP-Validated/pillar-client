@@ -40,4 +40,12 @@
 - 최종 HTTP artifact: maintainer-local audit/review-re003-20261009/final-20261009-064136-kst/http-results.json, schema 3, SHA-256 ad84d144a8f69d0de2d0502635bd4cb4e44252fdcbfef5754b5c340dc65142d3. sign_stage_observation_count와 stage_observations는 stage 관측 값이다.
 - 독립 검토: maintainer-local audit/review-re003-20261009/independent-review-followup.json, SHA-256 267fc2bfcd436649035f18cb6198da66a9ac31962ec122ded393297be25603ca. 상세 재현 범위는 [AUDIT](../../AUDIT.md)의 §14에 있다.
 
-근거: JSON 원장, 최종 HTTP artifact와 독립 검토의 대조 · 2026-10-09 07:21 KST
+## 저장소 안의 case 테스트 (2026-10-09)
+
+이전 artifact 경로 `retest-250-20261007/...`는 maintainer-local 기록이며 현재 저장소에서 다시 실행할 수 없다. 기록 자체는 바꾸지 않는다. 각 stable case ID를 CI가 실행하는 커밋된 테스트에 연결했다. 목록은 [JSON 원장](./pr1-case-evidence.json)의 `inRepoCaseTests`에 있다.
+
+- 기준 커밋은 `abe9d60`이고, 이 항목을 추가한 `fix/client-review-20261009` 커밋의 작업 트리에서 `cargo +1.98.1 test --workspace --locked`를 실행했다. 결과는 1004 passed, 0 failed, 15 ignored다.
+- B3 테스트는 provider마다 다른 receipt를 받는다. Receipt fingerprint를 raw JSON으로 되돌린 변형에서 새 테스트는 `2 distinct successful responses`로 실패했다. 같은 변형에서 이전의 라운드 기반 테스트는 통과했다.
+- 이 연결은 현재 회귀 테스트다. 원본 351 comparisons의 같은 case baseline 재생이 아니므로 case별 `verified`는 `false`로 유지한다.
+
+근거: JSON 원장, 최종 HTTP artifact와 독립 검토의 대조 · 2026-10-09 07:21 KST. 저장소 안의 case 테스트 절: 로컬 workspace 테스트와 변형 검증 · 2026-10-09 16:59 KST

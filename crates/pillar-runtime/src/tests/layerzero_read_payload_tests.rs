@@ -390,6 +390,114 @@ async fn runtime_evm_read_payload_resolver_fails_without_exact_result_quorum() {
     assert!(error.to_string().contains("No ReadV1002 eth_call quorum"));
 }
 
+/// Answers by provider URL fragment, so which provider failed does not depend on call order.
+#[derive(Clone)]
+struct ReadByProvider(Vec<(&'static str, Result<Value, String>)>);
+
+#[async_trait]
+impl JsonRpcTransport for ReadByProvider {
+    async fn post_json(
+        &self,
+        url: String,
+        _headers: HashMap<String, String>,
+        _body: Value,
+    ) -> Result<Value, String> {
+        self.0
+            .iter()
+            .find(|(provider, _)| url.contains(provider))
+            .map(|(_, response)| response.clone())
+            .unwrap_or_else(|| Err(format!("unexpected provider {url}")))
+    }
+
+    async fn get_json(
+        &self,
+        _url: String,
+        _headers: HashMap<String, String>,
+    ) -> Result<Value, String> {
+        Err("unexpected GET".to_string())
+    }
+}
+
+async fn resolve_read_with_entities(entities: [(&str, &str); 3]) -> Result<String, AppCoreError> {
+    use pillar_config::provider_validation::{
+        ProviderVoter, Quorum, QuorumStrategy, PROVIDER_CATEGORY_ANY,
+    };
+
+    let pool = ProviderConfig::new(
+        ["read-a", "read-b", "read-unavailable"]
+            .iter()
+            .map(|host| ProviderUri::Uri(format!("https://{host}.example")))
+            .collect(),
+        entities
+            .iter()
+            .map(|(category, entity)| ProviderVoter {
+                category: category.to_string(),
+                entity: entity.to_string(),
+            })
+            .collect(),
+        QuorumStrategy {
+            all_of: vec![std::collections::BTreeMap::from([(
+                PROVIDER_CATEGORY_ANY.to_string(),
+                Quorum::Count(2),
+            )])],
+            one_of: Vec::new(),
+        },
+    )
+    .unwrap();
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([("bsc".to_string(), pool)]),
+        Some(&["bsc".to_string()]),
+    )
+    .unwrap();
+    let resolver = RuntimeEvmReadPayloadResolver::new(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        ReadByProvider(vec![
+            ("read-a", eth_call_result("0x1234")),
+            ("read-b", eth_call_result("0x1234")),
+            ("read-unavailable", Err("provider unavailable".to_string())),
+        ]),
+        HashMap::from([(30_102, "bsc".to_string())]),
+    );
+    let mut sent_event = read_command_sent_event(evm_read_command_with_block_marker());
+    sent_event.read_block_pins = bsc_read_block_pins();
+    resolver
+        .resolve_payload(
+            &sent_event,
+            &SigningContext::Read {
+                expiration: 123,
+                skip_v_id: None,
+                dvn_address: None,
+                resolved_timestamp_time_markers: Vec::new(),
+            },
+        )
+        .await
+}
+
+#[tokio::test]
+async fn runtime_evm_read_payload_resolver_counts_two_urls_of_one_entity_as_one_vote() {
+    let resolved = resolve_read_with_entities([
+        ("shared_external", "alchemy"),
+        ("internal", "operator"),
+        ("shared_external", "quicknode"),
+    ])
+    .await
+    .expect("two distinct entities meet any:2");
+    assert_eq!(resolved, "0x1234");
+
+    let error = resolve_read_with_entities([
+        ("shared_external", "alchemy"),
+        ("shared_external", "alchemy"),
+        ("internal", "operator"),
+    ])
+    .await
+    .expect_err("two URLs of one entity cannot meet any:2");
+    assert!(
+        matches!(&error, AppCoreError::Internal(message)
+            if message.contains("No ReadV1002 eth_call quorum")),
+        "{error:?}"
+    );
+}
+
 #[tokio::test]
 async fn runtime_evm_read_payload_resolver_uses_resolved_timestamp_marker() {
     let calls = Arc::new(Mutex::new(Vec::new()));

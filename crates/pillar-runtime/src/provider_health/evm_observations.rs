@@ -68,17 +68,12 @@ where
             ))
         })
         .transpose()?;
+    // A failed receipt read is an unavailable provider (Missing below), not a changed source.
     let source_binding_error = source_evidence.and_then(|evidence| {
         receipt_response
             .as_ref()
-            .err()
-            .map(ToString::to_string)
-            .or_else(|| {
-                receipt_response
-                    .as_ref()
-                    .ok()
-                    .and_then(|receipt| validate_receipt_binding(receipt, evidence, tx_hash).err())
-            })
+            .ok()
+            .and_then(|receipt| validate_receipt_binding(receipt, evidence, tx_hash).err())
     });
     if let Some(reason) = source_binding_error {
         return Ok(BlockConfirmationObservation {
