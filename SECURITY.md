@@ -99,8 +99,8 @@ The following are deployment-side controls the software cannot enforce for you:
   is a deliberate divergence from upstream gasolina, which still uses `sui_*` and
   `suix_*` JSON-RPC, forced by Sui Foundation's decommission of fullnode JSON-RPC.
   GraphQL errors, null data and JSON-RPC error envelopes are provider failures:
-  they never vote on events, transactions or objects, and where readiness and
-  timestamp checks record missing data they count as `Missing`, as any unavailable
+  they never vote on events, transactions, objects or readiness, and in timestamp
+  checks they count as `Missing`, as any unavailable
   provider does. Providers observed unhealthy are dispatched last instead of
   dropped. A live mainnet capture showed that `simulateTransaction` still succeeds
   with a wrong shared `version`, so that field is advisory (fixture:
