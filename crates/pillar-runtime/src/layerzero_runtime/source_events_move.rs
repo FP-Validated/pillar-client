@@ -467,6 +467,12 @@ where
             transaction
         }
     };
+    if transaction.get("type").and_then(Value::as_str) == Some("pending_transaction") {
+        return Ok(BlockConfirmationObservation {
+            validity: BlockConfirmationValidity::Missing,
+            current_confirmations: None,
+        });
+    }
     let tx_height = if chain_name == "initia" {
         transaction
             .get("height")
@@ -474,8 +480,9 @@ where
             .or_else(|| {
                 transaction
                     .get("height")
-                    .and_then(Value::as_str)
-                    .and_then(|v| v.parse().ok())
+                    .and_then(Value::as_str)?
+                    .parse()
+                    .ok()
             })
     } else {
         let version = ledger_version.clone().unwrap_or_else(|| {
@@ -489,15 +496,12 @@ where
                 })
                 .unwrap_or_default()
         });
-        // Fail closed when the provider's `version` is not usable as a path
-        // segment: no URL is built, so the observation is simply absent and the
-        // caller's quorum logic treats it like any other provider that could not
-        // answer.
+        // A provider's malformed version is a provider failure, not a meaningful
+        // not-yet-confirmed observation; do not build a block URL from it.
         let Some(url) = move_block_by_version_url(&base, &version) else {
-            return Ok(BlockConfirmationObservation {
-                validity: BlockConfirmationValidity::Missing,
-                current_confirmations: None,
-            });
+            return Err(RpcError::Remote(
+                "Move transaction response is missing a usable version".to_string(),
+            ));
         };
         let block = super::validation_readiness::readiness_response(
             transport.get_json_scoped(url, headers.clone()).await,
@@ -514,10 +518,15 @@ where
             })
     };
     let Some(tx_height) = tx_height else {
-        return Ok(BlockConfirmationObservation {
-            validity: BlockConfirmationValidity::Missing,
-            current_confirmations: None,
-        });
+        if transaction.is_null() {
+            return Ok(BlockConfirmationObservation {
+                validity: BlockConfirmationValidity::Missing,
+                current_confirmations: None,
+            });
+        }
+        return Err(RpcError::Remote(
+            "Move transaction response is missing a usable height or version".to_string(),
+        ));
     };
     let latest = super::validation_readiness::readiness_response(
         transport
@@ -548,10 +557,9 @@ where
             })
     };
     let Some(current_height) = current_height else {
-        return Ok(BlockConfirmationObservation {
-            validity: BlockConfirmationValidity::Missing,
-            current_confirmations: None,
-        });
+        return Err(RpcError::Remote(
+            "Move latest-block response is missing a usable height".to_string(),
+        ));
     };
     if tx_height < 0 || current_height < 0 {
         return Ok(BlockConfirmationObservation {

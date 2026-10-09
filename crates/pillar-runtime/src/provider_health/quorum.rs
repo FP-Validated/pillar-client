@@ -202,7 +202,7 @@ where
     let zero_successful = accumulator.successful_voter_count() == 0;
     let result = accumulator.finish(context);
     result.map_err(|error| {
-        if zero_successful {
+        if zero_successful && !matches!(error, AppCoreError::Admission(_)) {
             QuorumResolutionFailure::ZeroSuccessfulResponses
         } else {
             QuorumResolutionFailure::Other(error)
@@ -647,5 +647,60 @@ mod tests {
             error.to_string().contains("Not enough healthy providers"),
             "two healthy URLs of one entity cannot meet any:2: {error}"
         );
+    }
+
+    #[tokio::test]
+    async fn zero_voter_signal_preserves_admission_errors() {
+        type Outcome = (usize, Result<Option<(String, ())>, RpcError>);
+        type Request = std::future::Ready<Outcome>;
+        let config = pool(uris(2), 2);
+
+        let admissions = FuturesUnordered::<Request>::new();
+        admissions.push(std::future::ready((
+            0,
+            Err(RpcError::Admission(
+                pillar_core::execution::BudgetError::Overloaded,
+            )),
+        )));
+        admissions.push(std::future::ready((
+            1,
+            Err(RpcError::Admission(
+                pillar_core::execution::BudgetError::Deadline,
+            )),
+        )));
+        assert!(matches!(
+            resolve_provider_quorum_with_zero_signal(admissions, 2, rule(&config), "test").await,
+            Err(QuorumResolutionFailure::Other(AppCoreError::Admission(_)))
+        ));
+
+        let remotes = FuturesUnordered::<Request>::new();
+        remotes.push(std::future::ready((
+            0,
+            Err(RpcError::Remote("offline".into())),
+        )));
+        remotes.push(std::future::ready((
+            1,
+            Err(RpcError::Remote("offline".into())),
+        )));
+        assert!(matches!(
+            resolve_provider_quorum_with_zero_signal(remotes, 2, rule(&config), "test").await,
+            Err(QuorumResolutionFailure::ZeroSuccessfulResponses)
+        ));
+
+        let mixed = FuturesUnordered::<Request>::new();
+        mixed.push(std::future::ready((
+            0,
+            Err(RpcError::Admission(
+                pillar_core::execution::BudgetError::WaitExpired,
+            )),
+        )));
+        mixed.push(std::future::ready((
+            1,
+            Err(RpcError::Remote("offline".into())),
+        )));
+        assert!(matches!(
+            resolve_provider_quorum_with_zero_signal(mixed, 2, rule(&config), "test").await,
+            Err(QuorumResolutionFailure::Other(AppCoreError::Admission(_)))
+        ));
     }
 }

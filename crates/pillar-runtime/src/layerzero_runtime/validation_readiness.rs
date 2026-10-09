@@ -676,21 +676,30 @@ where
         }),
     );
     let (receipt_response, current_response) = tokio::join!(receipt, current);
-    let receipt_block = Some(readiness_response(receipt_response)?).and_then(|response| {
-        let result = response.get("result")?;
-        let hash = result.get("block_hash")?.as_str()?.to_string();
-        let number = result
-            .get("block_number")
-            .and_then(numeric_response)?
-            .parse::<i64>()
-            .ok()?;
-        Some((hash, number))
-    });
-    let current_block = Some(readiness_response(current_response)?)
-        .and_then(|response| response.get("result").and_then(numeric_response))
-        .and_then(|value| value.parse::<i64>().ok());
-    let (Some((receipt_hash, receipt_number)), Some(current_number)) =
-        (receipt_block, current_block)
+    let receipt_response = readiness_response(receipt_response)?;
+    let receipt_block = match receipt_response.get("result") {
+        None | Some(Value::Null) => None,
+        Some(result) => match result.get("block_hash").and_then(Value::as_str) {
+            None => None,
+            Some(hash) => {
+                let number = result
+                    .get("block_number")
+                    .and_then(numeric_response)
+                    .and_then(|value| value.parse::<i64>().ok())
+                    .ok_or_else(|| {
+                        RpcError::Remote("Malformed Starknet receipt block_number".to_string())
+                    })?;
+                Some((hash.to_string(), number))
+            }
+        },
+    };
+    let current_response = readiness_response(current_response)?;
+    let current_block = current_response
+        .get("result")
+        .and_then(numeric_response)
+        .and_then(|value| value.parse::<i64>().ok())
+        .ok_or_else(|| RpcError::Remote("Malformed Starknet block number".to_string()))?;
+    let (Some((receipt_hash, receipt_number)), current_number) = (receipt_block, current_block)
     else {
         return Ok(BlockConfirmationObservation {
             validity: BlockConfirmationValidity::Missing,
@@ -761,25 +770,34 @@ where
         }),
     );
     let (transaction_response, latest_response) = tokio::join!(transaction, latest);
-    let transaction_ledger = Some(readiness_response(transaction_response)?).and_then(|response| {
-        let result = response.get("result")?;
-        (result.get("status").and_then(Value::as_str) == Some("SUCCESS")).then(|| {
-            result
-                .get("ledger")
-                .and_then(numeric_response)?
-                .parse::<i64>()
-                .ok()
-        })?
-    });
-    let current_ledger = Some(readiness_response(latest_response)?).and_then(|response| {
-        response
-            .get("result")
-            .and_then(|result| result.get("sequence"))
-            .and_then(numeric_response)
-            .and_then(|value| value.parse::<i64>().ok())
-    });
-    let (Some(transaction_ledger), Some(current_ledger)) = (transaction_ledger, current_ledger)
-    else {
+    let transaction_response = readiness_response(transaction_response)?;
+    let transaction_ledger = match transaction_response.get("result") {
+        None | Some(Value::Null) => None,
+        Some(result) => match result.get("status").and_then(Value::as_str) {
+            Some("NOT_FOUND") | Some("FAILED") => None,
+            Some("SUCCESS") => Some(
+                result
+                    .get("ledger")
+                    .and_then(numeric_response)
+                    .and_then(|value| value.parse::<i64>().ok())
+                    .ok_or_else(|| {
+                        RpcError::Remote("Malformed Stellar transaction ledger".to_string())
+                    })?,
+            ),
+            _ => {
+                return Err(RpcError::Remote(
+                    "Malformed Stellar transaction status".to_string(),
+                ))
+            }
+        },
+    };
+    let current_ledger = readiness_response(latest_response)?
+        .get("result")
+        .and_then(|result| result.get("sequence"))
+        .and_then(numeric_response)
+        .and_then(|value| value.parse::<i64>().ok())
+        .ok_or_else(|| RpcError::Remote("Malformed Stellar ledger sequence".to_string()))?;
+    let Some(transaction_ledger) = transaction_ledger else {
         return Ok(BlockConfirmationObservation {
             validity: BlockConfirmationValidity::Missing,
             current_confirmations: None,
