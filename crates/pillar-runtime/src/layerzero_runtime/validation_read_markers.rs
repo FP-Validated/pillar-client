@@ -70,13 +70,13 @@ where
                 .ok_or_else(|| {
                     AppCoreError::BadRequest("block confirmation range overflow".to_string())
                 })?;
-            if !self
+            let (confirmation_satisfied, latest_block_number) = self
                 .block_confirmation_satisfied_with_quorum(&marker.chain_name, required_block_number)
-                .await?
-            {
+                .await?;
+            if !confirmation_satisfied {
                 return Err(AppCoreError::BadRequest(format!(
                     "Block confirmation for chainName {} for time marker is greater than current block number: {} > {}",
-                    marker.chain_name, required_block_number, "latest"
+                    marker.chain_name, required_block_number, latest_block_number
                 )));
             }
         }
@@ -133,12 +133,12 @@ where
                                 "block confirmation range overflow".to_string(),
                             )
                         })?;
-                    if !self
+                    let (confirmation_satisfied, latest_block_number) = self
                         .block_confirmation_satisfied_with_quorum(chain_name, required_block_number)
-                        .await?
-                    {
+                        .await?;
+                    if !confirmation_satisfied {
                         return Err(AppCoreError::BadRequest(format!(
-                            "Block confirmation for chainName {chain_name} for read command block marker is greater than current block number: {required_block_number} > latest"
+                            "Block confirmation for chainName {chain_name} for read command block marker is greater than current block number: {required_block_number} > {latest_block_number}"
                         )));
                     }
                 }
@@ -160,7 +160,7 @@ where
         &self,
         chain_name: &str,
         required_block_number: i64,
-    ) -> Result<bool, AppCoreError> {
+    ) -> Result<(bool, i64), AppCoreError> {
         crate::provider_health::rpc_scope(chain_name, async {
             let owned_chain = chain_name.to_string();
             let chain_type = static_chain_type_by_chain_name(std::slice::from_ref(&owned_chain))
@@ -188,8 +188,12 @@ where
                     )
                     .map(|result| {
                         result.map(|block| {
-                            let sufficient = block.block.number >= required_block_number;
-(if sufficient { "sufficient".to_string() } else { "insufficient".to_string() }, sufficient)
+                            let latest_block_number = block.block.number;
+                            let sufficient = latest_block_number >= required_block_number;
+                            (
+                                if sufficient { "sufficient".to_string() } else { "insufficient".to_string() },
+                                (sufficient, latest_block_number),
+                            )
                         })
                     });
                     (index, vote)

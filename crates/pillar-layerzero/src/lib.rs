@@ -15,11 +15,11 @@ mod sui_bcs;
 mod types;
 
 pub use abi::{
-    build_evm_dvn_call_data_result, build_evm_get_receive_library_call_data,
-    build_evm_get_uln_config_call_data, build_evm_hash_lookup_call_data,
-    build_evm_is_valid_receive_library_call_data, build_evm_lz_map_call_data,
-    build_evm_lz_reduce_call_data, build_evm_uln_v2_get_app_config_call_data,
-    build_evm_uln_v2_inbound_proof_library_call_data,
+    build_evm_dvn_call_data_result, build_evm_get_read_lib_config_call_data,
+    build_evm_get_receive_library_call_data, build_evm_get_uln_config_call_data,
+    build_evm_hash_lookup_call_data, build_evm_is_valid_receive_library_call_data,
+    build_evm_lz_map_call_data, build_evm_lz_reduce_call_data,
+    build_evm_uln_v2_get_app_config_call_data, build_evm_uln_v2_inbound_proof_library_call_data,
     build_evm_v1_get_receive_library_address_call_data,
     build_evm_validation_library_get_proof_type_call_data,
     build_evm_validation_library_get_utils_version_call_data, build_evm_verifiable_call_data,

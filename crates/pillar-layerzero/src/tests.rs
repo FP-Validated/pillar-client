@@ -1660,3 +1660,17 @@ fn test_v_ids() -> HashMap<String, String> {
     .map(|(chain_name, v_id)| (chain_name.to_string(), v_id.to_string()))
     .collect()
 }
+#[test]
+fn read_lib_config_calldata_uses_sender_then_src_eid() {
+    let calldata =
+        build_evm_get_read_lib_config_call_data("0x1111111111111111111111111111111111111111", 123)
+            .unwrap();
+    let bytes = decode_hex_bytes(&calldata).unwrap();
+
+    assert_eq!(&bytes[..4], &[0x8e, 0xb0, 0xbf, 0x30]);
+    assert_eq!(
+        &bytes[4..36],
+        solidity_address_word("0x1111111111111111111111111111111111111111").unwrap()
+    );
+    assert_eq!(&bytes[36..68], solidity_uint256(123));
+}

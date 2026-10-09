@@ -105,6 +105,16 @@ pub fn build_evm_verifiable_call_data(proof: &EvmUlnProof) -> Result<String, App
     out.extend_from_slice(&solidity_dynamic_bytes(&proof.packet_header)?);
     Ok(format!("0x{}", hex::encode(out)))
 }
+/// ReadLib1002.getReadLibConfig(sender, srcEid).
+pub fn build_evm_get_read_lib_config_call_data(
+    oapp: &str,
+    remote_eid: u32,
+) -> Result<String, AppCoreError> {
+    let mut out = Vec::from(function_selector("getReadLibConfig(address,uint32)"));
+    out.extend_from_slice(&solidity_address_word(oapp)?);
+    out.extend_from_slice(&solidity_uint256(remote_eid as u64));
+    Ok(format!("0x{}", hex::encode(out)))
+}
 
 pub fn build_evm_get_uln_config_call_data(
     oapp: &str,

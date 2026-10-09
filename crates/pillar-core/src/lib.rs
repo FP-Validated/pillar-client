@@ -752,12 +752,10 @@ impl PillarApp {
                     "resolved PacketSent destination {resolved} does not match requested destination {dst_chain_name}"
                 )));
             }
-            // The resolved event must also use the requested ULN version, except V2-to-V3 routing.
+            // V2 requests resolve as V2; routing rebuilds the event afterwards.
             let requested_version = request.lz_message_id.uln_send_version.as_str().unwrap_or_default();
             let resolved_version = sent_event.lz_message_id.uln_send_version.as_str().unwrap_or_default();
-            if resolved_version != requested_version
-                && !(requested_version == "V2" && resolved_version == "V3")
-            {
+            if resolved_version != requested_version {
                 return Err(AppCoreError::BadRequest(format!(
                     "resolved PacketSent ULN version {resolved_version} does not match requested ULN version {requested_version}"
                 )));
@@ -965,12 +963,11 @@ impl PillarApp {
             .and_then(Value::as_str)
             .unwrap_or_default();
         let payload = if sent_event.lz_message_id.uln_send_version.as_str() == Some("ReadV1002") {
-            let payload = if resolved_payload.is_empty() || resolved_payload == "0x" {
-                request_payload
+            if resolved_payload.is_empty() {
+                request_payload.to_string()
             } else {
-                resolved_payload
-            };
-            payload.strip_prefix("0x").unwrap_or(payload).to_string()
+                resolved_payload.to_string()
+            }
         } else {
             details
                 .pointer("/proof/resolvedPayload")

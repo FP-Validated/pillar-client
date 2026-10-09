@@ -201,6 +201,16 @@ where
             evm_receive_contract_pair(observation.contracts, receive_version)?;
         let verifiable_call_data = build_evm_verifiable_call_data(observation.proof)?;
         let inbound_confirmations = if receive_version == "ReadV1002" {
+            let config_call_data =
+                build_evm_get_read_lib_config_call_data(observation.oapp, observation.remote_eid)?;
+            eth_call(
+                transport.clone(),
+                url.clone(),
+                headers.clone(),
+                receive_contract,
+                &config_call_data,
+            )
+            .await?;
             0
         } else {
             let config_call_data =

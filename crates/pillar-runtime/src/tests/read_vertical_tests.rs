@@ -71,6 +71,7 @@ impl ReadMarker {
 enum ReadChain {
     Stable,
     ReorgedBeforeRead,
+    ReadLibConfigReverts,
     MalformedCallEmpty,
     MalformedCallUpperPrefix,
     MalformedCallNotHex,
@@ -127,7 +128,9 @@ impl ReadVerticalTransport {
             | ReadChain::EmptyCallCodeZero
             | ReadChain::EmptyCallCodeNonzero
             | ReadChain::EmptyCallCodeEmptyCode => json!("0x"),
-            ReadChain::Stable | ReadChain::ReorgedBeforeRead => json!(READ_RESPONSE),
+            ReadChain::Stable | ReadChain::ReorgedBeforeRead | ReadChain::ReadLibConfigReverts => {
+                json!(READ_RESPONSE)
+            }
         };
         json!({"result": result})
     }
@@ -144,7 +147,10 @@ impl ReadVerticalTransport {
             ReadChain::MalformedCodeWrongType => json!(7),
             ReadChain::EmptyCallCodeNonzero => json!("0x6000"),
             ReadChain::EmptyCallCodeEmptyCode => json!("0x"),
-            ReadChain::EmptyCallCodeZero | ReadChain::Stable | ReadChain::ReorgedBeforeRead => {
+            ReadChain::EmptyCallCodeZero
+            | ReadChain::Stable
+            | ReadChain::ReorgedBeforeRead
+            | ReadChain::ReadLibConfigReverts => {
                 json!("0x00")
             }
             ReadChain::MalformedCallEmpty
@@ -174,6 +180,15 @@ impl ReadVerticalTransport {
                     "1"
                 ),
             ),
+            "0x8eb0bf30" => {
+                if self.chain == ReadChain::ReadLibConfigReverts {
+                    return Err("execution reverted".to_string());
+                }
+                (
+                    ethereum_contract("ReadLib1002"),
+                    format!("0x{}", "00".repeat(32)),
+                )
+            }
             "0x43ea4fa9" => {
                 return Err("execution reverted".to_string());
             }
@@ -436,7 +451,14 @@ fn read_call_blocks(calls: &RecordedJsonCalls) -> Vec<Value> {
         .lock()
         .unwrap()
         .iter()
-        .filter(|(url, _, body)| url.contains("bsc-rpc") && body["method"] == "eth_call")
+        .filter(|(url, _, body)| {
+            url.contains("bsc-rpc")
+                && body["method"] == "eth_call"
+                && !body["params"][0]["data"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .starts_with("0x8eb0bf30")
+        })
         .map(|(_, _, body)| body["params"][1].clone())
         .collect()
 }
@@ -482,6 +504,36 @@ async fn production_read_vertical_signs_state_from_the_validated_block() {
             "{marker:?}: each provider must read the validated block by hash"
         );
     }
+}
+
+#[tokio::test]
+async fn production_read_vertical_refuses_reverted_read_lib_config_before_signing() {
+    let (app, calls) =
+        read_vertical_app(ReadChain::ReadLibConfigReverts, ReadMarker::BlockNumber).await;
+
+    let error = app
+        .sign_request_v2(read_vertical_request(ReadMarker::BlockNumber))
+        .await
+        .expect_err("a reverted ReadLib1002 config call must refuse signing");
+    assert!(error.to_string().contains("payload-signed"), "{error}");
+    let stages = stages_of(&app).await;
+    assert!(
+        stages.iter().all(|stage| stage != "sign"),
+        "stages={stages:?}"
+    );
+    let config_calls = calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, _, body)| {
+            body["method"] == "eth_call"
+                && body["params"][0]["data"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .starts_with("0x8eb0bf30")
+        })
+        .count();
+    assert_eq!(config_calls, 1);
 }
 
 /// Readiness agrees on block 0x40 = A; before the builder reads, the chain

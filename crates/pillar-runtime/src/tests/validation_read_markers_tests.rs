@@ -187,7 +187,7 @@ async fn runtime_rpc_validation_checks_validates_read_command_block_number_marke
 
     assert_eq!(
             err.to_string(),
-            "Block confirmation for chainName bsc for read command block marker is greater than current block number: 76 > latest"
+            "Block confirmation for chainName bsc for read command block marker is greater than current block number: 76 > 75"
         );
     assert!(matches!(err, AppCoreError::BadRequest(_)));
     let calls = calls.lock().unwrap();
@@ -394,7 +394,7 @@ async fn runtime_rpc_validation_checks_rejects_unconfirmed_read_time_marker() {
 
     assert_eq!(
             err.to_string(),
-            "Block confirmation for chainName bsc for time marker is greater than current block number: 12 > latest"
+            "Block confirmation for chainName bsc for time marker is greater than current block number: 12 > 11"
         );
 }
 
