@@ -4,7 +4,7 @@ All notable changes to this project are documented here. This project follows
 semantic versioning for the HTTP surface, the environment-variable contract and
 the Prometheus metric names.
 
-## Unreleased
+## 2.6.1 - 2026-10-10
 
 ### Upgrade / Breaking
 
@@ -67,6 +67,7 @@ the Prometheus metric names.
 - 2026-10-09 전체 리뷰의 라운드별 항목, 조치와 검증 결과는 [AUDIT](AUDIT.md)의 §16에 있다.
 - `ton_dvn_verify.json`의 `vec-c`는 1.2.66 `hexToCells`의 1016-bit 분할을 따르며, 값은 이 저장소의 builder가 계산한다.
 - Durable audit quota는 문서화된 per-attempt 방식을 유지한다.
+- 이 릴리스의 실행 코드는 `b7ecb00`과 같다. 릴리스 커밋은 workspace version과 `Cargo.lock`의 workspace 항목만 2.6.0에서 2.6.1로 바꾼다. 2.6.0에서 올릴 때는 위의 `Upgrade / Breaking`과 `Operator action` 절을 먼저 적용한다. 검증 기록은 [AUDIT](AUDIT.md)의 §16에 있다.
 
 ## 2.6.0 - 2026-10-09
 

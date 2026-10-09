@@ -511,5 +511,14 @@ Rollback 절차: `ovh-chain-repo`에서 `f9af3f9`를 revert하고 같은 방식�
 | `cargo +1.94.1 check --workspace --locked --all-targets` | 통과 |
 | `docker build` 뒤 설정 없이 실행 | `Missing required environment variable PILLAR_API_AUTH_TOKENS`로 기동 거부 |
 | Image 실행(`LOCAL_MNEMONIC`, BSC testnet provider 2개, quorum 2) | Docker health `healthy`, `pillar healthcheck` exit 0, `/ready` 200, `/provider-health` `{"bsc":true}`, `pillar_provider_single_entity_chains 0`, bearer 없는 `/signer-info` 401, image 안에 `curl` 없음, uid 10001 |
+| Hosted CI run `37946961465` (`ccf4c01`, main push) | 6/6 jobs 통과. Workspace 1079 passed, 0 failed, 15 ignored |
 
-근거: `.full-review-20261009/evidence/round6-integration`의 fmt/clippy/test/PostgreSQL/integrity/MSRV 출력과 image 실행 기록, 라운드별 reviewer 보고와 red/green 출력 · 2026-10-09 23:48 KST
+### 2.6.1 릴리스, 2026-10-10
+
+- 이 절의 변경은 2.6.1로 릴리스했다. Tag는 `v2.6.1`, GitHub release는 `v2.6.1`이다.
+- 릴리스 커밋은 workspace version과 `Cargo.lock`의 workspace 항목 10개를 2.6.0에서 2.6.1로 바꾸고, CHANGELOG의 절 이름을 2.6.1로 정한다. 실행 로직과 외부 dependency는 `b7ecb00`과 같다.
+- 2.6.0에서 올릴 때는 CHANGELOG 2.6.1의 `Upgrade / Breaking`과 `Operator action` 절을 먼저 적용한다.
+- 릴리스 커밋의 tree에서 fmt, clippy `-D warnings`, workspace test(1079 passed, 0 failed, 15 ignored), MSRV 1.94.1 check가 모두 통과했다.
+- 릴리스 시점의 메인넷 image는 2.6.0 코드(`b7fc3ab`)다.
+
+근거: `.full-review-20261009/evidence/round6-integration`의 fmt/clippy/test/PostgreSQL/integrity/MSRV 출력과 image 실행 기록, 라운드별 reviewer 보고와 red/green 출력 · 2026-10-09 23:48 KST. Hosted CI 행: run `37946961465` 결과 · 2026-10-10 00:08 KST. 2.6.1 릴리스 절: 릴리스 tree의 로컬 fmt/clippy/test/MSRV 실행 · 2026-10-10 00:24 KST
