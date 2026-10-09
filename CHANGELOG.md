@@ -4,7 +4,7 @@ All notable changes to this project are documented here. This project follows
 semantic versioning for the HTTP surface, the environment-variable contract and
 the Prometheus metric names.
 
-## Unreleased
+## 2.6.0 - 2026-10-09
 
 ### Upgrade / Breaking
 
@@ -42,6 +42,7 @@ the Prometheus metric names.
 - READ HTTP E2E는 정확한 stage/source/destination/status tuple의 Prometheus `_count` 숫자를 읽는다. 같은 series의 중복 관측을 정확하게 계산한다. Test artifact schema 3은 `sign_stage_observation_count`와 tuple별 `stage_observations`로 stage 관측 횟수를 기록한다.
 - Gasolina parity README의 재현 절차는 `$PILLAR`와 `$UPSTREAM` 절대 경로로 복사하고 `cargo test`를 `$PILLAR`에서 실행한다. 이전 절차는 upstream checkout 안에서 Pillar 상대 경로를 복사해 실패했다. Canton emitter 절의 미지원 설명은 현재 README/SECURITY 참조와 fixture 증거 범위로 바꿨다. AUDIT §13은 revert code 3에는 message 조건이 없음을 명시한다.
 - 2026-10-09 클라이언트 리뷰 후속 테스트를 추가했다. `l1Fee` quorum 회귀 테스트는 이제 두 provider가 같은 라운드에서 서로 다른 receipt를 반환한다. 이전 테스트는 라운드 안의 두 provider에게 같은 receipt를 줘서 raw-JSON fingerprint로 되돌아가도 통과했다. PacketSent data 불일치 대조군, `removed` 생략 수용과 `null`/비bool 거부, 매핑된 srcEid의 400과 매핑되지 않은 srcEid의 500, Lambda policy payload의 `signingContext`, 빈 `dvnAddress`에서 `hashLookup`만 생략, READ와 Sui에서 한 entity의 URI 두 개가 한 표인지도 고정했다. 기록은 [AUDIT](AUDIT.md)의 §15에 있다.
+- 이 릴리스의 실행 코드는 2026-10-09에 메인넷에 배포한 `b7fc3ab`(`ghcr.io/fp-validated/pillar-dvn-client:ci-b7fc3ab41fec-r37903096415-a1`)과 같다. 릴리스 커밋은 workspace version과 `Cargo.lock`의 workspace 항목만 2.5.0에서 2.6.0으로 바꾼다. 이 절에는 `Upgrade / Breaking` 변경과 HTTP 상태 변경이 있어 patch가 아니라 minor로 올렸다. 검증과 배포 기록은 [AUDIT](AUDIT.md)의 §15에 있다.
 
 ## 2.5.0 - 2026-10-06
 

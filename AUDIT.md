@@ -453,4 +453,14 @@ Rollback은 `ovh-chain-repo`에서 `f9af3f9`를 revert하고 같은 방식으로
 - 원본 351 comparisons 재실행과 TON 266-level 원본 응답 replay는 외부 자료가 필요하다. live KMS rotation은 별도 승인과 테스트 key가 필요하다. 이 절의 범위가 아니며 §13의 공통 근거 범위를 따른다.
 - 현재 운영 설정에는 Tron이 없고 extra-context가 설정되어 있지 않다. Tron finality와 live Lambda/policy server 확인은 그 설정이 생길 때 수행한다.
 
-근거: 로컬 fmt/clippy/test/MSRV 실행, 변경 전 코드 대비 변형 실행, 리뷰 반례 원시 출력 · 2026-10-09 17:00 KST. 운영 배포 절: hosted CI 로그와 artifact, crane digest, ArgoCD 상태, rollout과 pod image ID, 배포 전후 endpoint 비교 · 2026-10-09 17:45 KST
+### 2.6.0 릴리스, 2026-10-09
+
+이 절의 변경은 2.6.0으로 릴리스했다.
+
+- 릴리스 커밋은 workspace version과 `Cargo.lock`의 workspace 항목 10개만 2.5.0에서 2.6.0으로 바꾼다. 실행 로직과 외부 dependency는 바뀌지 않는다.
+- 바이너리는 `CARGO_PKG_VERSION`을 쓰지 않는다. 따라서 운영 중인 `b7fc3ab` 이미지와 동작이 같다.
+- Breaking 변경과 HTTP 상태 변경이 있어 patch가 아니라 minor로 올렸다.
+- 릴리스 커밋에서 다음을 실행해 모두 통과했다: `cargo +1.98.1 fmt --all --check`, `clippy --workspace --all-targets --locked -D warnings`, `test --workspace --locked`(1004 passed, 0 failed, 15 ignored), `cargo +1.94.1 check --workspace --locked --all-targets`.
+- 운영 `/version`은 GitOps 값 `PILLAR_IMAGE_VERSION: v2.5.0`을 그대로 보고한다. 이 값을 바꾸려면 GitOps 변경과 Deployment sync가 필요하며, 이번에는 바꾸지 않았다.
+
+근거: 로컬 fmt/clippy/test/MSRV 실행, 변경 전 코드 대비 변형 실행, 리뷰 반례 원시 출력 · 2026-10-09 17:00 KST. 운영 배포 절: hosted CI 로그와 artifact, crane digest, ArgoCD 상태, rollout과 pod image ID, 배포 전후 endpoint 비교 · 2026-10-09 17:45 KST. 2.6.0 릴리스 절: 릴리스 커밋의 로컬 fmt/clippy/test/MSRV 실행 · 2026-10-09 18:00 KST
