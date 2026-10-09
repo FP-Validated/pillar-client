@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
+import { withBodyDigest } from './generated-body-digest.mjs'
 
 const repoRoot = process.cwd()
 const sourceRoot = path.resolve(
@@ -100,5 +101,5 @@ for (const [environment, ulnVersion, chainName, status, sourceLine] of entries) 
 lines.push('];', '')
 
 fs.mkdirSync(path.dirname(outputPath), { recursive: true })
-fs.writeFileSync(outputPath, lines.join('\n'))
+fs.writeFileSync(outputPath, withBodyDigest(lines).join('\n'))
 console.log(`wrote ${entries.length} environment capability entries to ${outputPath}`)

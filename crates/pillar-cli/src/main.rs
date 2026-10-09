@@ -28,6 +28,7 @@ use tokio::{
 use tower::ServiceExt;
 use tracing_subscriber::{fmt, EnvFilter};
 mod connections;
+mod healthcheck;
 
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(58);
 const KEEP_ALIVE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -40,6 +41,9 @@ const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_CONNECTION_LIFETIME: Duration = Duration::from_secs(300);
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("healthcheck") {
+        std::process::exit(healthcheck::exit_code());
+    }
     init_tracing();
     let config = load_from_env()?;
     let port = config.server_port;

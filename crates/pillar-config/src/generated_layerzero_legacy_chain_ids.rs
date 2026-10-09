@@ -5,6 +5,7 @@
 // Input hashes:
 // - dist/index.cjs sha256:f165d1760eb83cd6ad03ad7c232b0742ab0864bb7039ce068d5fd325825c8d14
 // Entries: 941
+// Body sha256: 64e67fe2928b532c4891bb33011555971b9312f4fb4cb7844e7f1c5c949502cf
 
 pub(crate) const LZ_LEGACY_CHAIN_NAME_BY_ID: &[(u32, &str)] = &[
     (1, "ethereum"),

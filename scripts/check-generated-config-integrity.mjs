@@ -2,8 +2,9 @@
 // Verifies that every generated LayerZero config file still agrees with its own
 // provenance header.
 //
-// The generators write a header that declares how many rows they emitted. This check
-// re-counts the rows and compares. It exists because a hand-edit is the failure mode the
+// The generators write a header that declares how many rows they emitted and a sha256 of
+// everything after the header. This check re-counts the rows and recomputes the digest. It
+// exists because a hand-edit is the failure mode the
 // repository's own guidance calls out - "do not hand-edit
 // crates/pillar-config/src/generated_layerzero_evm.rs; regenerate it from the script" -
 // and nothing enforced it. Adding or deleting a row here changes a signing-critical
@@ -16,10 +17,12 @@
 // This one can, which is the whole point of it being a separate script.
 //
 // What it does NOT do: prove the values are correct. Only regenerating from the pinned
-// upstream package does that. This catches drift between a file and its own header.
+// upstream package does that. This catches drift between a file and its own header,
+// including an in-place value edit that keeps every row count.
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { BODY_DIGEST_PREFIX, bodyDigest, generatedBody } from './generated-body-digest.mjs'
 
 const repoRoot = process.cwd()
 const configDir = path.join(repoRoot, 'crates', 'pillar-config', 'src')
@@ -110,9 +113,31 @@ function checkHeader(text, spec) {
     // unreproducible without any count changing. The generators disagree on spacing -
     // the EVM and environment headers write `sha256:<hex>` in a bulleted list while the
     // TON header writes `... sha256: <hex>` inline - so both are accepted.
-    if (!/sha256:\s?[0-9a-f]{64}/.test(text)) {
+    const inputHeader = text
+        .split('\n')
+        .filter((line) => !line.startsWith(BODY_DIGEST_PREFIX))
+        .join('\n')
+    if (!/sha256:\s?[0-9a-f]{64}/.test(inputHeader)) {
         fail(`${spec.file}: provenance block records no sha256 input digest`)
     }
+}
+
+function checkBodyDigest(text, spec) {
+    const match = text.match(/^\/\/ Body sha256: ([0-9a-f]{64})$/m)
+    if (!match) {
+        fail(`${spec.file}: provenance header does not declare a body sha256`)
+        return false
+    }
+    const actual = bodyDigest(generatedBody(text))
+    if (match[1] !== actual) {
+        fail(
+            `${spec.file}: header declares body sha256 ${match[1]} but the body hashes to ${actual}. ` +
+                `Regenerate with ${spec.generator} instead of editing the file.`,
+        )
+        return false
+    }
+    console.log(`ok  ${spec.file}  body sha256: ${actual}`)
+    return true
 }
 
 let checked = 0
@@ -124,6 +149,7 @@ for (const spec of EXPECTED) {
     }
     const text = fs.readFileSync(filePath, 'utf8')
     checkHeader(text, spec)
+    if (checkBodyDigest(text, spec)) checked += 1
     for (const [label, array] of spec.counts) {
         const declared = declaredCount(text, label, spec.file)
         const actual = countRows(text, array, spec.file)
@@ -146,4 +172,4 @@ if (failures.length > 0) {
     process.exit(1)
 }
 
-console.log(`\ngenerated config integrity check passed: ${checked} counts reconciled`)
+console.log(`\ngenerated config integrity check passed: ${checked} counts and digests reconciled`)

@@ -63,8 +63,8 @@ binary against LayerZero `mainnet` and `testnet`.
   `ReadV1002` is EVM-only.
 
   The IOTA Move chain is named `iotal1`. `LAYERZERO_AVAILABLE_CHAIN_NAMES`
-  drops names it does not recognise, so a misspelling silently removes a chain
-  rather than failing loudly.
+  drops names it does not recognise and logs a warning naming them, so a
+  misspelling removes that chain from service; check the startup log.
 - **Stellar and Canton are in scope**, measured against upstream 1.2.66:
   - Stellar pins upstream 1.2.66's own contract getters (generation two:
     EndpointV2 `CCQLLRE5…`/`CALTBA5S…`, ULN302 `CCV4HEII…`/`CCMLPCAW…` on
@@ -122,7 +122,10 @@ PILLAR_API_AUTH_TOKENS="$(openssl rand -hex 24)" \
 
 Startup prints a redacted configuration report (provider URLs, headers and key
 identifiers are masked, tokens are shown only as a count) and then binds
-`0.0.0.0:$SERVER_PORT`. Authentication is enabled by default: when `PILLAR_API_AUTH_ENABLED=false`, every route is public and tokens are optional. Keep that mode behind network-edge controls. Otherwise, startup refuses if `PILLAR_API_AUTH_TOKENS` is missing or contains a token shorter than 32 characters.
+`0.0.0.0:$SERVER_PORT`. Authentication is on by default, and startup refuses if
+`PILLAR_API_AUTH_TOKENS` is missing or holds a token shorter than 32 characters.
+With `PILLAR_API_AUTH_ENABLED=false` every route is public and tokens are
+optional; keep that mode behind network-edge controls.
 
 Sui provider entries under `chains.sui.rpc` must use a Sui GraphQL RPC URL (for
 example `https://graphql.mainnet.sui.io/graphql` or the corresponding testnet
@@ -192,8 +195,8 @@ refused at startup with a message naming it. By `PROVIDER_CONFIG_TYPE`:
 | `LAYERZERO_PROVIDER_CONFIG_FILE_PATH` | `LOCAL` | `providers-v2.json` from a file; wins over the inline form. |
 | `LAYERZERO_QUORUM_STRATEGY_CONFIG_FILE_PATH` | `LOCAL` | `quorum-strategy.json` from a file, required with the providers file. |
 | `CONFIG_BUCKET_NAME` | `S3`, `GCS` | Bucket holding `providers-v2.json` and `quorum-strategy.json`; both are read on every load. |
-| `LAYERZERO_CDK_DEPLOY_REGION` | `S3` | AWS region (defaults to `us-east-1`). |
-| `GCP_PROJECT_ID` | `GCS` | GCP project owning the bucket. |
+| `LAYERZERO_CDK_DEPLOY_REGION` | `S3`, Lambda extra-context | AWS region (defaults to `us-east-1` for `S3`; required when `EXTRA_CONTEXT_AWS_LAMBDA_NAME` is set). |
+| `GCP_PROJECT_ID` | `GCS` | Required by configuration validation; the bucket is addressed by name, so the value does not select it. |
 
 `category` is `internal`, `dedicated_external` or `shared_external`; every `entity`
 must be listed in `entities`. A strategy counts **distinct entities** among the
@@ -258,7 +261,7 @@ Optional:
 | `LAYERZERO_AVAILABLE_CHAIN_NAMES` | Restrict the environment's non-deprecated V2/V302 chain union (comma-separated). Unknown names are excluded; selected chains require provider config. |
 | `LAYERZERO_DEBUG_MODE` | Include `debugInfo` in sign responses. |
 | `EXTRA_CONTEXT_REQUEST_URL` / `EXTRA_CONTEXT_REQUEST_AUTH_TOKEN` | External extra-context check over HTTPS. |
-| `EXTRA_CONTEXT_AWS_LAMBDA_NAME` | External extra-context check over Lambda (mutually exclusive with the URL form). |
+| `EXTRA_CONTEXT_AWS_LAMBDA_NAME` | External extra-context check over Lambda (mutually exclusive with the URL form); needs `LAYERZERO_CDK_DEPLOY_REGION`. |
 | `PILLAR_IMAGE_VERSION` | Version string reported by `GET /version` and `pillar_build_info`. |
 | `PILLAR_MAX_CONNECTIONS` | Concurrent connection cap (default 1024). The server speaks HTTP/1.1 only, so a connection carries one request at a time and this is also the in-flight request bound. |
 | `PILLAR_SHUTDOWN_GRACE_SECONDS` | Total shutdown grace G (default 25 seconds); connection draining and in-flight work are bounded by absolute deadline D = T0 + G. The orchestrator termination grace period must exceed this value. |
@@ -406,16 +409,18 @@ log line on its own.
   value; alert above ~300. Absent under `PROVIDER_CONFIG_TYPE=LOCAL`, which runs
   no refresh loop.
 - `pillar_background_task_heartbeat_age_seconds{task}` — seconds since each
-  background loop last began an iteration, for `provider_config_refresh`
-  (60s interval, remote provider config only), `provider_rank_refresh` (150s)
-  and `provider_health_cache_refresh` (15s). Also computed at scrape time, which
-  is what makes a loop that panicked, hung or was never started visible at all:
-  alert above roughly three times the interval. A value bounded under its
-  interval is a loop keeping up. It does not tell you *why* a loop stopped — a
-  panic, a hung RPC and a task that never started all read as a growing age,
-  deliberately, because the operator's next step is the same for all three. A
-  failing refresh is a different fact and has its own metrics: the loop stays
-  healthy here while `pillar_provider_config_refresh_total{result}` and
+  background loop last stamped its heartbeat: `provider_config_refresh` (60s
+  interval, remote provider config only) stamps after each refresh attempt
+  finishes, while `provider_rank_refresh` (150s) and
+  `provider_health_cache_refresh` (15s) stamp as each iteration starts. Also
+  computed at scrape time, which is what makes a loop that panicked, hung or was
+  never started visible at all: alert above roughly three times the interval. A
+  value bounded under its interval is a loop keeping up. It does not tell you
+  *why* a loop stopped — a panic, a hung RPC and a task that never started all
+  read as a growing age, deliberately, because the operator's next step is the
+  same for all three. A failing refresh is a different fact and has its own
+  metrics: the loop stays healthy here while
+  `pillar_provider_config_refresh_total{result}` and
   `pillar_provider_config_age_seconds` carry the failure.
 - `pillar_signer_errors_total{backend}` — signing and key-fetch failures per
   signer backend
@@ -425,6 +430,20 @@ log line on its own.
   deliberately not a catch-all: a provider failure during validation shows up as
   `pillar_sign_stage_duration_seconds{stage="validate",status="error"}`, and
   the stage a request died in is the more useful signal there.
+- `pillar_http_started_total{method,path}`,
+  `pillar_http_outcomes_total{method,path,outcome}` and
+  `pillar_http_outcome_duration_seconds{method,path,outcome}` — requests
+  entering the middleware and their terminal application outcome, including a
+  request future dropped before completion; `path` is a fixed route allowlist
+  with `<unmatched>` for everything else
+- `pillar_signing_audit_enabled` and `pillar_signing_audit_ready` — whether
+  durable signing audit is configured, and its last observed store connectivity
+  and retained-evidence capacity
+- `pillar_admission_active{budget}`, `pillar_admission_waiting{budget}`,
+  `pillar_admission_started_total{budget}` and
+  `pillar_admission_total{budget,outcome}` for the `sign`, `rpc` and `kms`
+  budgets, plus `pillar_kms_hedge_skipped_total` for speculative KMS calls
+  skipped without waiting (see SECURITY.md, Admission)
 
 ## Development
 
@@ -432,10 +451,12 @@ CI (`.github/workflows/ci.yml`) runs on pushes to `main`, `v*` tags, pull reques
 and a weekly schedule, in six jobs: fmt, Clippy, tests and the release build with
 Rust 1.98.1; `cargo check` at the declared MSRV 1.94.1; the generated-config
 integrity and acceptance-matrix checks; `cargo audit`, `cargo deny` and a CycloneDX
-SBOM; and a container build that checks the revision label and that the binary
-refuses to start without configuration. The image is not pushed. Warnings are
-errors. Rust 1.99 reports `double_must_use` on `async_trait`-generated futures, so
-stay on the pinned toolchain:
+SBOM; the macOS TON release lifecycle; and a container build that checks the
+revision label and that the binary refuses to start without configuration. The
+container job runs only after the test, supply-chain and generated-config jobs
+pass. The image is not pushed; on pushes the saved image tar gets a GitHub build
+provenance attestation. Warnings are errors. Rust 1.99 reports `double_must_use`
+on `async_trait`-generated futures, so stay on the pinned toolchain:
 `rustup toolchain install 1.98.1 --component rustfmt --component clippy`.
 
 ```bash
@@ -447,7 +468,14 @@ cargo audit && cargo deny check     # dependency and license policy
 
 `crates/pillar-config/src/generated_layerzero_evm.rs`,
 `generated_layerzero_environment.rs`, `generated_ton_layerzero.rs`,
-`generated_layerzero_legacy_chain_ids.rs` and `generated_chain_metadata.rs` are generated tables; never edit them by hand. The associated generator scripts document their inputs.
+`generated_layerzero_legacy_chain_ids.rs` and `generated_chain_metadata.rs` are
+generated tables — never edit them by hand. There is one generator per file. Each
+header records its input digests, its row counts and a sha256 of the table body,
+and CI recomputes the counts and the body digest, so an in-place value edit fails
+the build. The environment, EVM and TON generators read the upstream LayerZero
+deployment configuration from `PILLAR_AUDIT_ROOT`, the legacy chain ids only the
+lz-definitions package, and the chain metadata the upstream
+`chain-metadata-config/values/src` directory in `CHAIN_METADATA_ROOT`:
 
 ```bash
 # gasolina-audit 213cd500 (1.2.66): the app root, not the repository root
@@ -467,6 +495,10 @@ LZ_TON_SDK_ROOT=/path/to/@layerzerolabs/lz-ton-sdk-v2 \
 # v1 chain ids as lz-definitions' getNetworkForChainId resolves them (941 ids)
 LZ_DEFINITIONS_ROOT=/path/to/@layerzerolabs/lz-definitions \
   node scripts/generate-layerzero-legacy-chain-ids.mjs
+
+# maxEthGetLogsBlockRange per environment (335 entries)
+CHAIN_METADATA_ROOT=$PILLAR_AUDIT_ROOT/packages/configs/chain-metadata-config/values/src \
+  node scripts/generate-chain-metadata-config.mjs
 ```
 
 `LZ_DEFINITIONS_ROOT` and `LZ_TON_SDK_ROOT` accept any extracted copy of the
@@ -478,10 +510,10 @@ than a partial local copy.
 
 The generated files record the package version and input hashes, so a regeneration
 is checked by `git diff --stat crates/pillar-config/src/generated_*.rs` being empty.
-That byte-for-byte comparison is the only check that catches an address value
-changed in place: `scripts/check-generated-config-integrity.mjs`, which runs in CI,
-needs no upstream source and therefore only reconciles each file against the row
-counts in its own provenance header.
+Only that regeneration proves the values match upstream.
+`scripts/check-generated-config-integrity.mjs`, which runs in CI, needs no upstream
+source: it reconciles each file against the row counts and the body sha256 in its
+own provenance header, so it catches any edit that was not made by the generator.
 
 Benchmarks are opt-in: `cargo bench -p pillar-bench`.
 

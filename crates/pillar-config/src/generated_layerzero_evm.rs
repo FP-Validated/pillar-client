@@ -9,6 +9,7 @@
 // Endpoint entries: 874
 // Deployment entries: 4033
 // Sources: upstream LayerZero deployment configuration and @layerzerolabs/lz-definitions.
+// Body sha256: eb79d2eca5680d1952e885eddb32765352e97973627528a7f0a959394dcf6168
 
 pub(crate) const LZ_EVM_ENDPOINT_IDS: &[(&str, &str, &str, u32)] = &[
     ("testnet", "aavegotchi", "V1", 10191),

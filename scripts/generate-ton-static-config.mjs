@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
+import { withBodyDigest } from './generated-body-digest.mjs'
 
 const repoRoot = process.cwd()
 const auditRoot = process.env.PILLAR_AUDIT_ROOT ?? path.resolve(repoRoot, '../pillar-audit')
@@ -179,7 +180,7 @@ for (const { environment, contractName, address } of deployments) {
 lines.push('];', '')
 
 fs.mkdirSync(path.dirname(outPath), { recursive: true })
-fs.writeFileSync(outPath, lines.join('\n'))
+fs.writeFileSync(outPath, withBodyDigest(lines).join('\n'))
 
 console.log(`TON SDK upstream package: ${packageJson.name}@${packageVersion}`)
 console.log(`TON SDK artifacts sha256: ${artifactsSha256}`)

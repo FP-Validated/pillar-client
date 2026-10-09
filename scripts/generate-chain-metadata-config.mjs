@@ -5,6 +5,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
+import { withBodyDigest } from './generated-body-digest.mjs'
 
 const repoRoot = process.cwd()
 const valuesRoot = process.env.CHAIN_METADATA_ROOT
@@ -49,5 +50,5 @@ const lines = [
     '];',
     '',
 ]
-fs.writeFileSync(outputPath, lines.join('\n'))
+fs.writeFileSync(outputPath, withBodyDigest(lines).join('\n'))
 console.log(`wrote ${rows.length} chain metadata rows to ${outputPath}`)
