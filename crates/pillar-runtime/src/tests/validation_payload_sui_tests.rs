@@ -417,10 +417,11 @@ async fn runtime_rpc_validation_checks_send_the_live_sui_header_and_reject_its_v
                 .as_array()
                 .is_some_and(|inputs| {
                     inputs.iter().any(|input| {
-                        input["pure"]
-                            .as_str()
-                            .and_then(|encoded| base64_decode(encoded).ok())
-                            .is_some_and(|bytes| contains_subslice(&bytes, &header))
+                        input["kind"] == "PURE"
+                            && input["pure"]
+                                .as_str()
+                                .and_then(|encoded| base64_decode(encoded).ok())
+                                .is_some_and(|bytes| contains_subslice(&bytes, &header))
                     })
                 })
     });

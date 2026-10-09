@@ -613,15 +613,15 @@ where
 
     let encode_input = |input: &SuiCallArg| match input {
         SuiCallArg::Pure(bytes) => {
-            json!({"pure": base64::engine::general_purpose::STANDARD.encode(bytes)})
+            json!({"kind":"PURE","pure":base64::engine::general_purpose::STANDARD.encode(bytes)})
         }
         SuiCallArg::Shared(object) => {
-            json!({"object":{"sharedObject":{"objectId":format!("0x{}",hex::encode(object.object_id)),"initialSharedVersion":object.initial_shared_version.to_string(),"mutable":object.mutable}}})
+            json!({"kind":"SHARED","objectId":format!("0x{}",hex::encode(object.object_id)),"initialSharedVersion":object.initial_shared_version.to_string(),"mutable":object.mutable})
         }
     };
     let encode_argument = |argument: &SuiArgument| match argument {
-        SuiArgument::Input(index) => json!({"input":{"ix":index}}),
-        SuiArgument::Result(index) => json!({"txResult":{"cmd":index}}),
+        SuiArgument::Input(index) => json!({"kind":"INPUT","input":index}),
+        SuiArgument::Result(index) => json!({"kind":"RESULT","result":index}),
     };
     let transaction = json!({
         "sender": SUI_DEV_INSPECT_MOCK_SENDER,
@@ -738,6 +738,18 @@ mod tests {
         assert!(decode_return_value(&json!([256])).is_none());
     }
 
+    #[test]
+    fn recorded_mainnet_graphql_verification_response_is_not_verified() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../tests/gasolina_parity/transport/sui-mainnet-graphql-payload-support.json"
+        ))
+        .unwrap();
+        let response = &fixture["simulateVerifiable"]["response"]["data"]["simulateTransaction"];
+        assert_eq!(response["effects"]["status"], "SUCCESS");
+        let bytes = decode_return_value(&response["outputs"][0]["returnValues"][0]["value"]["bcs"])
+            .unwrap();
+        assert_eq!(decode_sui_u8(&bytes).unwrap(), 0);
+    }
     #[test]
     fn rpc_methods_are_namespaced_per_chain() {
         assert_eq!(
