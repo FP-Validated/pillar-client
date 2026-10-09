@@ -19,7 +19,7 @@ the Prometheus metric names.
 
 ### Security
 
-- TON provider BoC는 하나의 parser로 읽는다. 이 parser는 header, root index, `has_idx` 크기와 선언된 cell 수를 먼저 검사하고(config param 43에 따라 account storage는 65,536개, message와 trace body는 8,192개까지), root hash와 depth를 panic 없이 계산하며, 고유 cell 기준으로 graph를 검사한다. Storage와 controller가 보낸 event/packet decode는 exotic cell과 0이 아닌 level mask를 거부하고, trace fingerprint는 exotic body를 받는다. 잘못된 BoC를 보낸 provider는 자기 표만 잃는다.
+- TON provider BoC는 하나의 parser로 읽는다. 이 parser는 header, root index, `has_idx` 크기와 선언된 cell 수를 먼저 검사하고(config param 43에 따라 account storage는 65,536개, message와 trace body는 8,192개까지), TON node의 cell depth 상한 1,024를 cell 객체를 만들기 전에 확인하며, root hash와 depth를 panic 없이 계산한다. Graph 검사는 cell node마다 한 번 방문한다. Storage와 controller가 보낸 event/packet decode는 exotic cell과 0이 아닌 level mask를 거부하고, trace fingerprint는 exotic body를 받는다. Uln storage에서 꺼낸 default receive config는 고유 cell이 2,048개 이하일 때만 `committableView` 인자로 직렬화하고, 넘으면 해석할 수 없는 storage로 표를 낸다. 잘못된 BoC를 보낸 provider는 자기 표만 잃는다.
 - TON message bit는 upstream `cellsToHex`처럼 첫 ref chain만 따라 읽는다.
 - TON readiness는 resolution quorum이 합의한 `PacketSent` 트랜잭션의 masterchain seqno에서 confirmation을 센다.
 - Sui GraphQL과 IotaL1 transaction 조회는 요청한 digest와 다른 응답에 표를 주지 않는다.

@@ -481,12 +481,17 @@ Rollback 절차: `ovh-chain-repo`에서 `f9af3f9`를 revert하고 같은 방식�
 | 4 | Readiness와 설정 | Aptos ledger-version 경로의 형식이 깨진 block 응답, `http://[::1]` provider URI 경고 | `91337ea` |
 | 4 | 문서 | EVM `null` receipt의 400, Solana `options` 적용 범위, strategy key 경고 시점, quorum vote error log, READ 오류 문구 | `9411227` |
 | 4 | 문서 | 이 절(§16)의 신설과 §11, CHANGELOG의 참조 | `b87be2b` |
+| 5 (`b87be2b`) | TON | 65,536 cell 상한 아래의 깊은 선형 chain BoC(depth 65,534)를 drop할 때 2 MiB worker stack이 넘침, hash 기준 방문 집합 때문에 level mask를 속인 parent 아래의 exotic cell이 검사를 통과함, provider가 만든 큰 default receive config의 직렬화가 수 초 걸림 | `a052fa0`, `a0ad592` |
+| 5 | Readiness | Aptos tx-hash 경로에서 block 요청을 만들 수 없는 `version`이 `Missing` 표가 됨 | `a5af7ad` |
 
 라운드 중 내린 결정은 다음과 같다.
 - Durable audit quota는 문서화된 per-attempt 방식이다. 같은 packet의 재전송도 quota를 쓰므로 SECURITY는 audit을 켤 때 signing route에 인증이나 edge rate limit을 두도록 안내한다.
 - Solana `dvnAddress`는 base58만 받는다. Upstream이 payload-signed 검증에서 hex를 `new PublicKey`로 거부하므로 라운드 1의 hex 수용을 라운드 2에서 되돌렸다.
 - Starknet receipt fingerprint의 projection은 유지했다. Provider 사이에 비교 대상 receipt 필드가 다르게 오는 근거가 없었다.
 - TON message cell 분할은 upstream 1.2.66 `common-ton/src/cells.ts`의 1016-bit 분할을 따른다. `ton_dvn_verify.json`의 `vec-c`는 이 저장소의 builder가 계산한 값이다.
-- TON BoC cell 상한은 mainnet config param 43(toncenter `getConfigParam` 읽기)의 값을 쓴다. Account storage는 `max_acc_state_cells` 65,536, message와 trace body는 `max_msg_cells` 8,192다. 측정한 mainnet storage는 UlnConnection 15 cell, Uln 532 cell, UlnManager 1,223 cell이고, attestation 600 nonce의 connection storage fixture도 이 상한 안에서 읽힌다.
+- TON BoC cell 상한은 mainnet config param 43(toncenter `getConfigParam` 읽기)의 값을 쓴다. Account storage는 `max_acc_state_cells` 65,536, message와 trace body는 `max_msg_cells` 8,192다. 측정한 mainnet storage는 UlnConnection 15 cell, Uln 532 cell, UlnManager 1,223 cell이고, attestation 600 nonce의 connection storage fixture도 이 상한 안에서 읽힌다. 상한 크기의 BoC를 parse한 test process의 peak RSS는 account 65,536 cell에서 60,850,176 byte, message 8,192 cell에서 11,403,264 byte다.
+- TON BoC depth 상한은 TON node의 cell 구조 상한 `CellTraits::max_depth`(1,024, `ton-blockchain/ton` `crypto/vm/cells/CellTraits.h`)다. Config param 43의 `max_vm_data_depth`(512)는 이와 별개인 더 좁은 on-chain 제한이다. Parser는 raw BoC의 reference graph에서 depth를 계산해 cell 객체를 만들기 전에 거부한다. Exotic 검사의 방문 집합은 provider가 조작할 수 있는 representation hash가 아니라 cell node identity를 key로 쓴다.
+- Default receive config 직렬화 상한은 고유 cell 2,048개다. Mainnet Uln storage(532 cell)의 config는 2 cell, testnet fixture의 config는 3 cell이고, depth 상한 아래에서 required/optional DVN chain 두 개가 가질 수 있는 최대 크기는 2,047 cell이다. 상한 크기 config의 직렬화는 release build에서 24 ms였다.
+- 비EVM readiness에서 형식이 깨진 200 응답은 provider 실패로 표에서 뺀다. Upstream Aptos `aptosBlockHeightQuorumFn`은 `null`과 `block_height`가 빠진 응답을 같은 bucket에 넣고, Pillar는 `null`만 `Missing` 표로 센다.
 
 §15 F-5 행의 동작은 이 리뷰에서 바뀌었다. Readiness receipt 재조회의 RPC 실패는 `Missing` 표로 세지 않고 표에서 뺀다(`7a2c33f`, `4779729`). EVM에서 성공한 provider가 없을 때의 응답은 F-5와 같은 500 `Transaction receipt or block not found for <tx>`다.
