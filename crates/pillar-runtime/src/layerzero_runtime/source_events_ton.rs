@@ -1,7 +1,9 @@
 use super::*;
 use crate::provider_health::drop_json_value_safely;
 use std::collections::{HashMap, HashSet};
-use ton_core::cell::{BoC, TonCell};
+#[cfg(test)]
+use ton_core::cell::BoC;
+use ton_core::cell::TonCell;
 
 const EVENT_CLASS_NAME: &str = "event";
 const EVENT_OPCODE: u64 = 3_812_333_683;
@@ -262,7 +264,7 @@ fn ton_message_digest(transaction: &Value, message: &Value) -> Option<String> {
     if !boc_checksum_holds(&bytes) {
         return None;
     }
-    let root = BoC::from_bytes(bytes).ok()?.single_root().ok()?;
+    let root = pillar_layerzero::boc_from_bytes(bytes).ok()?;
     // `_message.opcode ? BigInt(_message.opcode) : -1`, so JS-falsy values are -1.
     let opcode = match message.get("opcode") {
         None | Some(Value::Null) | Some(Value::Bool(false)) => None,
@@ -406,7 +408,7 @@ fn decode_ton_message(
     let body = message
         .pointer("/message_content/body")
         .and_then(Value::as_str)?;
-    let root = BoC::from_base64(body).ok()?.single_root().ok()?;
+    let root = pillar_layerzero::boc_from_base64(body).ok()?;
     let event = root.refs().first()?.clone();
     if class_name(&event).ok()?.as_str() != EVENT_CLASS_NAME {
         return None;

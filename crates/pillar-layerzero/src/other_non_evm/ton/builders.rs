@@ -23,8 +23,8 @@ fn require_nonneg(value: i64, field: &str) -> Result<u64, AppCoreError> {
     })
 }
 
-/// `hexToCells`: encode an arbitrary-length hex payload into a chain of cells,
-/// each holding up to 1023 bits, the first cell being the root.
+/// `hexToCells`: encode an arbitrary-length hex payload into byte-aligned TON snake cells,
+/// each holding up to 1016 bits, the first cell being the root.
 pub fn hex_to_cells(hex: &str) -> Result<TonCell, AppCoreError> {
     let body = hex.strip_prefix("0x").unwrap_or(hex);
     let total_bits = body.len() * 4;
@@ -34,12 +34,13 @@ pub fn hex_to_cells(hex: &str) -> Result<TonCell, AppCoreError> {
     let bytes = hex::decode(body)
         .map_err(|e| AppCoreError::Internal(format!("TON message hex decode: {e}")))?;
 
+    const CELL_BITS: usize = 1016;
     let mut spans: Vec<(usize, usize)> = Vec::new();
     let mut offset = 0;
     while offset < total_bits {
-        let bits = std::cmp::min(1023, total_bits - offset);
+        let bits = std::cmp::min(CELL_BITS, total_bits - offset);
         spans.push((offset, bits));
-        offset += 1023;
+        offset += CELL_BITS;
     }
 
     let mut acc: Option<TonCell> = None;
@@ -236,5 +237,27 @@ mod tests {
         let cell = hex_to_cells("0xdeadbeef").unwrap();
         assert_eq!(cell.refs().len(), 0);
         assert_eq!(cell.data_len_bits(), 32);
+    }
+
+    #[test]
+    fn hex_to_cells_matches_upstream_byte_aligned_shapes() {
+        for (bytes, expected) in [
+            (127, vec![1016]),
+            (128, vec![1016, 8]),
+            (254, vec![1016, 1016]),
+            (255, vec![1016, 1016, 8]),
+        ] {
+            let hex = format!("0x{}", "ab".repeat(bytes));
+            let mut cell = hex_to_cells(&hex).unwrap();
+            let mut actual = Vec::new();
+            loop {
+                actual.push(cell.data_len_bits());
+                let Some(child) = cell.refs().first() else {
+                    break;
+                };
+                cell = child.clone();
+            }
+            assert_eq!(actual, expected, "{bytes}-byte payload");
+        }
     }
 }

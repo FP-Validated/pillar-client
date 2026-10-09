@@ -608,3 +608,89 @@ async fn ton_three_provider_missing_in_msg_loses_vote_before_resolver_quorum() {
         "missing in_msg must lose its vote: {error:?}"
     );
 }
+#[tokio::test]
+async fn ton_honest_provider_reaches_one_vote_quorum_when_peer_returns_root_index_boc() {
+    #[derive(Clone)]
+    struct PerHost(Arc<HashMap<&'static str, Value>>);
+    #[async_trait]
+    impl JsonRpcTransport for PerHost {
+        async fn post_json(
+            &self,
+            url: String,
+            _: HashMap<String, String>,
+            _: Value,
+        ) -> Result<Value, String> {
+            Err(format!("unexpected POST {url}"))
+        }
+        async fn get_json(&self, url: String, _: HashMap<String, String>) -> Result<Value, String> {
+            self.0
+                .iter()
+                .find(|(prefix, _)| url.starts_with(&format!("{prefix}/events?tx_hash=")))
+                .map(|(_, response)| response.clone())
+                .ok_or_else(|| format!("unrecorded GET {url}"))
+        }
+    }
+    let honest = replay_file("ton-v3-events.response.json");
+    let mut malicious = honest.clone();
+    for transaction in malicious["events"][0]["transactions"]
+        .as_object_mut()
+        .unwrap()
+        .values_mut()
+    {
+        if let Some(message) = transaction
+            .get_mut("in_msg")
+            .filter(|message| message.is_object())
+        {
+            message["message_content"]["body"] = Value::from("te6ccgEBAQEAAgUAAA==");
+        }
+    }
+    let upstream = replay_file("upstream-stage3-events.json")["events"]["ton"]["event"].clone();
+    let pathway = &upstream["pathway"];
+    let config =
+        runtime_evm_layerzero_config("mainnet", &["ton".to_string(), "arbitrum".to_string()])
+            .unwrap();
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "ton".to_string(),
+            ProviderConfig::with_distinct_entities(
+                vec![
+                    ProviderUri::Uri(
+                        "https://honest.example/v2?v3-endpoint=https://honest.example/v3".into(),
+                    ),
+                    ProviderUri::Uri(
+                        "https://malicious.example/v2?v3-endpoint=https://malicious.example/v3"
+                            .into(),
+                    ),
+                ],
+                1,
+            ),
+        )]),
+        None,
+    )
+    .unwrap();
+    let resolver = EvmPacketSentResolver::new(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        PerHost(Arc::new(HashMap::from([
+            ("https://honest.example/v3", honest),
+            ("https://malicious.example/v3", malicious),
+        ]))),
+        config.packet_sent_resolver_config,
+    );
+    let request = LzMessageId {
+        pathway_id: PathwayId {
+            src_chain_name: "ton".to_string(),
+            dst_chain_name: "arbitrum".to_string(),
+            extra: ["srcEid", "dstEid", "sender", "receiver"]
+                .into_iter()
+                .map(|key| (key.to_string(), pathway[key].clone()))
+                .collect(),
+        },
+        nonce: upstream["nonce"].as_u64().unwrap(),
+        uln_send_version: upstream["ulnSendVersion"].clone(),
+    };
+    let event = resolver
+        .get_lz_sent_event(TON_TX, &request)
+        .await
+        .expect("the malformed provider loses its vote and the honest provider meets quorum");
+    assert_same_event("ton", &event, &upstream);
+}
