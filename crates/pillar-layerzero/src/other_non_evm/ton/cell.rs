@@ -189,6 +189,10 @@ fn boc_root_depth(bytes: &[u8]) -> Option<usize> {
         let d1 = *bytes.get(cursor)?;
         let d2 = *bytes.get(cursor + 1)?;
         cursor += 2;
+        if d1 & 0x10 != 0 {
+            let hash_count = (d1 >> 5).count_ones() as usize + 1;
+            cursor = cursor.checked_add(hash_count * (32 + 2))?;
+        }
         cursor = cursor.checked_add(usize::from(d2 / 2 + d2 % 2))?;
         let refs_count = usize::from(d1 & 7);
         let mut refs = Vec::with_capacity(refs_count);
@@ -487,6 +491,25 @@ mod tests {
         boc.extend_from_slice(&[0, 2, 0xcd]);
         assert_eq!(boc.len(), 21 + 61);
         assert!(boc_from_bytes_with_limits(boc, MAX_MESSAGE_CELLS, true).is_err());
+    }
+
+    #[test]
+    fn accepts_boc_cells_that_store_their_hashes() {
+        let plain = vec![
+            0xb5, 0xee, 0x9c, 0x72, 1, 1, 2, 1, 0, 7, 0, 0x01, 0x02, 0xab, 1, 0x00, 0x02, 0xcd,
+        ];
+        let root = boc_from_bytes(plain).expect("plain BoC");
+        let leaf = &root.refs()[0];
+        let mut with_hashes = vec![0xb5, 0xee, 0x9c, 0x72, 1, 1, 2, 1, 0, 75, 0, 0x11, 0x02];
+        with_hashes.extend_from_slice(root.hash().unwrap().as_slice());
+        with_hashes.extend_from_slice(&root.depth().unwrap().to_be_bytes());
+        with_hashes.extend_from_slice(&[0xab, 1, 0x10, 0x02]);
+        with_hashes.extend_from_slice(leaf.hash().unwrap().as_slice());
+        with_hashes.extend_from_slice(&leaf.depth().unwrap().to_be_bytes());
+        with_hashes.push(0xcd);
+        assert_eq!(boc_root_depth(&with_hashes), Some(1));
+        let parsed = boc_from_bytes(with_hashes).expect("BoC with stored hashes");
+        assert_eq!(parsed.hash().unwrap(), root.hash().unwrap());
     }
 
     #[test]
