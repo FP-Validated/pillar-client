@@ -752,6 +752,7 @@ async fn packet_sent_resolver_decodes_solana_program_return_packet() {
         "hyperliquid"
     );
     assert_eq!(sent_event.lz_message_id.nonce, 286);
+    assert!(sent_event.extra["options"].is_object());
     assert_eq!(
         sent_event.extra["guid"],
         "0xef08c522ae69e298671d4cb1f58084a21e5be098ed9a5170afa468e26a53a9fc"
@@ -774,6 +775,40 @@ async fn packet_sent_resolver_decodes_solana_program_return_packet() {
             "id": 1,
             "jsonrpc": "2.0",
         })
+    );
+}
+#[tokio::test]
+async fn packet_sent_resolver_skips_solana_packet_with_undecodable_options() {
+    let transport = RecordingTransport {
+        calls: Arc::new(Mutex::new(Vec::new())),
+        responses: Arc::new(Mutex::new(vec![Ok(json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": solana_packet_sent_transaction_data_with_options(&[0, 3, 1]),
+        }))])),
+    };
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "solana".to_string(),
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://solana-rpc.example".to_string())],
+                1,
+            ),
+        )]),
+        Some(&["solana".to_string()]),
+    )
+    .unwrap();
+    let resolver = EvmPacketSentResolver::new(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        transport,
+        evm_packet_sent_resolver_config("V302"),
+    );
+    let error = resolver
+        .get_lz_sent_event("solana-signature", &solana_packet_sent_request())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, AppCoreError::Internal(message) if message.contains("Could not find sentEvent"))
     );
 }
 

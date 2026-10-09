@@ -667,7 +667,14 @@ where
         pathway_extra.insert("receiver".to_string(), Value::from(packet.receiver));
         let mut extra = IndexMap::new();
         extra.insert("guid".to_string(), Value::from(packet.guid));
-        extra.insert("options".to_string(), Value::from(event.options));
+        let options = match super::relayer_options::decode_evm_relayer_options(
+            &event.options,
+            &dst_chain_name,
+        ) {
+            Ok(options) => options,
+            Err(_) => return Ok(SourceEventConversion::NotOurs),
+        };
+        extra.insert("options".to_string(), options);
         extra.insert("sendLibrary".to_string(), Value::from(event.send_library));
         extra.insert(
             "packetEmitAddress".to_string(),
@@ -2077,7 +2084,7 @@ struct SolanaPacketSentEvent {
     endpoint_program_id: String,
     send_library: String,
     packet: LzPacketV1,
-    options: String,
+    options: Vec<u8>,
 }
 
 fn decode_solana_packet_sent_events(transaction: &Value) -> Vec<SolanaPacketSentEvent> {
@@ -2113,7 +2120,7 @@ fn decode_solana_packet_sent_event_instruction(
         endpoint_program_id,
         send_library: bs58::encode(send_library_bytes).into_string(),
         packet,
-        options: format!("0x{}", hex::encode(options)),
+        options: options.to_vec(),
     })
 }
 

@@ -211,6 +211,11 @@ pub(super) fn evm_packet_sent_request(uln_version: &str) -> LzMessageId {
 }
 
 pub(super) fn solana_packet_sent_transaction_data() -> Value {
+    let options = hex::decode("00030100110100000000000000000000000000000000").unwrap();
+    solana_packet_sent_transaction_data_with_options(&options)
+}
+
+pub(super) fn solana_packet_sent_transaction_data_with_options(options: &[u8]) -> Value {
     let packet_return = "BA8GAAAAAAAAAAAAAAAAAJkAAAABAAAAAAAAAR4AAHXYB9FK7wOqz943w3rISAXwJl2JNulUJrhq+VsIL1pWfwAAAHafAAAAAAAAAAAAAAAATkHPw/OxninjI9LDb48gKh4VHa/vCMUirmnimGcdTLH1gISiHlvgmO2aUXCvpGjialOp/AAAAAAAAAAAAAAAAEII+FGAuVVv9Dm8c7wcQxMf3gQJAAAAAAAHoSA=";
     json!({
         "slot": 431734504,
@@ -219,7 +224,7 @@ pub(super) fn solana_packet_sent_transaction_data() -> Value {
             "err": null,
             "innerInstructions": [{
                 "index": 1,
-                "instructions": [solana_packet_sent_event_instruction(packet_return)]
+                "instructions": [solana_packet_sent_event_instruction(packet_return, options)]
             }],
             "logMessages": [
                 format!("Program return: 7a4WjyR8VZ7yZz5XJAKm39BUGn5iT9CKcv2pmG9tdXVH {packet_return}")
@@ -237,7 +242,10 @@ pub(super) fn solana_packet_sent_transaction_with_false_positive_packet_data() -
             "err": null,
             "innerInstructions": [{
                 "index": 1,
-                "instructions": [solana_packet_sent_event_instruction(packet_return)]
+                "instructions": [solana_packet_sent_event_instruction(
+                    packet_return,
+                    &hex::decode("00030100110100000000000000000000000000000000").unwrap(),
+                )]
             }],
             "logMessages": [
                 format!("Program return: 7a4WjyR8VZ7yZz5XJAKm39BUGn5iT9CKcv2pmG9tdXVH {packet_return}")
@@ -246,7 +254,7 @@ pub(super) fn solana_packet_sent_transaction_with_false_positive_packet_data() -
     })
 }
 
-fn solana_packet_sent_event_instruction(packet_return: &str) -> Value {
+fn solana_packet_sent_event_instruction(packet_return: &str, options: &[u8]) -> Value {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
 
     let returned = STANDARD.decode(packet_return).unwrap();
@@ -258,7 +266,8 @@ fn solana_packet_sent_event_instruction(packet_return: &str) -> Value {
     let mut event = hex::decode("e445a52e51cb9a1d005ca7c98b2eab52").unwrap();
     event.extend_from_slice(&(packet.len() as u32).to_le_bytes());
     event.extend_from_slice(packet);
-    event.extend_from_slice(&0_u32.to_le_bytes());
+    event.extend_from_slice(&(options.len() as u32).to_le_bytes());
+    event.extend_from_slice(options);
     event.extend_from_slice(&send_library);
     json!({
         "programId": "76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6",
