@@ -274,6 +274,13 @@ fn ton_packet_sent_requires_the_controller_owned_channel_as_sender() {
 async fn ton_two_provider_resolution(
     change: impl Fn(&mut serde_json::Map<String, Value>),
 ) -> Result<LzSentEvent, AppCoreError> {
+    ton_two_provider_resolution_with(change, |_| {}).await
+}
+
+async fn ton_two_provider_resolution_with(
+    change: impl Fn(&mut serde_json::Map<String, Value>),
+    configure: impl Fn(&mut EvmPacketSentResolverConfig),
+) -> Result<LzSentEvent, AppCoreError> {
     #[derive(Clone)]
     struct PerHost(Arc<HashMap<&'static str, Value>>);
     #[async_trait]
@@ -320,13 +327,15 @@ async fn ton_two_provider_resolution(
         None,
     )
     .unwrap();
+    let mut resolver_config = config.packet_sent_resolver_config;
+    configure(&mut resolver_config);
     let resolver = EvmPacketSentResolver::new(
         &ProviderSnapshotHandle::from_getter(&getter),
         PerHost(Arc::new(HashMap::from([
             ("https://a.example/v3", honest),
             ("https://b.example/v3", other),
         ]))),
-        config.packet_sent_resolver_config,
+        resolver_config,
     );
     let request = LzMessageId {
         pathway_id: PathwayId {
@@ -341,6 +350,24 @@ async fn ton_two_provider_resolution(
         uln_send_version: upstream["ulnSendVersion"].clone(),
     };
     resolver.get_lz_sent_event(TON_TX, &request).await
+}
+
+#[tokio::test]
+async fn ton_missing_source_endpoint_id_is_a_server_fault() {
+    let upstream = replay_file("upstream-stage3-events.json")["events"]["ton"]["event"].clone();
+    let ton_eid = upstream["pathway"]["srcEid"].as_u64().unwrap() as u32;
+    let error = ton_two_provider_resolution_with(
+        |_| {},
+        |config| {
+            config.chain_name_by_eid.remove(&ton_eid);
+        },
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(
+        error,
+        AppCoreError::Internal(format!("No chain name for endpoint id {ton_eid}"))
+    );
 }
 
 /// Upstream quorums TON traces on a message projection

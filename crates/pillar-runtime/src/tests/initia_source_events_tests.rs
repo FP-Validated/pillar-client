@@ -175,15 +175,7 @@ async fn initia_unmapped_destination_event_does_not_mask_later_match() {
         .iter()
         .find(|scenario| scenario["name"] == "unknown destination eid")
         .unwrap();
-    let mut unknown_event = unmapped["transaction"]["events"][0].clone();
-    let encoded_data = unknown_event["attributes"][1]["value"].as_str().unwrap();
-    let mut event_data: Value = serde_json::from_str(encoded_data).unwrap();
-    event_data["encoded_packet"] = event_data["encoded_packet"]
-        .as_str()
-        .unwrap()
-        .replacen("00007595", "00007cfe", 1)
-        .into();
-    unknown_event["attributes"][1]["value"] = serde_json::to_string(&event_data).unwrap().into();
+    let unknown_event = unmapped["transaction"]["events"][0].clone();
     let mut transaction = matching["transaction"].clone();
     transaction["events"]
         .as_array_mut()

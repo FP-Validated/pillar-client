@@ -317,19 +317,21 @@ not reproduce:
   other value is a 400 before anything is signed. Upstream's `getFeatherProof`
   signs the bare packet for 2 and throws for anything else; 2 has no deployed
   verifier source, so its meaning cannot be checked and it is not imitated.
-- A trusted `PacketSent` whose destination EID has no chain in this deployment's
-  map or in the legacy cross-stage table is a non-match, so a later event in the
-  same transaction can still resolve. Upstream raises a 500 `Invariant failed:
-  Invalid endpointId` for it; no pathway to that destination can be signed here, so
-  skipping it never admits a packet the request did not name. A missing source EID,
-  or a Move/Sui event whose source maps to another chain, stays an `Internal` fault
-  but is reported only when no event matches; on EVM this was a 400 miss before.
-  EVM `ReadV1002` applies the source rule to the emitting chain after the endpoint
+- A trusted `PacketSent` whose destination EID this deployment cannot name is a
+  non-match, so a later event in the same transaction can still resolve. Move,
+  Sui, IotaL1, Starknet and Stellar consult the chain-name map and then the legacy
+  cross-stage table, where upstream raises a 500 `Invariant failed: Invalid
+  endpointId`; EVM, Solana and TON consult the map only, as before. No pathway to
+  such a destination can be signed here, so skipping it never admits a packet the
+  request did not name. A missing source EID, or a Move/Sui event whose source maps
+  to another chain, stays an `Internal` fault but is reported only when no event
+  matches; on EVM this was a 400 miss before, and on TON it aborted the scan. EVM
+  `ReadV1002` applies the source rule to the emitting chain after the endpoint
   flip. Move, Sui, IotaL1, Starknet and Stellar still convert every event before
-  matching, so any other conversion error fails the read as upstream does. Two
-  paths are unchanged: TON's decoder drops destination-unmapped events before the
-  source check, so a TON source-EID gap shows as a miss; and the Aptos V1
-  `OutboundEvent` path (`resolve_aptos_v1_packet`) keeps upstream's behaviour.
+  matching, so any other conversion error fails the read as upstream does. TON's
+  decoder still drops destination-unmapped events before the source check, so a
+  source-EID gap on such an event shows as a miss. The Aptos V1 `OutboundEvent`
+  path (`resolve_aptos_v1_packet`) keeps upstream's behaviour unchanged.
 - A resolved packet must also agree with the request's destination chain name,
   and, except on Aptos, Movement and Initia sources, with its `ulnSendVersion`
   and source chain name; upstream's `lzMessageIdMatches` compares only eids,

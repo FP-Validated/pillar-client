@@ -9,7 +9,7 @@ the Prometheus metric names.
 ### Security
 
 - `POST /`의 알 수 없는 v1 chain id는 provider RPC 전에 HTTP 400으로 거부한다. 메시지는 upstream의 `Invariant failed: Invalid endpointId: <n>`을 유지한다. 이전에는 같은 메시지의 500이었다. 이 차이는 upstream과 의도적으로 다르다.
-- Source-event scan에서 trusted PacketSent의 destination EID가 이 배포의 chain-name map과 legacy 표 어디에도 없으면 비일치로 건너뛴다. 같은 tx의 뒤 event가 요청과 맞으면 resolve된다. Upstream은 이때 `Invariant failed: Invalid endpointId`로 500을 낸다. 서명은 여전히 요청 identity와 정확히 맞는 event에만 가능하다.
+- Source-event scan에서 trusted PacketSent의 destination EID를 이 배포가 해석하지 못하면 비일치로 건너뛴다. 같은 tx의 뒤 event가 요청과 맞으면 resolve된다. Move, Sui, IotaL1, Starknet, Stellar는 chain-name map 다음에 legacy 표를 보며, upstream은 이 경우 `Invariant failed: Invalid endpointId`로 500을 낸다. EVM, Solana, TON은 이전처럼 map만 본다. 서명은 여전히 요청 identity와 정확히 맞는 event에만 가능하다.
 - Source EID가 map에 없거나 Move/Sui event의 source chain이 다르면 기존 `Internal` 오류를 유지한다. 다만 일치하는 event가 없을 때만 반환한다. EVM에서 이 경우는 이전에 400 miss였고 이제 500이다. EVM `ReadV1002`는 endpoint flip 뒤 emitting chain에 같은 규칙을 적용한다.
 - Move, Sui, IotaL1, Starknet, Stellar는 모든 event를 먼저 변환한 뒤 매칭하는 upstream 순서를 유지한다. 뒤 event의 변환 오류도 read 전체를 실패시킨다. Starknet, Stellar, Move의 legacy cross-stage destination 해석도 유지한다.
 - `polygon`과 `tron`의 MESSAGE readiness는 요청한 confirmation 수와 finalized head를 함께 확인한다. Receipt 높이의 canonical header number와 hash도 receipt와 같아야 한다. 이 결속은 reference보다 엄격하다. 다른 EVM chain과 `amoy`의 정책은 바꾸지 않는다.
