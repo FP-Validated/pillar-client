@@ -527,7 +527,11 @@ mod tests {
         let load = tokio::spawn(async move { load_remote_snapshot(&loader, &source, None).await });
         tokio::task::yield_now().await;
         tokio::time::advance(Duration::from_secs(31)).await;
-        let error = load.await.unwrap().unwrap_err();
+        let error = tokio::time::timeout(Duration::from_secs(1), load)
+            .await
+            .expect("bounded load must return to the caller")
+            .unwrap()
+            .unwrap_err();
         assert!(error.contains("timed out after 30 seconds"), "{error}");
     }
 
@@ -668,12 +672,12 @@ mod tests {
             .contains("bsc"));
 
         logs.lock().clear();
-        let serving = owner_serving(TWO);
+        let serving = owner_serving(ONE);
         let registry = Arc::new(Mutex::new(PillarMetrics::new()));
-        let unchanged = refresh_with(&serving, &registry, Ok(refreshed_snapshot(TWO))).await;
+        let unchanged = refresh_with(&serving, &registry, Ok(refreshed_snapshot(ONE))).await;
         assert_eq!(
             rendered_gauge(&unchanged, "pillar_provider_single_entity_chains"),
-            0.0
+            1.0
         );
         assert!(logs.lock().is_empty(), "unchanged set must not warn");
     }

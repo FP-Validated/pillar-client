@@ -115,7 +115,29 @@ async fn serve_until(
     shutdown_signal: ShutdownSignal,
     shutdown: impl Future<Output = io::Result<&'static str>>,
 ) -> io::Result<()> {
+    serve_until_with_lifetime(
+        listener,
+        app,
+        max_connections,
+        (shutdown_grace, shutdown_withdrawal),
+        shutdown_signal,
+        MAX_CONNECTION_LIFETIME,
+        shutdown,
+    )
+    .await
+}
+
+async fn serve_until_with_lifetime(
+    listener: TcpListener,
+    app: Router,
+    max_connections: usize,
+    shutdown_durations: (Duration, Duration),
+    shutdown_signal: ShutdownSignal,
+    max_connection_lifetime: Duration,
+    shutdown: impl Future<Output = io::Result<&'static str>>,
+) -> io::Result<()> {
     let semaphore = Arc::new(Semaphore::new(max_connections));
+    let (shutdown_grace, shutdown_withdrawal) = shutdown_durations;
     let connections = connections::Connections::new(shutdown_signal.clone());
     let mut tasks = tokio::task::JoinSet::new();
     let mut shutdown = Box::pin(shutdown);
@@ -134,7 +156,14 @@ async fn serve_until(
             }
         };
         match connection_permit(&semaphore, &connections, &mut shutdown).await? {
-            Ok(permit) => spawn_connection(&mut tasks, &connections, &app, stream, permit),
+            Ok(permit) => spawn_connection(
+                &mut tasks,
+                &connections,
+                &app,
+                stream,
+                permit,
+                max_connection_lifetime,
+            ),
             Err(signalled) => {
                 drop(stream);
                 break 'accept signalled?;
@@ -164,7 +193,14 @@ async fn serve_until(
                 }
             };
             match connection_permit(&semaphore, &connections, &mut end).await? {
-                Ok(permit) => spawn_connection(&mut tasks, &connections, &app, stream, permit),
+                Ok(permit) => spawn_connection(
+                    &mut tasks,
+                    &connections,
+                    &app,
+                    stream,
+                    permit,
+                    max_connection_lifetime,
+                ),
                 Err(()) => {
                     drop(stream);
                     break;
@@ -229,6 +265,7 @@ fn spawn_connection(
     app: &Router,
     stream: TcpStream,
     permit: OwnedSemaphorePermit,
+    max_connection_lifetime: Duration,
 ) {
     let app = app.clone();
     let (registration, control, close) = connections.register();
@@ -241,7 +278,7 @@ fn spawn_connection(
             SOCKET_TIMEOUT,
             KEEP_ALIVE_TIMEOUT,
             HEADER_READ_TIMEOUT,
-            MAX_CONNECTION_LIFETIME,
+            max_connection_lifetime,
             Some((control, close)),
         )
         .await
@@ -631,6 +668,65 @@ mod tests {
         );
         trickle.abort();
     }
+    #[tokio::test]
+    async fn production_connection_lifetime_drains_an_in_flight_request() {
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let app = Router::new().route(
+            "/",
+            get({
+                let entered = entered.clone();
+                let release = release.clone();
+                move || {
+                    let entered = entered.clone();
+                    let release = release.clone();
+                    async move {
+                        entered.notify_one();
+                        release.notified().await;
+                        "done"
+                    }
+                }
+            }),
+        );
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (_, shutdown_signal) =
+            pillar_api::router_with_shutdown(pillar_api::StaticApp::observed_mainnet(), "test");
+        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(serve_until_with_lifetime(
+            listener,
+            app,
+            1,
+            (Duration::from_secs(5), Duration::ZERO),
+            shutdown_signal,
+            Duration::from_millis(100),
+            async move {
+                stopped.await.unwrap();
+                Ok("test")
+            },
+        ));
+        let mut client = TcpStream::connect(address).await.unwrap();
+        client
+            .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .await
+            .unwrap();
+        entered.notified().await;
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        release.notify_one();
+
+        let mut response = Vec::new();
+        client.read_to_end(&mut response).await.unwrap();
+        let response = String::from_utf8(response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+        assert!(
+            response.to_ascii_lowercase().contains("connection: close"),
+            "{response}"
+        );
+        assert!(response.ends_with("done"), "{response}");
+        stop.send(()).unwrap();
+        server.await.unwrap().unwrap();
+    }
+
     #[derive(Clone)]
     struct AlwaysReadyIo {
         reads: Arc<AtomicUsize>,
