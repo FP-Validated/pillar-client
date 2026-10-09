@@ -50,28 +50,30 @@ where
             .await;
     }
     if src_chain_name == "ton" {
+        let agreed_seqno = sent_event
+            .extra
+            .get("blockNumber")
+            .and_then(|value| value.as_i64().or_else(|| value.as_str()?.parse().ok()));
         let quorum = required_provider_quorum(provider_config, src_chain_name)?;
-        let plan = plan_dispatch(&self.rank_tracker, src_chain_name, quorum)
-        .await?;
+        let plan = plan_dispatch(&self.rank_tracker, src_chain_name, quorum).await?;
         let requests = FuturesUnordered::new();
         for DispatchEntry { index, uri, delay } in plan {
             let transport = self.transport.clone();
-            let tx_hash = sent_event.tx_hash.clone();
+            let seqno = agreed_seqno;
             let required = block_confirmation;
             let parts = ton_v3_provider_uri_parts(uri);
             requests.push(async move {
                 if !delay.is_zero() {
                     tokio::time::sleep(delay).await;
                 }
-                let observation = match parts {
-                    Some((endpoint, _, headers)) => {
-                        observe_ton_block_confirmations(
-                            transport, endpoint, headers, &tx_hash, required,
-                        )
-                        .await
+                let observation = match (parts, seqno) {
+                    (Some((endpoint, _, headers)), Some(seqno)) => {
+                        observe_ton_block_confirmations(transport, endpoint, headers, seqno, required).await
                     }
-                    None => Ok(BlockConfirmationObservation { validity: BlockConfirmationValidity::Missing,
-                    current_confirmations: None, }),
+                    _ => Ok(BlockConfirmationObservation {
+                        validity: BlockConfirmationValidity::Missing,
+                        current_confirmations: None,
+                    }),
                 };
                 (index, observation.map(|observation| Some((format!("{:?}", observation.validity), observation))))
             });
@@ -348,6 +350,11 @@ where
             )),
         };
     }
+    if sent_event.source_evidence.is_none() {
+        return Err(AppCoreError::Internal(
+            "Missing source evidence for EVM readiness".to_string(),
+        ));
+    }
     let quorum = required_provider_quorum(provider_config, src_chain_name)?;
     let plan = plan_dispatch(&self.rank_tracker, src_chain_name, quorum)
     .await?;
@@ -375,8 +382,18 @@ where
         });
     }
     let context = format!("block confirmation for chain {src_chain_name}");
-    let observation =
-        resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context).await?;
+    let observation = match resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context).await {
+        Ok(observation) => observation,
+        Err(AppCoreError::Internal(ref message))
+            if message.contains("0 distinct successful responses") =>
+        {
+            return Err(AppCoreError::Internal(format!(
+                "Transaction receipt or block not found for {}",
+                sent_event.tx_hash
+            )));
+        }
+        Err(error) => return Err(error),
+    };
 
     match observation.validity {
         BlockConfirmationValidity::Sufficient { .. } => Ok(()),
@@ -463,43 +480,18 @@ async fn observe_ton_block_confirmations<T>(
     transport: T,
     endpoint: String,
     headers: HashMap<String, String>,
-    tx_hash: &str,
+    tx_seqno: i64,
     required_confirmations: i64,
 ) -> Result<BlockConfirmationObservation, RpcError>
 where
     T: JsonRpcTransport,
 {
-    if required_confirmations < 0 {
+    if required_confirmations < 0 || tx_seqno < 0 {
         return Ok(BlockConfirmationObservation {
             validity: BlockConfirmationValidity::InvalidRange,
             current_confirmations: None,
         });
     }
-    // This `tx_hash` is provider-controlled - it comes from `transaction["hash"]` in a
-    // trace response - so the core's shape gate does not cover it and the encoding is
-    // the only guard; fail closed rather than build a URL it could re-target.
-    let Some(encoded_tx_hash) = encode_path_segment(tx_hash) else {
-        return Ok(BlockConfirmationObservation {
-            validity: BlockConfirmationValidity::Missing,
-            current_confirmations: None,
-        });
-    };
-    let trace =
-        fetch_ton_transaction_trace(&transport, &endpoint, &headers, &encoded_tx_hash).await?;
-    let Some(trace) = trace else {
-        return Ok(BlockConfirmationObservation {
-            validity: BlockConfirmationValidity::Missing,
-            current_confirmations: None,
-        });
-    };
-    // The trace is rooted at its first transaction, which can sit in an earlier
-    // masterchain block than the PacketSent transaction; upstream reads the root here.
-    let Some(tx_seqno) = ton_trace_transaction_seqno(&trace, tx_hash) else {
-        return Ok(BlockConfirmationObservation {
-            validity: BlockConfirmationValidity::Missing,
-            current_confirmations: None,
-        });
-    };
     let current_response = provider_response(
         transport
             .get_json_scoped(
@@ -542,21 +534,6 @@ where
         validity,
         current_confirmations: Some(confirmations),
     })
-}
-
-fn ton_trace_transaction_seqno(trace: &Value, tx_hash: &str) -> Option<i64> {
-    let mut stack = vec![trace];
-    while let Some(node) = stack.pop() {
-        let transaction = node.get("transaction")?;
-        if transaction.get("hash").and_then(Value::as_str) == Some(tx_hash) {
-            let seqno = transaction.get("mc_block_seqno")?;
-            return seqno.as_i64().or_else(|| seqno.as_str()?.parse().ok());
-        }
-        if let Some(children) = node.get("children").and_then(Value::as_array) {
-            stack.extend(children.iter().rev());
-        }
-    }
-    None
 }
 
 async fn observe_solana_slot_confirmations<T>(
@@ -880,23 +857,39 @@ mod ton_tests {
     ) -> (BlockConfirmationObservation, Vec<String>) {
         let urls = Arc::new(Mutex::new(Vec::new()));
         let transport = RecordingTransport {
-            responses: Arc::new(Mutex::new(vec![
-                Ok(trace),
-                Ok(json!({"last": {"seqno": head}})),
-            ])),
+            responses: Arc::new(Mutex::new(vec![Ok(json!({"last": {"seqno": head}}))])),
             urls: urls.clone(),
         };
-        let observation = observe_ton_block_confirmations(
-            transport,
-            "https://ton-v3.example".to_string(),
-            HashMap::new(),
-            tx_hash,
-            5,
-        )
-        .await
-        .unwrap();
+        let observation = match ton_test_transaction_seqno(&trace, tx_hash) {
+            Some(seqno) => observe_ton_block_confirmations(
+                transport,
+                "https://ton-v3.example".to_string(),
+                HashMap::new(),
+                seqno,
+                5,
+            )
+            .await
+            .unwrap(),
+            None => BlockConfirmationObservation {
+                validity: BlockConfirmationValidity::Missing,
+                current_confirmations: None,
+            },
+        };
         let urls = urls.lock().unwrap().clone();
         (observation, urls)
+    }
+
+    fn ton_test_transaction_seqno(trace: &Value, tx_hash: &str) -> Option<i64> {
+        if let Some(transaction) = trace.get("transaction") {
+            if transaction.get("hash").and_then(Value::as_str) == Some(tx_hash) {
+                return transaction.get("mc_block_seqno")?.as_i64();
+            }
+        }
+        trace
+            .pointer("/events/0/transactions")?
+            .get(tx_hash)?
+            .get("mc_block_seqno")?
+            .as_i64()
     }
 
     /// toncenter v3 `/events`: an external message lands at seqno 100 and the
@@ -969,11 +962,8 @@ mod ton_tests {
         assert_eq!(observation.current_confirmations, None);
     }
 
-    /// Public toncenter v3 `/events` (observed 2026-10-06) returns every transaction hash as
-    /// canonical padded standard base64, so `+`, `/` and `=` must survive the query string and
-    /// the trace lookup compares the provider's own spelling exactly.
     #[tokio::test]
-    async fn ton_confirmations_follow_a_canonical_base64_hash_through_the_encoded_query() {
+    async fn ton_confirmations_use_agreed_packet_seqno_without_trace_resolution() {
         const PACKET_SENT: &str = "xl/S/EtS8UMfIBSN5KWDG/XZ7tv3ovs2k3zRO+e7K5w=";
         const ROOT: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
         let trace = json!({"events": [{
@@ -983,26 +973,14 @@ mod ton_tests {
                 PACKET_SENT: {"hash": PACKET_SENT, "lt": "1001", "mc_block_seqno": 105},
             }
         }]});
-
-        let (observation, urls) = observe_recording(trace.clone(), 110, PACKET_SENT).await;
-        assert_eq!(
-            urls.first().map(String::as_str),
-            Some("https://ton-v3.example/events?tx_hash=xl%2FS%2FEtS8UMfIBSN5KWDG%2FXZ7tv3ovs2k3zRO%2Be7K5w%3D")
-        );
+        let (observation, urls) = observe_recording(trace, 110, PACKET_SENT).await;
+        assert_eq!(urls, ["https://ton-v3.example/masterchainInfo"]);
         assert!(matches!(
             observation.validity,
             BlockConfirmationValidity::Sufficient {
                 receipt_block_number: 105,
                 ..
             }
-        ));
-
-        // Base64 is case-sensitive: a lowercased hash names other bytes, so it must not match.
-        let lowered = PACKET_SENT.to_lowercase();
-        let observation = observe(trace, 110, &lowered).await;
-        assert!(matches!(
-            observation.validity,
-            BlockConfirmationValidity::Missing
         ));
     }
 }

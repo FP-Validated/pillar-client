@@ -19,15 +19,6 @@ pub(super) fn readiness_sent_event() -> LzSentEvent {
     }
 }
 
-pub(super) fn receipt_at(block_hash: &str, block_number: &str) -> Value {
-    json!({
-        "result": {
-            "blockHash": block_hash,
-            "blockNumber": block_number
-        }
-    })
-}
-
 pub(super) fn latest_block(number: &str) -> Value {
     json!({
         "result": {
@@ -268,11 +259,11 @@ async fn runtime_rpc_validation_checks_validates_message_readiness_with_quorum()
     let transport = RecordingTransport {
         calls: calls.clone(),
         responses: Arc::new(Mutex::new(vec![
-            Ok(receipt_at("0xaaa", "0x64")),
+            Ok(bound_receipt("0xaaa", "0x64", "0x1", "0x0")),
             Ok(latest_block("0x67")),
-            Ok(receipt_at("0xaaa", "0x64")),
+            Ok(bound_receipt("0xaaa", "0x64", "0x1", "0x0")),
             Ok(latest_block("0x68")),
-            Ok(receipt_at("0xbbb", "0xc8")),
+            Ok(bound_receipt("0xbbb", "0xc8", "0x1", "0x0")),
             Ok(latest_block("0xc9")),
         ])),
     };
@@ -283,7 +274,7 @@ async fn runtime_rpc_validation_checks_validates_message_readiness_with_quorum()
 
     checks
         .validate_readiness(
-            &readiness_sent_event(),
+            &readiness_sent_event_bound_to("0xaaa", 100, 0),
             &SigningContext::Message {
                 expiration: 1,
                 skip_v_id: None,
@@ -477,9 +468,9 @@ async fn polygon_readiness_binds_canonical_header_at_receipt_height() {
     ])
     .await;
     let error = result.expect_err("finalized behind the receipt is not final yet");
-    assert!(
-        matches!(error, AppCoreError::BadRequest(_)) && error.to_string().contains("not met"),
-        "{error}"
+    assert_eq!(
+        error.to_string(),
+        "block confirmations not met, current block confirmation: -1"
     );
     assert_eq!(tags.len(), 3, "{tags:?}");
 
@@ -618,7 +609,197 @@ async fn runtime_rpc_validation_checks_reports_a_failed_receipt_reread_as_unavai
         "a transport failure is an unavailable provider, not a changed source: {error}"
     );
 }
+#[tokio::test]
+async fn runtime_rpc_validation_checks_treats_json_rpc_receipt_errors_as_unavailable() {
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "ethereum".to_string(),
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://eth-a.example".to_string())],
+                1,
+            ),
+        )]),
+        Some(&["ethereum".to_string()]),
+    )
+    .unwrap();
+    for receipt in [
+        json!({"jsonrpc":"2.0", "id":1, "error":{"code":-32005, "message":"limit exceeded"}}),
+        json!({"jsonrpc":"2.0", "id":1, "other":"no result"}),
+    ] {
+        let transport = RecordingTransport {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            responses: Arc::new(Mutex::new(vec![Ok(receipt), Ok(latest_block("0x67"))])),
+        };
+        let error = RuntimeRpcValidationChecks::from_getter(
+            &ProviderSnapshotHandle::from_getter(&getter),
+            transport,
+        )
+        .validate_readiness(
+            &readiness_sent_event_bound_to("0xaaa", 100, 0),
+            &SigningContext::Message {
+                expiration: 1,
+                skip_v_id: None,
+                dvn_address: None,
+                block_confirmation: 2,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(error, AppCoreError::Internal(_))
+                && error
+                    .to_string()
+                    .contains("Transaction receipt or block not found"),
+            "provider failure must not be classified as changed source: {error}"
+        );
+    }
+}
 
+#[derive(Clone)]
+struct UrlMappedReadinessTransport;
+
+#[async_trait]
+impl JsonRpcTransport for UrlMappedReadinessTransport {
+    async fn post_json(
+        &self,
+        url: String,
+        _headers: HashMap<String, String>,
+        body: Value,
+    ) -> Result<Value, String> {
+        let method = body["method"].as_str().unwrap_or_default();
+        match (url.as_str(), method) {
+            ("https://eth-a.example" | "https://eth-b.example", "eth_getTransactionReceipt") => {
+                Ok(bound_receipt("0xaaa", "0x64", "0x1", "0x0"))
+            }
+            ("https://eth-a.example" | "https://eth-b.example", "eth_getBlockByNumber") => {
+                Ok(latest_block("0x67"))
+            }
+            ("https://eth-c.example" | "https://eth-d.example", "eth_getTransactionReceipt") => {
+                Err("timeout".to_string())
+            }
+            ("https://eth-c.example" | "https://eth-d.example", "eth_getBlockByNumber") => {
+                Ok(latest_block("0x67"))
+            }
+            _ => Err(format!("unexpected request {url} {method}")),
+        }
+    }
+
+    async fn get_json(
+        &self,
+        _url: String,
+        _headers: HashMap<String, String>,
+    ) -> Result<Value, String> {
+        Err("unexpected GET".to_string())
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn runtime_rpc_validation_does_not_count_failed_evm_reads_as_quorum_votes() {
+    let uris = ["eth-a", "eth-b", "eth-c", "eth-d"]
+        .into_iter()
+        .map(|host| ProviderUri::Uri(format!("https://{host}.example")))
+        .collect();
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "ethereum".to_string(),
+            ProviderConfig::with_distinct_entities(uris, 2),
+        )]),
+        Some(&["ethereum".to_string()]),
+    )
+    .unwrap();
+    RuntimeRpcValidationChecks::from_getter(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        UrlMappedReadinessTransport,
+    )
+    .validate_readiness(
+        &readiness_sent_event_bound_to("0xaaa", 100, 0),
+        &SigningContext::Message {
+            expiration: 1,
+            skip_v_id: None,
+            dvn_address: None,
+            block_confirmation: 2,
+        },
+    )
+    .await
+    .expect("two Sufficient provider observations form quorum; failures are not votes");
+}
+#[derive(Clone)]
+struct TonForgeryReadinessTransport;
+
+#[async_trait]
+impl JsonRpcTransport for TonForgeryReadinessTransport {
+    async fn post_json(
+        &self,
+        _url: String,
+        _headers: HashMap<String, String>,
+        _body: Value,
+    ) -> Result<Value, String> {
+        Err("unexpected POST".to_string())
+    }
+
+    async fn get_json(
+        &self,
+        url: String,
+        _headers: HashMap<String, String>,
+    ) -> Result<Value, String> {
+        if url.ends_with("/masterchainInfo") {
+            return Ok(json!({"last": {"seqno": 101}}));
+        }
+        Ok(json!({"events": [{
+            "trace": {"tx_hash": "forged-old", "children": []},
+            "transactions": {"forged-old": {"hash": "forged-old", "mc_block_seqno": 1}}
+        }]}))
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn ton_readiness_uses_quorum_agreed_packet_block_not_forged_transaction_hash() {
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "ton".to_string(),
+            ProviderConfig::with_distinct_entities(
+                vec![
+                    ProviderUri::Uri(
+                        "https://ton-a.example?v3-endpoint=https%3A%2F%2Fton-v3.example"
+                            .to_string(),
+                    ),
+                    ProviderUri::Uri(
+                        "https://ton-b.example?v3-endpoint=https%3A%2F%2Fton-v3.example"
+                            .to_string(),
+                    ),
+                ],
+                2,
+            ),
+        )]),
+        Some(&["ton".to_string()]),
+    )
+    .unwrap();
+    let mut sent_event = readiness_sent_event();
+    sent_event.lz_message_id.pathway_id.src_chain_name = "ton".to_string();
+    sent_event.tx_hash = "forged-old".to_string();
+    sent_event
+        .extra
+        .insert("blockNumber".to_string(), Value::from(100));
+    let error = RuntimeRpcValidationChecks::from_getter(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        TonForgeryReadinessTransport,
+    )
+    .validate_readiness(
+        &sent_event,
+        &SigningContext::Message {
+            expiration: 1,
+            skip_v_id: None,
+            dvn_address: None,
+            block_confirmation: 5,
+        },
+    )
+    .await
+    .expect_err("an old forged transaction hash must not satisfy readiness");
+    assert_eq!(
+        error.to_string(),
+        "block confirmations not met, current block confirmation: 1"
+    );
+}
 #[tokio::test]
 async fn runtime_rpc_validation_checks_validates_solana_message_readiness_with_slots() {
     let getter = StaticProviderConfig::new(
@@ -714,7 +895,7 @@ async fn runtime_rpc_validation_checks_rejects_insufficient_message_confirmation
     let transport = RecordingTransport {
         calls: Arc::new(Mutex::new(Vec::new())),
         responses: Arc::new(Mutex::new(vec![
-            Ok(receipt_at("0xaaa", "0x64")),
+            Ok(bound_receipt("0xaaa", "0x64", "0x1", "0x0")),
             Ok(latest_block("0x65")),
         ])),
     };
@@ -725,7 +906,7 @@ async fn runtime_rpc_validation_checks_rejects_insufficient_message_confirmation
 
     let err = checks
         .validate_readiness(
-            &readiness_sent_event(),
+            &readiness_sent_event_bound_to("0xaaa", 100, 0),
             &SigningContext::Message {
                 expiration: 1,
                 skip_v_id: None,
@@ -760,7 +941,7 @@ async fn runtime_rpc_validation_checks_rejects_confirmation_overflow() {
         RecordingTransport {
             calls: Arc::new(Mutex::new(Vec::new())),
             responses: Arc::new(Mutex::new(vec![
-                Ok(receipt_at("0xaaa", "0x1")),
+                Ok(bound_receipt("0xaaa", "0x1", "0x1", "0x0")),
                 Ok(latest_block("0x1")),
             ])),
         },
@@ -768,7 +949,7 @@ async fn runtime_rpc_validation_checks_rejects_confirmation_overflow() {
 
     let error = checks
         .validate_readiness(
-            &readiness_sent_event(),
+            &readiness_sent_event_bound_to("0xaaa", 1, 0),
             &SigningContext::Message {
                 expiration: 1,
                 skip_v_id: None,
@@ -809,7 +990,7 @@ async fn runtime_rpc_validation_checks_rejects_missing_message_readiness_data() 
 
     let err = checks
         .validate_readiness(
-            &readiness_sent_event(),
+            &readiness_sent_event_bound_to("0xaaa", 100, 0),
             &SigningContext::Message {
                 expiration: 1,
                 skip_v_id: None,
@@ -822,7 +1003,7 @@ async fn runtime_rpc_validation_checks_rejects_missing_message_readiness_data() 
 
     assert_eq!(
         err.to_string(),
-        "Transaction receipt or block not found for 0xtx"
+        "source receipt binding changed: source receipt disappeared"
     );
 }
 

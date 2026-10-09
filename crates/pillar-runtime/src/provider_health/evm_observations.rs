@@ -68,34 +68,35 @@ where
             ))
         })
         .transpose()?;
-    // A failed receipt read is an unavailable provider (Missing below), not a changed source.
-    let source_binding_error = source_evidence.and_then(|evidence| {
-        receipt_response
-            .as_ref()
-            .ok()
-            .and_then(|receipt| validate_receipt_binding(receipt, evidence, tx_hash).err())
-    });
+    let receipt_value = match receipt_response {
+        Ok(response) if response.get("error").is_none() && response.get("result").is_some() => {
+            response
+        }
+        Ok(_) | Err(RpcError::Remote(_) | RpcError::Unavailable) => {
+            return Err(RpcError::Remote(
+                "transaction receipt unavailable".to_string(),
+            ));
+        }
+        Err(error) => return Err(error),
+    };
+    let source_binding_error = source_evidence
+        .and_then(|evidence| validate_receipt_binding(&receipt_value, evidence, tx_hash).err());
     if let Some(reason) = source_binding_error {
         return Ok(BlockConfirmationObservation {
             validity: BlockConfirmationValidity::SourceChanged(reason),
             current_confirmations: None,
         });
     }
-    let observation = receipt_response
-        .ok()
-        .and_then(|receipt| parse_receipt_block_placement(&receipt).ok())
-        .zip(
+    let Some(((receipt_block_hash, receipt_block_number), current_block_number)) =
+        parse_receipt_block_placement(&receipt_value).ok().zip(
             latest_block_response
                 .as_ref()
                 .and_then(|block| parse_block_number(block).ok()),
-        );
-
-    let Some(((receipt_block_hash, receipt_block_number), current_block_number)) = observation
+        )
     else {
-        return Ok(BlockConfirmationObservation {
-            validity: BlockConfirmationValidity::Missing,
-            current_confirmations: None,
-        });
+        return Err(RpcError::Remote(
+            "receipt or latest block unavailable".to_string(),
+        ));
     };
 
     let (Some(current_confirmations), Some(required_block_number)) = (
@@ -114,6 +115,9 @@ where
         });
     }
     let confirmations_met = current_block_number >= required_block_number;
+    let finalized_behind = finalized_block
+        .as_ref()
+        .is_some_and(|(number, _)| *number < receipt_block_number);
     let mut finalized = !require_finalized;
     if let Some((finalized_number, finalized_hash)) = finalized_block {
         if finalized_number >= receipt_block_number {
@@ -165,7 +169,11 @@ where
     };
     Ok(BlockConfirmationObservation {
         validity,
-        current_confirmations: Some(current_confirmations),
+        current_confirmations: Some(if finalized_behind {
+            -1
+        } else {
+            current_confirmations.max(0)
+        }),
     })
 }
 
