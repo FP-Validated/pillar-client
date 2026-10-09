@@ -70,6 +70,13 @@ impl JsonRpcTransport for ScriptedSui {
                 .contains("transaction(digest: $digest)"),
             "{body}"
         );
+        assert!(
+            body["query"]
+                .as_str()
+                .unwrap()
+                .contains("events(first: 50, after: $after)"),
+            "Sui event pages must use the forward cursor: {body}"
+        );
         let all = self.events["data"].as_array().unwrap();
         let after = body["variables"]["after"].as_str();
         let start = after
