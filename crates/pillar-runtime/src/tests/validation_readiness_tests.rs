@@ -1247,6 +1247,108 @@ async fn no_non_evm_chain_falls_through_to_the_evm_block_confirmation_default() 
 
 #[derive(Clone)]
 struct SolanaReadinessByUrlTransport;
+#[derive(Clone, Copy)]
+enum MalformedReadinessFamily {
+    Move,
+    Starknet,
+    Stellar,
+}
+
+#[derive(Clone, Copy)]
+struct MalformedReadinessTransport(MalformedReadinessFamily);
+
+#[async_trait]
+impl JsonRpcTransport for MalformedReadinessTransport {
+    async fn post_json(
+        &self,
+        _url: String,
+        _headers: HashMap<String, String>,
+        body: Value,
+    ) -> Result<Value, String> {
+        Ok(match (self.0, body["method"].as_str()) {
+            (MalformedReadinessFamily::Starknet, Some("starknet_getTransactionReceipt")) => {
+                json!({"result": {"block_hash": "0xabc"}})
+            }
+            (MalformedReadinessFamily::Starknet, Some("starknet_blockNumber")) => {
+                json!({"result": 100})
+            }
+            (MalformedReadinessFamily::Stellar, Some("getTransaction")) => {
+                json!({"result": {"status": "SUCCESS"}})
+            }
+            (MalformedReadinessFamily::Stellar, Some("getLatestLedger")) => {
+                json!({"result": {"sequence": 100}})
+            }
+            (_, method) => return Err(format!("unexpected readiness method {method:?}")),
+        })
+    }
+
+    async fn get_json(
+        &self,
+        _url: String,
+        _headers: HashMap<String, String>,
+    ) -> Result<Value, String> {
+        match self.0 {
+            MalformedReadinessFamily::Move => Ok(json!({"success": true})),
+            _ => Err("unexpected GET".to_string()),
+        }
+    }
+}
+
+async fn malformed_readiness_is_not_a_quorum_vote(chain: &str, family: MalformedReadinessFamily) {
+    let uris = ["a", "b"]
+        .into_iter()
+        .map(|name| ProviderUri::Uri(format!("https://{name}-{chain}.example/")))
+        .collect();
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            chain.to_string(),
+            ProviderConfig::with_distinct_entities(uris, 2),
+        )]),
+        Some(&[chain.to_string()]),
+    )
+    .unwrap();
+    let checks = RuntimeRpcValidationChecks::from_getter(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        MalformedReadinessTransport(family),
+    );
+    let error = checks
+        .validate_readiness(
+            &move_readiness_sent_event(chain, "0xtx"),
+            &SigningContext::Message {
+                expiration: 1,
+                skip_v_id: None,
+                dvn_address: None,
+                block_confirmation: 8,
+            },
+        )
+        .await
+        .expect_err("malformed 200 response must be a provider failure");
+    assert!(
+        error.to_string().contains("quorum"),
+        "malformed responses must be non-votes: {error}"
+    );
+    assert!(
+        !error
+            .to_string()
+            .contains("Transaction receipt or block not found"),
+        "malformed responses must not resolve to Missing: {error}"
+    );
+}
+
+#[tokio::test]
+async fn malformed_move_readiness_200_is_a_non_vote() {
+    malformed_readiness_is_not_a_quorum_vote("aptos", MalformedReadinessFamily::Move).await;
+}
+
+#[tokio::test]
+async fn malformed_starknet_readiness_200_is_a_non_vote() {
+    malformed_readiness_is_not_a_quorum_vote("starknet", MalformedReadinessFamily::Starknet).await;
+}
+
+#[tokio::test]
+async fn malformed_stellar_readiness_200_is_a_non_vote() {
+    malformed_readiness_is_not_a_quorum_vote("stellar", MalformedReadinessFamily::Stellar).await;
+}
 
 #[async_trait]
 impl JsonRpcTransport for SolanaReadinessByUrlTransport {
@@ -1260,6 +1362,7 @@ impl JsonRpcTransport for SolanaReadinessByUrlTransport {
             return Err("HTTP 500".to_string());
         }
         match body["method"].as_str() {
+            Some("getTransaction") if url.contains("-null.example") => Ok(json!({"result": null})),
             Some("getTransaction") => Ok(json!({"result": {"slot": 1000}})),
             Some("getSlot") => Ok(json!({"result": 1200})),
             method => Err(format!("unexpected Solana method {method:?}")),
@@ -1305,4 +1408,39 @@ async fn solana_readiness_two_of_four_transport_failures_are_non_votes() {
         )
         .await
         .expect("two confirmed providers satisfy the absolute 2-of-4 strategy");
+}
+
+#[tokio::test]
+async fn solana_finalized_null_transaction_remains_a_missing_vote() {
+    let uris = ["a-null", "b-null"]
+        .into_iter()
+        .map(|name| ProviderUri::Uri(format!("https://solana-{name}.example")))
+        .collect();
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "solana".to_string(),
+            ProviderConfig::with_distinct_entities(uris, 2),
+        )]),
+        Some(&["solana".to_string()]),
+    )
+    .unwrap();
+    let checks = RuntimeRpcValidationChecks::from_getter(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        SolanaReadinessByUrlTransport,
+    );
+    let error = checks
+        .validate_readiness(
+            &solana_readiness_sent_event(),
+            &SigningContext::Message {
+                expiration: 1,
+                skip_v_id: None,
+                dvn_address: None,
+                block_confirmation: 128,
+            },
+        )
+        .await
+        .expect_err("two finalized null responses are missing votes, not successful confirmations");
+    assert!(error
+        .to_string()
+        .contains("Transaction receipt or block not found for"));
 }

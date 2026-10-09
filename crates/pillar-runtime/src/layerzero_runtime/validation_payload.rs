@@ -67,8 +67,8 @@ where
                 let src_eid = pathway_extra_u32(sent_event, "srcEid")?;
                 // A V3 packet names the receiver as bytes32; the endpoint and the ULN
                 // both take an `address`. Narrowed once here, so every call in the
-                // observation - the endpoint reads and the existing `getUlnConfig`
-                // alike - sees the same 20-byte value.
+                // observation - the endpoint reads and the READ `getReadLibConfig` call -
+                // sees the same 20-byte value.
                 let oapp = evm_address_from_pathway_value(&pathway_extra_string_value(
                     sent_event, "receiver",
                 )?)?;
