@@ -521,4 +521,11 @@ Verification results for final code commit `b7ecb00`:
 - fmt, clippy `-D warnings`, workspace tests (1079 passed, 0 failed, 15 ignored), and MSRV 1.94.1 check all passed on the release tree.
 - The mainnet image at release time is 2.6.0 code (`b7fc3ab`).
 
-Evidence: fmt/clippy/test/PostgreSQL/integrity/MSRV output and image run records in `.full-review-20261009/evidence/round6-integration`, round-by-round reviewer reports and red/green output · 2026-10-09 23:48 KST. Hosted CI row: result for run `37946961465` · 2026-10-10 00:08 KST. 2.6.1 release section: local fmt/clippy/test/MSRV runs on the release tree · 2026-10-10 00:24 KST
+### 2.6.2 Hotfix Release, 2026-10-10
+
+- 2.6.2 is a hotfix on 2.6.1. Tag is `v2.6.2`; GitHub release is `v2.6.2`.
+- The only behavior change is `cbd1fa2`: Sui GraphQL and IotaL1 event pagination check every page for provider errors, so an error on an earlier page removes that provider's vote even when the last page is clean.
+- Regression tests `sui_errors_on_an_earlier_event_page_lose_the_vote` and `iota_error_on_an_earlier_event_page_loses_the_vote` place the packet on page 2 and the error on page 1. Both fail on 2.6.1 code and pass on 2.6.2.
+- No configuration or HTTP contract changes; upgrading from 2.6.1 needs no operator action.
+
+Evidence: fmt/clippy/test/PostgreSQL/integrity/MSRV output and image run records in `.full-review-20261009/evidence/round6-integration`, round-by-round reviewer reports and red/green output · 2026-10-09 23:48 KST. Hosted CI row: result for run `37946961465` · 2026-10-10 00:08 KST. 2.6.1 release section: local fmt/clippy/test/MSRV runs on the release tree · 2026-10-10 00:24 KST. 2.6.2 section: `.full-review-20261009/evidence/sui-page-errors/{red-final,green-final,ws-tests}.txt` and hosted CI run `37956704504` · 2026-10-10 01:17 KST
