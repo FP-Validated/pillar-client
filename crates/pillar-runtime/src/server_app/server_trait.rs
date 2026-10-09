@@ -1,6 +1,14 @@
 use super::*;
 use pillar_core::AppCoreError;
 
+fn constant_time_token_match(provided: &[u8], expected: &[u8]) -> bool {
+    let mut diff = u8::from(provided.len() != expected.len());
+    for index in 0..provided.len().max(expected.len()) {
+        diff |=
+            provided.get(index).copied().unwrap_or(0) ^ expected.get(index).copied().unwrap_or(0);
+    }
+    diff == 0
+}
 #[async_trait]
 impl<T> ServerApp for RuntimeServerApp<T>
 where
@@ -143,6 +151,12 @@ where
         self.runtime_config.api_auth_tokens.clone()
     }
 
+    fn auth_token_matches(&self, token: &[u8]) -> bool {
+        self.runtime_config
+            .api_auth_tokens
+            .iter()
+            .any(|expected| constant_time_token_match(token, expected.as_bytes()))
+    }
     fn public_sign_routes(&self) -> bool {
         self.runtime_config.public_sign_routes
     }

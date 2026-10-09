@@ -106,6 +106,11 @@ pub trait ServerApp: Send + Sync + 'static {
     fn auth_tokens(&self) -> Vec<String> {
         Vec::new()
     }
+    fn auth_token_matches(&self, token: &[u8]) -> bool {
+        self.auth_tokens()
+            .iter()
+            .any(|expected| constant_time_token_match(token, expected.as_bytes()))
+    }
     /// Whether the signing routes accept unauthenticated callers.
     ///
     /// Defaults to false so an embedder has to say so explicitly; forgetting to
@@ -364,13 +369,6 @@ fn authenticated_route(method: &str, path: &str, public_sign_routes: bool) -> bo
     )
 }
 fn authorized(state: &ApiState, req: &Request<Body>) -> bool {
-    let tokens = state.app.auth_tokens();
-    // Fail closed: an app that supplies no tokens can never serve an
-    // authenticated route. `pillar-config` refuses to start without tokens, so
-    // reaching this branch means an embedder wired the app without them.
-    if tokens.is_empty() {
-        return false;
-    }
     let Some(value) = req.headers().get(header::AUTHORIZATION) else {
         return false;
     };
@@ -380,9 +378,7 @@ fn authorized(state: &ApiState, req: &Request<Body>) -> bool {
     let Some(token) = value.strip_prefix("Bearer ") else {
         return false;
     };
-    tokens
-        .iter()
-        .any(|expected| constant_time_token_match(token.as_bytes(), expected.as_bytes()))
+    state.app.auth_token_matches(token.as_bytes())
 }
 fn constant_time_token_match(provided: &[u8], expected: &[u8]) -> bool {
     // Fold the length mismatch as a boolean. `(a ^ b) as u8` truncates, so any
