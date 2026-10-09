@@ -121,7 +121,10 @@ PILLAR_API_AUTH_TOKENS="$(openssl rand -hex 24)" \
 ```
 
 Startup prints a redacted configuration report (provider URLs, headers and key
-identifiers are masked, tokens are shown only as a count) and then binds
+identifiers are masked, tokens are shown only as a count, and an entity label
+with characters outside `[A-Za-z0-9._-]` is shown as `<unlisted entity>`) and,
+on mainnet, warns per chain about any provider URI that is neither `https` nor
+literal-loopback `http`. It then binds
 `0.0.0.0:$SERVER_PORT`. Authentication is on by default, and startup refuses if
 `PILLAR_API_AUTH_TOKENS` is missing or holds a token shorter than 32 characters.
 With `PILLAR_API_AUTH_ENABLED=false` every route is public and tokens are
@@ -220,7 +223,8 @@ each meet the strategy, the call fails rather than picking one.
 <labels.json> <out-dir>` rewrites a retired file, given a `{ "<host>": { "category",
 "entity" } }` label per URI host, and refuses to write a pair that would not start;
 `... -- validate <providers-v2.json> <quorum-strategy.json> [chains]` runs the startup
-loader offline and prints a redacted summary. Examples are in
+loader offline and prints a redacted summary; warnings such as unmatched strategy
+keys appear in the service log at startup. Examples are in
 `crates/pillar-config/examples/provider-config/`.
 
 On `S3` and `GCS` the bucket is re-read every 60 seconds and a usable
@@ -229,10 +233,12 @@ are one generation. Every reader of provider configuration - the signing path,
 `/provider-health`, `/available-chains` - moves to the new one together, and anything
 that has to combine two reads of it pins one generation for the whole operation: a
 sign request from start to finish, and `/ready`, which asks whether any advertised
-chain is healthy. A read of either object that fails, or a pair that fails the load
-checks above, leaves the previous configuration serving and is counted under
-`pillar_provider_config_refresh_total{result="error"}`; `result="rejected"` counts a
-loaded pair the publish gate still refuses.
+chain is healthy. Each load of the two objects is bounded at 30 seconds. A read of
+either object that fails or times out, or a pair that fails the load checks above,
+leaves the previous configuration serving and is counted under
+`pillar_provider_config_refresh_total{result="error"}`; at startup the same failure
+stops the process. `result="rejected"` counts a loaded pair the publish gate still
+refuses.
 
 What a refresh can change is the URIs, entities and strategies behind the chains this
 instance was started for. The chain set itself is fixed for the process
