@@ -89,7 +89,8 @@ The following are deployment-side controls the software cannot enforce for you:
   misspelled `allOf` cannot become an empty requirement; a category key other
   than `internal`, `dedicated_external`, `shared_external` or `any` is refused, so
   a misspelled category with `"max"` cannot resolve to zero; strategy chain or
-  endpoint keys that match no configured provider are named in a startup warning;
+  endpoint keys that match no configured provider are named in a warning each time
+  the configuration loads (a chain outside the roster shows as `<unlisted chain>`);
   a strategy that zero
   entities satisfy (`{}`, `{ "any": 0 }`) is refused (upstream treats the empty
   strategy as trivial); only the `rpc` pool is dispatched, so upstream's TON

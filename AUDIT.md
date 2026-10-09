@@ -76,7 +76,7 @@ JSON artifact per run under `local/e2e-runs/` (gitignored); set
 
 Not defended in code: a compromised host or KMS principal, an operator who configures
 a quorum that one entity can satisfy (flagged at startup as
-`single-provider-trust-root`, warned on each refresh that changes those chains, and
+`single-provider-trust-root`, warned on each refresh that changes those chains to a non-empty set, and
 counted in `pillar_provider_single_entity_chains`), a majority of colluding providers, and fleet-wide rate
 limiting (budgets are per process). `SECURITY.md` "Operator responsibilities" lists
 the controls left to the deployment.

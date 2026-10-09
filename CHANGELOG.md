@@ -10,7 +10,7 @@ the Prometheus metric names.
 
 - READ(`ReadV1002`) 응답의 `payload`는 upstream(`app.ts:332`, `resolvedPayload || payload`)과 같다. Resolved payload는 `0x` 없는 hex이고, resolved payload가 비면 요청 packet의 `message`를 그대로 반환한다. 서명 입력(`resolvedPayloadHash`)은 바뀌지 않는다.
 - 해석된 `PacketSent`의 `ulnSendVersion`이 요청과 다르면 서명 전에 400 `resolved PacketSent ULN version <resolved> does not match requested ULN version <requested>`를 반환한다. 이 응답이 새로 나오는 곳은 event version을 `send_library`로 정하는 Aptos, Movement, Initia source다. 다른 family는 기존대로 400 `cannot find packet event …`다.
-- Readiness에서 provider의 transport 오류, JSON-RPC `error` envelope, 필수 필드가 빠진 200 응답은 모든 chain family에서 표가 아니다. `result: null`, pending transaction, `NOT_FOUND` 같은 의미 있는 응답은 기존처럼 `Missing` 표다. EVM은 성공한 provider가 없으면 기존 500 `Transaction receipt or block not found for <tx>`를 유지하고, 다른 family는 500 `No block confirmation for chain <chain> quorum: …`이다. 로컬 admission 실패(과부하, deadline, shutdown)는 admission 오류로 그대로 보고한다. 2.6.0 Upgrade의 Sui readiness 기술과 Security의 EVM receipt 재조회 기술을 이 항목이 대체한다.
+- Readiness에서 provider의 transport 오류와 JSON-RPC `error` envelope는 모든 chain family에서 표가 아니다. 비EVM family는 필수 필드가 빠진 200 응답도 표가 아니며, `result: null`, pending transaction, `NOT_FOUND` 같은 의미 있는 응답은 기존처럼 `Missing` 표다. EVM에서 `result` 필드가 없는 응답은 표가 아니고, `null` receipt나 binding 필드가 빠지거나 바뀐 receipt는 기존처럼 400 `source receipt binding changed`다. EVM은 성공한 provider가 없으면 기존 500 `Transaction receipt or block not found for <tx>`를 유지하고, 다른 family는 500 `No block confirmation for chain <chain> quorum: …`이다. 로컬 admission 실패(과부하, deadline, shutdown)는 admission 오류로 그대로 보고한다. 2.6.0 Upgrade의 Sui readiness 기술과 Security의 EVM receipt RPC 실패 기술을 이 항목이 대체한다.
 - `quorum-strategy.json`의 `allOf`/`oneOf` key는 `internal`, `dedicated_external`, `shared_external`, `any`만 허용한다. 다른 key가 있으면 startup이 실패하고, refresh는 `result="error"`로 기록되며 이전 설정을 유지한다.
 - 설정된 chain에 배정되는 wallet이 하나도 없으면 startup이 그 chain과 원인(그 chain type을 정의한 wallet이 없음, 또는 `supportedChainNames`가 제외함)을 밝히고 실패한다. Mnemonic wallet은 `byChainType`에 그 chain의 type이 있을 때만 그 chain에 배정한다.
 - Container image의 runtime stage에는 apt package와 `curl`이 없다. CA bundle은 digest가 고정된 builder에서 복사한다. `HEALTHCHECK`는 `pillar healthcheck`이며 `127.0.0.1:$SERVER_PORT`의 `GET /ready`가 200이면 exit 0이다.
@@ -24,9 +24,9 @@ the Prometheus metric names.
 - TON readiness는 resolution quorum이 합의한 `PacketSent` 트랜잭션의 masterchain seqno에서 confirmation을 센다.
 - Sui GraphQL과 IotaL1 transaction 조회는 요청한 digest와 다른 응답에 표를 주지 않는다.
 - ULNv2 MPT proof와 EVM readiness는 source evidence가 없으면 RPC를 보내기 전에 거부한다. MPT block 조회는 `eth_getBlockByHash(hash, false)`다.
-- READ readiness는 provider별로 latest block이 요구 높이를 만족하는지에 대해 quorum을 낸다. Timestamp marker는 `blockConfirmation`까지 일치해야 한다. READ 거부 문구는 관측한 block 번호를 담는다.
+- READ readiness는 provider별로 latest block이 요구 높이를 만족하는지에 대해 quorum을 낸다. Timestamp marker는 `blockConfirmation`까지 일치해야 하며, 맞는 marker가 없으면 400 `Missing resolved timestamp time marker for chainName <c> timestamp <t> and blockConfirmation <n>`이다. READ 거부 문구는 관측한 block 번호를 담고, READ 높이 quorum 실패는 500 `No READ block confirmation threshold for chain <c> quorum: …`이다.
 - `ReadV1002` 검증은 upstream처럼 ReadLib1002의 `getReadLibConfig(address,uint32)`를 읽고, revert하면 서명하지 않는다.
-- Strategy chain/endpoint key가 설정된 provider와 맞지 않으면 startup에서 경고한다. Refresh가 single-entity chain 집합을 비어 있지 않은 다른 집합으로 바꾸면 chain 이름과 함께 경고하고, `pillar_provider_single_entity_chains`는 startup과 받아들인 refresh마다 갱신한다.
+- Strategy chain/endpoint key가 설정된 provider와 맞지 않으면 load할 때마다 경고하며, roster 밖 chain 이름은 `<unlisted chain>`으로 표시한다. Refresh가 single-entity chain 집합을 비어 있지 않은 다른 집합으로 바꾸면 chain 이름과 함께 경고하고, `pillar_provider_single_entity_chains`는 startup과 받아들인 refresh마다 갱신한다.
 - Mainnet에서 `https`가 아니고 literal loopback `http`도 아닌 provider URI는 startup 때 chain별로 경고한다. Startup report는 `[A-Za-z0-9._-]` 밖의 문자가 든 entity label을 `<unlisted entity>`로 표시한다.
 - Mnemonic signer는 BIP-39 parse와 seed를 adapter당 한 번, seed 종류별로 필요할 때 만들어 `Zeroizing` buffer에 보관한다. 잘못된 BIP-39 mnemonic은 두 seed 종류 모두에서 거부한다. HMAC 중간값과 chain code도 `Zeroizing`이며 `bip39`의 `zeroize` feature를 켰다.
 - Bearer token 비교는 하나의 constant-time 함수로 하며 요청마다 token 목록을 복제하지 않는다.
@@ -38,8 +38,8 @@ the Prometheus metric names.
 - TON destination packet message를 upstream 1.2.66 `hexToCells`처럼 1016-bit byte-aligned cell로 나눈다. 127 byte를 넘는 message의 packet hash와 서명 대상이 이에 따라 정해진다.
 - Sui event 조회는 `first: 50`과 cursor로 모든 page를 정방향으로 읽고(transaction당 최대 1,024 event), IotaL1 `iotax_queryEvents`도 오름차순으로 page를 따라간다. 두 경로 모두 누적 응답 16 MiB 상한을 둔다.
 - Stellar `getTransaction` quorum은 `status`, `ledger`, `envelopeXdr`, contract event XDR을 비교한다. ScVal parser는 Stellar XDR의 모든 variant 길이를 따르고 깊이를 제한한다. Stellar builder는 `G…` account와 `C…` contract `dvnAddress`를 받는다.
-- Extra-context 요청에서 EVM source의 `onChainEvent.blockHash`/`blockNumber`는 resolution evidence 값이다. Solana source의 `options`는 upstream Solana decoder처럼 READ field 없는 relayer options object이고, decode할 수 없는 options는 오류로 처리한다.
-- `polygon`/`tron`에서 finalized가 receipt보다 뒤처지면 confirmation 문구는 upstream처럼 `-1`이고, 음수 confirmation은 0으로 보고한다.
+- Solana source의 `PacketSent` `options`는 모든 요청에서 upstream Solana decoder처럼 READ field 없이 decode하며, decode할 수 없으면 500 `Solana options decode error: …`다. Extra-context 요청의 `options`는 이 relayer options object이고, EVM source의 `onChainEvent.blockHash`/`blockNumber`는 resolution evidence 값이다.
+- `polygon`/`tron`에서 finalized가 receipt보다 뒤처지면 confirmation 문구는 upstream처럼 `-1`이다. EVM readiness는 음수 confirmation을 0으로 보고한다.
 - 연결 수명 300초에 도달하면 진행 중인 응답을 `Connection: close`와 함께 끝까지 보낸다. 절대 IO 상한은 300초 + header 10초 + 요청 58초다.
 - `MNEMONIC` signer의 AWS Secrets Manager region은 `LAYERZERO_CDK_DEPLOY_REGION`, 그다음 AWS SDK 기본 region chain, 그다음 `us-east-1` 순서로 정한다.
 - Durable audit readiness probe 결과를 250 ms 동안 재사용하며, probe lane을 기다리던 probe도 이 결과를 쓴다.
@@ -58,7 +58,8 @@ the Prometheus metric names.
 - 배포 전에 `cargo run -p pillar-config --example provider_config -- validate …`로 strategy category를 확인하고, startup log의 strategy key 경고와 mainnet non-HTTPS 경고를 확인한다.
 - `pillar_provider_single_entity_chains > 0`에 alert를 건다.
 - READ client는 `0x` 없는 `payload`를 허용해야 한다. Extra-context policy는 EVM `onChainEvent.blockHash`/`blockNumber` 값과 Solana `options` object를 받는다.
-- Readiness 500 body에 의존하는 alert나 parser는 `No block confirmation for chain … quorum` 문구도 다룬다.
+- Readiness와 READ의 500 body에 의존하는 alert나 parser는 `No block confirmation for chain … quorum`과 `No READ block confirmation threshold for chain … quorum` 문구도 다룬다.
+- Provider 하나가 quorum 호출에서 실패할 때마다 ERROR `provider quorum vote error: …`를 남긴다(URL 제외). Log 기반 alert의 임계값을 이에 맞춘다.
 - Durable audit을 켰다면 같은 packet의 재전송도 attempt quota를 쓰므로 signing route에 인증이나 edge rate limit을 둔다.
 
 ### Audit

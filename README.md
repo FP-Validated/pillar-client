@@ -224,7 +224,7 @@ each meet the strategy, the call fails rather than picking one.
 "entity" } }` label per URI host, and refuses to write a pair that would not start;
 `... -- validate <providers-v2.json> <quorum-strategy.json> [chains]` runs the startup
 loader offline and prints a redacted summary; warnings such as unmatched strategy
-keys appear in the service log at startup. Examples are in
+keys appear in the service log whenever the configuration loads. Examples are in
 `crates/pillar-config/examples/provider-config/`.
 
 On `S3` and `GCS` the bucket is re-read every 60 seconds and a usable

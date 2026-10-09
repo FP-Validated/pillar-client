@@ -8,7 +8,7 @@ rather than this repository's opinion of it.
 |---|---|
 | `emit-evm-signing-path.ts` | `crates/pillar-runtime/tests/gasolina_parity/evm_signing_path.json` |
 | `emit-v-id-table.ts` | `crates/pillar-runtime/tests/gasolina_parity/v_id_by_chain_name.json` (gasolina-audit `213cd500`; see below) |
-| `emit-ton-dvn-verify.ts` | `crates/pillar-layerzero/tests/gasolina_parity/ton_dvn_verify.json` |
+| `emit-ton-dvn-verify.ts` | `crates/pillar-layerzero/tests/gasolina_parity/ton_dvn_verify.json` (`vec-a`, `vec-b`; `vec-c` follows 1.2.66 `hexToCells` 1016-bit cells and is computed by the repository builder, see the fixture `_provenance`) |
 | `emit-historical-smoke.ts` | `crates/pillar-runtime/tests/gasolina_parity/historical_smoke.json` |
 | `emit-ton-proxy-target.ts` | `crates/pillar-layerzero/tests/gasolina_parity/ton_proxy_target.json` |
 | `emit-zod-v2-golden.ts` | `crates/pillar-api/fixtures/zod_v2_golden.json` (wrap its output under `cases`, keep `_provenance`; re-run at `213cd500` with every case unchanged) |

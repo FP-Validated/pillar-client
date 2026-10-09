@@ -71,8 +71,8 @@ const VECTORS: Vector[] = [
             '0:4444444444444444444444444444444444444444444444444444444444444444',
     },
     {
-        // 200 bytes, so hexToCells has to split across cells on a non
-        // byte-aligned 1023-bit boundary - the load-bearing path into packetHash.
+        // 200 bytes, so hexToCells has to split across cells; 1.2.66 splits on the
+        // byte-aligned 1016-bit boundary - the load-bearing path into packetHash.
         id: 'vec-c-large-multicell-message',
         srcEid: 30101,
         dstEid: 30343,
