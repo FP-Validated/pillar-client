@@ -97,9 +97,7 @@ pub async fn production_aws_mnemonic_secret_client(
     region: Option<&String>,
 ) -> Result<AwsSecretsManagerMnemonicClient, String> {
     let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-        .region(aws_sdk_secretsmanager::config::Region::new(
-            secrets_manager_region(region.map(String::as_str)).to_string(),
-        ))
+        .region(secrets_manager_region_provider(region.map(String::as_str)))
         .load()
         .await;
     Ok(AwsSecretsManagerMnemonicClient::new(
@@ -107,8 +105,17 @@ pub async fn production_aws_mnemonic_secret_client(
     ))
 }
 
-fn secrets_manager_region(region: Option<&str>) -> &str {
-    region.unwrap_or("us-east-1")
+fn secrets_manager_region_provider(
+    region: Option<&str>,
+) -> aws_config::meta::region::RegionProviderChain {
+    match region {
+        Some(region) => aws_config::meta::region::RegionProviderChain::first_try(Some(
+            aws_sdk_secretsmanager::config::Region::new(region.to_string()),
+        )),
+        None => {
+            aws_config::meta::region::RegionProviderChain::default_provider().or_else("us-east-1")
+        }
+    }
 }
 
 pub async fn aws_mnemonic_signer_assembly_from_secret_client<C>(
@@ -365,11 +372,33 @@ pub async fn production_kms_raw_signer_factory_from_options(
 
 #[cfg(test)]
 mod tests {
-    use super::secrets_manager_region;
+    use super::secrets_manager_region_provider;
 
-    #[test]
-    fn unset_secrets_manager_region_defaults_to_us_east_1() {
-        assert_eq!(secrets_manager_region(None), "us-east-1");
-        assert_eq!(secrets_manager_region(Some("eu-west-1")), "eu-west-1");
+    #[tokio::test]
+    async fn explicit_secrets_manager_region_takes_precedence() {
+        let region = secrets_manager_region_provider(Some("eu-west-1"))
+            .region()
+            .await
+            .unwrap();
+        assert_eq!(region.as_ref(), "eu-west-1");
+    }
+
+    #[tokio::test]
+    async fn aws_region_is_used_by_the_sdk_default_region_chain() {
+        if std::env::var("AWS_REGION").as_deref() != Ok("ap-south-1") {
+            return;
+        }
+        let region = secrets_manager_region_provider(None).region().await;
+        assert_eq!(region.unwrap().as_ref(), "ap-south-1");
+    }
+
+    #[tokio::test]
+    async fn absent_secrets_manager_region_falls_back_to_us_east_1() {
+        let region = aws_config::meta::region::RegionProviderChain::first_try(None)
+            .or_else("us-east-1")
+            .region()
+            .await
+            .unwrap();
+        assert_eq!(region.as_ref(), "us-east-1");
     }
 }

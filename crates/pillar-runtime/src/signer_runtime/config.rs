@@ -74,19 +74,40 @@ pub fn runtime_signer_config_from_env_map(
         }
     };
 
-    let wallets_by_chain_name =
+    let wallet_names_by_chain =
         build_wallets_by_chain_name(&config_wallet_definitions, chain_names)
-            .into_iter()
-            .map(|(chain_name, wallets)| {
-                (
-                    chain_name,
-                    wallets
-                        .into_iter()
-                        .map(|wallet_name| WalletRef { wallet_name })
-                        .collect(),
-                )
-            })
-            .collect();
+            .map_err(|error| error.to_string())?;
+    for chain_name in chain_names {
+        let wallets = &wallet_names_by_chain[chain_name];
+        if wallets.is_empty() {
+            let chain_type = chain_type_by_chain_name
+                .get(chain_name)
+                .ok_or_else(|| format!("Missing chain type for configured chain {chain_name}"))?;
+            let defines_chain_type = config_wallet_definitions
+                .iter()
+                .any(|wallet| wallet.by_chain_type.contains_key(chain_type));
+            let reason = if defines_chain_type {
+                "supportedChainNames excludes it"
+            } else {
+                "no wallet defines its ChainType"
+            };
+            return Err(format!(
+                "Configured chain {chain_name} resolves to zero wallets: {reason}"
+            ));
+        }
+    }
+    let wallets_by_chain_name = wallet_names_by_chain
+        .into_iter()
+        .map(|(chain_name, wallets)| {
+            (
+                chain_name,
+                wallets
+                    .into_iter()
+                    .map(|wallet_name| WalletRef { wallet_name })
+                    .collect(),
+            )
+        })
+        .collect();
     let wallet_definitions = signer_wallet_definitions_from_config(&config_wallet_definitions)?;
 
     Ok(RuntimeSignerConfig {

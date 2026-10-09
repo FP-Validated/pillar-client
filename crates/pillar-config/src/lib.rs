@@ -781,15 +781,14 @@ pub fn wallet_to_mnemonic_map_from_file_path_env_map(
 pub fn build_wallets_by_chain_name(
     wallet_definitions: &[WalletDefinition],
     chain_names: &[String],
-) -> HashMap<String, Vec<String>> {
+) -> Result<HashMap<String, Vec<String>>, ConfigError> {
     chain_names
         .iter()
         .map(|chain_name| {
+            let chain_type = static_chain_type_name(chain_name)?;
             let wallets = wallet_definitions
                 .iter()
                 .filter(|wallet| {
-                    let chain_type = static_chain_type_name(chain_name)
-                        .expect("configured chain has a static type");
                     wallet.by_chain_type.contains_key(chain_type)
                         && wallet
                             .supported_chain_names
@@ -800,7 +799,7 @@ pub fn build_wallets_by_chain_name(
                 })
                 .map(|wallet| wallet.name.clone())
                 .collect::<Vec<_>>();
-            (chain_name.clone(), wallets)
+            Ok((chain_name.clone(), wallets))
         })
         .collect()
 }
@@ -2828,7 +2827,8 @@ mod tests {
         )]))
         .unwrap();
         let by_chain =
-            build_wallets_by_chain_name(&wallets, &["ethereum".to_string(), "bsc".to_string()]);
+            build_wallets_by_chain_name(&wallets, &["ethereum".to_string(), "bsc".to_string()])
+                .unwrap();
         assert_eq!(by_chain["ethereum"], vec!["wallet-a", "wallet-b"]);
         assert_eq!(by_chain["bsc"], vec!["wallet-b"]);
     }
@@ -2843,7 +2843,8 @@ mod tests {
         )]))
         .unwrap();
         let by_chain =
-            build_wallets_by_chain_name(&wallets, &["ethereum".to_string(), "solana".to_string()]);
+            build_wallets_by_chain_name(&wallets, &["ethereum".to_string(), "solana".to_string()])
+                .unwrap();
         assert_eq!(by_chain["ethereum"], vec!["w-evm"]);
         assert_eq!(by_chain["solana"], vec!["w-sol"]);
     }

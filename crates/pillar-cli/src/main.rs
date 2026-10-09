@@ -35,10 +35,22 @@ const KEEP_ALIVE_TIMEOUT: Duration = Duration::from_secs(60);
 /// Deadline for the request line and headers, which the socket timeout cannot
 /// cover because it only wraps the service call.
 const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(10);
-/// Absolute ceiling on one connection. It has to exceed `SOCKET_TIMEOUT` so a
-/// legitimate slow request is not cut off mid-flight, while still bounding a
-/// client that keeps renewing the sliding idle window.
+/// Starts graceful shutdown for an active connection; its IO deadline also
+/// allows the header-read and request service budgets to finish.
 const MAX_CONNECTION_LIFETIME: Duration = Duration::from_secs(300);
+#[derive(Clone, Copy)]
+struct ConnectionTimeouts {
+    lifetime: Duration,
+    request: Duration,
+    keep_alive: Duration,
+    header_read: Duration,
+}
+const PRODUCTION_CONNECTION_TIMEOUTS: ConnectionTimeouts = ConnectionTimeouts {
+    lifetime: MAX_CONNECTION_LIFETIME,
+    request: SOCKET_TIMEOUT,
+    keep_alive: KEEP_ALIVE_TIMEOUT,
+    header_read: HEADER_READ_TIMEOUT,
+};
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     if std::env::args().nth(1).as_deref() == Some("healthcheck") {
@@ -121,7 +133,7 @@ async fn serve_until(
         max_connections,
         (shutdown_grace, shutdown_withdrawal),
         shutdown_signal,
-        MAX_CONNECTION_LIFETIME,
+        PRODUCTION_CONNECTION_TIMEOUTS,
         shutdown,
     )
     .await
@@ -133,7 +145,7 @@ async fn serve_until_with_lifetime(
     max_connections: usize,
     shutdown_durations: (Duration, Duration),
     shutdown_signal: ShutdownSignal,
-    max_connection_lifetime: Duration,
+    connection_timeouts: ConnectionTimeouts,
     shutdown: impl Future<Output = io::Result<&'static str>>,
 ) -> io::Result<()> {
     let semaphore = Arc::new(Semaphore::new(max_connections));
@@ -162,7 +174,7 @@ async fn serve_until_with_lifetime(
                 &app,
                 stream,
                 permit,
-                max_connection_lifetime,
+                connection_timeouts,
             ),
             Err(signalled) => {
                 drop(stream);
@@ -199,7 +211,7 @@ async fn serve_until_with_lifetime(
                     &app,
                     stream,
                     permit,
-                    max_connection_lifetime,
+                    connection_timeouts,
                 ),
                 Err(()) => {
                     drop(stream);
@@ -265,9 +277,15 @@ fn spawn_connection(
     app: &Router,
     stream: TcpStream,
     permit: OwnedSemaphorePermit,
-    max_connection_lifetime: Duration,
+    connection_timeouts: ConnectionTimeouts,
 ) {
     let app = app.clone();
+    let ConnectionTimeouts {
+        lifetime,
+        request: request_timeout,
+        keep_alive: keep_alive_timeout,
+        header_read: header_read_timeout,
+    } = connection_timeouts;
     let (registration, control, close) = connections.register();
     tasks.spawn(async move {
         let _permit = permit;
@@ -275,10 +293,10 @@ fn spawn_connection(
         if let Err(error) = serve_connection_controlled(
             stream,
             app,
-            SOCKET_TIMEOUT,
-            KEEP_ALIVE_TIMEOUT,
-            HEADER_READ_TIMEOUT,
-            max_connection_lifetime,
+            request_timeout,
+            keep_alive_timeout,
+            header_read_timeout,
+            lifetime,
             Some((control, close)),
         )
         .await
@@ -387,7 +405,7 @@ where
                 io,
                 keep_alive_timeout,
                 if control.is_some() {
-                    max_connection_lifetime + request_timeout
+                    max_connection_lifetime + header_read_timeout + request_timeout
                 } else {
                     max_connection_lifetime
                 },
@@ -669,6 +687,67 @@ mod tests {
         trickle.abort();
     }
     #[tokio::test]
+    async fn production_hard_ceiling_covers_a_trickling_header_phase() {
+        let app = Router::new().route("/", get(|| async { "ok" }));
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (_, shutdown_signal) =
+            pillar_api::router_with_shutdown(pillar_api::StaticApp::observed_mainnet(), "test");
+        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        let server = tokio::spawn(serve_until_with_lifetime(
+            listener,
+            app,
+            1,
+            (Duration::from_secs(5), Duration::ZERO),
+            shutdown_signal,
+            ConnectionTimeouts {
+                lifetime: Duration::from_millis(100),
+                request: Duration::from_millis(100),
+                keep_alive: Duration::from_millis(100),
+                header_read: Duration::from_millis(300),
+            },
+            async move {
+                stopped.await.unwrap();
+                Ok("test")
+            },
+        ));
+        let client = TcpStream::connect(address).await.unwrap();
+        let (mut reader, mut writer) = client.into_split();
+        writer
+            .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nX-Pad: ")
+            .await
+            .unwrap();
+        let trickle = tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_millis(40)).await;
+                if writer.write_all(b"x").await.is_err() {
+                    break;
+                }
+            }
+        });
+
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let mut probe = [0];
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), reader.read(&mut probe))
+                .await
+                .is_err(),
+            "the connection must outlive the old lifetime + request timeout ceiling"
+        );
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), reader.read(&mut probe))
+                .await
+                .expect("the hard IO ceiling must close the trickling connection")
+                .unwrap(),
+            0
+        );
+
+        trickle.abort();
+        stop.send(()).unwrap();
+        server.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
     async fn production_connection_lifetime_drains_an_in_flight_request() {
         let entered = Arc::new(tokio::sync::Notify::new());
         let release = Arc::new(tokio::sync::Notify::new());
@@ -699,7 +778,10 @@ mod tests {
             1,
             (Duration::from_secs(5), Duration::ZERO),
             shutdown_signal,
-            Duration::from_millis(100),
+            ConnectionTimeouts {
+                lifetime: Duration::from_millis(100),
+                ..PRODUCTION_CONNECTION_TIMEOUTS
+            },
             async move {
                 stopped.await.unwrap();
                 Ok("test")

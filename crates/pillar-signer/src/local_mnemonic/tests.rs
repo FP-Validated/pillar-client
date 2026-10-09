@@ -27,6 +27,30 @@ fn local_mnemonic_derives_each_seed_kind_lazily_once() {
     let ton_address = signer.seed(SeedKind::Ton).unwrap().as_ptr();
     assert!(signer.seeds.ton.get().is_some());
     assert_eq!(signer.seed(SeedKind::Ton).unwrap().as_ptr(), ton_address);
+    assert!(signer.seeds.bip39.get().is_some());
+}
+
+#[test]
+fn invalid_bip39_mnemonics_are_rejected_for_both_seed_kinds() {
+    let mut accepted = Vec::new();
+    for phrase in [
+        "TEST TEST TEST TEST TEST TEST TEST TEST TEST TEST TEST JUNK",
+        "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon",
+    ] {
+        let signer = LocalMnemonicRawSignerAdapter::new(LocalMnemonic {
+            mnemonic: Zeroizing::new(phrase.to_string()),
+            path: "m/44'/60'/0'/0/0".to_string(),
+        });
+        for seed_kind in [SeedKind::Bip39, SeedKind::Ton] {
+            if signer.seed(seed_kind).is_ok() {
+                accepted.push((phrase, seed_kind));
+            }
+        }
+    }
+    assert!(
+        accepted.is_empty(),
+        "accepted invalid mnemonic seeds: {accepted:?}"
+    );
 }
 
 #[tokio::test]
@@ -38,6 +62,13 @@ async fn local_mnemonic_ecdsa_public_key_matches_typescript_vector() {
         path: "m/44'/60'/0'/0/0".to_string(),
     });
 
+    let expected_seed = Mnemonic::parse_in_normalized(Language::English, &signer.mnemonic.mnemonic)
+        .unwrap()
+        .to_seed("");
+    assert_eq!(
+        signer.seed(SeedKind::Bip39).unwrap().as_slice(),
+        expected_seed.as_slice()
+    );
     let public_key = signer
         .get_public_key(PublicKeyRequest {
             signature_type: SignatureType::Ecdsa,
@@ -237,6 +268,12 @@ async fn local_mnemonic_ton_seed_public_key_matches_typescript_vector() {
             "8c7d8863fc52b287b1399a2a77ecc8e71b21e578e9f33245d368b131db6ff3c",
             "d92b2f2854d573d7339aca5b71a71d578943721670013e01bbe6434ff6a308186"
         )
+    );
+    assert_eq!(
+        signer.seed(SeedKind::Ton).unwrap().as_slice(),
+        ton_hd_seed(&signer.mnemonic.mnemonic, "")
+            .unwrap()
+            .as_slice()
     );
 
     let public_key = signer
