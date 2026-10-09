@@ -630,32 +630,32 @@ Addresses live in `stellar_uln_302_for_environment`,
   `@layerzerolabs/lz-ton-sdk-v2` versions with input sha256s) and nowhere else.
   Treat a chain, deployment or status that changed upstream as unsupported here
   until a maintainer regenerates and the diff is reviewed.
-- EVM source resolution은 receipt와 모든 log의 transaction hash를 요청한 source transaction에 결속한다.
-  Log의 block hash와 number도 receipt와 같아야 한다. `removed` 생략은 false로 정규화한다.
-  true, null과 잘못된 타입은 거부한다. 정규화한 log index는 중복될 수 없다.
-  Quorum은 정규화한 typed receipt와 log를 비교한다. `l1Fee` 같은 추가 metadata는 비교하지 않는다.
-  Resolution은 `EvmSourceEvidence`에 transaction hash, block hash와 number, execution status,
-  PacketSent log의 index, address, topics와 data를 보관한다.
-  Readiness와 ULNv2 MPT builder의 재조회는 이 evidence와 일치해야 한다.
-  따라서 같은 transaction이 다른 log로 재포함된 경우에도 서명하지 않는다.
-  `polygon`과 `tron`은 latest confirmation 수와 finalized 높이를 모두 만족해야 한다.
-  Receipt 높이의 canonical header number와 hash도 일치해야 한다.
-  Finalized RPC 실패, null과 canonical header number 불일치는 표를 얻지 못한다.
-  Canonical hash 불일치는 SourceChanged 표가 되며 quorum이 성립하면 서명을 거부한다.
-  Latest-only fallback은 없다.
-  다른 EVM chain과 `amoy`에는 이 finalized 정책을 추가하지 않는다.
-  Canonical header 결속은 upstream보다 엄격한 fail-closed 정책이다.
-  Transaction hash 비교는 optional `0x` prefix와 대소문자를 정규화한다. RPC 요청 값은 바꾸지 않는다.
-  Evidence 필드 확장으로 validation audit hash는 이전 버전과 byte 단위로 비교할 수 없다.
-- TON 전용 decoder는 4 MiB 응답과 512 JSON container nesting을 허용한다.
-  Trace 변환은 transaction hash 중복과 잘못된 topology를 조립 전에 거부한다.
-  변환된 tree는 node 512개와 JSON container depth 512개를 넘을 수 없다.
-  Projection은 서명과 confirmation에 필요한 scalar 필드만 유지한다.
-  깊은 미사용 metadata는 복제하거나 재직렬화하지 않는다.
-  생략된 leaf children은 빈 배열로 정규화한다. 원본 JSON 해제는 반복형이다.
-  이 정규화는 children 누락에서 오류가 나는 upstream quorum 함수와 의도적으로 다르다.
-  Legacy `/transactionTrace`도 중복 hash와 문자열이 아닌 hash를 거부한다.
-  Container 비용은 node cap으로 별도 제한한다. Projected string byte cap은 4 MiB다.
+- EVM source resolution binds the transaction hashes of the receipt and every log to the requested source transaction.
+  The log's block hash and number must also match the receipt. An omitted `removed` is normalized to false.
+  true, null, and values of the wrong type are rejected. Normalized log indices must be unique.
+  The quorum compares normalized typed receipts and logs. It does not compare extra metadata such as `l1Fee`.
+  Resolution stores the transaction hash, block hash and number, execution status,
+  and the index, address, topics, and data of the PacketSent log in `EvmSourceEvidence`.
+  Readiness and the ULNv2 MPT builder's re-query must match this evidence.
+  Therefore, no signature is produced even if the same transaction is re-included with a different log.
+  `polygon` and `tron` must meet both the latest confirmation count and the finalized height.
+  The canonical header number and hash at the receipt height must also match.
+  Finalized RPC failures, null values, and canonical header number mismatches do not vote.
+  A canonical hash mismatch is a SourceChanged vote and rejects signing if the quorum is met.
+  There is no latest-only fallback.
+  This finalized policy is not added to other EVM chains or `amoy`.
+  Canonical header binding is a stricter fail-closed policy than upstream.
+  Transaction hash comparisons normalize an optional `0x` prefix and letter case. RPC request values are unchanged.
+  The validation audit hash cannot be compared byte-for-byte with the previous version because the Evidence fields were extended.
+- The TON-specific decoder allows responses up to 4 MiB and JSON container nesting up to 512.
+  Trace conversion rejects duplicate transaction hashes and invalid topology before assembly.
+  Converted trees cannot exceed 512 nodes or a JSON container depth of 512.
+  Projection retains only scalar fields needed for signing and confirmation.
+  Deep unused metadata is not copied or reserialized.
+  Omitted leaf children are normalized to an empty array. Original JSON decoding is iterative.
+  This normalization intentionally differs from the upstream quorum function, which errors when children are omitted.
+  Legacy `/transactionTrace` also rejects duplicate hashes and hashes that are not strings.
+  Container cost is limited separately by the node cap. The projected string byte cap is 4 MiB.
 - TON block confirmations count from the masterchain seqno of the `PacketSent`
   transaction itself. That seqno is part of the per-message fingerprint the
   provider quorum agrees on during resolution, so readiness compares it with the
@@ -686,24 +686,24 @@ Addresses live in `stellar_uln_302_for_environment`,
   not change: the read is still only as final as the marker's
   `blockConfirmation` makes it, and a reorg deeper than that *after* signing is
   a finality question this service cannot answer.
-- READ는 `eth_call`과 `eth_getCode`에서 정확한 `0x` prefix와 짝수 길이의 hex octets를 가진 JSON string만 DATA로 허용한다.
-  `eth_call`이 `0x`이면 같은 provider와 headers로 `eth_getCode`를 조회한다.
-  두 요청은 readiness가 검증한 같은 EIP-1898 block hash와 `requireCanonical:true`를 사용한다.
-  Code가 정확한 `0x`이면 runtime은 `NoCode` 관측을 entity quorum의 표로 기록한다.
-  `0x00` 등 byte가 있는 code는 정상 empty return을 허용한다. 별도 call/code quorum은 없다.
-  Runtime은 numeric error code `3`, 또는 code `-32000`과 대소문자를 구분하지 않고 일치하는 `execution reverted` 메시지의 조합만 `ExecutionRevert`로 분류한다.
-  Runtime은 제공된 revert DATA의 타입과 hex octet을 검증하고 대소문자를 정규화한다.
-  생략된 DATA와 유효한 `0x`는 반환 byte가 없다는 같은 관측이다. 서로 다른 nonempty DATA는 같은 표가 아니다.
-  Runtime은 `NoCode` 또는 `ExecutionRevert`의 유일한 entity quorum만 non-retryable domain refusal로 변환한다.
-  API는 이 거절에 HTTP 400, `code=UNRESOLVABLE_COMMAND`, `retryable=false`를 반환하며 signer에 진입하지 않는다.
-  Timeout, transport 장애, malformed DATA와 일반 RPC 오류는 표를 얻지 못한다. Quorum 부족은 domain refusal이 아니라 기존 internal 오류다.
-  불량 provider 하나가 있어도 서로 다른 정상 entity 두 개는 quorum 2로 정상 서명한다.
-  정상과 부정 관측이 각각 quorum을 만족하면 runtime은 모호한 결과를 거부한다.
-  운영자는 hash pin을 준수하는 provider만 READ route에 구성하고 미준수 provider로의 failover를 차단해야 한다. EIP-1898 파라미터 전송만으로 provider의 준수를 입증하지 않는다. `retryable=false` 판단도 이 전제에 의존한다.
-- Extra-context의 HTTP와 Lambda 요청은 `sentEvent`, `from`, typed `signingContext`를 포함한다.
-  MESSAGE와 READ의 기존 Serde 형식과 optional omission을 유지한다.
-  Closed-schema policy handler는 새 필드를 허용해야 한다.
-  이 전달은 on-chain state 검증을 대신하지 않으며 policy를 설정하지 않은 경로는 바꾸지 않는다.
+- READ accepts DATA only as a JSON string with an exact `0x` prefix and even-length hex octets from `eth_call` and `eth_getCode`.
+  If `eth_call` returns `0x`, `eth_getCode` is queried with the same provider and headers.
+  Both requests use the same EIP-1898 block hash validated by readiness and `requireCanonical:true`.
+  If the code is exactly `0x`, the runtime records a `NoCode` observation as a vote in the entity quorum.
+  Code containing bytes, such as `0x00`, allows a normal empty return. There is no separate call/code quorum.
+  The runtime classifies only numeric error code `3`, or code `-32000` combined with a case-insensitive `execution reverted` message, as `ExecutionRevert`.
+  The runtime validates the type and hex octets of supplied revert DATA and normalizes letter case.
+  Omitted DATA and valid `0x` are the same observation of no return bytes. Different nonempty DATA values are not the same vote.
+  The runtime converts only a unique entity quorum of `NoCode` or `ExecutionRevert` into a non-retryable domain refusal.
+  The API returns HTTP 400 for this refusal, with `code=UNRESOLVABLE_COMMAND` and `retryable=false`, and does not enter the signer.
+  Timeouts, transport failures, malformed DATA, and ordinary RPC errors do not vote. An insufficient quorum is an existing internal error, not a domain refusal.
+  Even with one bad provider, two distinct healthy entities sign normally with quorum 2.
+  If both positive and negative observations each meet quorum, the runtime rejects the ambiguous result.
+  Operators must configure only providers that honor hash pinning on the READ route and block failover to noncompliant providers. Sending EIP-1898 parameters alone does not prove provider compliance. The `retryable=false` decision also depends on this assumption.
+- HTTP and Lambda requests for Extra-context include `sentEvent`, `from`, and typed `signingContext`.
+  They preserve the existing Serde formats and optional omission for MESSAGE and READ.
+  Closed-schema policy handlers must accept the new fields.
+  This forwarding does not replace on-chain state validation and does not change paths where no policy is configured.
 - An external extra-context policy must answer `true`, and the two transports
   wrap that verdict differently. **The shapes are not interchangeable** - a
   policy service migrated from one form to the other will be refused.

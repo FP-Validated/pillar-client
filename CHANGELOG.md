@@ -8,106 +8,106 @@ the Prometheus metric names.
 
 ### Upgrade / Breaking
 
-- READ(`ReadV1002`) 응답의 `payload`는 upstream(`app.ts:332`, `resolvedPayload || payload`)과 같다. Resolved payload는 `0x` 없는 hex이고, resolved payload가 비면 요청 packet의 `message`를 그대로 반환한다. 서명 입력(`resolvedPayloadHash`)은 바뀌지 않는다.
-- 해석된 `PacketSent`의 `ulnSendVersion`이 요청과 다르면 서명 전에 400 `resolved PacketSent ULN version <resolved> does not match requested ULN version <requested>`를 반환한다. 이 응답이 새로 나오는 곳은 event version을 `send_library`로 정하는 Aptos, Movement, Initia source다. 다른 family는 기존대로 400 `cannot find packet event …`다.
-- Readiness에서 provider의 transport 오류와 JSON-RPC `error` envelope는 모든 chain family에서 표가 아니다. 비EVM family는 필수 필드가 빠지거나 값의 형식이 맞지 않는 200 응답(예: Aptos의 `version`, `block_height`)도 표가 아니며, `result: null`, pending transaction, `NOT_FOUND` 같은 의미 있는 응답은 기존처럼 `Missing` 표다. EVM에서 `result` 필드가 없는 응답은 표가 아니고, `null` receipt나 binding 필드가 빠지거나 바뀐 receipt는 기존처럼 400 `source receipt binding changed`다. EVM은 성공한 provider가 없으면 기존 500 `Transaction receipt or block not found for <tx>`를 유지하고, 다른 family는 500 `No block confirmation for chain <chain> quorum: …`이다. 로컬 admission 실패(과부하, deadline, shutdown)는 admission 오류로 그대로 보고한다. 2.6.0 Upgrade의 Sui readiness 기술과 Security의 EVM receipt RPC 실패 기술을 이 항목이 대체한다.
-- `quorum-strategy.json`의 `allOf`/`oneOf` key는 `internal`, `dedicated_external`, `shared_external`, `any`만 허용한다. 다른 key가 있으면 startup이 실패하고, refresh는 `result="error"`로 기록되며 이전 설정을 유지한다.
-- 설정된 chain에 배정되는 wallet이 하나도 없으면 startup이 그 chain과 원인(그 chain type을 정의한 wallet이 없음, 또는 `supportedChainNames`가 제외함)을 밝히고 실패한다. Mnemonic wallet은 `byChainType`에 그 chain의 type이 있을 때만 그 chain에 배정한다.
-- Container image의 runtime stage에는 apt package와 `curl`이 없다. CA bundle은 digest가 고정된 builder에서 복사한다. `HEALTHCHECK`는 `pillar healthcheck`이며 `127.0.0.1:$SERVER_PORT`의 `GET /ready`가 200이면 exit 0이다.
-- `provider_config` example의 `convert`는 legacy chain에 `quorum`이 없으면 변환을 거부하고, 생성하는 default strategy는 `{ "allOf": [{ "any": 2 }] }`이다.
-- 빈 문자열인 실행 한도와 durable audit 환경변수(`PILLAR_*_CONCURRENCY`, `*_QUEUE_CAPACITY`, `PILLAR_ADMISSION_WAIT_MS`, `PILLAR_KMS_*`, `PILLAR_AUDIT_ENABLED`, `PILLAR_AUDIT_TIMEOUT_MS`, `PILLAR_AUDIT_MAX_ATTEMPTS`)는 미설정과 같게 기본값을 쓴다.
+- The response from READ(`ReadV1002`) has the same `payload` as upstream (`app.ts:332`, `resolvedPayload || payload`). The resolved payload is hex without `0x`; if it is empty, the `message` from the request packet is returned unchanged. The signing input (`resolvedPayloadHash`) is unchanged.
+- If the `ulnSendVersion` of the resolved `PacketSent` differs from the request, return 400 `resolved PacketSent ULN version <resolved> does not match requested ULN version <requested>` before signing. This response is newly produced for Aptos, Movement and Initia sources, where the event version is determined by `send_library`. Other families continue to return 400 `cannot find packet event …` as before.
+- In Readiness, provider transport errors and JSON-RPC `error` envelopes do not vote in any chain family. For non-EVM families, 200 responses missing required fields or with values of the wrong type (for example, Aptos `version` and `block_height`) also do not vote; meaningful responses such as `result: null`, a pending transaction, and `NOT_FOUND` continue to vote as `Missing`. For EVM, a response without a `result` field does not vote, while a `null` receipt or a receipt with missing or changed binding fields continues to return 400 `source receipt binding changed`. If no EVM provider succeeds, the existing 500 `Transaction receipt or block not found for <tx>` is retained; other families return 500 `No block confirmation for chain <chain> quorum: …`. Local admission failures (overload, deadline, shutdown) continue to be reported as admission errors. This entry supersedes the Sui readiness description in 2.6.0 Upgrade and the EVM receipt RPC failure description in Security.
+- Keys in `allOf`/`oneOf` in `quorum-strategy.json` may only be `internal`, `dedicated_external`, `shared_external` or `any`. Any other key causes startup to fail; refresh records `result="error"` and retains the previous configuration.
+- If no wallet is assigned to a configured chain, startup fails and names the chain and the reason (no wallet defines that chain type, or `supportedChainNames` excludes it). A Mnemonic wallet is assigned to a chain only when its type is present in `byChainType`.
+- The runtime stage of the container image contains no apt packages or `curl`. The CA bundle is copied from the builder whose digest is pinned. `HEALTHCHECK` runs `pillar healthcheck`, which exits 0 when `GET /ready` at `127.0.0.1:$SERVER_PORT` returns 200.
+- `convert` in the `provider_config` example refuses to convert a legacy chain without `quorum`; the default strategy it generates is `{ "allOf": [{ "any": 2 }] }`.
+- Empty strings for execution limits and durable audit environment variables (`PILLAR_*_CONCURRENCY`, `*_QUEUE_CAPACITY`, `PILLAR_ADMISSION_WAIT_MS`, `PILLAR_KMS_*`, `PILLAR_AUDIT_ENABLED`, `PILLAR_AUDIT_TIMEOUT_MS`, `PILLAR_AUDIT_MAX_ATTEMPTS`) use the defaults, as if unset.
 
 ### Security
 
-- TON provider BoC는 하나의 parser로 읽는다. 이 parser는 header, root index, `has_idx` 크기와 선언된 cell 수를 먼저 검사하고(config param 43에 따라 account storage는 65,536개, message와 trace body는 8,192개까지), TON node의 cell depth 상한 1,024를 cell 객체를 만들기 전에 확인하며, root hash와 depth를 panic 없이 계산한다. Graph 검사는 cell node마다 하위 ref를 한 번 펼친다. Storage와 controller가 보낸 event/packet decode는 exotic cell과 0이 아닌 level mask를 거부하고, trace fingerprint는 exotic body를 받는다. Uln storage에서 꺼낸 default receive config는 고유 cell이 2,048개 이하일 때만 `committableView` 인자로 직렬화하고, 넘으면 해석할 수 없는 storage로 표를 낸다. 잘못된 BoC를 보낸 provider는 자기 표만 잃는다.
-- TON message bit는 upstream `cellsToHex`처럼 첫 ref chain만 따라 읽는다.
-- TON readiness는 resolution quorum이 합의한 `PacketSent` 트랜잭션의 masterchain seqno에서 confirmation을 센다.
-- Sui GraphQL과 IotaL1 transaction 조회는 요청한 digest와 다른 응답에 표를 주지 않는다.
-- ULNv2 MPT proof와 EVM readiness는 source evidence가 없으면 RPC를 보내기 전에 거부한다. MPT block 조회는 `eth_getBlockByHash(hash, false)`다.
-- READ readiness는 provider별로 latest block이 요구 높이를 만족하는지에 대해 quorum을 낸다. Timestamp marker는 `blockConfirmation`까지 일치해야 하며, 맞는 marker가 없으면 400 `Missing resolved timestamp time marker for chainName <c> timestamp <t> and blockConfirmation <n>`이다. READ 거부 문구는 관측한 block 번호를 담고, READ 높이 quorum 실패는 500 `No READ block confirmation threshold for chain <c> quorum: …`이다.
-- `ReadV1002` 검증은 upstream처럼 ReadLib1002의 `getReadLibConfig(address,uint32)`를 읽고, revert하면 서명하지 않는다.
-- Strategy chain/endpoint key가 설정된 provider와 맞지 않으면 load할 때마다 경고하며, roster 밖 chain 이름은 `<unlisted chain>`으로 표시한다. Refresh가 single-entity chain 집합을 비어 있지 않은 다른 집합으로 바꾸면 chain 이름과 함께 경고하고, `pillar_provider_single_entity_chains`는 startup과 받아들인 refresh마다 갱신한다.
-- Mainnet에서 `https`가 아니고 literal loopback `http`도 아닌 provider URI는 startup 때 chain별로 경고한다. Startup report는 `[A-Za-z0-9._-]` 밖의 문자가 든 entity label을 `<unlisted entity>`로 표시한다.
-- Mnemonic signer는 BIP-39 parse와 seed를 adapter당 한 번, seed 종류별로 필요할 때 만들어 `Zeroizing` buffer에 보관한다. 잘못된 BIP-39 mnemonic은 두 seed 종류 모두에서 거부한다. HMAC 중간값과 chain code도 `Zeroizing`이며 `bip39`의 `zeroize` feature를 켰다.
-- Bearer token 비교는 하나의 constant-time 함수로 하며 요청마다 token 목록을 복제하지 않는다.
-- S3/GCS provider config 읽기는 startup과 refresh 모두 30초로 제한한다. TCP accept 오류 뒤에는 100 ms 쉬고 다시 accept한다.
+- TON provider BoCs are read by a single parser. It first checks the header, root index, `has_idx` size and declared cell count (up to 65,536 for account storage and 8,192 for message and trace bodies, according to config param 43), checks the TON node cell-depth limit of 1,024 before creating cell objects, and calculates root hash and depth without panicking. The graph check expands child refs once per cell node. Event/packet decoding from storage and controller rejects exotic cells and nonzero level masks; the trace fingerprint accepts exotic bodies. A default receive config extracted from Uln storage is serialized as a `committableView` argument only when it has at most 2,048 unique cells; above that, it votes as unresolvable storage. A provider returning a malformed BoC loses only its own vote.
+- TON message bits follow only the first ref chain, as in upstream `cellsToHex`.
+- TON readiness counts confirmations from the masterchain seqno of the `PacketSent` transaction agreed on by the resolution quorum.
+- Sui GraphQL and IotaL1 transaction reads do not let a response with a digest different from the requested digest vote.
+- ULNv2 MPT proofs and EVM readiness are refused before sending an RPC when source evidence is absent. The MPT block lookup is `eth_getBlockByHash(hash, false)`.
+- READ readiness takes a quorum on whether each provider's latest block meets the required height. A Timestamp marker must also match `blockConfirmation`; if no marker matches, return 400 `Missing resolved timestamp time marker for chainName <c> timestamp <t> and blockConfirmation <n>`. READ refusal messages include the observed block number, and a READ height quorum failure returns 500 `No READ block confirmation threshold for chain <c> quorum: …`.
+- `ReadV1002` validation reads ReadLib1002's `getReadLibConfig(address,uint32)`, as upstream does, and does not sign if it reverts.
+- A warning is logged on every load when a strategy chain/endpoint key does not match a configured provider, and chain names outside the roster are shown as `<unlisted chain>`. If a refresh changes the single-entity chain set from one nonempty set to another, it logs a warning with the chain names, and `pillar_provider_single_entity_chains` is updated at startup and on each accepted refresh.
+- On Mainnet, provider URIs that are neither `https` nor literal loopback `http` produce a warning for each chain at startup. The startup report displays entity labels containing characters outside `[A-Za-z0-9._-]` as `<unlisted entity>`.
+- The Mnemonic signer creates the BIP-39 parse and seed once per adapter, as needed for each seed type, and stores them in a `Zeroizing` buffer. An invalid BIP-39 mnemonic is rejected for both seed types. HMAC intermediates and the chain code are also `Zeroizing`, and the `zeroize` feature of `bip39` is enabled.
+- Bearer tokens are compared by one constant-time function, without copying the token list for each request.
+- S3/GCS provider config reads have a 30-second limit at both startup and refresh. After a TCP accept error, the server waits 100 ms and accepts again.
 
 ### Fixes
 
-- `ReadV1002` 검증은 ReadLib1002에 없는 `getUlnConfig`를 호출하지 않는다.
-- TON destination packet message를 upstream 1.2.66 `hexToCells`처럼 1016-bit byte-aligned cell로 나눈다. 127 byte를 넘는 message의 packet hash와 서명 대상이 이에 따라 정해진다.
-- Sui event 조회는 `first: 50`과 cursor로 모든 page를 정방향으로 읽고(transaction당 최대 1,024 event), IotaL1 `iotax_queryEvents`도 오름차순으로 page를 따라간다. 두 경로 모두 누적 응답 16 MiB 상한을 둔다.
-- Stellar `getTransaction` quorum은 `status`, `ledger`, `envelopeXdr`, contract event XDR을 비교한다. ScVal parser는 Stellar XDR의 모든 variant 길이를 따르고 깊이를 제한한다. Stellar builder는 `G…` account와 `C…` contract `dvnAddress`를 받는다.
-- Solana source의 `PacketSent` `options`는 모든 요청에서 upstream Solana decoder처럼 READ field 없이 decode하며, decode할 수 없으면 500 `Solana options decode error: …`다. Extra-context 요청의 `options`는 이 relayer options object이고, EVM source의 `onChainEvent.blockHash`/`blockNumber`는 resolution evidence 값이다.
-- `polygon`/`tron`에서 finalized가 receipt보다 뒤처지면 confirmation 문구는 upstream처럼 `-1`이다. EVM readiness는 음수 confirmation을 0으로 보고한다.
-- 연결 수명 300초에 도달하면 진행 중인 응답을 `Connection: close`와 함께 끝까지 보낸다. 절대 IO 상한은 300초 + header 10초 + 요청 58초다.
-- `MNEMONIC` signer의 AWS Secrets Manager region은 `LAYERZERO_CDK_DEPLOY_REGION`, 그다음 AWS SDK 기본 region chain, 그다음 `us-east-1` 순서로 정한다.
-- Durable audit readiness probe 결과를 250 ms 동안 재사용하며, probe lane을 기다리던 probe도 이 결과를 쓴다.
-- `pillar_background_task_heartbeat_age_seconds`의 HELP는 loop가 heartbeat를 마지막으로 기록한 뒤의 초를 뜻한다.
-- ULNv2 refresh의 log 검색 범위 계산은 overflow를 오류로 처리한다.
+- `ReadV1002` validation does not call `getUlnConfig`, which ReadLib1002 does not have.
+- TON destination packet messages are split into 1016-bit byte-aligned cells, as in upstream 1.2.66 `hexToCells`. This determines the packet hash and signing target for messages longer than 127 bytes.
+- Sui event reads fetch every page in forward order using `first: 50` and a cursor (up to 1,024 events per transaction); IotaL1 `iotax_queryEvents` also follows pages in ascending order. Both paths have a cumulative response limit of 16 MiB.
+- Stellar `getTransaction` quorum compares `status`, `ledger`, `envelopeXdr` and contract event XDR. The ScVal parser follows the lengths of every Stellar XDR variant and limits depth. The Stellar builder accepts a `G…` account and a `C…` contract `dvnAddress`.
+- Solana source `PacketSent` `options` are decoded for every request without a READ field, like the upstream Solana decoder; if they cannot be decoded, return 500 `Solana options decode error: …`. For Extra-context requests, `options` is this relayer options object, and EVM source `onChainEvent.blockHash`/`blockNumber` are resolution evidence values.
+- When finalized is behind the receipt on `polygon`/`tron`, the confirmation message is `-1`, as upstream does. EVM readiness reports negative confirmations as 0.
+- When the connection lifetime reaches 300 seconds, the in-progress response is sent to completion with `Connection: close`. The absolute IO limit is 300 seconds + 10 seconds for headers + 58 seconds for the request.
+- The `MNEMONIC` signer's AWS Secrets Manager region is selected in this order: `LAYERZERO_CDK_DEPLOY_REGION`, then the AWS SDK default region chain, then `us-east-1`.
+- Durable audit readiness probe results are reused for 250 ms; probes waiting for a probe lane use this result too.
+- The HELP for `pillar_background_task_heartbeat_age_seconds` means seconds since the loop last recorded a heartbeat.
+- Overflow in the ULNv2 refresh log search range calculation is treated as an error.
 
 ### Build
 
-- CI container job은 `build`, `supply-chain`, `generated-config` job이 통과한 뒤 실행하고, push(main, `v*` tag)에서는 저장한 image tar에 GitHub build provenance attestation을 붙인다. Tag build의 `PILLAR_IMAGE_VERSION`은 tag 이름이다. Node 22를 SHA 고정 `actions/setup-node`로 설치한다.
-- Generated table header는 `// Body sha256: <hex>`를 기록하고, `scripts/check-generated-config-integrity.mjs`가 row count와 body digest를 다시 계산한다. Generator와 검사기는 `scripts/generated-body-digest.mjs`를 같이 쓴다.
-- `pillar healthcheck` subcommand를 추가했다.
+- The CI container job runs after the `build`, `supply-chain` and `generated-config` jobs pass; on push (main, `v*` tag), it attaches a GitHub build provenance attestation to the saved image tar. `PILLAR_IMAGE_VERSION` for a tag build is the tag name. Node 22 is installed with SHA-pinned `actions/setup-node`.
+- Generated table headers record `// Body sha256: <hex>`, and `scripts/check-generated-config-integrity.mjs` recalculates the row count and body digest. The generator and checker share `scripts/generated-body-digest.mjs`.
+- Added the `pillar healthcheck` subcommand.
 
 ### Operator action
 
-- Image 안의 `curl`을 쓰던 probe나 운영 명령은 `GET /ready` httpGet probe나 `pillar healthcheck`로 바꾼다.
-- 배포 전에 `cargo run -p pillar-config --example provider_config -- validate …`로 strategy category를 확인하고, startup log의 strategy key 경고와 mainnet non-HTTPS 경고를 확인한다.
-- `pillar_provider_single_entity_chains > 0`에 alert를 건다.
-- READ client는 `0x` 없는 `payload`를 허용해야 한다. Extra-context policy는 EVM `onChainEvent.blockHash`/`blockNumber` 값과 Solana `options` object를 받는다.
-- Readiness와 READ의 500 body에 의존하는 alert나 parser는 `No block confirmation for chain … quorum`과 `No READ block confirmation threshold for chain … quorum` 문구도 다룬다.
-- Provider 하나가 quorum 호출에서 실패할 때마다 ERROR `provider quorum vote error: …`를 남긴다(URL 제외). Log 기반 alert의 임계값을 이에 맞춘다.
-- Durable audit을 켰다면 같은 packet의 재전송도 attempt quota를 쓰므로 signing route에 인증이나 edge rate limit을 둔다.
+- Replace probes or operational commands that used the image's `curl` with a `GET /ready` httpGet probe or `pillar healthcheck`.
+- Before deployment, check strategy categories with `cargo run -p pillar-config --example provider_config -- validate …`, and check the strategy-key and Mainnet non-HTTPS warnings in the startup log.
+- Alert on `pillar_provider_single_entity_chains > 0`.
+- READ clients must accept `payload` without `0x`. Extra-context policies receive EVM `onChainEvent.blockHash`/`blockNumber` values and a Solana `options` object.
+- Alerts or parsers that depend on Readiness and READ 500 bodies must also handle `No block confirmation for chain … quorum` and `No READ block confirmation threshold for chain … quorum`.
+- Each time a provider fails in a quorum call, it logs ERROR `provider quorum vote error: …` (excluding the URL). Set log-based alert thresholds accordingly.
+- If durable audit is enabled, resending the same packet also uses attempt quota, so put authentication or an edge rate limit on the signing route.
 
 ### Audit
 
-- 2026-10-09 전체 리뷰의 라운드별 항목, 조치와 검증 결과는 [AUDIT](AUDIT.md)의 §16에 있다.
-- `ton_dvn_verify.json`의 `vec-c`는 1.2.66 `hexToCells`의 1016-bit 분할을 따르며, 값은 이 저장소의 builder가 계산한다.
-- Durable audit quota는 문서화된 per-attempt 방식을 유지한다.
-- 이 릴리스의 실행 코드는 `b7ecb00`과 같다. 릴리스 커밋은 workspace version과 `Cargo.lock`의 workspace 항목만 2.6.0에서 2.6.1로 바꾼다. 2.6.0에서 올릴 때는 위의 `Upgrade / Breaking`과 `Operator action` 절을 먼저 적용한다. 검증 기록은 [AUDIT](AUDIT.md)의 §16에 있다.
+- Round-by-round items, actions and verification results from the full review on 2026-10-09 are in §16 of [AUDIT](AUDIT.md).
+- `vec-c` in `ton_dvn_verify.json` follows the 1016-bit splitting of 1.2.66 `hexToCells`; the value is calculated by this repository's builder.
+- Durable audit quota retains the documented per-attempt approach.
+- The executable code in this release is the same as `b7ecb00`. The release commit changes only the workspace version and the workspace entries in `Cargo.lock` from 2.6.0 to 2.6.1. When upgrading from 2.6.0, first apply the `Upgrade / Breaking` and `Operator action` sections above. Verification records are in §16 of [AUDIT](AUDIT.md).
 
 ## 2.6.0 - 2026-10-09
 
 ### Upgrade / Breaking
 
-- Sui의 `chains.sui.rpc` provider URI는 GraphQL endpoint여야 한다. Pool에 남은 JSON-RPC URL은 실패한 provider로 처리된다. Event와 object 조회에서는 투표하지 않고, readiness와 timestamp 검사에서는 다른 unavailable provider처럼 Missing으로 기록된다. `/provider-health`의 Sui `response` 값은 string에서 number로 바뀐다.
+- The `chains.sui.rpc` provider URI for Sui must be a GraphQL endpoint. Any JSON-RPC URL left in the pool is treated as a failed provider. It does not vote in event and object reads, and is recorded as Missing, like other unavailable providers, in readiness and timestamp checks. The Sui `response` value in `/provider-health` changes from string to number.
 
 ### Security
 
-- `POST /`의 알 수 없는 v1 chain id는 provider RPC 전에 HTTP 400으로 거부한다. 메시지는 upstream의 `Invariant failed: Invalid endpointId: <n>`을 유지한다. 이전에는 같은 메시지의 500이었다. 이 차이는 upstream과 의도적으로 다르다.
-- Source-event scan에서 trusted PacketSent의 destination EID를 이 배포가 해석하지 못하면 비일치로 건너뛴다. 같은 tx의 뒤 event가 요청과 맞으면 resolve된다. Move, Sui, IotaL1, Starknet, Stellar는 chain-name map 다음에 legacy 표를 보며, upstream은 이 경우 `Invariant failed: Invalid endpointId`로 500을 낸다. EVM, Solana, TON은 이전처럼 map만 본다. 서명은 여전히 요청 identity와 정확히 맞는 event에만 가능하다.
-- Source EID가 map에 없거나 Move/Sui event의 source chain이 다르면 기존 `Internal` 오류를 유지한다. 다만 일치하는 event가 없을 때만 반환한다. EVM에서 이 경우는 이전에 400 miss였고 이제 500이다. EVM `ReadV1002`는 endpoint flip 뒤 emitting chain에 같은 규칙을 적용한다.
-- Move, Sui, IotaL1, Starknet, Stellar는 모든 event를 먼저 변환한 뒤 매칭하는 upstream 순서를 유지한다. 뒤 event의 변환 오류도 read 전체를 실패시킨다. Starknet, Stellar, Move의 legacy cross-stage destination 해석도 유지한다.
-- `polygon`과 `tron`의 MESSAGE readiness는 요청한 confirmation 수와 finalized head를 함께 확인한다. Receipt 높이의 canonical header number와 hash도 receipt와 같아야 한다. 이 결속은 reference보다 엄격하다. 다른 EVM chain과 `amoy`의 정책은 바꾸지 않는다.
-- EVM receipt quorum은 서명에 사용하는 receipt와 log 필드만 정규화한다. `l1Fee` 같은 추가 metadata는 표를 나누지 않는다. Receipt와 log의 transaction/block identity가 다르거나 log index가 중복되면 거부한다. `removed` 생략은 false로 정규화한다. true, null과 잘못된 타입은 거부한다. Transaction hash의 optional `0x` prefix와 대소문자는 같은 값으로 비교한다. Readiness와 ULNv2 MPT 재조회는 resolution의 packet log 내용과 block에 다시 결속된다.
-- READ는 DATA를 검증하며 empty call은 같은 URL, headers, EIP-1898 pin의 code를 조회한다. 정확한 0x code만 NoCode이고 0x00/0x6000은 정상 empty return이다. Data/NoCode/ExecutionRevert의 semantic fingerprint는 기존 category/entity quorum을 거친다. NoCode 또는 execution revert의 유일한 quorum만 HTTP 400의 기존 statusCode/body에 code=UNRESOLVABLE_COMMAND, retryable=false를 추가하며 sign stage에 진입하지 않는다. 단일 negative, timeout, transport, malformed DATA와 일반 RPC 오류는 전역 domain refusal이 아니며 양립하는 quorum 둘은 fail closed한다. Numeric revert code 3 또는 numeric -32000과 대소문자를 구분하지 않고 일치하는 execution reverted 메시지의 조합만 분류하며 provided DATA를 검증·정규화한다. Absent/empty revert DATA는 반환 byte가 없다는 동일 의미로 비교한다.
-- Extra-context HTTP와 Lambda에 기존 typed `signingContext`를 전달한다. Strict-schema policy consumer는 새 필드를 허용해야 한다. 설정하지 않은 policy와 strict boolean-true gate의 동작은 유지한다.
-- Ethereum-style signature 변환은 모든 ECDSA signer에서 recovery ID 2/3을 거부한다. 기존 low-S 정규화 순서와 non-EVM raw recovery ID 형식은 유지한다. KMS 호출 뒤에 거부하므로 cloud signing call 자체를 방지하는 변경은 아니다.
-- Sui read는 fullnode JSON-RPC 폐지에 따라 GraphQL을 쓴다. upstream gasolina는 아직 `sui_*`/`suix_*` JSON-RPC를 쓰므로 의도적인 차이다. Payload 검증은 GraphQL `simulateTransaction`을 직접 호출한다. Mainnet capture에서 shared object의 `version` 값은 서버가 검증하지 않았다. `iotal1`은 `iota_*` JSON-RPC를 유지한다.
-- TON 전용 HTTP JSON decoder는 기존 4 MiB 응답 제한과 512-level JSON container nesting 제한을 적용한다. Trace 변환은 transaction hash 중복, 잘못된 topology, 512개 초과 node와 변환 후 512 container 초과 깊이를 조립 전에 거부한다. 서명과 confirmation에 필요한 scalar 필드만 투영한다. Object와 Array를 직접 조립해 subtree 재직렬화를 제거한다. 생략된 leaf children은 빈 배열로 처리한다. 이 정규화는 children 누락을 거부하는 upstream quorum 함수와 의도적으로 다르다. 원본 JSON은 반복형으로 순회하고 해제한다. JSON nesting과 trace node 수는 다른 단위다.
-- EVM PacketSent log의 ABI offset이나 길이가 `2^64-1`이면 decoder가 정수 overflow로 panic했다. 이제 다른 잘못된 log처럼 `Internal` 오류를 반환하고, resolver는 그 log를 건너뛴다. 이전에는 어떤 source-chain contract든 정상 send와 같은 tx에서 이런 log를 emit하면 그 tx의 resolve가 매번 중단됐다. 오류 문구는 바뀌지 않는다.
-- EVM readiness가 receipt를 다시 읽을 때 RPC가 실패하면 그 provider를 `Missing`으로 기록하고, 응답은 upstream과 같은 500 `Transaction receipt or block not found for <tx>`이다(이전 응답: 400 `source receipt binding changed: <오류>`). `null` receipt, 다른 block, 사라진 log 같은 binding 변경은 400 `source receipt binding changed`이다. 어느 경우에도 서명하지 않는다.
+- Unknown v1 chain ids in `POST /` are rejected with HTTP 400 before provider RPC. The message remains upstream's `Invariant failed: Invalid endpointId: <n>`. Previously, the same message was returned with 500. This difference from upstream is intentional.
+- If this deployment cannot resolve the destination EID of a trusted PacketSent during a source-event scan, it skips the event as a non-match. A later event in the same tx can resolve if it matches the request. Move, Sui, IotaL1, Starknet and Stellar consult the legacy table after the chain-name map; upstream returns 500 with `Invariant failed: Invalid endpointId` in this case. EVM, Solana and TON continue to use only the map, as before. Signing remains possible only for an event that exactly matches the requested identity.
+- If the Source EID is absent from the map or a Move/Sui event has a different source chain, the existing `Internal` error is retained, but returned only when no event matches. For EVM, this case previously produced a 400 miss and now produces 500. EVM `ReadV1002` applies the same rule to the emitting chain after an endpoint flip.
+- Move, Sui, IotaL1, Starknet and Stellar retain the upstream order of converting every event before matching. A conversion error in a later event also fails the entire read. Legacy cross-stage destination resolution is also retained for Starknet, Stellar and Move.
+- MESSAGE readiness for `polygon` and `tron` checks both the requested confirmation count and the finalized head. The canonical header number and hash at the receipt height must also match the receipt. This binding is stricter than the reference. The policy for other EVM chains and `amoy` is unchanged.
+- EVM receipt quorum normalizes only the receipt and log fields used for signing. Additional metadata such as `l1Fee` does not split the vote. A mismatch between receipt and log transaction/block identity, or a duplicate log index, is rejected. An omitted `removed` is normalized to false. True, null and invalid types are rejected. Transaction hashes compare as the same value with optional `0x` prefixes and regardless of case. Readiness and ULNv2 MPT rereads are re-bound to the packet log contents and block from resolution.
+- READ validates DATA, and an empty call reads code at the same URL, headers and EIP-1898 pin. Only exact 0x code is NoCode; 0x00/0x6000 are normal empty returns. Semantic fingerprints for Data/NoCode/ExecutionRevert go through the existing category/entity quorum. Only a unique quorum for NoCode or execution revert adds code=UNRESOLVABLE_COMMAND, retryable=false to the existing HTTP 400 statusCode/body, and does not enter the sign stage. A single negative, timeout, transport error, malformed DATA or ordinary RPC error is not a global domain refusal, and two compatible quorums fail closed. Only the combination of numeric revert code 3 or numeric -32000 and a case-insensitive matching execution reverted message is classified; provided DATA is validated and normalized. Absent/empty revert DATA is compared with the same meaning: no returned bytes.
+- Extra-context HTTP and Lambda pass through the existing typed `signingContext`. Strict-schema policy consumers must allow the new field. Behavior is unchanged for an unset policy and a strict boolean-true gate.
+- Ethereum-style signature conversion rejects recovery ID 2/3 for every ECDSA signer. The existing low-S normalization order and non-EVM raw recovery ID format are retained. Since rejection occurs after the KMS call, this change does not prevent the cloud signing call itself.
+- Sui reads use GraphQL because fullnode JSON-RPC is deprecated. This is an intentional difference because upstream gasolina still uses `sui_*`/`suix_*` JSON-RPC. Payload validation directly calls GraphQL `simulateTransaction`. The server did not validate shared object `version` values in the Mainnet capture. `iotal1` retains `iota_*` JSON-RPC.
+- The TON-only HTTP JSON decoder applies the existing 4 MiB response limit and 512-level JSON container nesting limit. Trace conversion rejects duplicate transaction hashes, invalid topology, more than 512 nodes and post-conversion depth over 512 containers before assembly. It projects only the scalar fields needed for signing and confirmation. It assembles Objects and Arrays directly, removing subtree reserialization. Omitted leaf children are treated as empty arrays. This normalization intentionally differs from the upstream quorum function, which rejects missing children. The original JSON is traversed and released iteratively. JSON nesting and trace node count are different units.
+- If the ABI offset or length of an EVM PacketSent log is `2^64-1`, the decoder previously panicked on integer overflow. It now returns an `Internal` error like other malformed logs, and the resolver skips that log. Previously, if any source-chain contract emitted such a log in the same tx as a valid send, resolution of that tx always stopped. The error text is unchanged.
+- If RPC fails while EVM readiness rereads a receipt, that provider is recorded as `Missing`, and the response is the same upstream 500 `Transaction receipt or block not found for <tx>` (previous response: 400 `source receipt binding changed: <error>`). Binding changes such as a `null` receipt, a different block or a missing log remain 400 `source receipt binding changed`. No signature is produced in either case.
 
 ### Build
 
-- CI의 모든 GitHub Action을 commit SHA로 고정했다. `cargo-audit`, `cargo-deny`, `cargo-cyclonedx`의 버전도 고정했다. Supply-chain job도 Rust 1.98.1을 쓴다.
-- Container builder를 `rust:1.98.1-bookworm` digest로 고정했다. 출하 binary는 CI가 test한 compiler로 빌드된다. 이전 builder는 Rust 1.97.1이었다.
+- Pin every GitHub Action in CI to a commit SHA. Versions of `cargo-audit`, `cargo-deny` and `cargo-cyclonedx` are also pinned. The supply-chain job also uses Rust 1.98.1.
+- Pin the container builder to the `rust:1.98.1-bookworm` digest. The shipped binary is built with the compiler tested by CI. The previous builder was Rust 1.97.1.
 
 ### Operator action
 
-- KMS key rotation은 replica 재시작으로 반영한다. AWS ECDSA, Azure, GCP signer는 처음 확인한 key identity를 process 수명 동안 쓴다. 절차와 identity 비교 조건은 [SECURITY](SECURITY.md#operator-responsibilities)에 있다.
+- KMS key rotation takes effect by restarting replicas. AWS ECDSA, Azure and GCP signers use the key identity first observed for the lifetime of the process. The procedure and identity comparison conditions are in [SECURITY](SECURITY.md#operator-responsibilities).
 
 ### Audit
 
-- 2026-10-08의 읽기 전용 조회에서 immutable Azure key version의 공개키와 운영 Pillar/Solana DVN config의 64-byte `X||Y` 공개키가 일치했고, config slot `454395711`을 확인했다. 이 항목은 공개키 관측이며, deployed program/source 대응과 live Azure KMS 및 on-chain signature acceptance 조건은 [SECURITY](SECURITY.md#where-responses-still-differ-from-upstream)에 별도로 명시한다.
-- TON HTTP 검증은 합성 JSON depth 266과 512를 처리하고 513을 거절했다. Release lifecycle 검증은 topology, quorum 조기 반환과 취소 시 해제를 확인한다. 합성 fixture 결과와 원본 266-depth 응답의 replay 범위는 [AUDIT](AUDIT.md)의 §13에서 구분한다.
-- READ HTTP E2E는 정확한 stage/source/destination/status tuple의 Prometheus `_count` 숫자를 읽는다. 같은 series의 중복 관측을 정확하게 계산한다. Test artifact schema 3은 `sign_stage_observation_count`와 tuple별 `stage_observations`로 stage 관측 횟수를 기록한다.
-- Gasolina parity README의 재현 절차는 `$PILLAR`와 `$UPSTREAM` 절대 경로로 복사하고 `cargo test`를 `$PILLAR`에서 실행한다. 이전 절차는 upstream checkout 안에서 Pillar 상대 경로를 복사해 실패했다. Canton emitter 절의 미지원 설명은 현재 README/SECURITY 참조와 fixture 증거 범위로 바꿨다. AUDIT §13은 revert code 3에는 message 조건이 없음을 명시한다.
-- 2026-10-09 클라이언트 리뷰에서 찾은 항목에 대한 테스트를 추가했다: provider별로 `l1Fee`가 다른 receipt의 quorum 수용, PacketSent data 불일치 거부, `removed` 생략 수용과 `null`/비bool 거부, 매핑된 srcEid 400과 매핑되지 않은 srcEid 500, Lambda policy payload의 `signingContext`, 빈 `dvnAddress`에서 `hashLookup`만 생략, READ와 Sui에서 한 entity의 URI 두 개를 한 표로 계산. 기록은 [AUDIT](AUDIT.md)의 §15와 [retest-2.6.0.md](audit/retest-2.6.0.md)에 있다.
-- 이 릴리스의 실행 코드는 2026-10-09에 메인넷에 배포한 `b7fc3ab`(`ghcr.io/fp-validated/pillar-dvn-client:ci-b7fc3ab41fec-r37903096415-a1`)과 같다. 릴리스 커밋은 workspace version과 `Cargo.lock`의 workspace 항목만 2.5.0에서 2.6.0으로 바꾼다. 이 절에는 `Upgrade / Breaking` 변경과 HTTP 상태 변경이 있어 patch가 아니라 minor로 올렸다. 검증과 배포 기록은 [AUDIT](AUDIT.md)의 §15에 있다.
+- In the read-only lookup on 2026-10-08, the public key of an immutable Azure key version matched the 64-byte `X||Y` public key in the production Pillar/Solana DVN config, and config slot `454395711` was confirmed. This entry records a public-key observation; deployed program/source correspondence and live Azure KMS and on-chain signature acceptance conditions are separately stated in [SECURITY](SECURITY.md#where-responses-still-differ-from-upstream).
+- TON HTTP validation handled synthetic JSON depths 266 and 512 and rejected 513. Release lifecycle validation confirmed topology, early quorum return and release on cancellation. The scope of the synthetic fixture results and replay of the original 266-depth response is distinguished in §13 of [AUDIT](AUDIT.md).
+- READ HTTP E2E reads the Prometheus `_count` number for the exact stage/source/destination/status tuple. It calculates duplicate observations of the same series exactly. Test artifact schema 3 records stage observation counts using `sign_stage_observation_count` and tuple-specific `stage_observations`.
+- The reproduction procedure in the Gasolina parity README copies to absolute `$PILLAR` and `$UPSTREAM` paths and runs `cargo test` from `$PILLAR`. The previous procedure failed because it copied a relative Pillar path inside the upstream checkout. The unsupported explanation in the Canton emitter section was changed to match the current README/SECURITY references and fixture evidence scope. AUDIT §13 states that revert code 3 has no message condition.
+- Added tests for items found in the 2026-10-09 client review: quorum acceptance of receipts with different provider `l1Fee` values, rejection of PacketSent data mismatches, acceptance of omitted `removed` and rejection of `null`/non-boolean values, 400 for mapped srcEid and 500 for unmapped srcEid, `signingContext` in the Lambda policy payload, omission of only `hashLookup` for an empty `dvnAddress`, and whether two URIs for one entity count as one vote in READ and Sui. Records are in §15 of [AUDIT](AUDIT.md) and [retest-2.6.0.md](audit/retest-2.6.0.md).
+- The executable code in this release is the same as `b7fc3ab` (`ghcr.io/fp-validated/pillar-dvn-client:ci-b7fc3ab41fec-r37903096415-a1`). The release commit changes only the workspace version and the workspace entries in `Cargo.lock` from 2.5.0 to 2.6.0. It is a minor rather than patch release because it includes `Upgrade / Breaking` changes and HTTP status changes. Verification and deployment records are in §15 of [AUDIT](AUDIT.md).
 
 ## 2.5.0 - 2026-10-06
 

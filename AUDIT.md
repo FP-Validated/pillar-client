@@ -383,142 +383,142 @@ PR #1 was unmerged at the 2026-10-08 rollout observation; it was subsequently me
 
 Detailed raw evidence, source/run inputs and operational records are retained as maintainer-local evidence under `audit/retest-250/`, `audit/review-80e0ad21-20261008/`, `audit/review-pr1-20261008/` and `audit/review-re003-20261009/`. This guide summarizes their findings.
 
-## 14. RE-003: READ stage 관측 횟수 계측, 2026-10-09
+## 14. RE-003: READ stage observation-count instrumentation, 2026-10-09
 
-READ HTTP E2E는 Prometheus _count의 숫자 값을 stage/src_chain/dst_chain/status tuple별로 집계한다. HTTP case마다 새 app과 metrics registry를 사용한다. Matching row의 잘못된 count/label은 실패이며, tuple이 없을 때만 0이다. 부정 case는 HTTP status와 관계없이 sign-stage 관측이 있으면 실패한다. Artifact schema 3의 sign_stage_observation_count 및 stage_observations는 stage 관측 횟수이지 SDK/KMS 호출 횟수가 아니다. 기존 schema 2 evidence는 변경하지 않았다.
+READ HTTP E2E aggregates the numeric values of Prometheus _count by stage/src_chain/dst_chain/status tuple. Each HTTP case uses a new app and metrics registry. An incorrect count/label in a matching row is a failure; only an absent tuple is zero. A negative case fails if a sign-stage observation exists, regardless of HTTP status. In artifact schema 3, sign_stage_observation_count and stage_observations are counts of stage observations, not SDK/KMS calls. Existing schema 2 evidence was not changed.
 
-| 검증 범위 | 관측 결과 | 증거와 한계 |
+| Verification scope | Observed result | Evidence and limits |
 | --- | --- | --- |
-| Numeric regression | Worker 실행: 실제 PillarMetricsStageObserver와 registry를 사용해 같은 tuple의 2회 관측, count 0/1/2와 malformed matching row를 검증했다. sign_stage_metric_observations_are_not_series_cardinality는 1 passed, 0 failed, 512 filtered다. | Numeric red의 근거는 worker 서술 기록 red-phase.txt와 regression-plan.txt다. Malformed-row red의 원시 결과는 별도 session receipt artifact://4530이다. 최종 green 원시 로그는 maintainer-local final 디렉터리에 보존한다. |
-| TCP HTTP E2E | 최종 소스에서 실제 POST /v2/resolve-and-sign 33 case 실행: HTTP 200 12, 400 4, 500 17; 모두 expected status와 일치. Empty return 및 1-bad/2-good control 포함. | Worker 실행 기록에 따라 결과를 기재. Main은 최종 JSON의 exact tuple 숫자와 scalar가 일치하고 부정 case에 sign series가 없음을 대조했다. |
-| Targeted Clippy / formatting | Worker 실행: Rust 1.98.1 runtime test-target Clippy 성공. Main 실행: cargo +1.98.1 fmt --all --check 통과. | 검증 대상은 runtime test target과 workspace formatting이다. |
-| Independent read-only review | Reviewer는 source와 HTTP raw artifact를 읽기 전용으로 검토했고 근거 분류 보완 F1–F3를 수용했다. | independent-review-followup.json에 판정과 검토 범위를 보존한다. |
+| Numeric regression | Worker run: using the actual PillarMetricsStageObserver and registry, it verified two observations of the same tuple, counts 0/1/2, and a malformed matching row. sign_stage_metric_observations_are_not_series_cardinality was 1 passed, 0 failed, 512 filtered. | Evidence for numeric red is in the worker narrative records red-phase.txt and regression-plan.txt. The raw result for malformed-row red is in a separate session receipt artifact://4530. The final green raw log is retained in the maintainer-local final directory. |
+| TCP HTTP E2E | Ran 33 cases with actual POST /v2/resolve-and-sign against the final source: HTTP 200 12, 400 4, 500 17; all matched the expected status. Includes empty return and 1-bad/2-good control. | Results are stated according to the worker run record. Main checked that the exact tuple counts and scalar in the final JSON match and that negative cases have no sign series. |
+| Targeted Clippy / formatting | Worker run: Rust 1.98.1 runtime test-target Clippy succeeded. Main run: cargo +1.98.1 fmt --all --check passed. | The verification covered the runtime test target and workspace formatting. |
+| Independent read-only review | The reviewer reviewed the source and HTTP raw artifact read-only and accepted evidence-classification additions F1–F3. | The findings and review scope are retained in independent-review-followup.json. |
 
-테스트 소스 crates/pillar-runtime/src/tests/read_data_http_e2e.rs SHA-256: 0680778bb17a2e7ee271a0d1493afa4b68e8f4a6badc4f780d4994c8efbea3df (source-bound 시각 2026-10-09 06:41:36 KST). 최종 raw artifact audit/review-re003-20261009/final-20261009-064136-kst/http-results.json SHA-256: ad84d144a8f69d0de2d0502635bd4cb4e44252fdcbfef5754b5c340dc65142d3.
+Test source crates/pillar-runtime/src/tests/read_data_http_e2e.rs SHA-256: 0680778bb17a2e7ee271a0d1493afa4b68e8f4a6badc4f780d4994c8efbea3df (source-bound time 2026-10-09 06:41:36 KST). Final raw artifact audit/review-re003-20261009/final-20261009-064136-kst/http-results.json SHA-256: ad84d144a8f69d0de2d0502635bd4cb4e44252fdcbfef5754b5c340dc65142d3.
 
-Final directory의 원시 logs는 harness 행을 포함한 worker tool-output 전사다. SHA-256: tcp-http-e2e.log 7152d8423cd9bb21439049187c71506a89eb9c11e1030e5e4cf19d0fbd9e6fb4; numeric-regression.log b4ed2da0adbe9c653c4ce46394a0f9fa01cb4a4f0b4892efbc0436ca5146a2fe; clippy.log a945bfda3e7ff7d3bd5a3a896f2579ba36aa91191d79418ab24459bd1073a170. Numeric regression은 test-name filter와 --quiet로 실행해 개별 test 이름이 출력되지 않았다. 당시 test binary SHA-256은 기록되지 않았다. Source hash는 실행 binary hash나 독립 binary 재현성 증명이 아니다.
+The raw logs in the Final directory are worker tool-output transcripts that include harness lines. SHA-256: tcp-http-e2e.log 7152d8423cd9bb21439049187c71506a89eb9c11e1030e5e4cf19d0fbd9e6fb4; numeric-regression.log b4ed2da0adbe9c653c4ce46394a0f9fa01cb4a4f0b4892efbc0436ca5146a2fe; clippy.log a945bfda3e7ff7d3bd5a3a896f2579ba36aa91191d79418ab24459bd1073a170. Numeric regression ran with a test-name filter and --quiet, so individual test names were not printed. The test binary SHA-256 was not recorded at the time. The source hash is not the run binary hash or proof of independent binary reproducibility.
 
-최상위 audit/review-re003-20261009/http-results.json과 tcp-http-e2e.log는 parser 수정 전 중간 실행이며 최종 결과로 사용하지 않는다. SHA-256은 각각 67f2de440249ba5e7aea62222cd81f5962c048dcccaf3f98a3d29197945470e9, 4e72c75e23b4b371a6f962cc8b3f691682fa310a72e02c98663b45a7d38e0f35다. Bytes는 보존한다.
+The top-level audit/review-re003-20261009/http-results.json and tcp-http-e2e.log are intermediate runs from before the parser fix and are not used as final results. Their SHA-256 values are 67f2de440249ba5e7aea62222cd81f5962c048dcccaf3f98a3d29197945470e9 and 4e72c75e23b4b371a6f962cc8b3f691682fa310a72e02c98663b45a7d38e0f35, respectively. The bytes are preserved.
 
-**변경과 검증 범위:** READ HTTP E2E 및 감사 문서의 수정이다. Numeric regression, fixture TCP HTTP, targeted Clippy, formatting과 독립 source/artifact 검토를 수행했다. Source-bound 기록과 운영 acceptance는 별도 범위로 유지한다. RE-001과 원본 comparison ledger의 판정은 §13의 공통 근거 범위를 따른다.
+**Change and verification scope:** Changes to READ HTTP E2E and the audit document. Numeric regression, fixture TCP HTTP, targeted Clippy, formatting, and independent source/artifact review were performed. Source-bound records and operational acceptance remain separate scopes. The status of RE-001 and the original comparison ledger follows the shared evidence boundary in §13.
 
-근거: audit/review-re003-20261009/run-log.txt, 최종 artifact 및 로그, Main artifact 대조와 fmt 확인, independent-review-followup.json · 2026-10-09 06:47 KST
+Evidence: audit/review-re003-20261009/run-log.txt, final artifact and logs, Main artifact comparison and fmt check, independent-review-followup.json · 2026-10-09 06:47 KST
 
-## 15. 2026-10-09 클라이언트 리뷰와 2.6.0 릴리스
+## 15. 2026-10-09 Client Review and 2.6.0 Release
 
-기준 커밋 `abe9d60`을 리뷰하면서 개선 항목 F-1~F-7을 찾았고, 모두 조치해 2.6.0으로 릴리스했다. 서명 정책이 바뀐 항목은 F-5 하나이고, 나머지는 테스트와 문서다. 항목별 결과는 [retest-2.6.0.md](audit/retest-2.6.0.md)에 원본 retest 양식으로 정리했다.
+Review of baseline commit `abe9d60` found improvement items F-1–F-7; all were addressed and released in 2.6.0. Only F-5 changed signing policy; the rest are tests and documentation. Item-by-item results are recorded in the original retest format in [retest-2.6.0.md](audit/retest-2.6.0.md).
 
-| 항목 | 리뷰에서 찾은 내용 | 조치 | 검증 |
+| Item | Finding in review | Action | Verification |
 | --- | --- | --- | --- |
-| F-1 KMS key 고정 | 각 signer는 처음 확인한 key identity를 process 수명 동안 쓴다. | SECURITY Operator responsibilities, README, CHANGELOG에 "rotation은 재시작으로 반영"을 명시했다. | 소스 대조 (`aws.rs`, `azure/adapter.rs`, `gcp.rs`) |
-| F-2 `l1Fee` 회귀 테스트 | 기존 테스트는 라운드마다 두 provider에게 같은 receipt를 줬다. | provider별로 다른 receipt를 주는 테스트와 PacketSent data 불일치 대조군을 추가했다. | Fingerprint를 raw JSON으로 되돌린 변형에서는 새 테스트가 `2 distinct successful responses`로 실패하고, 현재 코드에서는 통과한다. |
-| F-3 acceptance 원장 | case evidence가 maintainer-local 경로를 가리켰다. | `pr1-case-evidence.json`의 `inRepoCaseTests`로 8개 case를 커밋된 테스트와 hosted CI run에 연결했다. | 로컬 workspace 실행, hosted CI run `37903096415` |
-| F-4 매핑되지 않은 srcEid | resolver 주석의 upstream 인용이 실제 동작과 달랐다. | 의도적 500 정책을 유지하고 주석을 바로잡았다. 매핑된 srcEid 400 / 매핑되지 않은 srcEid 500 HTTP 테스트를 추가했다. | `packet_identity_http_tests` |
-| F-5 readiness 오류 분류 | receipt 재조회의 RPC 실패가 `SourceChanged`(400)로 기록됐다. | `Missing`(500, `Transaction receipt or block not found for <tx>`)으로 기록한다. | 변경 전 코드는 400 `source receipt binding changed: connection reset by peer`, 변경 후는 500이며 전체 서명 경로에서 sign stage 0회 |
-| F-6 `removed` 정책 | 생략 수용과 `null` 거부를 고정한 테스트가 필요했다. | 생략 수용, `null`/비bool 거부 테스트를 추가하고 §11에 이후 변경을 표시했다. | `production_vertical_signs_when_receipt_logs_omit_removed` 등 |
-| F-7 문서 조건 | GCP/Azure identity 비교 조건과 READ revert 메시지 비교 방식을 문서와 맞출 필요가 있었다. | SECURITY와 CHANGELOG에 반영했다. | 소스 대조 (`gcp.rs:65-67`, `azure/client.rs:69-79`, `evm_payload_observations.rs:325-326`) |
+| F-1 KMS key pinning | Each signer uses the key identity it first verified for the lifetime of the process. | Stated in SECURITY Operator responsibilities, README, and CHANGELOG that rotation takes effect after restart. | Source comparison (`aws.rs`, `azure/adapter.rs`, `gcp.rs`) |
+| F-2 `l1Fee` regression test | The existing test gave both providers the same receipt in every round. | Added a test giving each provider a different receipt and a PacketSent data mismatch control. | With a mutation reverting the fingerprint to raw JSON, the new test fails with `2 distinct successful responses`, while it passes on current code. |
+| F-3 acceptance ledger | Case evidence pointed to a maintainer-local path. | Linked 8 cases to committed tests and a hosted CI run using `inRepoCaseTests` in `pr1-case-evidence.json`. | Local workspace run, hosted CI run `37903096415` |
+| F-4 unmapped srcEid | The upstream citation in the resolver comment did not match actual behavior. | Retained the intentional 500 policy and corrected the comment. Added HTTP tests for mapped srcEid 400 / unmapped srcEid 500. | `packet_identity_http_tests` |
+| F-5 readiness error classification | An RPC failure during receipt re-query was recorded as `SourceChanged`(400). | Records it as `Missing`(500, `Transaction receipt or block not found for <tx>`). | Pre-change code returned 400 `source receipt binding changed: connection reset by peer`; after the change, it returns 500 and the full signing path has 0 sign-stage observations |
+| F-6 `removed` policy | Tests were needed to lock in acceptance of omission and rejection of `null`. | Added tests accepting omission and rejecting `null`/non-bool, and marked the subsequent change in §11. | `production_vertical_signs_when_receipt_logs_omit_removed` and others |
+| F-7 documentation conditions | GCP/Azure identity comparison conditions and READ revert message comparison needed to match the documentation. | Reflected them in SECURITY and CHANGELOG. | Source comparison (`gcp.rs:65-67`, `azure/client.rs:69-79`, `evm_payload_observations.rs:325-326`) |
 
-추가로 다음 동작을 테스트로 고정했다:
-- Lambda policy payload의 `signingContext`
-- 빈 `dvnAddress`에서 `hashLookup`만 생략하고 `verifiable`은 유지하는 동작
-- READ와 Sui에서 한 entity의 URI 두 개가 한 표로 세지는 동작
+Additional behavior was locked in with tests:
+- `signingContext` in the Lambda policy payload
+- For an empty `dvnAddress`, omit only `hashLookup` and retain `verifiable`
+- Two URIs for one entity count as one vote in READ and Sui
 
-| 검증 | 결과 |
+| Verification | Result |
 | --- | --- |
-| `cargo +1.98.1 fmt --all --check` | 통과 |
-| `cargo +1.98.1 clippy --workspace --all-targets --locked -- -D warnings` | 통과 |
-| `cargo +1.98.1 test --workspace --locked` (`b7fc3ab`, `09cec5c`) | 1004 passed, 0 failed, 15 ignored (중첩 child-process 실행 1건 제외) |
-| `cargo +1.94.1 check --workspace --locked --all-targets` | 통과 |
-| Hosted CI run `37903096415` (`b7fc3ab`, main push) | 6/6 jobs 통과. Workspace 1004 passed, 0 failed, 15 ignored |
+| `cargo +1.98.1 fmt --all --check` | Passed |
+| `cargo +1.98.1 clippy --workspace --all-targets --locked -- -D warnings` | Passed |
+| `cargo +1.98.1 test --workspace --locked` (`b7fc3ab`, `09cec5c`) | 1004 passed, 0 failed, 15 ignored (one nested child-process run excluded) |
+| `cargo +1.94.1 check --workspace --locked --all-targets` | Passed |
+| Hosted CI run `37903096415` (`b7fc3ab`, main push) | 6/6 jobs passed. Workspace 1004 passed, 0 failed, 15 ignored |
 
-리뷰 반례 CE0~CE5는 `abe9d60`과 `f5868d0`에 같은 패치를 적용해 실행했다. CE1(`l1Fee`만 다른 provider 두 개)은 `f5868d0`에서 거부되고 `abe9d60`에서 대조군과 같은 payload와 signature로 서명했다. 원시 출력은 maintainer-local `.review-evidence-20261009/ce-output.json`(SHA-256 `c16ec43befa3f752e47471baab4e9c9dd39149dde8e13e79ce150c2ede65048d`)이다.
+Review counterexamples CE0–CE5 were run by applying the same patch to `abe9d60` and `f5868d0`. CE1 (two providers differing only in `l1Fee`) was rejected on `f5868d0` and signed on `abe9d60` with the same payload and signature as the control. Raw output is maintainer-local .review-evidence-20261009/ce-output.json (SHA-256 `c16ec43befa3f752e47471baab4e9c9dd39149dde8e13e79ce150c2ede65048d`).
 
-### 운영 배포, 2026-10-09
+### Operational Deployment, 2026-10-09
 
-`8b40220`을 `b7fc3ab`으로 main에 머지하고 메인넷에 배포했다. 운영 이미지의 이전 소스 tree가 `abe9d60`과 같았으므로, 운영 동작 차이는 F-5 하나다.
+Merged `8b40220` into main as `b7fc3ab` and deployed to mainnet. The previous source tree of the production image matched `abe9d60`, so F-5 is the only operational behavior change.
 
-| 단계 | 결과 |
+| Stage | Result |
 | --- | --- |
-| CI image | Run `37903096415` attempt 1, checkout tree `a3231a193e7bd25fe5999d1ac80973d16e0962d7`, revision label `b7fc3ab`, 설정 누락 시 기동 거부. Tar SHA-256 `c17265c03979c7afebcdf945be3339cd96ae7a8e9b84f05dd46d0564b4b6ceed` |
-| Registry | 같은 tar를 `crane push`로 `ghcr.io/fp-validated/pillar-dvn-client:ci-b7fc3ab41fec-r37903096415-a1`에 게시했다. 원격 digest `sha256:744309ed6274dce919054969d51064578e423dd0a315cc8763f2c9016e1692d0`, 원격 config SHA-256은 CI image ID `b765f410…`와 같다. |
-| GitOps | `FP-Validated/ovh-chain-repo` `f9af3f9`에서 image tag 한 줄을 바꿨다. helm render 차이도 Deployment image 한 줄이다. |
-| Sync | aks-cluster ArgoCD `pillar-dvn-client-mainnet`을 hard refresh한 뒤 revision `f9af3f9`로 Deployment만 sync했다. |
-| Rollout | ovh-cluster `layerzero-mainnet` Deployment revision 18, 3/3 Ready, 세 pod 모두 새 digest, restart 0 |
-| 배포 전후 비교 | `/ready`, `/version`, `/environment`, `/available-chains`, `/signer-info`(ethereum, solana) 응답이 배포 전과 같았다. Signer identity가 유지됐다. |
+| CI image | Run `37903096415` attempt 1, checkout tree `a3231a193e7bd25fe5999d1ac80973d16e0962d7`, revision label `b7fc3ab`; refuses to start if configuration is missing. Tar SHA-256 `c17265c03979c7afebcdf945be3339cd96ae7a8e9b84f05dd46d0564b4b6ceed` |
+| Registry | Published the same tar with `crane push` to `ghcr.io/fp-validated/pillar-dvn-client:ci-b7fc3ab41fec-r37903096415-a1`. Remote digest `sha256:744309ed6274dce919054969d51064578e423dd0a315cc8763f2c9016e1692d0`; remote config SHA-256 matches CI image ID `b765f410…`. |
+| GitOps | Changed one image-tag line in `FP-Validated/ovh-chain-repo` `f9af3f9`. The helm render diff is also one Deployment image line. |
+| Sync | Hard-refreshed aks-cluster ArgoCD `pillar-dvn-client-mainnet`, then synced only the Deployment at revision `f9af3f9`. |
+| Rollout | ovh-cluster `layerzero-mainnet` Deployment revision 18, 3/3 Ready, all three pods on the new digest, 0 restarts |
+| Before/after deployment comparison | Responses from `/ready`, `/version`, `/environment`, `/available-chains`, and `/signer-info` (ethereum, solana) were unchanged from before deployment. Signer identity was retained. |
 
-Rollback 절차: `ovh-chain-repo`에서 `f9af3f9`를 revert하고 같은 방식으로 Deployment만 sync한다. 이전 이미지 `ci-21b4955b00c0-r37891292805-a1@sha256:1fd4b09f…`는 registry에 있다.
+Rollback procedure: revert `f9af3f9` in `ovh-chain-repo` and sync only the Deployment in the same way. The previous image `ci-21b4955b00c0-r37891292805-a1@sha256:1fd4b09f…` is in the registry.
 
-### 2.6.0 릴리스, 2026-10-09
+### 2.6.0 Release, 2026-10-09
 
-- 릴리스 커밋 `09cec5c`, tag `v2.6.0`, GitHub release `v2.6.0`.
-- 릴리스 커밋은 workspace version과 `Cargo.lock`의 workspace 항목 10개를 2.5.0에서 2.6.0으로 바꾼다. 실행 로직과 외부 dependency는 `b7fc3ab`과 같다. 바이너리는 `CARGO_PKG_VERSION`을 쓰지 않으므로, 운영 중인 `b7fc3ab` 이미지가 2.6.0 코드다.
-- Breaking 변경과 HTTP 상태 변경이 있어 minor로 올렸다.
-- 릴리스 커밋에서 fmt, clippy `-D warnings`, workspace test(1004 passed, 0 failed, 15 ignored), MSRV 1.94.1 check가 모두 통과했다.
+- Release commit `09cec5c`, tag `v2.6.0`, GitHub release `v2.6.0`.
+- The release commit changes the workspace version and 10 workspace entries in `Cargo.lock` from 2.5.0 to 2.6.0. Executable logic and external dependencies are the same as in `b7fc3ab`. The binary does not use `CARGO_PKG_VERSION`, so the running `b7fc3ab` image is 2.6.0 code.
+- Raised the minor version due to breaking changes and an HTTP status change.
+- fmt, clippy `-D warnings`, workspace tests (1004 passed, 0 failed, 15 ignored), and MSRV 1.94.1 check all passed on the release commit.
 
-근거: 로컬 fmt/clippy/test/MSRV 실행, 변형 실행, 리뷰 반례 원시 출력 · 2026-10-09 17:00 KST. 운영 배포 절: hosted CI 로그와 artifact, crane digest, ArgoCD 상태, rollout과 pod image ID, 배포 전후 endpoint 비교 · 2026-10-09 17:45 KST. 2.6.0 릴리스 절: 릴리스 커밋의 로컬 fmt/clippy/test/MSRV 실행 · 2026-10-09 18:00 KST
+Evidence: local fmt/clippy/test/MSRV runs, mutation runs, raw output for review counterexamples · 2026-10-09 17:00 KST. Operational deployment section: hosted CI logs and artifact, crane digest, ArgoCD status, rollout and pod image ID, before/after endpoint comparison · 2026-10-09 17:45 KST. 2.6.0 release section: local fmt/clippy/test/MSRV runs on the release commit · 2026-10-09 18:00 KST
 
-## 16. 2026-10-09 전체 리뷰
+## 16. 2026-10-09 Full Review
 
-2.6.0 문서 커밋 `548c691`을 기준으로 코드와 문서 전체를 라운드 단위로 리뷰했다. 라운드마다 영역별 독립 reviewer가 정적 검토와 upstream 1.2.66 로컬 사본 대조를 했다. 코드 수정은 회귀 테스트, 해당 crate의 test suite 또는 CI 검사 스크립트로 확인했고, 회귀 테스트와 suite의 실행 출력은 maintainer-local `.full-review-20261009/evidence/`에 있다. 다음 라운드는 직전 라운드의 수정과 그 주변을 다시 검토했다. 라운드 7에서 코드 항목이 나오지 않았고, 그 라운드가 찾은 문서 한 문장을 코드와 대조해 고친 뒤 반복을 마쳤다.
+Reviewed all code and documentation in rounds, based on documentation commit `548c691` for 2.6.0. In each round, independent reviewers for each area performed static review and comparison against the local copy of upstream 1.2.66. Code changes were checked with regression tests, the relevant crate's test suite, or CI check scripts; regression tests and suite output are in maintainer-local `.full-review-20261009/evidence/`. Each subsequent round re-reviewed changes from the preceding round and the surrounding code. Round 7 found no code items; after checking one documentation sentence found in that round against the code and correcting it, the review ended.
 
-| 라운드 (검토 대상) | 영역 | 찾은 항목 | 조치 커밋 |
+| Round (review target) | Area | Findings | Fix commits |
 | --- | --- | --- | --- |
-| 1 (`548c691`) | EVM readiness | receipt 재조회의 JSON-RPC `error`가 400으로 끝남, 실패한 read가 `Missing` 표로 `Sufficient`를 막음, `polygon`/`tron` confirmation 문구, MPT block 조회 형식과 source evidence가 없는 요청, TON readiness의 기준 hash | `7a2c33f` |
-| 1 | READ와 payload | `ReadV1002`가 ReadLib1002에 없는 `getUlnConfig`를 호출함, READ readiness가 provider 간 latest block 완전 일치를 요구함, timestamp marker의 `blockConfirmation`, READ 응답 `payload` 형식, extra-context `onChainEvent` 값, 해석된 ULN version 비교 | `07fb5ed`, `937a3a6` |
-| 1 | 비EVM | Sui event paging(`last: 50`), Sui digest 비교, Stellar 결과 fingerprint, IOTA event 순서와 paging, Stellar ScVal 크기와 깊이, TON BoC cell 수 선할당, ULNv2 refresh 범위 계산 | `93853af`, `759f10a` |
-| 1 | 설정, CI, image | 정의되지 않은 strategy category, provider와 맞지 않는 strategy key, refresh의 single-entity strategy, startup report의 entity label, mainnet non-HTTPS URI 경고, 빈 환경변수 값, converter의 기본 strategy, generated table digest, CI container job 순서와 provenance, image의 `curl`, 문서와 코드의 불일치 | `45af150`, `6ab8872`, `4e7711a`, `cd82438` |
-| 1 | Signer와 audit | durable audit quota, `/ready` audit probe, mnemonic seed 재유도, 중간값 zeroize, token 목록 복제 | `5763ada` |
-| 2 (`b04a0d9`) | Readiness | 비EVM family에서 provider 실패가 `Missing` 표가 됨 | `469f12d`, `b27333e` |
-| 2 | 비EVM | Stellar ScVal variant 19와 20의 길이, Stellar `G…`/`C…` `dvnAddress`, Solana `options` 형식, Sui cursor, IOTA paging이 적용되는 chain 이름, Sui/IOTA 누적 응답 상한, IOTA transaction digest 비교 | `f656cfb`, `af2eaef`, `2ddecd8` |
-| 2 | TON | BoC parsing과 message cell 분할 크기 | `cd8b10a` |
-| 2 | 설정, signer, CLI | chain type이 다른 mnemonic wallet의 chain 배정, Secrets Manager 기본 region, 연결 수명 도달 시 응답 종료, accept 오류 뒤 backoff, 원격 설정 load 시간 상한, single-entity 경고와 gauge 갱신 조건, seed 지연 생성과 token 비교, heartbeat metric HELP, tag build의 image version | `99f22de`, `f5ab404` |
-| 2 | READ와 audit | READ 서명 호환(빈 resolved payload 등), audit capacity flag, 라운드 1의 packet 단위 quota가 `srcTxHash` 표기 변형과 64회 상한으로 특정 packet을 막을 수 있음 | `5258287`, `86046cd`, `2ddecd8`, `810692b` |
-| 3 (`8c43be0`) | Readiness | zero-voter quorum에서 admission 오류 보존, Move/Starknet/Stellar의 형식이 깨진 200 응답, Solana `null` 응답 | `4779729`, `d39168c`, `c947674`, `e33af25` |
-| 3 | TON과 Solana | exotic cell과 level mask, root hash/depth 계산의 panic, cell 수 상한, 첫 ref chain 읽기, Solana `options` decode 오류 전파, `vec-c` 출처 표기 | `c73a93f`, `eed8be4` |
-| 3 | Signer, 설정, CLI | 두 seed 종류의 BIP-39 검사, wallet이 배정되지 않는 chain, header 시간을 포함한 IO 상한, Secrets Manager region 순서 | `f6bbf6b` |
-| 3 | 문서 | README, SECURITY, AUDIT의 동작 기술 | `754de71`, `06f80f1` |
-| 4 (`06f80f1`) | TON | BoC 검사 순회가 공유 cell을 tree로 펼쳐 작은 DAG BoC(40 cell, 247 byte)에서 반환하지 않음, 단일 4,096 cell 상한이 `hashLookups`가 큰 UlnConnection storage를 거부함, trace body의 exotic cell 거부 | `0589720` |
-| 4 | Readiness와 설정 | Aptos ledger-version 경로의 형식이 깨진 block 응답, `http://[::1]` provider URI 경고 | `91337ea` |
-| 4 | 문서 | EVM `null` receipt의 400, Solana `options` 적용 범위, strategy key 경고 시점, quorum vote error log, READ 오류 문구 | `9411227` |
-| 4 | 문서 | 이 절(§16)의 신설과 §11, CHANGELOG의 참조 | `b87be2b` |
-| 5 (`b87be2b`) | TON | 65,536 cell 상한 아래의 깊은 선형 chain BoC(depth 65,534)를 drop할 때 2 MiB worker stack이 넘침, hash 기준 방문 집합 때문에 level mask를 속인 parent 아래의 exotic cell이 검사를 통과함, provider가 만든 큰 default receive config(65,013 cell, depth 1,012)의 직렬화가 test profile에서 24.7초 걸림 | `a052fa0`, `a0ad592` |
-| 5 | Readiness | Aptos tx-hash 경로에서 block 요청을 만들 수 없는 `version`이 `Missing` 표가 됨 | `a5af7ad` |
-| 6 (`7731afd`) | TON | depth 사전 검사가 hash를 저장한 cell(descriptor bit 4)의 hash와 depth byte를 건너뛰지 않아 그 형식의 BoC를 거부함 | `ae88839` |
-| 6 | 문서 | 비EVM readiness의 형식 오류 범위, Aptos `null` 응답 기술, mainnet Uln storage fixture 출처, 측정 workload 기술 | `b7ecb00` |
-| 7 (`b7ecb00`) | 전체 | 코드 항목 없음. 이 절의 Aptos `null` transaction 기술 한 문장 | 이 절을 마무리한 커밋 |
+| 1 (`548c691`) | EVM readiness | JSON-RPC `error` from receipt re-query ends as 400, failed reads count as `Missing` votes and prevent `Sufficient`, `polygon`/`tron` confirmation wording, MPT block-query format and requests without source evidence, reference hash for TON readiness | `7a2c33f` |
+| 1 | READ and payload | `ReadV1002` calls `getUlnConfig`, which ReadLib1002 does not provide; READ readiness requires exact latest-block agreement across providers; timestamp marker's `blockConfirmation`; READ response `payload` format; extra-context `onChainEvent` value; comparison of resolved ULN version | `07fb5ed`, `937a3a6` |
+| 1 | Non-EVM | Sui event paging (`last: 50`), Sui digest comparison, Stellar result fingerprint, IOTA event ordering and paging, Stellar ScVal size and depth, TON BoC cell-count preallocation, ULNv2 refresh range calculation | `93853af`, `759f10a` |
+| 1 | Configuration, CI, image | Undefined strategy category, strategy key that does not match provider, single-entity strategy for refresh, entity label in startup report, mainnet non-HTTPS URI warning, empty environment-variable value, converter default strategy, generated table digest, CI container job order and provenance, image `curl`, documentation/code mismatch | `45af150`, `6ab8872`, `4e7711a`, `cd82438` |
+| 1 | Signer and audit | Durable audit quota, `/ready` audit probe, mnemonic seed re-derivation, zeroization of intermediate values, token-list copy | `5763ada` |
+| 2 (`b04a0d9`) | Readiness | Provider failures in non-EVM families counted as `Missing` votes | `469f12d`, `b27333e` |
+| 2 | Non-EVM | Stellar ScVal variant 19 and 20 lengths, Stellar `G…`/`C…` `dvnAddress`, Solana `options` format, Sui cursor, chain names for which IOTA paging applies, Sui/IOTA cumulative response limits, IOTA transaction digest comparison | `f656cfb`, `af2eaef`, `2ddecd8` |
+| 2 | TON | BoC parsing and message cell split size | `cd8b10a` |
+| 2 | Configuration, signer, CLI | Chain assignment for a mnemonic wallet with a different chain type, Secrets Manager default region, response termination at connection lifetime, backoff after accept error, remote configuration load timeout, single-entity warning and gauge update conditions, lazy seed creation and token comparison, heartbeat metric HELP, image version for tag build | `99f22de`, `f5ab404` |
+| 2 | READ and audit | READ signing compatibility (including empty resolved payload), audit capacity flag, round 1 per-packet quota could block a packet due to `srcTxHash` notation variants and a 64-attempt limit | `5258287`, `86046cd`, `2ddecd8`, `810692b` |
+| 3 (`8c43be0`) | Readiness | Preserve admission error on zero-voter quorum, malformed 200 responses from Move/Starknet/Stellar, Solana `null` response | `4779729`, `d39168c`, `c947674`, `e33af25` |
+| 3 | TON and Solana | Exotic cell and level mask, panic in root hash/depth calculation, cell-count limit, first ref-chain read, propagate Solana `options` decode error, `vec-c` source attribution | `c73a93f`, `eed8be4` |
+| 3 | Signer, configuration, CLI | BIP-39 checks for both seed types, chain with no assigned wallet, IO limit including header time, Secrets Manager region ordering | `f6bbf6b` |
+| 3 | Documentation | README, SECURITY, AUDIT behavior descriptions | `754de71`, `06f80f1` |
+| 4 (`06f80f1`) | TON | BoC validation traversal expands shared cells into a tree and does not return for a small DAG BoC (40 cells, 247 bytes), single 4,096-cell limit rejects UlnConnection storage with many `hashLookups`, reject exotic cells in trace body | `0589720` |
+| 4 | Readiness and configuration | Malformed block response on Aptos ledger-version path, warning for provider URI `http://[::1]` | `91337ea` |
+| 4 | Documentation | 400 for EVM `null` receipt, Solana `options` scope, strategy-key warning timing, quorum vote error log, READ error wording | `9411227` |
+| 4 | Documentation | Added this section (§16) and references to §11 and CHANGELOG | `b87be2b` |
+| 5 (`b87be2b`) | TON | Dropping a deep linear chain BoC (depth 65,534) below the 65,536-cell limit overflows the 2 MiB worker stack; hash-based visited set lets an exotic cell under a level-mask-spoofing parent pass validation; serialization of a large provider-generated default receive config (65,013 cells, depth 1,012) takes 24.7 seconds in test profile | `a052fa0`, `a0ad592` |
+| 5 | Readiness | `version` for which no block request can be formed on Aptos tx-hash path counted as a `Missing` vote | `a5af7ad` |
+| 6 (`7731afd`) | TON | Depth precheck does not skip hash and depth bytes of hash-storing cells (descriptor bit 4), rejecting BoCs in that format | `ae88839` |
+| 6 | Documentation | Non-EVM readiness malformed-format scope, Aptos `null` response description, mainnet Uln storage fixture source, measured workload description | `b7ecb00` |
+| 7 (`b7ecb00`) | All | No code items. One sentence in this section describing Aptos `null` transaction | Commit that completed this section |
 
-라운드 중 내린 결정은 다음과 같다.
-- Durable audit quota는 문서화된 per-attempt 방식이다. 같은 packet의 재전송도 quota를 쓰므로 SECURITY는 audit을 켤 때 signing route에 인증이나 edge rate limit을 두도록 안내한다.
-- Solana `dvnAddress`는 base58만 받는다. Upstream이 payload-signed 검증에서 hex를 `new PublicKey`로 거부하므로 라운드 1의 hex 수용을 라운드 2에서 되돌렸다.
-- Starknet receipt fingerprint의 projection은 유지했다. Provider 사이에 비교 대상 receipt 필드가 다르게 오는 근거가 없었다.
-- TON message cell 분할은 upstream 1.2.66 `common-ton/src/cells.ts`의 1016-bit 분할을 따른다. `ton_dvn_verify.json`의 `vec-c`는 이 저장소의 builder가 계산한 값이다.
-- TON BoC cell 상한은 mainnet config param 43(toncenter `getConfigParam` 읽기)의 값을 쓴다. Account storage는 `max_acc_state_cells` 65,536, message와 trace body는 `max_msg_cells` 8,192다. 측정한 mainnet storage는 UlnConnection 15 cell, Uln 532 cell, UlnManager 1,223 cell이고, attestation 600 nonce의 connection storage fixture도 이 상한 안에서 읽힌다. 참조와 data가 없는 cell로 상한까지 채운 BoC를 parse한 test process의 peak RSS는 account 65,536 cell에서 60,850,176 byte, message 8,192 cell에서 11,403,264 byte다.
-- TON BoC depth 상한은 TON node의 cell 구조 상한 `CellTraits::max_depth`(1,024, `ton-blockchain/ton` `crypto/vm/cells/CellTraits.h`)다. Config param 43의 `max_vm_data_depth`(512)는 이와 별개인 더 좁은 on-chain 제한이다. Parser는 raw BoC의 reference graph에서 depth를 계산해 cell 객체를 만들기 전에 거부하며, 이 계산은 `ton_core`처럼 cell에 저장된 hash와 depth byte를 건너뛴다. Exotic 검사는 pop한 cell마다 하고, 하위 ref는 cell node identity마다 한 번 펼친다. 방문 key는 provider가 조작할 수 있는 representation hash가 아니라 node identity다.
-- Default receive config 직렬화 상한은 고유 cell 2,048개다. Mainnet Uln storage(532 cell)의 config는 2 cell, testnet fixture의 config는 3 cell이고, depth 상한 아래에서 required/optional DVN chain 두 개가 가질 수 있는 최대 크기는 2,047 cell이다. 상한 크기 config의 직렬화는 release build에서 24 ms였다. Mainnet fixture `ton_mainnet_uln_storage.b64`는 Uln `EQAXRMTd2d1IW72G7U71RuGNiP2M2NfQp5U69W667far3CYo`에 대한 toncenter `getAddressInformation` 응답의 `data`이며, masterchain seqno 97941002, 2026-10-09 23:06 KST에 읽었다.
-- 비EVM readiness에서 필드가 빠지거나 형식이 맞지 않는 200 응답은 provider 실패로 표에서 뺀다. Upstream Aptos `aptosBlockHeightQuorumFn`은 `null` block과 `block_height`가 빠진 block을 같은 bucket에 넣는다. Pillar는 Aptos ledger-version 경로의 `null` block과 Initia의 `null` transaction을 `Missing` 표로 세고, Aptos와 Movement tx-hash 경로의 `null` transaction과 transaction 뒤의 `null` block은 provider 실패로 처리한다.
+Decisions made during the rounds:
+- Durable audit quota is documented per-attempt behavior. Retries of the same packet also consume quota, so SECURITY advises configuring authentication or an edge rate limit on the signing route when audit is enabled.
+- Solana `dvnAddress` accepts base58 only. Upstream rejects hex with `new PublicKey` in payload-signed validation, so round 1's acceptance of hex was reverted in round 2.
+- Kept the Starknet receipt fingerprint projection. There was no evidence that providers returned different values for compared receipt fields.
+- TON message cell splitting follows the 1016-bit split in upstream 1.2.66 `common-ton/src/cells.ts`. `vec-c` in `ton_dvn_verify.json` is calculated by this repository's builder.
+- TON BoC cell limits use mainnet config param 43 (read via toncenter `getConfigParam`). Account storage is limited to `max_acc_state_cells` 65,536; messages and trace bodies to `max_msg_cells` 8,192. Measured mainnet storage is 15 cells for UlnConnection, 532 for Uln, and 1,223 for UlnManager; the connection storage fixture with 600 attestation nonces also reads within this limit. Peak RSS of the test process parsing a BoC filled to the limit with cells without refs or data is 60,850,176 bytes for 65,536 account cells and 11,403,264 bytes for 8,192 message cells.
+- TON BoC depth limit is the TON node cell-structure limit, `CellTraits::max_depth` (1,024, `ton-blockchain/ton` `crypto/vm/cells/CellTraits.h`). Config param 43's `max_vm_data_depth` (512) is a separate, narrower on-chain limit. The parser calculates depth from the raw BoC reference graph and rejects it before creating cell objects; this calculation, like `ton_core`, skips hashes and depth bytes stored in cells. Exotic validation runs on each popped cell, and child refs are expanded once per cell node identity. The visited key is node identity, not the representation hash a provider can manipulate.
+- Default receive config serialization is limited to 2,048 unique cells. Config for mainnet Uln storage (532 cells) uses 2 cells; the testnet fixture config uses 3. Below the depth limit, the maximum size for two required/optional DVN chains is 2,047 cells. Serialization of a max-size config took 24 ms in release build. Mainnet fixture `ton_mainnet_uln_storage.b64` is the `data` from toncenter `getAddressInformation` response for Uln `EQAXRMTd2d1IW72G7U71RuGNiP2M2NfQp5U69W667far3CYo`, read at masterchain seqno 97941002 on 2026-10-09 23:06 KST.
+- In non-EVM readiness, 200 responses with missing or malformed fields are excluded as provider failures. Upstream Aptos `aptosBlockHeightQuorumFn` puts a `null` block and a block missing `block_height` in the same bucket. Pillar counts a `null` block on the Aptos ledger-version path and a `null` transaction on Initia as `Missing` votes; it treats a `null` transaction on the Aptos and Movement tx-hash paths and a `null` block after a transaction as provider failures.
 
-§15 F-5 행의 동작은 이 리뷰에서 바뀌었다. Readiness receipt 재조회의 RPC 실패는 `Missing` 표로 세지 않고 표에서 뺀다(`7a2c33f`, `4779729`). EVM에서 성공한 provider가 없을 때의 응답은 F-5와 같은 500 `Transaction receipt or block not found for <tx>`다.
+The behavior in the §15 F-5 row changed in this review. An RPC failure during readiness receipt re-query is excluded from voting, rather than counted as a `Missing` vote (`7a2c33f`, `4779729`). When no EVM provider succeeds, the response is the same 500 `Transaction receipt or block not found for <tx>` as in F-5.
 
-최종 코드 커밋 `b7ecb00`의 검증 결과는 다음과 같다.
+Verification results for final code commit `b7ecb00`:
 
-| 검증 | 결과 |
+| Verification | Result |
 | --- | --- |
-| `cargo +1.98.1 fmt --all --check` | 통과 |
-| `cargo +1.98.1 clippy --workspace --all-targets --locked -- -D warnings` | 통과 |
+| `cargo +1.98.1 fmt --all --check` | Passed |
+| `cargo +1.98.1 clippy --workspace --all-targets --locked -- -D warnings` | Passed |
 | `cargo +1.98.1 test --workspace --locked` | 1079 passed, 0 failed, 15 ignored |
 | `cargo +1.98.1 test -p pillar-runtime --locked postgres_audit -- --ignored --test-threads=1` (local PostgreSQL) | 11 passed, 0 failed |
-| `node scripts/check-generated-config-integrity.mjs` | 통과 |
-| `cargo +1.94.1 check --workspace --locked --all-targets` | 통과 |
-| `docker build` 뒤 설정 없이 실행 | `Missing required environment variable PILLAR_API_AUTH_TOKENS`로 기동 거부 |
-| Image 실행(`LOCAL_MNEMONIC`, BSC testnet provider 2개, quorum 2) | Docker health `healthy`, `pillar healthcheck` exit 0, `/ready` 200, `/provider-health` `{"bsc":true}`, `pillar_provider_single_entity_chains 0`, bearer 없는 `/signer-info` 401, image 안에 `curl` 없음, uid 10001 |
-| Hosted CI run `37946961465` (`ccf4c01`, main push) | 6/6 jobs 통과. Workspace 1079 passed, 0 failed, 15 ignored |
+| `node scripts/check-generated-config-integrity.mjs` | Passed |
+| `cargo +1.94.1 check --workspace --locked --all-targets` | Passed |
+| Run after `docker build` without configuration | Refused to start with `Missing required environment variable PILLAR_API_AUTH_TOKENS` |
+| Run image (`LOCAL_MNEMONIC`, two BSC testnet providers, quorum 2) | Docker health `healthy`, `pillar healthcheck` exit 0, `/ready` 200, `/provider-health` `{"bsc":true}`, `pillar_provider_single_entity_chains 0`, unauthenticated `/signer-info` 401, no `curl` in image, uid 10001 |
+| Hosted CI run `37946961465` (`ccf4c01`, main push) | 6/6 jobs passed. Workspace 1079 passed, 0 failed, 15 ignored |
 
-### 2.6.1 릴리스, 2026-10-10
+### 2.6.1 Release, 2026-10-10
 
-- 이 절의 변경은 2.6.1로 릴리스했다. Tag는 `v2.6.1`, GitHub release는 `v2.6.1`이다.
-- 릴리스 커밋은 workspace version과 `Cargo.lock`의 workspace 항목 10개를 2.6.0에서 2.6.1로 바꾸고, CHANGELOG의 절 이름을 2.6.1로 정한다. 실행 로직과 외부 dependency는 `b7ecb00`과 같다.
-- 2.6.0에서 올릴 때는 CHANGELOG 2.6.1의 `Upgrade / Breaking`과 `Operator action` 절을 먼저 적용한다.
-- 릴리스 커밋의 tree에서 fmt, clippy `-D warnings`, workspace test(1079 passed, 0 failed, 15 ignored), MSRV 1.94.1 check가 모두 통과했다.
-- 릴리스 시점의 메인넷 image는 2.6.0 코드(`b7fc3ab`)다.
+- This section's changes were released as 2.6.1. Tag is `v2.6.1`; GitHub release is `v2.6.1`.
+- The release commit changes the workspace version and 10 workspace entries in `Cargo.lock` from 2.6.0 to 2.6.1, and names the CHANGELOG section 2.6.1. Executable logic and external dependencies are the same as in `b7ecb00`.
+- When upgrading from 2.6.0, first apply the `Upgrade / Breaking` and `Operator action` sections for 2.6.1 in CHANGELOG.
+- fmt, clippy `-D warnings`, workspace tests (1079 passed, 0 failed, 15 ignored), and MSRV 1.94.1 check all passed on the release tree.
+- The mainnet image at release time is 2.6.0 code (`b7fc3ab`).
 
-근거: `.full-review-20261009/evidence/round6-integration`의 fmt/clippy/test/PostgreSQL/integrity/MSRV 출력과 image 실행 기록, 라운드별 reviewer 보고와 red/green 출력 · 2026-10-09 23:48 KST. Hosted CI 행: run `37946961465` 결과 · 2026-10-10 00:08 KST. 2.6.1 릴리스 절: 릴리스 tree의 로컬 fmt/clippy/test/MSRV 실행 · 2026-10-10 00:24 KST
+Evidence: fmt/clippy/test/PostgreSQL/integrity/MSRV output and image run records in `.full-review-20261009/evidence/round6-integration`, round-by-round reviewer reports and red/green output · 2026-10-09 23:48 KST. Hosted CI row: result for run `37946961465` · 2026-10-10 00:08 KST. 2.6.1 release section: local fmt/clippy/test/MSRV runs on the release tree · 2026-10-10 00:24 KST

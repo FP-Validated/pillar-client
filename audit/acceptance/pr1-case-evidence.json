@@ -58,7 +58,7 @@
       "workspaceChecks": {
         "fmt": {"status": "passed", "exitStatus": 0, "artifact": "audit/review-pr1-20261008/main-validation-95w4uR/fmt-exit-status.txt"},
         "clippyAllTargets": {"status": "passed", "exitStatus": 0, "artifact": "audit/review-pr1-20261008/main-validation-95w4uR/clippy-exit-status.txt"},
-        "workspaceTests": {"status": "failed", "exitStatus": 101, "passed": 496, "failed": 1, "ignored": 15, "failure": "Main이 기존 config_loader log-capture 실패를 직접 관측했다. 이 count는 runtime target의 결과이며 workspace 전체 합계가 아니다. 기존 source와 assert는 변경하지 않았다.", "rawLogSha256": "129b54eac4740fbc1e18e21957f8d0f45e94f0385dc338180e1b8b0e39e1fbe6", "rawLogPath": "audit/review-pr1-20261008/main-validation-95w4uR/workspace-test.log"}
+        "workspaceTests": {"status": "failed", "exitStatus": 101, "passed": 496, "failed": 1, "ignored": 15, "failure": "Main directly observed the existing config_loader log-capture failure. This count is the runtime target's result, not the whole-workspace total. The existing source and assertion were not modified.", "rawLogSha256": "129b54eac4740fbc1e18e21957f8d0f45e94f0385dc338180e1b8b0e39e1fbe6", "rawLogPath": "audit/review-pr1-20261008/main-validation-95w4uR/workspace-test.log"}
       },
       "workerTestFirstEvidence": {
         "sourceBase": "87b4bae121280a67fb589f60bbd0deebafae2eab",
@@ -73,7 +73,7 @@
         "postFixRawSha256": "5d1b39d4227e2a53478ad1981fba51393afc2a5488e4d20a8eaefbcc3edb5e25",
         "workerExecutableSha256": "not retained in delivery evidence; do not bind these worker run results to Main's later runtime binary"
       },
-      "bindingLimit": "Local runtime/test binary is linked to the retained selected 19-file source snapshot and delivery record, not to the full checkout or the 87b4bae release binary. No deployment or external public replay is claimed. 과거 signer_stage_count와 negativeSignerStage/positiveSignerStage는 metric series 개수이며 numeric 관측 횟수나 실제 signer/KMS 호출 수의 근거가 아니다."
+      "bindingLimit": "Local runtime/test binary is linked to the retained selected 19-file source snapshot and delivery record, not to the full checkout or the 87b4bae release binary. No deployment or external public replay is claimed. The earlier signer_stage_count and negativeSignerStage/positiveSignerStage are metric series counts, not numeric observation counts or evidence of actual signer/KMS call counts."
     },
     "nativeBuildBinding": {
       "checkout": "/Users/steve/orca/workspaces/pillar-client/retest-250-20261007",
@@ -210,7 +210,7 @@
         "cases": ["empty_call_with_0x00_code", "empty_call_with_0x6000_code", "singleton_no_code_two_good", "singleton_revert_two_good"],
         "observed": "Each HTTP 200, signed=true, signer_stage_count=1. A singleton failing/no-code/revert provider with two healthy peers does not prevent quorum."
       },
-      "signStage": {"negative": "부정 case에는 sign stage series가 없음", "control": "정상 case에는 sign stage series가 1개 있음", "rawCounter": false},
+      "signStage": {"negative": "negative cases have no sign stage series", "control": "the normal case has one sign stage series", "rawCounter": false},
       "fixture": {
         "kind": "local TCP HTTP API-handler + Reqwest provider fixture",
         "portableSanitized": false,
@@ -233,7 +233,7 @@
         "observed": "Both HTTP 200, signed=true, signer_stage_count=1; valid empty READ results remain preserved."
       },
       "normalControl": {"status": "direct-artifact-observed", "evidence": "Both code-present empty-call cases pass in the 33-case TCP HTTP run."},
-      "signStage": {"status": "정상 case마다 sign stage series 1개", "rawCounter": false},
+      "signStage": {"status": "one sign stage series per normal case", "rawCounter": false},
       "fixture": {"portableSanitized": false, "kind": "local TCP HTTP API-handler + Reqwest provider fixture"},
       "evidenceKinds": ["direct-artifact-observed"],
       "verified": false,
@@ -273,8 +273,8 @@
         "observed": "HTTP 200, signed=true, signer_stage_count=1; quorum of two healthy providers succeeds despite one revert/error provider."
       },
       "signStage": {
-        "negative": "domain refusal과 generic failure case에는 sign stage series가 없음",
-        "control": "정상 healthy-quorum control에는 sign stage series가 1개 있음",
+        "negative": "domain refusal and generic failure cases have no sign stage series",
+        "control": "the normal healthy-quorum control has one sign stage series",
         "rawCounter": false
       },
       "fixture": {
@@ -492,7 +492,7 @@
   },
   "report": {
     "path": "pr1-case-evidence.md",
-    "language": "ko"
+    "language": "en"
   },
   "pr1FollowupEvidence": {
     "observedAtKst": "2026-10-08 23:01:32 KST (Main-reported SELF forward stop and five-port lsof check)",

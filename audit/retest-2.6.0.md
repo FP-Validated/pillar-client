@@ -87,4 +87,4 @@ How each fix is verified:
 
 2.6.0 is released as `v2.6.0` and its code runs on mainnet.
 
-근거: 로컬·hosted CI 테스트 출력, CE0–CE5 원시 출력(`ce-output.json`), mutation 실행, `git log -S` commit 대응, crane digest, ArgoCD·rollout 상태, 배포 전후 endpoint 비교, `09cec5c` 릴리스 검증 · 2026-10-09 18:04 KST
+Evidence: Local and hosted CI test output, CE0–CE5 raw output (`ce-output.json`), mutation run, `git log -S` commit correspondence, crane digest, ArgoCD and rollout status, pre/post-deployment endpoint comparison, `09cec5c` release verification · 2026-10-09 18:04 KST
