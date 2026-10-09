@@ -260,7 +260,10 @@ mod tests {
 
     #[test]
     fn rejects_cell_count_over_limit_in_header() {
-        let boc = [0xb5, 0xee, 0x9c, 0x72, 2, 1, 0x10, 0x01, 0, 0, 0, 0];
+        let mut boc = vec![
+            0xb5, 0xee, 0x9c, 0x72, 2, 2, 0x10, 0x01, 0, 1, 0, 0, 0x20, 0x02, 0, 0,
+        ];
+        boc.resize(16 + 0x2002, 0);
         assert!(!boc_header_is_safe(&boc));
     }
     #[test]
