@@ -860,6 +860,7 @@ dependencies = [
  "bitcoin_hashes",
  "serde",
  "unicode-normalization",
+ "zeroize",
 ]
 
 [[package]]

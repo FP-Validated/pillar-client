@@ -17,7 +17,7 @@ use tokio_postgres::{
     config::{Host, SslMode},
     Client, Config, NoTls,
 };
-
+const HEALTH_CACHE_TTL: std::time::Duration = std::time::Duration::from_millis(250);
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS pillar_audit_namespace (
  namespace text PRIMARY KEY, max_attempts bigint NOT NULL CHECK(max_attempts > 0),
@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS pillar_audit_intent (
  wallet_hash text NOT NULL, backend text NOT NULL, key_reference_hash text NOT NULL,
  key_version_hash text NOT NULL, key_reference text NOT NULL, key_version text NOT NULL, public_key_hash text NOT NULL, signed_digest text NOT NULL,
  algorithm text NOT NULL, PRIMARY KEY(namespace,request_hash,wallet_hash,backend,key_reference_hash,key_version_hash));
+CREATE TABLE IF NOT EXISTS pillar_audit_packet (
+ namespace text NOT NULL REFERENCES pillar_audit_namespace(namespace), packet_hash text NOT NULL,
+ attempts bigint NOT NULL DEFAULT 0 CHECK(attempts >= 0), PRIMARY KEY(namespace,packet_hash));
 CREATE TABLE IF NOT EXISTS pillar_audit_attempt (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, namespace text NOT NULL REFERENCES pillar_audit_namespace(namespace),
  request_hash text NOT NULL, validation_hash text NOT NULL, wallet_hash text NOT NULL, backend text NOT NULL,
@@ -126,6 +129,7 @@ pub(crate) struct PostgresAuditStore {
     probe: Mutex<Option<Session>>,
     probe_generation: Arc<AtomicU64>,
     reachable: Arc<AtomicBool>,
+    health_cache: Mutex<Option<(tokio::time::Instant, bool)>>,
     tls_roots: Arc<rustls::RootCertStore>,
 }
 impl PostgresAuditStore {
@@ -143,6 +147,7 @@ impl PostgresAuditStore {
             probe: Mutex::new(None),
             probe_generation: Arc::new(AtomicU64::new(0)),
             reachable: Arc::new(AtomicBool::new(false)),
+            health_cache: Mutex::new(None),
             tls_roots,
         });
         {
@@ -287,11 +292,21 @@ impl PostgresAuditStore {
             .await
             .map_err(unavailable)?;
         let namespace = &self.config.namespace;
-        let row = tx.query_one("SELECT attempt_count,max_attempts FROM pillar_audit_namespace WHERE namespace=$1 FOR UPDATE", &[namespace]).await.map_err(unavailable)?;
-        let has_capacity_after_attempt = row.get::<_, i64>(0) + 1 < row.get::<_, i64>(1);
-        if row.get::<_, i64>(0) >= row.get::<_, i64>(1) {
+        let namespace_row = tx.query_one("SELECT attempt_count,max_attempts FROM pillar_audit_namespace WHERE namespace=$1 FOR UPDATE", &[namespace]).await.map_err(unavailable)?;
+        let packet_hash = &intent.validated.packet_hash;
+        let inserted_packet = tx.execute("INSERT INTO pillar_audit_packet(namespace,packet_hash) VALUES($1,$2) ON CONFLICT DO NOTHING", &[namespace, packet_hash]).await.map_err(unavailable)? == 1;
+        if inserted_packet && namespace_row.get::<_, i64>(0) >= namespace_row.get::<_, i64>(1) {
             return Err(Failure::Quota);
         }
+        let packet_row = tx.query_opt("UPDATE pillar_audit_packet SET attempts=attempts+1 WHERE namespace=$1 AND packet_hash=$2 AND attempts < 64 RETURNING attempts", &[namespace, packet_hash]).await.map_err(unavailable)?;
+        if packet_row.is_none() {
+            return Err(Failure::Quota);
+        }
+        if inserted_packet {
+            tx.execute("UPDATE pillar_audit_namespace SET attempt_count=attempt_count+1 WHERE namespace=$1", &[namespace]).await.map_err(unavailable)?;
+        }
+        let has_capacity_after_attempt =
+            !inserted_packet || namespace_row.get::<_, i64>(0) + 1 < namespace_row.get::<_, i64>(1);
         let reference = fingerprint(intent.key.reference.as_bytes());
         let version = fingerprint(intent.key.version.as_bytes());
         let identity: &[&(dyn tokio_postgres::types::ToSql + Sync)] = &[
@@ -316,12 +331,6 @@ impl PostgresAuditStore {
             i64::try_from(intent.validated.provider_generation).map_err(unavailable)?;
         let row = tx.query_one("INSERT INTO pillar_audit_attempt(namespace,request_hash,validation_hash,wallet_hash,backend,key_reference_hash,key_version_hash,public_key_hash,signed_digest,algorithm,source_chain,destination_chain,expiration,provider_generation,key_reference,key_version) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id", &[namespace,&intent.validated.request_hash,&intent.validated.validation_hash,&intent.wallet_hash,&intent.key.backend,&reference,&version,&intent.key.public_key_hash,&intent.signed_digest,&intent.algorithm,&intent.validated.source_chain,&intent.validated.destination_chain,&intent.validated.expiration,&generation,&intent.key.reference,&intent.key.version]).await.map_err(unavailable)?;
         let id = row.get(0);
-        tx.execute(
-            "UPDATE pillar_audit_namespace SET attempt_count=attempt_count+1 WHERE namespace=$1",
-            &[namespace],
-        )
-        .await
-        .map_err(unavailable)?;
         tx.commit().await.map_err(unavailable)?;
         self.reachable
             .store(has_capacity_after_attempt, Ordering::Release);
@@ -390,15 +399,21 @@ impl SigningAuditStore for PostgresAuditStore {
         self.finish(&mut slot, result)
     }
     async fn healthy(&self) -> bool {
-        // One budget covers waiting for the probe lane, connecting and querying.
+        if let Some((checked_at, healthy)) = *self.health_cache.lock().await {
+            if checked_at.elapsed() < HEALTH_CACHE_TTL {
+                return healthy;
+            }
+        }
         let started = tokio::time::Instant::now();
         let healthy = match within_deadline(self.config.timeout, self.probe.lock()).await {
             Ok(mut lane) => {
-                // A probe granted the lane after its budget ran out fails here instead of dialing.
+                if let Some((checked_at, healthy)) = *self.health_cache.lock().await {
+                    if checked_at.elapsed() < HEALTH_CACHE_TTL {
+                        return healthy;
+                    }
+                }
                 let remaining = self.config.timeout.saturating_sub(started.elapsed());
                 let probe = async {
-                    // Out of the lane while in use: a cancelled or timed-out probe drops its
-                    // connection rather than leaving a possibly wedged one for the next probe.
                     let mut session = lane.take();
                     let result = self.health_inner(&mut session).await;
                     if result.is_ok() {
@@ -411,6 +426,7 @@ impl SigningAuditStore for PostgresAuditStore {
             Err(_) => false,
         };
         self.reachable.store(healthy, Ordering::Release);
+        *self.health_cache.lock().await = Some((tokio::time::Instant::now(), healthy));
         healthy
     }
 }
@@ -558,6 +574,7 @@ mod tests {
             probe: Mutex::new(None),
             probe_generation: Arc::new(AtomicU64::new(0)),
             reachable: Arc::new(AtomicBool::new(true)),
+            health_cache: Mutex::new(None),
             tls_roots: webpki_roots(),
         })
     }
@@ -723,6 +740,7 @@ mod tests {
     fn intent() -> AttemptIntent {
         AttemptIntent {
             validated: ValidatedIntent {
+                packet_hash: "packet".into(),
                 request_hash: "request".into(),
                 validation_hash: "validation".into(),
                 source_chain: "ethereum".into(),
@@ -742,7 +760,19 @@ mod tests {
         }
     }
 
-    // Real time throughout: a paused clock can advance past a loopback event before it is observed.
+    #[tokio::test]
+    async fn audit_readiness_lane_wait_timeout_clears_reachable_state() {
+        let store = store(
+            "postgresql://audit@127.0.0.1:1/audit".into(),
+            Duration::from_millis(5),
+        );
+        store.reachable.store(true, Ordering::Release);
+        let _probe_lane = store.probe.lock().await;
+
+        assert!(!store.healthy().await);
+        assert!(!store.health_state().load(Ordering::Acquire));
+    }
+
     #[tokio::test]
     async fn audit_readiness_probe_in_flight_does_not_hold_the_signing_session() {
         let timeout = Duration::from_secs(2);

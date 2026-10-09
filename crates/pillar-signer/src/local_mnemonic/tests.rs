@@ -2,6 +2,22 @@ use super::*;
 use crate::chain_address::bytes_to_hex;
 use crate::{PublicKeyRequest, RawSignerAdapter, SeedKind, SignRequest, SignatureType};
 
+#[test]
+fn local_mnemonic_signing_reuses_zeroized_derived_seed_storage() {
+    let signer = LocalMnemonicRawSignerAdapter::new(LocalMnemonic {
+        mnemonic: Zeroizing::new(
+            "test test test test test test test test test test test junk".to_string(),
+        ),
+        path: "m/44'/60'/0'/0/0".to_string(),
+    });
+    let seed_address = signer.seed(SeedKind::Bip39).unwrap().as_ptr();
+
+    for _ in 0..4 {
+        let _key = signer.ecdsa_signing_key(SeedKind::Bip39).unwrap();
+        assert_eq!(signer.seed(SeedKind::Bip39).unwrap().as_ptr(), seed_address);
+    }
+}
+
 #[tokio::test]
 async fn local_mnemonic_ecdsa_public_key_matches_typescript_vector() {
     let signer = LocalMnemonicRawSignerAdapter::new(LocalMnemonic {
