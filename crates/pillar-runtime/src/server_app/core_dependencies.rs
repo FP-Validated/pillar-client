@@ -11,12 +11,12 @@ fn warn_mainnet_provider_uris(provider_config: &impl ProviderConfigGetter, chain
                         | pillar_config::ProviderUri::UriWithHeaders { uri, .. } => uri,
                     };
                     reqwest::Url::parse(uri).map_or(true, |url| {
-                        url.scheme() != "https"
-                            && !(url.scheme() == "http"
-                                && url
-                                    .host_str()
-                                    .and_then(|host| host.parse::<std::net::IpAddr>().ok())
-                                    .is_some_and(|ip| ip.is_loopback()))
+                        let literal_loopback = match url.host() {
+                            Some(url::Host::Ipv4(address)) => address.is_loopback(),
+                            Some(url::Host::Ipv6(address)) => address.is_loopback(),
+                            _ => false,
+                        };
+                        url.scheme() != "https" && !(url.scheme() == "http" && literal_loopback)
                     })
                 })
             })
@@ -287,16 +287,17 @@ mod tests {
     }
 
     #[test]
-    fn mainnet_http_provider_uri_emits_a_warning() {
-        let raw = r#"{"bsc":{"uris":["http://bsc-rpc.example"],"quorum":1}}"#;
+    fn mainnet_http_loopback_hosts_are_exempt_but_public_hosts_warn() {
+        let raw = r#"{"ipv6":{"uris":["http://[::1]"],"quorum":1},"ipv4":{"uris":["http://127.0.0.1"],"quorum":1},"public":{"uris":["http://example.com"],"quorum":1}}"#;
         let config = pillar_config::StaticProviderConfig::new(
             pillar_config::test_support::provider_configs_from_uris_json(raw),
             None,
         )
         .unwrap();
+        let chains = ["ipv6".to_string(), "ipv4".to_string(), "public".to_string()];
         // Register the warning callsite before `set_default`, so a racing first registration
         // on another test thread cannot cache it as disabled for this subscriber.
-        warn_mainnet_provider_uris(&config, &["bsc".to_string()]);
+        warn_mainnet_provider_uris(&config, &chains);
         let logs = Arc::new(parking_lot::Mutex::new(Vec::new()));
         let writer = Buffer(logs.clone());
         let _guard = tracing::subscriber::set_default(
@@ -304,12 +305,14 @@ mod tests {
                 .with_writer(move || writer.clone())
                 .finish(),
         );
-        warn_mainnet_provider_uris(&config, &["bsc".to_string()]);
+        warn_mainnet_provider_uris(&config, &chains);
         let output = String::from_utf8(logs.lock().clone()).unwrap();
+        assert!(output.contains("public"), "{output}");
         assert!(
             output.contains("mainnet provider config contains a non-HTTPS RPC URI"),
             "{output}"
         );
-        assert!(output.contains("bsc"), "{output}");
+        assert!(!output.contains("ipv6"), "{output}");
+        assert!(!output.contains("ipv4"), "{output}");
     }
 }

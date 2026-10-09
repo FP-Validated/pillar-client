@@ -512,7 +512,7 @@ where
         let block = super::validation_readiness::readiness_response(
             transport.get_json_scoped(url, headers.clone()).await,
         )?;
-        block
+        let block_height = block
             .get("block_height")
             .and_then(Value::as_i64)
             .or_else(|| {
@@ -521,7 +521,13 @@ where
                     .and_then(Value::as_str)?
                     .parse()
                     .ok()
-            })
+            });
+        if ledger_version.is_some() && block_height.is_none() && !block.is_null() {
+            return Err(RpcError::Remote(
+                "Aptos block-by-version response is missing a usable block height".to_string(),
+            ));
+        }
+        block_height
     };
     let Some(tx_height) = tx_height else {
         if transaction.is_null() {
@@ -955,6 +961,45 @@ mod tests {
             "https://aptos.example/blocks/by_version/26629?with_transactions=false"
         );
         assert_eq!(calls.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn malformed_aptos_ledger_block_does_not_vote_missing_in_quorum() {
+        use pillar_config::ProviderConfigGetter;
+        let configs = pillar_config::test_support::provider_configs_from_uris_json(
+            r#"{"aptos":{"uris":["https://aptos-a.example","https://aptos-b.example"],"quorum":2}}"#,
+        );
+        let config = pillar_config::StaticProviderConfig::new(configs, None).unwrap();
+        let provider_config = config.get_provider_config("aptos").unwrap();
+        let quorum = required_provider_quorum(provider_config, "aptos").unwrap();
+        let requests = FuturesUnordered::new();
+        for (index, block_response) in [json!({}), Value::Null].into_iter().enumerate() {
+            let (transport, _) = transport(vec![Ok(block_response)]);
+            requests.push(async move {
+                let result = observe_move_block_confirmations(
+                    transport,
+                    "aptos",
+                    format!("https://aptos-{index}.example"),
+                    HashMap::new(),
+                    "26629",
+                    8,
+                )
+                .await
+                .map(|observation| Some((format!("{:?}", observation.validity), observation)));
+                (index, result)
+            });
+        }
+        let result = resolve_provider_quorum(
+            requests,
+            2,
+            quorum,
+            "Aptos ledger-version block confirmation",
+        )
+        .await;
+        assert!(
+            result.is_err(),
+            "malformed block data must not join the genuine Missing vote"
+        );
     }
 
     /// `version` is read verbatim out of the provider's own transaction
