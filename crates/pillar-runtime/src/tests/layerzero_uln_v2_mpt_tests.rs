@@ -54,7 +54,10 @@ async fn runtime_evm_uln_v2_payload_builder_derives_mpt_hash_info_with_quorum() 
 async fn runtime_evm_uln_v2_mpt_refuses_missing_source_evidence() {
     let (result, calls) = run_mpt_payload(None, mpt_receipt(MPT_BLOCK_HASH)).await;
     result.expect_err("missing source evidence must fail before reading the block");
-    assert_eq!(calls, 5, "no block read when source binding is absent");
+    assert_eq!(
+        calls, 0,
+        "missing source evidence must be refused before any RPC"
+    );
 }
 
 /// The MPT proof is built from the block the *second* receipt read names, so a receipt

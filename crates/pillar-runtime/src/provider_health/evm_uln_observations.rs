@@ -11,8 +11,13 @@ pub(crate) async fn observe_uln_v2_mpt_hash_info<T>(
 where
     T: JsonRpcTransport,
 {
+    if source_evidence.is_none() {
+        return Err(AppCoreError::Internal(
+            "Missing source evidence for MPT proof".to_string(),
+        ));
+    }
+
     let receipt = transport
-        .clone()
         .post_json_scoped(
             url.clone(),
             headers.clone(),

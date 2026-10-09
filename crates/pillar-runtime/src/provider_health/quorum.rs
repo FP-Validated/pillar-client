@@ -73,6 +73,9 @@ where
             None => self.error_count += 1,
         }
     }
+    pub(crate) fn successful_voter_count(&self) -> usize {
+        self.successful.len()
+    }
     pub(crate) fn record_result(
         &mut self,
         index: usize,
@@ -84,7 +87,10 @@ where
                 self.pending.remove(&index);
                 self.deferred.get_or_insert(error);
             }
-            Err(RpcError::Remote(_) | RpcError::Unavailable) => self.record(index, None),
+            Err(error @ (RpcError::Remote(_) | RpcError::Unavailable)) => {
+                tracing::error!(target: "pillar_runtime", "provider quorum vote error: {error}");
+                self.record(index, None);
+            }
             Err(error) => return Err(error.into()),
         }
         Ok(())
@@ -167,6 +173,41 @@ where
         tracing::error!(target: "pillar_runtime", "provider quorum not reached for {context}");
     }
     result
+}
+#[derive(Debug)]
+pub(crate) enum QuorumResolutionFailure {
+    ZeroSuccessfulResponses,
+    Other(AppCoreError),
+}
+
+pub(crate) async fn resolve_provider_quorum_with_zero_signal<T, F>(
+    mut requests: FuturesUnordered<F>,
+    total: usize,
+    quorum: QuorumRule<'_>,
+    context: &str,
+) -> Result<T, QuorumResolutionFailure>
+where
+    T: Clone,
+    F: Future<Output = (usize, Result<Option<(String, T)>, RpcError>)>,
+{
+    let mut accumulator = ExactQuorumAccumulator::new(quorum, 0..total);
+    while let Some((index, observation)) = requests.next().await {
+        accumulator
+            .record_result(index, observation)
+            .map_err(QuorumResolutionFailure::Other)?;
+        if let Some(result) = accumulator.unambiguous_result() {
+            return Ok(result);
+        }
+    }
+    let zero_successful = accumulator.successful_voter_count() == 0;
+    let result = accumulator.finish(context);
+    result.map_err(|error| {
+        if zero_successful {
+            QuorumResolutionFailure::ZeroSuccessfulResponses
+        } else {
+            QuorumResolutionFailure::Other(error)
+        }
+    })
 }
 
 pub(crate) fn required_provider_quorum<'a>(
