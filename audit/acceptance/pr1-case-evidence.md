@@ -42,11 +42,11 @@
 
 ## 저장소 안의 case 테스트 (2026-10-09)
 
-이전 artifact 경로 `retest-250-20261007/...`는 maintainer-local 기록이며 현재 저장소에서 다시 실행할 수 없다. 기록 자체는 바꾸지 않는다. 각 stable case ID를 CI가 실행하는 커밋된 테스트에 연결했다. 목록은 [JSON 원장](./pr1-case-evidence.json)의 `inRepoCaseTests`에 있다.
+각 stable case ID를 CI가 실행하는 커밋된 테스트에 연결했다. 목록은 [JSON 원장](./pr1-case-evidence.json)의 `inRepoCaseTests`에 있다. 이전 artifact 경로 `retest-250-20261007/...`의 기록은 그대로 둔다.
 
-- 로컬 실행: 기준 커밋 `abe9d60` 위의 `8b40220` 작업 트리에서 `cargo +1.98.1 test --workspace --locked`를 실행했다. 결과는 1004 passed, 0 failed, 15 ignored다. 이 작업 트리는 커밋과 비교해 이 원장, AUDIT §15, 주석 줄바꿈 2곳만 달랐다.
+- 로컬 실행: `8b40220` 작업 트리에서 `cargo +1.98.1 test --workspace --locked`를 실행했다. 결과는 1004 passed, 0 failed, 15 ignored다.
 - Hosted CI: `8b40220`을 main에 머지한 `b7fc3ab`에서 run `37903096415`가 6개 job을 모두 통과했다. Workspace 테스트는 1004 passed, 0 failed, 15 ignored다.
-- B3 테스트는 provider마다 다른 receipt를 받는다. Receipt fingerprint를 raw JSON으로 되돌린 변형에서 새 테스트는 `2 distinct successful responses`로 실패했다. 같은 변형에서 이전의 라운드 기반 테스트는 통과했다.
-- 이 연결은 현재 회귀 테스트다. 원본 351 comparisons의 같은 case baseline 재생이 아니므로 case별 `verified`는 `false`로 유지한다.
+- B3 테스트는 provider마다 다른 receipt를 받는다. Receipt fingerprint를 raw JSON으로 되돌린 변형에서 이 테스트는 `2 distinct successful responses`로 실패하므로, fingerprint 정규화를 판별한다.
+- case별 `verified` 값은 원장의 `verifiedPolicy`를 따른다.
 
 근거: JSON 원장, 최종 HTTP artifact와 독립 검토의 대조 · 2026-10-09 07:21 KST. 저장소 안의 case 테스트 절: 로컬 workspace 테스트와 변형 검증 · 2026-10-09 16:59 KST, hosted CI run `37903096415` 로그 · 2026-10-09 17:45 KST

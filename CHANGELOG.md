@@ -24,7 +24,7 @@ the Prometheus metric names.
 - Sui read는 fullnode JSON-RPC 폐지에 따라 GraphQL을 쓴다. upstream gasolina는 아직 `sui_*`/`suix_*` JSON-RPC를 쓰므로 의도적인 차이다. Payload 검증은 GraphQL `simulateTransaction`을 직접 호출한다. Mainnet capture에서 shared object의 `version` 값은 서버가 검증하지 않았다. `iotal1`은 `iota_*` JSON-RPC를 유지한다.
 - TON 전용 HTTP JSON decoder는 기존 4 MiB 응답 제한과 512-level JSON container nesting 제한을 적용한다. Trace 변환은 transaction hash 중복, 잘못된 topology, 512개 초과 node와 변환 후 512 container 초과 깊이를 조립 전에 거부한다. 서명과 confirmation에 필요한 scalar 필드만 투영한다. Object와 Array를 직접 조립해 subtree 재직렬화를 제거한다. 생략된 leaf children은 빈 배열로 처리한다. 이 정규화는 children 누락을 거부하는 upstream quorum 함수와 의도적으로 다르다. 원본 JSON은 반복형으로 순회하고 해제한다. JSON nesting과 trace node 수는 다른 단위다.
 - EVM PacketSent log의 ABI offset이나 길이가 `2^64-1`이면 decoder가 정수 overflow로 panic했다. 이제 다른 잘못된 log처럼 `Internal` 오류를 반환하고, resolver는 그 log를 건너뛴다. 이전에는 어떤 source-chain contract든 정상 send와 같은 tx에서 이런 log를 emit하면 그 tx의 resolve가 매번 중단됐다. 오류 문구는 바뀌지 않는다.
-- EVM readiness가 receipt를 다시 읽다가 RPC가 실패하면 그 provider를 `Missing`으로 기록한다. 이전에는 transport 오류가 `SourceChanged` 표가 되어 HTTP 400 `source receipt binding changed: <오류>`를 반환했고, quorum 1 구성에서는 일시 오류 하나가 재시도할 수 없는 거절처럼 보였다. 이제 응답은 upstream과 같은 500 `Transaction receipt or block not found for <tx>`이다. `null` receipt, 다른 block, 사라진 log 같은 실제 binding 변경은 계속 400이다. 어느 경우에도 서명하지 않는다.
+- EVM readiness가 receipt를 다시 읽을 때 RPC가 실패하면 그 provider를 `Missing`으로 기록하고, 응답은 upstream과 같은 500 `Transaction receipt or block not found for <tx>`이다(이전 응답: 400 `source receipt binding changed: <오류>`). `null` receipt, 다른 block, 사라진 log 같은 binding 변경은 400 `source receipt binding changed`이다. 어느 경우에도 서명하지 않는다.
 
 ### Build
 
@@ -33,7 +33,7 @@ the Prometheus metric names.
 
 ### Operator action
 
-- KMS key rotation은 재시작이 필요하다. AWS ECDSA, Azure, GCP signer는 처음 확인한 key identity를 process 수명 동안 쓰므로, alias 재지정이나 새 key version은 실행 중인 process에 반영되지 않고 고정된 key를 비활성화하면 재시작 전까지 서명이 실패한다. 절차와 identity 비교 조건은 [SECURITY](SECURITY.md#operator-responsibilities)에 있다.
+- KMS key rotation은 replica 재시작으로 반영한다. AWS ECDSA, Azure, GCP signer는 처음 확인한 key identity를 process 수명 동안 쓴다. 절차와 identity 비교 조건은 [SECURITY](SECURITY.md#operator-responsibilities)에 있다.
 
 ### Audit
 
@@ -41,7 +41,7 @@ the Prometheus metric names.
 - TON HTTP 검증은 합성 JSON depth 266과 512를 처리하고 513을 거절했다. Release lifecycle 검증은 topology, quorum 조기 반환과 취소 시 해제를 확인한다. 합성 fixture 결과와 원본 266-depth 응답의 replay 범위는 [AUDIT](AUDIT.md)의 §13에서 구분한다.
 - READ HTTP E2E는 정확한 stage/source/destination/status tuple의 Prometheus `_count` 숫자를 읽는다. 같은 series의 중복 관측을 정확하게 계산한다. Test artifact schema 3은 `sign_stage_observation_count`와 tuple별 `stage_observations`로 stage 관측 횟수를 기록한다.
 - Gasolina parity README의 재현 절차는 `$PILLAR`와 `$UPSTREAM` 절대 경로로 복사하고 `cargo test`를 `$PILLAR`에서 실행한다. 이전 절차는 upstream checkout 안에서 Pillar 상대 경로를 복사해 실패했다. Canton emitter 절의 미지원 설명은 현재 README/SECURITY 참조와 fixture 증거 범위로 바꿨다. AUDIT §13은 revert code 3에는 message 조건이 없음을 명시한다.
-- 2026-10-09 클라이언트 리뷰 후속 테스트를 추가했다. `l1Fee` quorum 회귀 테스트는 이제 두 provider가 같은 라운드에서 서로 다른 receipt를 반환한다. 이전 테스트는 라운드 안의 두 provider에게 같은 receipt를 줘서 raw-JSON fingerprint로 되돌아가도 통과했다. PacketSent data 불일치 대조군, `removed` 생략 수용과 `null`/비bool 거부, 매핑된 srcEid의 400과 매핑되지 않은 srcEid의 500, Lambda policy payload의 `signingContext`, 빈 `dvnAddress`에서 `hashLookup`만 생략, READ와 Sui에서 한 entity의 URI 두 개가 한 표인지도 고정했다. 기록은 [AUDIT](AUDIT.md)의 §15에 있다.
+- 2026-10-09 클라이언트 리뷰에서 찾은 항목에 대한 테스트를 추가했다: provider별로 `l1Fee`가 다른 receipt의 quorum 수용, PacketSent data 불일치 거부, `removed` 생략 수용과 `null`/비bool 거부, 매핑된 srcEid 400과 매핑되지 않은 srcEid 500, Lambda policy payload의 `signingContext`, 빈 `dvnAddress`에서 `hashLookup`만 생략, READ와 Sui에서 한 entity의 URI 두 개를 한 표로 계산. 기록은 [AUDIT](AUDIT.md)의 §15와 [retest-2.6.0.md](audit/retest-2.6.0.md)에 있다.
 - 이 릴리스의 실행 코드는 2026-10-09에 메인넷에 배포한 `b7fc3ab`(`ghcr.io/fp-validated/pillar-dvn-client:ci-b7fc3ab41fec-r37903096415-a1`)과 같다. 릴리스 커밋은 workspace version과 `Cargo.lock`의 workspace 항목만 2.5.0에서 2.6.0으로 바꾼다. 이 절에는 `Upgrade / Breaking` 변경과 HTTP 상태 변경이 있어 patch가 아니라 minor로 올렸다. 검증과 배포 기록은 [AUDIT](AUDIT.md)의 §15에 있다.
 
 ## 2.5.0 - 2026-10-06

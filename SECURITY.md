@@ -53,19 +53,16 @@ The following are deployment-side controls the software cannot enforce for you:
   front of it; the process speaks plain HTTP by design.
 - Use `SIGNER_TYPE=KMS` in production and scope the KMS key policy to this
   workload only. Mnemonic backends keep key material in process environment.
-- Plan KMS key rotation as a restart. Each signer resolves its key on first use
-  and keeps that identity for the process lifetime: AWS ECDSA signs with the
+- Rotate KMS keys by restarting replicas. Each signer resolves its key on first
+  use and keeps that identity for the process lifetime: AWS ECDSA signs with the
   immutable key ARN an alias resolved to, Azure with the key version a versionless
   id resolved to, and GCP with the configured key version
-  (`crates/pillar-signer/src/{aws.rs,azure/adapter.rs,gcp.rs}`). Retargeting an
-  alias or adding a key version does not change what a running process signs
-  with, and disabling the pinned key fails every signature on it until the process
-  restarts. Roll replicas in the same change that updates the DVN's registered
-  signer, and configure versioned key ids so replicas started at different times
-  cannot resolve different keys. A sign response naming another key is refused
-  (`signing key identity changed`); GCP and Azure can compare only when the
-  response names a key, and they refuse a nameless response only with durable
-  audit enabled.
+  (`crates/pillar-signer/src/{aws.rs,azure/adapter.rs,gcp.rs}`). Roll replicas in
+  the same change that updates the DVN's registered signer, and configure
+  versioned key ids so every replica resolves the same key. A sign response
+  naming another key is refused (`signing key identity changed`). GCP and Azure
+  compare the key named in the response; with durable audit enabled they also
+  require the response to name a key.
 - Require at least two distinct entities for every chain's `rpc` strategy, for
   example `{ "allOf": [{ "any": 2 }] }`. A strategy that one entity can satisfy
   makes that operator the trust root for the event you attest to; the startup

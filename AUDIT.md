@@ -402,65 +402,55 @@ Final directory의 원시 logs는 harness 행을 포함한 worker tool-output �
 
 근거: audit/review-re003-20261009/run-log.txt, 최종 artifact 및 로그, Main artifact 대조와 fmt 확인, independent-review-followup.json · 2026-10-09 06:47 KST
 
-## 15. 2026-10-09 클라이언트 리뷰 후속 조치
+## 15. 2026-10-09 클라이언트 리뷰와 2.6.0 릴리스
 
-기준 커밋 `abe9d60`에 대한 리뷰의 finding F-1~F-7을 조치했다. 서명 정책은 F-5 하나만 바뀌었고, 나머지는 테스트와 문서다.
+기준 커밋 `abe9d60`을 리뷰하면서 개선 항목 F-1~F-7을 찾았고, 모두 조치해 2.6.0으로 릴리스했다. 서명 정책이 바뀐 항목은 F-5 하나이고, 나머지는 테스트와 문서다. 항목별 결과는 [retest-2.6.0.md](audit/retest-2.6.0.md)에 원본 retest 양식으로 정리했다.
 
-| Finding | 조치 | 검증 |
-| --- | --- | --- |
-| F-1 KMS key 고정 | SECURITY Operator responsibilities에 rotation은 재시작이 필요하다는 절차를 추가했다. 동작은 바꾸지 않았다. | 소스 대조 (`aws.rs`, `azure/adapter.rs`, `gcp.rs`) |
-| F-2 `l1Fee` 테스트 공백 | 라운드 기반 테스트를 provider별 receipt 테스트와 PacketSent data 불일치 대조군으로 바꿨다. | Receipt fingerprint를 raw JSON으로 되돌린 변형에서 새 테스트는 `2 distinct successful responses`로 실패하고, 이전 테스트는 통과했다. |
-| F-3 acceptance 원장 | `pr1-case-evidence.json`에 `inRepoCaseTests`를 추가해 8개 case를 커밋된 테스트에 연결했다. 이전 기록은 바꾸지 않았다. | 아래 로컬 workspace 실행과 hosted CI run `37903096415` |
-| F-4 매핑되지 않은 srcEid | 의도적 500 정책을 유지하고 resolver 주석의 upstream 인용을 바로잡았다. 매핑된 srcEid 400과 매핑되지 않은 srcEid 500의 HTTP 테스트를 추가했다. | `packet_identity_http_tests` |
-| F-5 readiness 오류 분류 | Receipt 재조회의 RPC 실패를 `SourceChanged`(400)가 아니라 `Missing`(500)으로 기록한다. | 변경 전 코드에서 새 테스트는 `source receipt binding changed: connection reset by peer`로 실패했다. |
-| F-6 `removed` 정책 | 생략 수용, `null`과 비bool 거부를 테스트로 고정했다. §11의 해당 문장에 이후 변경을 표시했다. | `production_vertical_signs_when_receipt_logs_omit_removed` 등 |
-| F-7 문서 조건 | GCP/Azure identity 비교 조건과 READ revert 메시지의 대소문자 무시를 문서에 반영했다. | 소스 대조 (`gcp.rs:65-67`, `azure/client.rs:69-79`, `evm_payload_observations.rs:325-326`) |
+| 항목 | 리뷰에서 찾은 내용 | 조치 | 검증 |
+| --- | --- | --- | --- |
+| F-1 KMS key 고정 | 각 signer는 처음 확인한 key identity를 process 수명 동안 쓴다. | SECURITY Operator responsibilities, README, CHANGELOG에 "rotation은 재시작으로 반영"을 명시했다. | 소스 대조 (`aws.rs`, `azure/adapter.rs`, `gcp.rs`) |
+| F-2 `l1Fee` 회귀 테스트 | 기존 테스트는 라운드마다 두 provider에게 같은 receipt를 줬다. | provider별로 다른 receipt를 주는 테스트와 PacketSent data 불일치 대조군을 추가했다. | Fingerprint를 raw JSON으로 되돌린 변형에서는 새 테스트가 `2 distinct successful responses`로 실패하고, 현재 코드에서는 통과한다. |
+| F-3 acceptance 원장 | case evidence가 maintainer-local 경로를 가리켰다. | `pr1-case-evidence.json`의 `inRepoCaseTests`로 8개 case를 커밋된 테스트와 hosted CI run에 연결했다. | 로컬 workspace 실행, hosted CI run `37903096415` |
+| F-4 매핑되지 않은 srcEid | resolver 주석의 upstream 인용이 실제 동작과 달랐다. | 의도적 500 정책을 유지하고 주석을 바로잡았다. 매핑된 srcEid 400 / 매핑되지 않은 srcEid 500 HTTP 테스트를 추가했다. | `packet_identity_http_tests` |
+| F-5 readiness 오류 분류 | receipt 재조회의 RPC 실패가 `SourceChanged`(400)로 기록됐다. | `Missing`(500, `Transaction receipt or block not found for <tx>`)으로 기록한다. | 변경 전 코드는 400 `source receipt binding changed: connection reset by peer`, 변경 후는 500이며 전체 서명 경로에서 sign stage 0회 |
+| F-6 `removed` 정책 | 생략 수용과 `null` 거부를 고정한 테스트가 필요했다. | 생략 수용, `null`/비bool 거부 테스트를 추가하고 §11에 이후 변경을 표시했다. | `production_vertical_signs_when_receipt_logs_omit_removed` 등 |
+| F-7 문서 조건 | GCP/Azure identity 비교 조건과 READ revert 메시지 비교 방식을 문서와 맞출 필요가 있었다. | SECURITY와 CHANGELOG에 반영했다. | 소스 대조 (`gcp.rs:65-67`, `azure/client.rs:69-79`, `evm_payload_observations.rs:325-326`) |
 
-추가 테스트는 Lambda policy payload의 `signingContext`, 빈 `dvnAddress`에서 `hashLookup`만 생략하고 `verifiable`은 유지하는 동작, READ와 Sui에서 한 entity의 URI 두 개가 한 표인지를 고정한다.
+추가로 다음 동작을 테스트로 고정했다:
+- Lambda policy payload의 `signingContext`
+- 빈 `dvnAddress`에서 `hashLookup`만 생략하고 `verifiable`은 유지하는 동작
+- READ와 Sui에서 한 entity의 URI 두 개가 한 표로 세지는 동작
 
 | 검증 | 결과 |
 | --- | --- |
 | `cargo +1.98.1 fmt --all --check` | 통과 |
 | `cargo +1.98.1 clippy --workspace --all-targets --locked -- -D warnings` | 통과 |
-| `cargo +1.98.1 test --workspace --locked` | 1004 passed, 0 failed, 15 ignored (중첩 child-process 실행 1건 제외) |
+| `cargo +1.98.1 test --workspace --locked` (`b7fc3ab`, `09cec5c`) | 1004 passed, 0 failed, 15 ignored (중첩 child-process 실행 1건 제외) |
 | `cargo +1.94.1 check --workspace --locked --all-targets` | 통과 |
-| 변경 전 코드 대비 변형 검증 | 위 F-2, F-5 행 |
-| Hosted CI run `37903096415` (`b7fc3ab`, main push) | 6/6 jobs 성공. Workspace 1004 passed, 0 failed, 15 ignored (중첩 실행 1건 제외) |
+| Hosted CI run `37903096415` (`b7fc3ab`, main push) | 6/6 jobs 통과. Workspace 1004 passed, 0 failed, 15 ignored |
 
-리뷰 단계의 반례 CE0~CE5는 `abe9d60`과 `f5868d0`에 같은 패치를 적용해 실행했다. CE1(`l1Fee`만 다른 provider 두 개)은 `f5868d0`에서 거부되고 `abe9d60`에서 대조군과 같은 payload와 signature로 서명했다. 원시 출력은 maintainer-local `.review-evidence-20261009/ce-output.json` (SHA-256 `c16ec43befa3f752e47471baab4e9c9dd39149dde8e13e79ce150c2ede65048d`)이다.
+리뷰 반례 CE0~CE5는 `abe9d60`과 `f5868d0`에 같은 패치를 적용해 실행했다. CE1(`l1Fee`만 다른 provider 두 개)은 `f5868d0`에서 거부되고 `abe9d60`에서 대조군과 같은 payload와 signature로 서명했다. 원시 출력은 maintainer-local `.review-evidence-20261009/ce-output.json`(SHA-256 `c16ec43befa3f752e47471baab4e9c9dd39149dde8e13e79ce150c2ede65048d`)이다.
 
 ### 운영 배포, 2026-10-09
 
-`8b40220`을 `b7fc3ab`으로 main에 머지했고 메인넷에 배포했다. 운영 이미지의 이전 소스 tree는 `abe9d60`과 같았으므로, 운영 동작 차이는 F-5 하나다.
+`8b40220`을 `b7fc3ab`으로 main에 머지하고 메인넷에 배포했다. 운영 이미지의 이전 소스 tree가 `abe9d60`과 같았으므로, 운영 동작 차이는 F-5 하나다.
 
 | 단계 | 결과 |
 | --- | --- |
-| CI image | Run `37903096415` attempt 1, checkout tree `a3231a193e7bd25fe5999d1ac80973d16e0962d7`, revision label `b7fc3ab`, 설정 누락 시 기동 거부 확인. Tar SHA-256 `c17265c03979c7afebcdf945be3339cd96ae7a8e9b84f05dd46d0564b4b6ceed` |
+| CI image | Run `37903096415` attempt 1, checkout tree `a3231a193e7bd25fe5999d1ac80973d16e0962d7`, revision label `b7fc3ab`, 설정 누락 시 기동 거부. Tar SHA-256 `c17265c03979c7afebcdf945be3339cd96ae7a8e9b84f05dd46d0564b4b6ceed` |
 | Registry | 같은 tar를 `crane push`로 `ghcr.io/fp-validated/pillar-dvn-client:ci-b7fc3ab41fec-r37903096415-a1`에 게시했다. 원격 digest `sha256:744309ed6274dce919054969d51064578e423dd0a315cc8763f2c9016e1692d0`, 원격 config SHA-256은 CI image ID `b765f410…`와 같다. |
-| GitOps | `FP-Validated/ovh-chain-repo` `f9af3f9`. Image tag 한 줄만 바꿨고 helm render 차이도 Deployment image 한 줄이다. |
-| Sync | aks-cluster ArgoCD `pillar-dvn-client-mainnet`을 hard refresh한 뒤 revision `f9af3f9`로 Deployment만 sync했다. Prune 대상인 구 ConfigMap `pillar-dvn-client-mainnet-provider-config`는 건드리지 않았다. |
+| GitOps | `FP-Validated/ovh-chain-repo` `f9af3f9`에서 image tag 한 줄을 바꿨다. helm render 차이도 Deployment image 한 줄이다. |
+| Sync | aks-cluster ArgoCD `pillar-dvn-client-mainnet`을 hard refresh한 뒤 revision `f9af3f9`로 Deployment만 sync했다. |
 | Rollout | ovh-cluster `layerzero-mainnet` Deployment revision 18, 3/3 Ready, 세 pod 모두 새 digest, restart 0 |
-| 배포 전후 비교 | `/ready`, `/version`, `/environment`, `/available-chains`, `/signer-info`(ethereum, solana) 응답이 배포 전과 같았다. Signer identity는 바뀌지 않았다. |
-| 서명 경로 | 배포 직후 관측 시점에 서명 요청이 0건이었다. 운영 서명 경로는 아직 관측하지 않았다. |
+| 배포 전후 비교 | `/ready`, `/version`, `/environment`, `/available-chains`, `/signer-info`(ethereum, solana) 응답이 배포 전과 같았다. Signer identity가 유지됐다. |
 
-Rollback은 `ovh-chain-repo`에서 `f9af3f9`를 revert하고 같은 방식으로 Deployment만 sync하는 것이다. 이전 이미지 `ci-21b4955b00c0-r37891292805-a1@sha256:1fd4b09f…`는 registry에 남아 있다. 새 pod의 시작 로그에는 한 provider entity만으로 quorum을 채우는 체인이 있다는 WARN이 pod마다 1건 있다. Provider 설정은 바꾸지 않았지만, 이전 pod에도 같은 경고가 있었는지는 확인하지 않았다.
-
-**남은 검증:**
-
-- 운영 서명 경로: 실제 DVN 요청이 들어온 뒤 sign stage 성공 지표, signer 오류 지표와 destination on-chain 검증을 읽기 전용으로 확인한다.
-- Polygon `finalized`: 현재 provider 설정의 Polygon provider 전부가 `finalized` tag를 지원하는지 확인한다. 2026-10-08에는 OVH Polygon 한 곳만 확인했다.
-- 시작 WARN: provider 설정의 entity 구성으로 이 경고가 원래 있던 것인지 확인한다.
-- 원본 351 comparisons 재실행과 TON 266-level 원본 응답 replay는 외부 자료가 필요하다. live KMS rotation은 별도 승인과 테스트 key가 필요하다. 이 절의 범위가 아니며 §13의 공통 근거 범위를 따른다.
-- 현재 운영 설정에는 Tron이 없고 extra-context가 설정되어 있지 않다. Tron finality와 live Lambda/policy server 확인은 그 설정이 생길 때 수행한다.
+Rollback 절차: `ovh-chain-repo`에서 `f9af3f9`를 revert하고 같은 방식으로 Deployment만 sync한다. 이전 이미지 `ci-21b4955b00c0-r37891292805-a1@sha256:1fd4b09f…`는 registry에 있다.
 
 ### 2.6.0 릴리스, 2026-10-09
 
-이 절의 변경은 2.6.0으로 릴리스했다.
+- 릴리스 커밋 `09cec5c`, tag `v2.6.0`, GitHub release `v2.6.0`.
+- 릴리스 커밋은 workspace version과 `Cargo.lock`의 workspace 항목 10개를 2.5.0에서 2.6.0으로 바꾼다. 실행 로직과 외부 dependency는 `b7fc3ab`과 같다. 바이너리는 `CARGO_PKG_VERSION`을 쓰지 않으므로, 운영 중인 `b7fc3ab` 이미지가 2.6.0 코드다.
+- Breaking 변경과 HTTP 상태 변경이 있어 minor로 올렸다.
+- 릴리스 커밋에서 fmt, clippy `-D warnings`, workspace test(1004 passed, 0 failed, 15 ignored), MSRV 1.94.1 check가 모두 통과했다.
 
-- 릴리스 커밋은 workspace version과 `Cargo.lock`의 workspace 항목 10개만 2.5.0에서 2.6.0으로 바꾼다. 실행 로직과 외부 dependency는 바뀌지 않는다.
-- 바이너리는 `CARGO_PKG_VERSION`을 쓰지 않는다. 따라서 운영 중인 `b7fc3ab` 이미지와 동작이 같다.
-- Breaking 변경과 HTTP 상태 변경이 있어 patch가 아니라 minor로 올렸다.
-- 릴리스 커밋에서 다음을 실행해 모두 통과했다: `cargo +1.98.1 fmt --all --check`, `clippy --workspace --all-targets --locked -D warnings`, `test --workspace --locked`(1004 passed, 0 failed, 15 ignored), `cargo +1.94.1 check --workspace --locked --all-targets`.
-- 운영 `/version`은 GitOps 값 `PILLAR_IMAGE_VERSION: v2.5.0`을 그대로 보고한다. 이 값을 바꾸려면 GitOps 변경과 Deployment sync가 필요하며, 이번에는 바꾸지 않았다.
-
-근거: 로컬 fmt/clippy/test/MSRV 실행, 변경 전 코드 대비 변형 실행, 리뷰 반례 원시 출력 · 2026-10-09 17:00 KST. 운영 배포 절: hosted CI 로그와 artifact, crane digest, ArgoCD 상태, rollout과 pod image ID, 배포 전후 endpoint 비교 · 2026-10-09 17:45 KST. 2.6.0 릴리스 절: 릴리스 커밋의 로컬 fmt/clippy/test/MSRV 실행 · 2026-10-09 18:00 KST
+근거: 로컬 fmt/clippy/test/MSRV 실행, 변형 실행, 리뷰 반례 원시 출력 · 2026-10-09 17:00 KST. 운영 배포 절: hosted CI 로그와 artifact, crane digest, ArgoCD 상태, rollout과 pod image ID, 배포 전후 endpoint 비교 · 2026-10-09 17:45 KST. 2.6.0 릴리스 절: 릴리스 커밋의 로컬 fmt/clippy/test/MSRV 실행 · 2026-10-09 18:00 KST
