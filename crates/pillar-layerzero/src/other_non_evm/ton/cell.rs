@@ -8,7 +8,9 @@
 //! would touch those too — this file just keeps the cross-cutting conversions
 //! in one place.
 
+use base64::Engine;
 use pillar_core::AppCoreError;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use ton_core::cell::{BoC, CellBuilder, TonCell};
 use ton_core::types::TonAddress;
 
@@ -25,18 +27,101 @@ pub fn build(builder: CellBuilder) -> Result<TonCell, AppCoreError> {
 }
 
 pub fn boc_from_hex(hex: &str) -> Result<TonCell, AppCoreError> {
-    BoC::from_hex(hex.trim_start_matches("0x"))
-        .map_err(map_err)?
-        .single_root()
-        .map_err(map_err)
+    let bytes = hex::decode(hex.trim_start_matches("0x")).map_err(map_err)?;
+    boc_from_bytes(bytes)
 }
 
 /// Parse a single-root BOC from a base64 string (toncenter `data` field).
 pub fn boc_from_base64(data: &str) -> Result<TonCell, AppCoreError> {
-    BoC::from_base64(data)
-        .map_err(map_err)?
-        .single_root()
-        .map_err(map_err)
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .map_err(map_err)?;
+    boc_from_bytes(bytes)
+}
+
+pub fn boc_from_bytes(bytes: Vec<u8>) -> Result<TonCell, AppCoreError> {
+    if !boc_header_is_safe(&bytes) {
+        return Err(map_err("invalid BOC header"));
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        BoC::from_bytes(std::sync::Arc::new(bytes))
+            .map_err(map_err)?
+            .single_root()
+            .map_err(map_err)
+    }))
+    .unwrap_or_else(|_| Err(map_err("BOC parser panicked")))
+}
+
+fn boc_header_is_safe(bytes: &[u8]) -> bool {
+    if bytes.len() < 10 || bytes[..4] != [0xb5, 0xee, 0x9c, 0x72] {
+        return false;
+    }
+    let flags = bytes[4];
+    let has_idx = flags & 0x80 != 0;
+    let has_crc32c = flags & 0x40 != 0;
+    let size_bytes = (flags & 7) as usize;
+    let offset_bytes = bytes[5] as usize;
+    if size_bytes == 0 || size_bytes > 4 || offset_bytes == 0 || offset_bytes > 8 {
+        return false;
+    }
+    let mut cursor = 6;
+    let Some(cells) = read_boc_uint(bytes, &mut cursor, size_bytes) else {
+        return false;
+    };
+    let Some(roots) = read_boc_uint(bytes, &mut cursor, size_bytes) else {
+        return false;
+    };
+    let Some(absent) = read_boc_uint(bytes, &mut cursor, size_bytes) else {
+        return false;
+    };
+    let Some(data_size) = read_boc_uint(bytes, &mut cursor, offset_bytes) else {
+        return false;
+    };
+    if cells == 0
+        || cells > data_size / 2
+        || roots == 0
+        || roots.checked_add(absent).is_none_or(|n| n > cells)
+    {
+        return false;
+    }
+    for _ in 0..roots {
+        let Some(root) = read_boc_uint(bytes, &mut cursor, size_bytes) else {
+            return false;
+        };
+        if root >= cells {
+            return false;
+        }
+    }
+    let index_size = if has_idx {
+        let Some(size) = cells.checked_mul(offset_bytes) else {
+            return false;
+        };
+        size
+    } else {
+        0
+    };
+    let Some(data_start) = cursor.checked_add(index_size) else {
+        return false;
+    };
+    let Some(data_end) = data_start.checked_add(data_size) else {
+        return false;
+    };
+    let crc_size = if has_crc32c { 4 } else { 0 };
+    data_end
+        .checked_add(crc_size)
+        .is_some_and(|end| end <= bytes.len())
+}
+
+fn read_boc_uint(bytes: &[u8], cursor: &mut usize, width: usize) -> Option<usize> {
+    let end = cursor.checked_add(width)?;
+    let value = bytes
+        .get(*cursor..end)?
+        .iter()
+        .try_fold(0usize, |n, byte| {
+            n.checked_mul(256)?.checked_add(usize::from(*byte))
+        })?;
+    *cursor = end;
+    Some(value)
 }
 
 /// Serialize a cell to a BOC hex string (with CRC32C, `b5ee9c72` magic) as the
@@ -135,5 +220,20 @@ mod tests {
         let (boc, _) = codec_lock();
         let cell = boc_from_hex(&boc).expect("parse BOC");
         assert_eq!(boc_to_hex(&cell).unwrap(), boc);
+    }
+    #[test]
+    fn malformed_boc_indices_do_not_panic() {
+        let root_index = [0xb5, 0xee, 0x9c, 0x72, 1, 1, 1, 1, 0, 2, 5, 0, 0];
+        let has_index_overflow = [
+            0xb5, 0xee, 0x9c, 0x72, 0x84, 8, 0x20, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+            0,
+        ];
+        for boc in [&root_index[..], &has_index_overflow[..]] {
+            let result = catch_unwind(AssertUnwindSafe(|| boc_from_bytes(boc.to_vec())));
+            assert!(
+                result.is_ok_and(|parsed| parsed.is_err()),
+                "malformed BOC must fail without unwinding"
+            );
+        }
     }
 }

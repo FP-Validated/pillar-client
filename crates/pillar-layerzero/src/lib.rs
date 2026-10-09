@@ -50,8 +50,8 @@ pub use evm::{
 pub use evm_v2::build_evm_uln_v2_verify_call_data;
 pub use evm_v3::build_evm_uln_v3_verify_call_data;
 pub use other_non_evm::{
-    boc_from_base64, build_ton_dvn_verify, canton_gasolina_signer_address, canton_hash_verify,
-    canton_key_fingerprint, canton_party_namespace, committable_view_is_signed,
+    boc_from_base64, boc_from_bytes, build_ton_dvn_verify, canton_gasolina_signer_address,
+    canton_hash_verify, canton_key_fingerprint, canton_party_namespace, committable_view_is_signed,
     decode_proxy_admin_target, decode_ton_relayer_options, derive_uln_addresses, dvn_attestation,
     stellar_contract_id_from_strkey, ton_address_to_be32, ton_boc_from_hex, ton_boc_to_base64,
     ton_payload_signed_targets, ton_state_init_address, uln_default_receive_config,

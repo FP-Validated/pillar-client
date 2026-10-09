@@ -18,8 +18,8 @@ pub use address::{
     TonContractCodeCells, TonPathway,
 };
 pub use cell::{
-    boc_from_base64, boc_from_hex as ton_boc_from_hex, boc_to_base64 as ton_boc_to_base64,
-    state_init_address as ton_state_init_address,
+    boc_from_base64, boc_from_bytes, boc_from_hex as ton_boc_from_hex,
+    boc_to_base64 as ton_boc_to_base64, state_init_address as ton_state_init_address,
 };
 
 /// A parsed TON contract storage cell, as handed to the pure decoders.
