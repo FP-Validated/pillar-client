@@ -495,9 +495,7 @@ mod default_receive_config_tests {
     #[test]
     fn over_bound_default_receive_config_is_refused_before_serialization() {
         let config = wide_config_cell(MAX_DEFAULT_RECEIVE_CONFIG_CELLS + 1);
-        let error = serialize_default_receive_config(&config)
-            .expect_err("over-bound config must be refused");
-        println!("refused over-bound config: {error}");
+        serialize_default_receive_config(&config).expect_err("over-bound config must be refused");
     }
 
     fn node(id: u32, children: &[TonCell]) -> TonCell {
@@ -548,7 +546,6 @@ mod default_receive_config_tests {
         let config = uln_default_receive_config(&storage).unwrap();
         let cells = ton_cell_count_at_most(&config, usize::MAX).unwrap();
         let serialized = serialize_default_receive_config(&config).unwrap();
-        println!("mainnet Uln storage cells=532, default receive config cells={cells}");
         assert_eq!(cells, 2);
         assert_eq!(
             serialized,
@@ -573,7 +570,7 @@ mod default_receive_config_tests {
         let expected = fixture["committableView"]["request"]["stack"][2][1]
             .as_str()
             .unwrap();
-        println!("testnet default receive config cells={cells}");
+        assert_eq!(cells, 3);
         assert_eq!(
             pillar_layerzero::boc_from_base64(&serialized)
                 .unwrap()
