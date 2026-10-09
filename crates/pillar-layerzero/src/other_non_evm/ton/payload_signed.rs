@@ -444,6 +444,7 @@ mod tests {
         use super::super::cl_declare::cell_name;
 
         let storage = boc_from_base64(LIVE_ULN_CONNECTION_STORAGE).expect("parse live storage");
+        assert!(usize::from(storage.depth().unwrap()) <= super::super::cell::MAX_CELL_DEPTH);
         assert_eq!(cell_name(&storage).unwrap(), "connection");
 
         // `hashLookups` (field 8) is an empty dict on this connection, so no
@@ -833,11 +834,9 @@ mod tests {
         assert!(count > 4096, "fixture uses {count} cells");
         assert!(count < MAX_ACCOUNT_STATE_CELLS);
         assert!(super::super::cell::boc_from_base64_with_limits(&boc, 4096, true).is_err());
-        assert!(super::super::cell::boc_from_base64_with_limits(
-            &boc,
-            MAX_ACCOUNT_STATE_CELLS,
-            true,
-        )
-        .is_ok());
+        let storage =
+            super::super::cell::boc_from_base64_with_limits(&boc, MAX_ACCOUNT_STATE_CELLS, true)
+                .expect("600-nonce storage is within the account depth bound");
+        assert!(usize::from(storage.depth().unwrap()) <= super::super::cell::MAX_CELL_DEPTH);
     }
 }
