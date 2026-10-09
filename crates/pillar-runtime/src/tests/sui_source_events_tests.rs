@@ -61,7 +61,13 @@ impl JsonRpcTransport for ScriptedSui {
                 })
                 .collect::<Vec<_>>();
             let page = json!({"data":data,"hasNextPage":end < all.len(),"nextCursor":if end < all.len() {Value::from(end as u64)} else {Value::Null}});
-            return Ok(json!({"jsonrpc":"2.0","id":1,"result":page}));
+            let mut response = json!({"jsonrpc":"2.0","id":1,"result":page});
+            if start == 0 {
+                if let Some(error) = self.events.get("firstPageError") {
+                    response["error"] = error.clone();
+                }
+            }
+            return Ok(response);
         }
         assert!(
             body["query"]
@@ -85,9 +91,13 @@ impl JsonRpcTransport for ScriptedSui {
         let end = (start + 50).min(all.len());
         let nodes = all[start..end].iter().map(|event| json!({"contents":{"type":{"repr":event["type"]},"json":event["parsedJson"]}})).collect::<Vec<_>>();
         let has_next = end < all.len();
-        Ok(
-            json!({"data":{"transaction":{"digest":self.events.get("digestOverride").and_then(Value::as_str).unwrap_or(body["variables"]["digest"].as_str().unwrap()),"effects":{"events":{"nodes":nodes,"pageInfo":{"hasNextPage":has_next,"endCursor":if has_next {end.to_string()} else {String::new()}}}}}}}),
-        )
+        let mut page = json!({"data":{"transaction":{"digest":self.events.get("digestOverride").and_then(Value::as_str).unwrap_or(body["variables"]["digest"].as_str().unwrap()),"effects":{"events":{"nodes":nodes,"pageInfo":{"hasNextPage":has_next,"endCursor":if has_next {end.to_string()} else {String::new()}}}}}}});
+        if after.is_none() {
+            if let Some(errors) = self.events.get("firstPageErrors") {
+                page["errors"] = errors.clone();
+            }
+        }
+        Ok(page)
     }
 
     async fn get_json(&self, url: String, _: HashMap<String, String>) -> Result<Value, String> {
@@ -380,6 +390,85 @@ async fn sui_provider_with_wrong_transaction_digest_loses_its_vote() {
         .unwrap_err();
     assert!(
         matches!(error, AppCoreError::Internal(ref message) if message.starts_with("No Sui transaction events quorum")),
+        "{error:?}"
+    );
+}
+
+/// A GraphQL error on an earlier page voids the whole event list, even when the last page is clean.
+#[tokio::test]
+async fn sui_errors_on_an_earlier_event_page_lose_the_vote() {
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let scenario = fixture["scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|scenario| scenario["chain"] == "sui" && scenario["name"] == "V302 match")
+        .unwrap();
+    let mut source = scenario["response"].clone();
+    let mut events = source["data"].as_array().unwrap().clone();
+    let packet_index = events
+        .iter()
+        .position(|event| {
+            event["type"]
+                .as_str()
+                .is_some_and(|kind| kind.ends_with("PacketSentEvent"))
+        })
+        .unwrap();
+    let packet_event = events.remove(packet_index);
+    events.resize(51, json!({"type":"0x2::noise::Noise","parsedJson":{}}));
+    events[50] = packet_event;
+    source["data"] = Value::Array(events);
+    let request: LzMessageId = serde_json::from_value(scenario["request"].clone()).unwrap();
+    scripted_resolver(fixture["environment"].as_str().unwrap(), "sui", &source)
+        .get_lz_sent_event(fixture["digest"].as_str().unwrap(), &request)
+        .await
+        .expect("clean pages resolve the page-2 packet");
+    source["firstPageErrors"] = json!([{"message":"partial event page"}]);
+    let error = scripted_resolver(fixture["environment"].as_str().unwrap(), "sui", &source)
+        .get_lz_sent_event(fixture["digest"].as_str().unwrap(), &request)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&error, AppCoreError::Internal(message) if message.starts_with("No Sui transaction events quorum")),
+        "{error:?}"
+    );
+}
+
+#[tokio::test]
+async fn iota_error_on_an_earlier_event_page_loses_the_vote() {
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let scenario = fixture["scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|scenario| scenario["chain"] == "iotal1" && scenario["name"] == "V302 match")
+        .unwrap();
+    let mut source = scenario["response"].clone();
+    let mut events = source["data"].as_array().unwrap().clone();
+    let packet_index = events
+        .iter()
+        .position(|event| {
+            event["type"]
+                .as_str()
+                .is_some_and(|kind| kind.ends_with("PacketSentEvent"))
+        })
+        .unwrap();
+    let packet = events.remove(packet_index);
+    events.resize(51, json!({"type":"0x2::noise::Noise","parsedJson":{}}));
+    events[50] = packet;
+    source["data"] = Value::Array(events);
+    let request: LzMessageId = serde_json::from_value(scenario["request"].clone()).unwrap();
+    scripted_resolver(fixture["environment"].as_str().unwrap(), "iotal1", &source)
+        .get_lz_sent_event(fixture["digest"].as_str().unwrap(), &request)
+        .await
+        .expect("clean pages resolve the page-2 packet");
+    source["firstPageError"] = json!({"code":-32000,"message":"partial event page"});
+    let error = scripted_resolver(fixture["environment"].as_str().unwrap(), "iotal1", &source)
+        .get_lz_sent_event(fixture["digest"].as_str().unwrap(), &request)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&error, AppCoreError::Internal(message) if message.contains("quorum")),
         "{error:?}"
     );
 }

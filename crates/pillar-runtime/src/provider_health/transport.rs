@@ -163,6 +163,9 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
                     .ok_or_else(|| {
                         RpcError::Remote("IOTA transaction exceeds 16 MiB response limit".into())
                     })?;
+                if let Some(error) = response.get("error") {
+                    return Err(RpcError::Remote(error.to_string()));
+                }
                 let Some(items) = response.pointer("/result/data").and_then(Value::as_array) else {
                     return Ok(response);
                 };
@@ -247,6 +250,9 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
                         ));
                     };
                     response_bytes = total_bytes;
+                    if response.get("error").is_some() || response.get("errors").is_some() {
+                        return Ok(super::sui_graphql::response(&method, response));
+                    }
                     if let Some(expected) = expected_digest {
                         if response
                             .pointer("/data/transaction/digest")

@@ -4,6 +4,12 @@ All notable changes to this project are documented here. This project follows
 semantic versioning for the HTTP surface, the environment-variable contract and
 the Prometheus metric names.
 
+## Unreleased
+
+### Security
+
+- Sui GraphQL event pagination checks every page for GraphQL `errors` (and a top-level `error`). A provider whose earlier page reports errors loses its vote, even when the last page is clean; before this change only the last page was checked, so events gathered after an erroring page could still vote. IotaL1 `iotax_queryEvents` pagination applies the same rule to a JSON-RPC `error` on any page.
+
 ## 2.6.1 - 2026-10-10
 
 ### Upgrade / Breaking
