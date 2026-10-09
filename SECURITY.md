@@ -72,9 +72,22 @@ The following are deployment-side controls the software cannot enforce for you:
   entities satisfy (`{}`, `{ "any": 0 }`) is refused (upstream treats the empty
   strategy as trivial); only the `rpc` pool is dispatched, so upstream's TON
   `v2`/`v3`, Aptos/Initia `eventIndexer`, Sui `grpc`/`graphql` and TRON `tronWeb`
-  pools are validated but never dialled; error responses do not vote; and providers
-  observed unhealthy are dispatched last instead of dropped. Configuration
-  errors name the file, the JSON line and column, schema field names, and only
+  pools are still not used as secondary provider pools; for `sui`, operators must
+  point each `rpc` URI at GraphQL instead of JSON-RPC. The GraphQL query path
+  retains the configured provider quorum and exact-value fingerprint checks. This
+  is a deliberate divergence from upstream gasolina, which still uses `sui_*` and
+  `suix_*` JSON-RPC, forced by Sui Foundation's decommission of fullnode JSON-RPC.
+  GraphQL errors, null data and JSON-RPC error envelopes are provider failures:
+  they never vote on events, transactions or objects, and where readiness and
+  timestamp checks record missing data they count as `Missing`, as any unavailable
+  provider does. Providers observed unhealthy are dispatched last instead of
+  dropped. A live mainnet capture showed that `simulateTransaction` still succeeds
+  with a wrong shared `version`, so that field is advisory (fixture:
+  `sui-mainnet-graphql-shared-version.json`).
+  Event `vector<u8>` fields are read as base64, as GraphQL renders them, or as an
+  explicit `0x` hex string; a value that does not decode fails that provider's
+  answer, so upstream's JSON-RPC digit-string options form is not supported here.
+  Configuration errors name the file, the JSON line and column, schema field names, and only
   chain, endpoint-type and category names this build defines; an unknown key, an
   entity, a header or any other value from the file appears as a placeholder or
   not at all, because a misplaced credential would otherwise reach startup errors
@@ -262,10 +275,10 @@ not reproduce:
   `skipVId`. Numbers are otherwise read as `JSON.parse` reads them (`7.0` is 7,
   integers past 2^53 round), and v1 chain ids, nonce and addresses take
   upstream's own `parseInt`/`toString` coercions. An unknown v1 chain id is
-  upstream's `Invariant failed: Invalid endpointId: <n>`, the form tiny-invariant
-  throws outside `NODE_ENV=production` (the upstream image sets no `NODE_ENV`);
-  an object-valued v1 sender or receiver is echoed in error bodies with sorted
-  keys, where `JSON.stringify` keeps insertion order.
+  refused as HTTP 400 with the unchanged `Invariant failed: Invalid endpointId: <n>`
+  message, rather than upstream's 500, during request conversion and before any
+  provider RPC; an object-valued v1 sender or receiver is echoed in error bodies
+  with sorted keys, where `JSON.stringify` keeps insertion order.
 - `skipVId: true` is refused with HTTP 400 on both signing routes (`POST /`,
   `POST /v2/resolve-and-sign`) before any provider read, except on the v2 route
   for a `V2` send to `aptos`; upstream signs a digest without the vId everywhere.
@@ -317,6 +330,21 @@ not reproduce:
   other value is a 400 before anything is signed. Upstream's `getFeatherProof`
   signs the bare packet for 2 and throws for anything else; 2 has no deployed
   verifier source, so its meaning cannot be checked and it is not imitated.
+- A trusted `PacketSent` whose destination EID this deployment cannot name is a
+  non-match, so a later event in the same transaction can still resolve. Move,
+  Sui, IotaL1, Starknet and Stellar consult the chain-name map and then the legacy
+  cross-stage table, where upstream raises a 500 `Invariant failed: Invalid
+  endpointId`; EVM, Solana and TON consult the map only, as before. No pathway to
+  such a destination can be signed here, so skipping it never admits a packet the
+  request did not name. A missing source EID, or a Move/Sui event whose source maps
+  to another chain, stays an `Internal` fault but is reported only when no event
+  matches; on EVM this was a 400 miss before, and on TON it aborted the scan. EVM
+  `ReadV1002` applies the source rule to the emitting chain after the endpoint
+  flip. Move, Sui, IotaL1, Starknet and Stellar still convert every event before
+  matching, so any other conversion error fails the read as upstream does. TON's
+  decoder still drops destination-unmapped events before the source check, so a
+  source-EID gap on such an event shows as a miss. The Aptos V1 `OutboundEvent`
+  path (`resolve_aptos_v1_packet`) keeps upstream's behaviour unchanged.
 - A resolved packet must also agree with the request's destination chain name,
   and, except on Aptos, Movement and Initia sources, with its `ulnSendVersion`
   and source chain name; upstream's `lzMessageIdMatches` compares only eids,

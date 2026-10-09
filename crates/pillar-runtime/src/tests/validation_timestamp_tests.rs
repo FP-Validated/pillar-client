@@ -1,5 +1,53 @@
 use super::*;
 
+type ScriptedResponses = Arc<Mutex<HashMap<String, Vec<Result<Value, String>>>>>;
+
+#[derive(Clone)]
+struct SuiTimestampTransport {
+    calls: RecordedJsonCalls,
+    responses: ScriptedResponses,
+}
+
+#[async_trait]
+impl JsonRpcTransport for SuiTimestampTransport {
+    async fn post_json(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+        body: Value,
+    ) -> Result<Value, String> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push((url.clone(), headers, body));
+        let response = self
+            .responses
+            .lock()
+            .unwrap()
+            .get_mut(&url)
+            .unwrap()
+            .remove(0);
+        response
+    }
+
+    async fn get_json(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+    ) -> Result<Value, String> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push((url.clone(), headers, json!({"method":"GET"})));
+        self.responses
+            .lock()
+            .unwrap()
+            .get_mut(&url)
+            .unwrap()
+            .remove(0)
+    }
+}
+
 /// The chains that must each have their own arm in every observation dispatch site:
 /// everything in `STATIC_CHAIN_TYPE_NAMES` whose family is neither EVM nor TRON.
 /// Derived, never written down, so a tenth non-EVM chain enters every caller of this
@@ -246,6 +294,105 @@ async fn runtime_rpc_validation_checks_iota_checkpoint_timestamp() {
     assert_eq!(calls[0].2["params"], json!([]));
     assert_eq!(calls[1].2["method"], "iota_getCheckpoint");
     assert_eq!(calls[1].2["params"], json!(["123"]));
+}
+
+fn sui_timestamp_checks(
+    responses: [Vec<Result<Value, String>>; 3],
+    calls: RecordedJsonCalls,
+) -> RuntimeRpcValidationChecks<SuiTimestampTransport> {
+    let uris = [
+        "https://sui-a.example",
+        "https://sui-b.example",
+        "https://sui-c.example",
+    ];
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "sui".to_string(),
+            ProviderConfig::with_distinct_entities(
+                uris.iter()
+                    .map(|uri| ProviderUri::Uri(uri.to_string()))
+                    .collect(),
+                2,
+            ),
+        )]),
+        Some(&["sui".to_string()]),
+    )
+    .unwrap();
+    RuntimeRpcValidationChecks::from_getter(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        SuiTimestampTransport {
+            calls,
+            responses: Arc::new(Mutex::new(
+                uris.iter()
+                    .map(|uri| uri.to_string())
+                    .zip(responses)
+                    .collect(),
+            )),
+        },
+    )
+}
+
+fn sui_valid_checkpoint() -> Vec<Result<Value, String>> {
+    vec![
+        Ok(json!({"data":{"checkpoints":{"nodes":[{"sequenceNumber":123}]}}})),
+        Ok(json!({"data":{"checkpoint":{"timestamp":"2026-01-02T03:04:05.000Z"}}})),
+    ]
+}
+
+const SUI_TIMESTAMP_RANGE: ExpirationValidRange = ExpirationValidRange {
+    min: 1_767_323_000,
+    max: 1_767_323_100,
+};
+
+#[tokio::test]
+async fn runtime_rpc_validation_reads_sui_graphql_checkpoint_timestamp_past_a_json_rpc_provider() {
+    // A JSON-RPC URL left in a Sui pool answers with an error and votes Missing, as any
+    // unavailable provider does; two GraphQL providers still carry a 2-of-3 quorum.
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let checks = sui_timestamp_checks(
+        [
+            vec![Ok(
+                json!({"jsonrpc":"2.0","error":{"code":-32601,"message":"Method not found"}}),
+            )],
+            sui_valid_checkpoint(),
+            sui_valid_checkpoint(),
+        ],
+        calls.clone(),
+    );
+    let timestamp = checks
+        .current_block_timestamp("sui", SUI_TIMESTAMP_RANGE)
+        .await
+        .unwrap();
+    assert_eq!(timestamp, 1_767_323_045);
+    let calls = calls.lock().unwrap();
+    let checkpoint_call = calls
+        .iter()
+        .find(|(url, _, body)| {
+            url == "https://sui-b.example" && body["variables"]["sequence"] == json!(123)
+        })
+        .expect("the latest sequence feeds the checkpoint query");
+    assert!(checkpoint_call.2["query"]
+        .as_str()
+        .unwrap()
+        .contains("checkpoint(sequenceNumber: $sequence)"));
+}
+
+#[tokio::test]
+async fn runtime_rpc_validation_fails_closed_when_sui_graphql_answers_lack_data() {
+    let checks = sui_timestamp_checks(
+        [
+            vec![Ok(
+                json!({"jsonrpc":"2.0","error":{"code":-32601,"message":"Method not found"}}),
+            )],
+            vec![Ok(json!({"data":null}))],
+            sui_valid_checkpoint(),
+        ],
+        Arc::new(Mutex::new(Vec::new())),
+    );
+    assert!(checks
+        .current_block_timestamp("sui", SUI_TIMESTAMP_RANGE)
+        .await
+        .is_err());
 }
 
 #[tokio::test]

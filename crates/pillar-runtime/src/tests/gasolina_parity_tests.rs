@@ -46,16 +46,21 @@ fn calculate_guid_reproduces_the_guids_endpoint_v2_emitted() {
     assert_eq!((compared, skipped), (14, vec!["solana".to_string(); 2]));
 }
 
+/// Upstream's 500 for an unknown v1 chain id is answered as a 400 with the same text.
+const UNKNOWN_ENDPOINT_ID_ERROR_PREFIX: &str = "Invariant failed: Invalid endpointId: ";
+const UNKNOWN_ENDPOINT_ID_DIVERGENCE_COUNT: usize = 31;
+
 /// Replays `legacy_message_id.json`: upstream's own `App.signRequestV1` conversion
 /// of a v1 `lzMessageId` (parseInt, lz-definitions' `getNetworkForChainId`,
-/// `toString`) through the production resolver. The one recorded residual is a
+/// `toString`) through the production resolver. Two residuals are recorded: a
 /// nonce JavaScript keeps as NaN, negative or past 2^64, which the typed nonce
-/// cannot hold and refuses.
+/// cannot hold and refuses, and the 31 unknown chain ids answered as 400s.
 #[test]
 fn legacy_message_ids_convert_like_upstreams_sign_request_v1() {
     let fixture: Value = serde_json::from_str(&gasolina_parity_json("legacy_message_id.json"))
         .expect("fixture parses");
     let mut mismatches = Vec::new();
+    let mut unknown_endpoint_divergences = 0;
     for (name, case) in fixture["cases"].as_object().expect("cases") {
         let legacy: pillar_core::LegacyLzMessageId =
             serde_json::from_value(case["lzMessageId"].clone()).expect("lzMessageId parses");
@@ -65,6 +70,18 @@ fn legacy_message_ids_convert_like_upstreams_sign_request_v1() {
             Value::from("V2"),
         );
         let expected = &case["result"];
+        if let Some(message) = expected["error"]
+            .as_str()
+            .filter(|message| message.starts_with(UNKNOWN_ENDPOINT_ID_ERROR_PREFIX))
+        {
+            assert_eq!(
+                actual,
+                Err(AppCoreError::BadRequest(message.to_string())),
+                "{name}"
+            );
+            unknown_endpoint_divergences += 1;
+            continue;
+        }
         match (&actual, expected["error"].as_str()) {
             (Err(error), Some(message)) if error.to_string() == message => {}
             (Err(AppCoreError::BadRequest(message)), None)
@@ -93,6 +110,10 @@ fn legacy_message_ids_convert_like_upstreams_sign_request_v1() {
         }
     }
     assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+    assert_eq!(
+        unknown_endpoint_divergences, UNKNOWN_ENDPOINT_ID_DIVERGENCE_COUNT,
+        "the upstream Invalid endpointId observations remain recorded as 400 divergences"
+    );
 }
 
 /// Testnet chains whose EndpointV1 id differs from `V2 % 30000`, where this service

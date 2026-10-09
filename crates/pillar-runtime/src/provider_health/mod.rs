@@ -44,6 +44,7 @@ mod read_time_marker_resolver;
 mod rpc_context;
 mod source;
 mod source_probes;
+mod sui_graphql;
 mod ton;
 mod transport;
 pub(crate) use rpc_context::rpc_scope;

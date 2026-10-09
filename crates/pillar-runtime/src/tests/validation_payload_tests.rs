@@ -1093,10 +1093,7 @@ async fn runtime_rpc_validation_checks_derives_initia_sender_from_public_key() {
 
 #[tokio::test]
 async fn runtime_rpc_validation_checks_resolves_sui_and_iota_transaction_from_address() {
-    for (chain_name, method) in [
-        ("sui", "sui_getTransactionBlock"),
-        ("iotal1", "iota_getTransactionBlock"),
-    ] {
+    for chain_name in ["sui", "iotal1"] {
         let getter = StaticProviderConfig::new(
             indexmap::IndexMap::from([(
                 chain_name.to_string(),
@@ -1109,21 +1106,16 @@ async fn runtime_rpc_validation_checks_resolves_sui_and_iota_transaction_from_ad
         )
         .unwrap();
         let calls = Arc::new(Mutex::new(Vec::new()));
+        let response = if chain_name == "sui" {
+            json!({"data":{"transaction":{"digest":"0xtx","sender":{"address":"0x1234"},"transactionBcs":"AQI=","effects":{"checkpoint":{"sequenceNumber":"42"},"status":"SUCCESS"}}}})
+        } else {
+            json!({"result":{"digest":"0xtx","checkpoint":"42","transaction":{"data":{"sender":"0x1234","transaction":{"kind":"ProgrammableTransaction"}}},"effects":{"status":{"status":"success"}}}})
+        };
         let checks = RuntimeRpcValidationChecks::from_getter(
             &ProviderSnapshotHandle::from_getter(&getter),
             RecordingTransport {
                 calls: calls.clone(),
-                responses: Arc::new(Mutex::new(vec![Ok(json!({
-                    "result": {
-                        "digest": "0xtx",
-                        "checkpoint": "42",
-                        "transaction": {"data": {
-                            "sender": "0x1234",
-                            "transaction": {"kind": "ProgrammableTransaction"}
-                        }},
-                        "effects": {"status": {"status": "success"}}
-                    }
-                }))])),
+                responses: Arc::new(Mutex::new(vec![Ok(response)])),
             },
         );
 
@@ -1135,11 +1127,19 @@ async fn runtime_rpc_validation_checks_resolves_sui_and_iota_transaction_from_ad
             "0x1234"
         );
         let calls = calls.lock().unwrap();
-        assert_eq!(calls[0].2["method"], method);
-        assert_eq!(
-            calls[0].2["params"],
-            json!(["0xtx", {"showInput": true, "showEffects": true}])
-        );
+        if chain_name == "sui" {
+            assert!(calls[0].2["query"]
+                .as_str()
+                .unwrap()
+                .contains("transaction(digest: $digest)"));
+            assert_eq!(calls[0].2["variables"]["digest"], "0xtx");
+        } else {
+            assert_eq!(calls[0].2["method"], "iota_getTransactionBlock");
+            assert_eq!(
+                calls[0].2["params"],
+                json!(["0xtx", {"showInput": true, "showEffects": true}])
+            );
+        }
     }
 }
 

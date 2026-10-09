@@ -882,8 +882,10 @@ async fn runtime_rpc_validation_checks_sui_checkpoint_readiness() {
     let transport = RecordingTransport {
         calls: calls.clone(),
         responses: Arc::new(Mutex::new(vec![
-            Ok(json!({"result": {"checkpoint": "7"}})),
-            Ok(json!({"result": "50"})),
+            Ok(
+                json!({"data":{"transaction":{"digest":"sui-tx","sender":{"address":"0xs"},"transactionBcs":"AQI=","effects":{"checkpoint":{"sequenceNumber":"7"},"status":"SUCCESS"}}}}),
+            ),
+            Ok(json!({"data":{"checkpoints":{"nodes":[{"sequenceNumber":"50"}]}}})),
         ])),
     };
     let checks = RuntimeRpcValidationChecks::from_getter(
@@ -904,13 +906,15 @@ async fn runtime_rpc_validation_checks_sui_checkpoint_readiness() {
         .unwrap();
     let calls = calls.lock().unwrap();
     assert_eq!(calls.len(), 2);
-    assert_eq!(calls[0].2["method"], "sui_getTransactionBlock");
-    assert_eq!(calls[0].2["params"], json!(["sui-tx", null]));
+    assert!(calls[0].2["query"]
+        .as_str()
+        .unwrap()
+        .contains("transaction(digest: $digest)"));
+    assert_eq!(calls[0].2["variables"]["digest"], "sui-tx");
     assert_eq!(
-        calls[1].2["method"],
-        "sui_getLatestCheckpointSequenceNumber"
+        calls[1].2["query"],
+        "query { checkpoints(last: 1) { nodes { sequenceNumber } } }"
     );
-    assert_eq!(calls[1].2["params"], json!([]));
 }
 
 #[tokio::test]

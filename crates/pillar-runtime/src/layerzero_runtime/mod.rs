@@ -98,7 +98,7 @@ pub(crate) use source_events_move::{
     MoveByteFields, MovePacketSentEvent,
 };
 pub(crate) use source_events_starknet::{
-    chain_name_for_packet_eid, decode_starknet_packet_sent_events, starknet_packet_to_lz_sent_event,
+    decode_starknet_packet_sent_events, starknet_packet_to_lz_sent_event,
 };
 pub(crate) use source_events_stellar::{
     decode_stellar_packet_sent_events, normalize_stellar_address, stellar_packet_to_lz_sent_event,

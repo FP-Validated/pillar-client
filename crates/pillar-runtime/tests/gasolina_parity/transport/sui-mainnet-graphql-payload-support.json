@@ -1,0 +1,94 @@
+{
+  "provenance": {
+    "endpoint": "https://graphql.mainnet.sui.io/graphql",
+    "capturedAt": "2026-10-09",
+    "note": "simulateVerifiable was captured with the shared input field `initialSharedVersion`; the stored request was later renamed to `version` without recapture. The server treats the field as advisory (see sui-mainnet-graphql-shared-version.json), so the response stands.",
+    "network": "Sui mainnet",
+    "configuredContracts": {
+      "utilsPackage": "0x00245ba36f7a1cc643a2b037450dff1e4399e18069c6545fb5fcaaf37d39d7dc",
+      "endpointV2Package": "0x31beaef889b08b9c3b37d19280fc1f8b75bae5b2de2410fc3120f403e9a36dac",
+      "uln302Package": "0x3ce7457bed48ad23ee5d611dd3172ae4fbd0a22ea0e846782a7af224d905dbb0",
+      "layerzeroViewsPackage": "0xd4f403280fa2c05da6ec6e75c563e88b60326a0300ac71bfea91028772c12f85",
+      "endpointObject": "0xd45b6890fa030bcb43347c0c69a9e5a1a288d1ca7b86b428014752b472f6bf91",
+      "ulnObject": "0x8ebd7a0b102a5f7a3d4a08d84dd853fecc4ae0093be6eb02cf0d11dce7d4861f",
+      "verificationObject": "0x950f66ed27ec0a01a52bda147d74165d4cc20165f0cee0ecae6aaacde13d7741"
+    }
+  },
+  "normalizedMoveFunction": {
+    "query": "query($package:SuiAddress!,$module:String!,$function:String!){package(address:$package){address module(name:$module){name function(name:$function){name parameters{repr}}}}}",
+    "variables": {
+      "package": "0xd4f403280fa2c05da6ec6e75c563e88b60326a0300ac71bfea91028772c12f85",
+      "module": "uln_302_views",
+      "function": "verifiable"
+    },
+    "response": {
+      "data": {
+        "package": {
+          "address": "0xd4f403280fa2c05da6ec6e75c563e88b60326a0300ac71bfea91028772c12f85",
+          "module": {
+            "name": "uln_302_views",
+            "function": {
+              "name": "verifiable",
+              "parameters": [
+                {"repr": "&0x3ce7457bed48ad23ee5d611dd3172ae4fbd0a22ea0e846782a7af224d905dbb0::uln_302::Uln302"},
+                {"repr": "&0x3ce7457bed48ad23ee5d611dd3172ae4fbd0a22ea0e846782a7af224d905dbb0::receive_uln::Verification"},
+                {"repr": "&0x31beaef889b08b9c3b37d19280fc1f8b75bae5b2de2410fc3120f403e9a36dac::endpoint_v2::EndpointV2"},
+                {"repr": "&0x31beaef889b08b9c3b37d19280fc1f8b75bae5b2de2410fc3120f403e9a36dac::messaging_channel::MessagingChannel"},
+                {"repr": "vector<u8>"},
+                {"repr": "vector<u8>"}
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "objectOwners": {
+    "query": "query($endpoint:SuiAddress!,$uln:SuiAddress!,$verification:SuiAddress!,$channel:SuiAddress!){endpoint:object(address:$endpoint){asMoveObject{owner{__typename ... on Shared{initialSharedVersion}}}} uln:object(address:$uln){asMoveObject{owner{__typename ... on Shared{initialSharedVersion}}}} verification:object(address:$verification){asMoveObject{owner{__typename ... on Shared{initialSharedVersion}}}} channel:object(address:$channel){asMoveObject{owner{__typename ... on Shared{initialSharedVersion}}}}}",
+    "variables": {
+      "endpoint": "0xd45b6890fa030bcb43347c0c69a9e5a1a288d1ca7b86b428014752b472f6bf91",
+      "uln": "0x8ebd7a0b102a5f7a3d4a08d84dd853fecc4ae0093be6eb02cf0d11dce7d4861f",
+      "verification": "0x950f66ed27ec0a01a52bda147d74165d4cc20165f0cee0ecae6aaacde13d7741",
+      "channel": "0xbf58a7e5ddedee55e953bc38768a6a514de138317e5e1617e27767bf0892b084"
+    },
+    "response": {
+      "data": {
+        "channel": {"asMoveObject":{"owner":{"__typename":"Shared","initialSharedVersion":918314621}}},
+        "endpoint": {"asMoveObject":{"owner":{"__typename":"Shared","initialSharedVersion":635685314}}},
+        "uln": {"asMoveObject":{"owner":{"__typename":"Shared","initialSharedVersion":635685319}}},
+        "verification": {"asMoveObject":{"owner":{"__typename":"Shared","initialSharedVersion":635685319}}}
+      }
+    }
+  },
+  "simulateVerifiable": {
+    "query": "query($transaction: JSON!) { simulateTransaction(transaction: $transaction, checksEnabled: false, doGasSelection: true) { effects { status executionError { message abortCode } } outputs { returnValues { value { bcs } } } } }",
+    "variables": {
+      "transaction": {
+        "sender": "0x1234567890123456789012345678901234567890123456789012345678901234",
+        "kind": {
+          "programmableTransaction": {
+            "inputs": [
+              {"kind":"SHARED","objectId":"0x8ebd7a0b102a5f7a3d4a08d84dd853fecc4ae0093be6eb02cf0d11dce7d4861f","version":"635685319","mutable":false},
+              {"kind":"SHARED","objectId":"0x950f66ed27ec0a01a52bda147d74165d4cc20165f0cee0ecae6aaacde13d7741","version":"635685319","mutable":false},
+              {"kind":"SHARED","objectId":"0xd45b6890fa030bcb43347c0c69a9e5a1a288d1ca7b86b428014752b472f6bf91","version":"635685314","mutable":false},
+              {"kind":"SHARED","objectId":"0xbf58a7e5ddedee55e953bc38768a6a514de138317e5e1617e27767bf0892b084","version":"918314621","mutable":false},
+              {"kind":"PURE","pure":"UQEAAAAAAAAAZAAAdZUAAAAAAAAAAAAAAADiSj3IiWIWEkIqZOY4iSeQFgi5HQAAdqqjVsogEPzfRNbOz87PGLc8MhiNNh453/OpasjeDex7Gw=="},
+              {"kind":"PURE","pure":"IAEjRWeJq83vASNFZ4mrze8BI0VniavN7wEjRWeJq83v"}
+            ],
+            "commands": [
+              {"moveCall":{"package":"0xd4f403280fa2c05da6ec6e75c563e88b60326a0300ac71bfea91028772c12f85","module":"uln_302_views","function":"verifiable","typeArguments":[],"arguments":[{"kind":"INPUT","input":0},{"kind":"INPUT","input":1},{"kind":"INPUT","input":2},{"kind":"INPUT","input":3},{"kind":"INPUT","input":4},{"kind":"INPUT","input":5}]}}
+            ]
+          }
+        }
+      }
+    },
+    "response": {
+      "data": {
+        "simulateTransaction": {
+          "effects": {"executionError": null, "status": "SUCCESS"},
+          "outputs": [{"returnValues":[{"value":{"bcs":"AA=="}}]}]
+        }
+      }
+    }
+  }
+}

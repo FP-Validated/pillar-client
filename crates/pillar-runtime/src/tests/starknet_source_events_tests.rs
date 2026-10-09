@@ -11,6 +11,8 @@ const FIXTURE: &str = include_str!("../../tests/gasolina_parity/starknet_source_
 /// Pillar-stricter, not parity: upstream matches the identity alone, and the call data is built
 /// for the requested version, so a `V301` request for a `V302` packet is refused.
 const PILLAR_STRICTER: &[&str] = &["V301 request"];
+/// Upstream throws for an unmapped destination EID; this deployment treats it as a non-match.
+const UNKNOWN_DESTINATION_EID_DIVERGENCES: &[&str] = &["unknown destination eid"];
 
 #[derive(Clone)]
 struct ScriptedStarknet {
@@ -81,6 +83,14 @@ async fn starknet_source_events_match_gasolina() {
         let result = scripted_resolver(environment, &scenario["receipt"])
             .get_lz_sent_event(tx_hash, &request)
             .await;
+        if UNKNOWN_DESTINATION_EID_DIVERGENCES.contains(&name) {
+            assert!(theirs["error"].as_str().is_some_and(
+                |message| message.starts_with("Invariant failed: Invalid endpointId: ")
+            ));
+            assert!(is_identity_mismatch(&result), "{name}: {result:?}");
+            stricter_refused += 1;
+            continue;
+        }
         let difference = if PILLAR_STRICTER.contains(&name) {
             assert!(theirs.get("event").is_some(), "{name}");
             assert!(is_identity_mismatch(&result), "{name}: {result:?}");
@@ -117,6 +127,59 @@ async fn starknet_source_events_match_gasolina() {
         23,
         "every upstream scenario is replayed"
     );
-    assert_eq!(stricter_refused, PILLAR_STRICTER.len());
+    assert_eq!(
+        stricter_refused,
+        PILLAR_STRICTER.len() + UNKNOWN_DESTINATION_EID_DIVERGENCES.len()
+    );
     assert_eq!(dst_name_refused, 7);
+}
+
+#[tokio::test]
+async fn starknet_unmapped_destination_event_does_not_mask_later_match() {
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let scenarios = fixture["scenarios"].as_array().unwrap();
+    let matching = scenarios
+        .iter()
+        .find(|scenario| scenario["name"] == "match")
+        .unwrap();
+    let unmapped = scenarios
+        .iter()
+        .find(|scenario| scenario["name"] == "unknown destination eid")
+        .unwrap();
+    let mut receipt = matching["receipt"].clone();
+    receipt["events"]
+        .as_array_mut()
+        .unwrap()
+        .insert(0, unmapped["receipt"]["events"][0].clone());
+    let request: LzMessageId = serde_json::from_value(matching["request"].clone()).unwrap();
+    let result = scripted_resolver(fixture["environment"].as_str().unwrap(), &receipt)
+        .get_lz_sent_event(fixture["txHash"].as_str().unwrap(), &request)
+        .await
+        .unwrap();
+    assert!(lz_message_identity_matches(&request, &result.lz_message_id));
+}
+
+#[tokio::test]
+async fn starknet_a_later_unconvertible_event_still_fails_the_read() {
+    // Upstream converts every event before matching, so any throw fails the read.
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let environment = fixture["environment"].as_str().unwrap();
+    let tx_hash = fixture["txHash"].as_str().unwrap();
+    let scenarios = fixture["scenarios"].as_array().unwrap();
+    let scenario = |name: &str| scenarios.iter().find(|s| s["name"] == name).unwrap();
+    let (matching, broken) = (scenario("match"), scenario("empty options"));
+    let request: LzMessageId = serde_json::from_value(matching["request"].clone()).unwrap();
+    let alone = scripted_resolver(environment, &broken["receipt"])
+        .get_lz_sent_event(tx_hash, &request)
+        .await
+        .unwrap_err();
+    let mut receipt = matching["receipt"].clone();
+    receipt["events"]
+        .as_array_mut()
+        .unwrap()
+        .push(broken["receipt"]["events"][0].clone());
+    let combined = scripted_resolver(environment, &receipt)
+        .get_lz_sent_event(tx_hash, &request)
+        .await;
+    assert_eq!(combined, Err(alone));
 }

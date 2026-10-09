@@ -6,14 +6,29 @@ the Prometheus metric names.
 
 ## Unreleased
 
+### Upgrade / Breaking
+
+- Sui의 `chains.sui.rpc` provider URI는 GraphQL endpoint여야 한다. Pool에 남은 JSON-RPC URL은 실패한 provider로 처리된다. Event와 object 조회에서는 투표하지 않고, readiness와 timestamp 검사에서는 다른 unavailable provider처럼 Missing으로 기록된다. `/provider-health`의 Sui `response` 값은 string에서 number로 바뀐다.
+
 ### Security
 
+- `POST /`의 알 수 없는 v1 chain id는 provider RPC 전에 HTTP 400으로 거부한다. 메시지는 upstream의 `Invariant failed: Invalid endpointId: <n>`을 유지한다. 이전에는 같은 메시지의 500이었다. 이 차이는 upstream과 의도적으로 다르다.
+- Source-event scan에서 trusted PacketSent의 destination EID를 이 배포가 해석하지 못하면 비일치로 건너뛴다. 같은 tx의 뒤 event가 요청과 맞으면 resolve된다. Move, Sui, IotaL1, Starknet, Stellar는 chain-name map 다음에 legacy 표를 보며, upstream은 이 경우 `Invariant failed: Invalid endpointId`로 500을 낸다. EVM, Solana, TON은 이전처럼 map만 본다. 서명은 여전히 요청 identity와 정확히 맞는 event에만 가능하다.
+- Source EID가 map에 없거나 Move/Sui event의 source chain이 다르면 기존 `Internal` 오류를 유지한다. 다만 일치하는 event가 없을 때만 반환한다. EVM에서 이 경우는 이전에 400 miss였고 이제 500이다. EVM `ReadV1002`는 endpoint flip 뒤 emitting chain에 같은 규칙을 적용한다.
+- Move, Sui, IotaL1, Starknet, Stellar는 모든 event를 먼저 변환한 뒤 매칭하는 upstream 순서를 유지한다. 뒤 event의 변환 오류도 read 전체를 실패시킨다. Starknet, Stellar, Move의 legacy cross-stage destination 해석도 유지한다.
 - `polygon`과 `tron`의 MESSAGE readiness는 요청한 confirmation 수와 finalized head를 함께 확인한다. Receipt 높이의 canonical header number와 hash도 receipt와 같아야 한다. 이 결속은 reference보다 엄격하다. 다른 EVM chain과 `amoy`의 정책은 바꾸지 않는다.
 - EVM receipt quorum은 서명에 사용하는 receipt와 log 필드만 정규화한다. `l1Fee` 같은 추가 metadata는 표를 나누지 않는다. Receipt와 log의 transaction/block identity가 다르거나 log index가 중복되면 거부한다. `removed` 생략은 false로 정규화한다. true, null과 잘못된 타입은 거부한다. Transaction hash의 optional `0x` prefix와 대소문자는 같은 값으로 비교한다. Readiness와 ULNv2 MPT 재조회는 resolution의 packet log 내용과 block에 다시 결속된다.
 - READ는 DATA를 검증하며 empty call은 같은 URL, headers, EIP-1898 pin의 code를 조회한다. 정확한 0x code만 NoCode이고 0x00/0x6000은 정상 empty return이다. Data/NoCode/ExecutionRevert의 semantic fingerprint는 기존 category/entity quorum을 거친다. NoCode 또는 execution revert의 유일한 quorum만 HTTP 400의 기존 statusCode/body에 code=UNRESOLVABLE_COMMAND, retryable=false를 추가하며 sign stage에 진입하지 않는다. 단일 negative, timeout, transport, malformed DATA와 일반 RPC 오류는 전역 domain refusal이 아니며 양립하는 quorum 둘은 fail closed한다. Numeric revert code 3 또는 numeric -32000과 정확한 execution reverted 메시지의 조합만 분류하며 provided DATA를 검증·정규화한다. Absent/empty revert DATA는 반환 byte가 없다는 동일 의미로 비교한다.
 - Extra-context HTTP와 Lambda에 기존 typed `signingContext`를 전달한다. Strict-schema policy consumer는 새 필드를 허용해야 한다. 설정하지 않은 policy와 strict boolean-true gate의 동작은 유지한다.
 - Ethereum-style signature 변환은 모든 ECDSA signer에서 recovery ID 2/3을 거부한다. 기존 low-S 정규화 순서와 non-EVM raw recovery ID 형식은 유지한다. KMS 호출 뒤에 거부하므로 cloud signing call 자체를 방지하는 변경은 아니다.
+- Sui read는 fullnode JSON-RPC 폐지에 따라 GraphQL을 쓴다. upstream gasolina는 아직 `sui_*`/`suix_*` JSON-RPC를 쓰므로 의도적인 차이다. Payload 검증은 GraphQL `simulateTransaction`을 직접 호출한다. Mainnet capture에서 shared object의 `version` 값은 서버가 검증하지 않았다. `iotal1`은 `iota_*` JSON-RPC를 유지한다.
 - TON 전용 HTTP JSON decoder는 기존 4 MiB 응답 제한과 512-level JSON container nesting 제한을 적용한다. Trace 변환은 transaction hash 중복, 잘못된 topology, 512개 초과 node와 변환 후 512 container 초과 깊이를 조립 전에 거부한다. 서명과 confirmation에 필요한 scalar 필드만 투영한다. Object와 Array를 직접 조립해 subtree 재직렬화를 제거한다. 생략된 leaf children은 빈 배열로 처리한다. 이 정규화는 children 누락을 거부하는 upstream quorum 함수와 의도적으로 다르다. 원본 JSON은 반복형으로 순회하고 해제한다. JSON nesting과 trace node 수는 다른 단위다.
+- EVM PacketSent log의 ABI offset이나 길이가 `2^64-1`이면 decoder가 정수 overflow로 panic했다. 이제 다른 잘못된 log처럼 `Internal` 오류를 반환하고, resolver는 그 log를 건너뛴다. 이전에는 어떤 source-chain contract든 정상 send와 같은 tx에서 이런 log를 emit하면 그 tx의 resolve가 매번 중단됐다. 오류 문구는 바뀌지 않는다.
+
+### Build
+
+- CI의 모든 GitHub Action을 commit SHA로 고정했다. `cargo-audit`, `cargo-deny`, `cargo-cyclonedx`의 버전도 고정했다. Supply-chain job도 Rust 1.98.1을 쓴다.
+- Container builder를 `rust:1.98.1-bookworm` digest로 고정했다. 출하 binary는 CI가 test한 compiler로 빌드된다. 이전 builder는 Rust 1.97.1이었다.
 
 ### Audit
 

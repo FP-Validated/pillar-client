@@ -1645,3 +1645,34 @@ async fn production_vertical_polygon_and_tron_enforce_finality_and_canonical_hea
         json!({"event": "evm_finality_consumer_controls", "pipeline": "RuntimeServerApp::sign_request_v2", "observations": observations})
     );
 }
+
+#[tokio::test]
+async fn v1_unknown_chain_id_is_bad_request_before_provider_calls() {
+    let (app, calls) = vertical_app(&MAINNET_VERTICAL, None).await;
+    calls.lock().unwrap().clear();
+    let error = app
+        .sign_request_v1(PillarApiRequestV1 {
+            src_tx_hash: "0xtx".to_string(),
+            lz_message_id: pillar_core::LegacyLzMessageId {
+                src_chain_id: Some(Value::from(31999)),
+                nonce: Some(Value::from(7)),
+                dst_chain_id: Some(Value::from(56)),
+                src_ua_address: Some(Value::from("0xsrc")),
+                dst_ua_address: Some(Value::from("0xdst")),
+            },
+            block_confirmation: 1,
+            expiration: 1_751_500_000,
+            uln_version: Value::from("V302"),
+            skip_v_id: None,
+            dvn_address: None,
+            message_hash: "0xhash".to_string(),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        pillar_api::AppError::BadRequest(ref message)
+            if message == "Invariant failed: Invalid endpointId: 31999"
+    ));
+    assert!(calls.lock().unwrap().is_empty());
+}

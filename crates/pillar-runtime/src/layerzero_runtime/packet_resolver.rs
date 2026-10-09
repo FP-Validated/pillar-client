@@ -2,6 +2,12 @@ use super::*;
 
 const ANCHOR_EVENT_EMIT_DISCRIMINATOR: [u8; 8] = [0xe4, 0x45, 0xa5, 0x2e, 0x51, 0xcb, 0x9a, 0x1d];
 const PACKET_SENT_EVENT_DISCRIMINATOR: [u8; 8] = [0x00, 0x5c, 0xa7, 0xc9, 0x8b, 0x2e, 0xab, 0x52];
+#[allow(clippy::large_enum_variant)]
+pub(crate) enum SourceEventConversion {
+    Converted(LzSentEvent),
+    NotOurs,
+    SourceFault(AppCoreError),
+}
 
 fn normalize_move_account_for_resolver(address: &str) -> String {
     let value = strip_hex_prefix(address).to_ascii_lowercase();
@@ -391,29 +397,23 @@ where
         expected_src_chain_name: &str,
         src_tx_hash: &str,
         event: MovePacketSentEvent,
-    ) -> Result<LzSentEvent, AppCoreError> {
-        // Upstream names the destination first, `getChainName` failing on an unknown eid
-        // (`decoders/index.ts:122`).
-        let dst_chain_name = self
-            .config
-            .chain_name_by_eid
-            .get(&event.packet.dst_eid)
-            .cloned()
-            .or_else(|| {
-                pillar_config::layerzero_legacy_chain_name(event.packet.dst_eid).map(str::to_string)
-            })
-            .ok_or_else(|| {
-                AppCoreError::Internal(format!(
-                    "Invariant failed: Invalid endpointId: {}",
-                    event.packet.dst_eid
-                ))
-            })?;
-        let src_chain_name = self.chain_name_for_eid(event.packet.src_eid)?;
+    ) -> Result<SourceEventConversion, AppCoreError> {
+        let src_chain_name = match self.chain_name_for_eid(event.packet.src_eid) {
+            Ok(name) => name,
+            Err(error) => return Ok(SourceEventConversion::SourceFault(error)),
+        };
         if src_chain_name != expected_src_chain_name {
-            return Err(AppCoreError::Internal(
+            return Ok(SourceEventConversion::SourceFault(AppCoreError::Internal(
                 "Move PacketSent source chain mismatch".to_string(),
-            ));
+            )));
         }
+        let dst_chain_name = match super::source_events_starknet::chain_name_for_packet_eid(
+            &self.config.chain_name_by_eid,
+            event.packet.dst_eid,
+        ) {
+            Ok(name) => name,
+            Err(_) => return Ok(SourceEventConversion::NotOurs),
+        };
         let mut pathway_extra = IndexMap::new();
         pathway_extra.insert("srcEid".to_string(), Value::from(event.packet.src_eid));
         pathway_extra.insert("dstEid".to_string(), Value::from(event.packet.dst_eid));
@@ -461,7 +461,7 @@ where
             "packetEmitAddress".to_string(),
             Value::from(event.endpoint_address),
         );
-        Ok(LzSentEvent {
+        Ok(SourceEventConversion::Converted(LzSentEvent {
             lz_message_id: LzMessageId {
                 pathway_id: PathwayId {
                     src_chain_name,
@@ -476,7 +476,7 @@ where
             source_evidence: None,
             read_block_pins: Vec::new(),
             extra,
-        })
+        }))
     }
 
     async fn get_quorum_rpc_result(
@@ -607,6 +607,7 @@ where
         if endpoint_events.is_empty() {
             return Err(AppCoreError::Internal("Transaction not found".to_string()));
         }
+        let mut first_source_fault = None;
         for event in endpoint_events {
             if !self
                 .config
@@ -616,14 +617,22 @@ where
                 continue;
             }
             let sent_event =
-                self.solana_packet_to_lz_sent_event(src_tx_hash, event, transaction)?;
+                match self.solana_packet_to_lz_sent_event(src_tx_hash, event, transaction) {
+                    Ok(SourceEventConversion::Converted(sent_event)) => sent_event,
+                    Ok(SourceEventConversion::NotOurs) => continue,
+                    Ok(SourceEventConversion::SourceFault(error)) => {
+                        first_source_fault.get_or_insert(error);
+                        continue;
+                    }
+                    Err(error) => return Err(error),
+                };
             if lz_message_id_matches(expected_lz_message_id, &sent_event.lz_message_id) {
                 return Ok(sent_event);
             }
         }
-        Err(AppCoreError::Internal(
-            "Could not find sentEvent that matches lzMessageId".to_string(),
-        ))
+        Err(first_source_fault.unwrap_or_else(|| {
+            AppCoreError::Internal("Could not find sentEvent that matches lzMessageId".to_string())
+        }))
     }
 
     fn solana_packet_to_lz_sent_event(
@@ -631,8 +640,16 @@ where
         src_tx_hash: &str,
         event: SolanaPacketSentEvent,
         transaction: &Value,
-    ) -> Result<LzSentEvent, AppCoreError> {
+    ) -> Result<SourceEventConversion, AppCoreError> {
         let packet = event.packet;
+        let src_chain_name = match self.chain_name_for_eid(packet.src_eid) {
+            Ok(name) => name,
+            Err(error) => return Ok(SourceEventConversion::SourceFault(error)),
+        };
+        let Some(dst_chain_name) = self.config.chain_name_by_eid.get(&packet.dst_eid).cloned()
+        else {
+            return Ok(SourceEventConversion::NotOurs);
+        };
         let mut pathway_extra = IndexMap::new();
         pathway_extra.insert("srcEid".to_string(), Value::from(packet.src_eid));
         pathway_extra.insert("dstEid".to_string(), Value::from(packet.dst_eid));
@@ -653,11 +670,11 @@ where
         if let Some(block_time) = transaction.get("blockTime").and_then(Value::as_i64) {
             extra.insert("blockTimestamp".to_string(), Value::from(block_time));
         }
-        Ok(LzSentEvent {
+        Ok(SourceEventConversion::Converted(LzSentEvent {
             lz_message_id: LzMessageId {
                 pathway_id: PathwayId {
-                    src_chain_name: self.chain_name_for_eid(packet.src_eid)?,
-                    dst_chain_name: self.chain_name_for_eid(packet.dst_eid)?,
+                    src_chain_name,
+                    dst_chain_name,
                     extra: pathway_extra,
                 },
                 nonce: packet.nonce,
@@ -668,7 +685,7 @@ where
             source_evidence: None,
             read_block_pins: Vec::new(),
             extra,
-        })
+        }))
     }
 
     fn packet_sent_to_lz_sent_event(
@@ -678,7 +695,7 @@ where
         packet_sent: EvmPacketSent,
         log_address: &str,
         source_evidence: EvmSourceEvidence,
-    ) -> Result<LzSentEvent, AppCoreError> {
+    ) -> Result<SourceEventConversion, AppCoreError> {
         let bindings = self
             .config
             .packet_sent_bindings_by_chain_name
@@ -729,11 +746,23 @@ where
         // (`encode_lz_packet_v1` writes `src_eid` at bytes[9..13] and `dst_eid` at
         // bytes[45..49] of the packet header) and `compute_lz_packet_v1_proof` branches
         // the signed payload hash on `src_eid`.
-        let dst_chain_name = self.chain_name_for_eid(packet.dst_eid)?;
-        let src_chain_name = if is_lz_read_endpoint_id(packet.src_eid) {
-            dst_chain_name.clone()
+        let read_packet = is_lz_read_endpoint_id(packet.src_eid);
+        let (src_chain_name, dst_chain_name) = if read_packet {
+            let chain_name = match self.chain_name_for_eid(packet.dst_eid) {
+                Ok(name) => name,
+                Err(error) => return Ok(SourceEventConversion::SourceFault(error)),
+            };
+            (chain_name.clone(), chain_name)
         } else {
-            self.chain_name_for_eid(packet.src_eid)?
+            let src_chain_name = match self.chain_name_for_eid(packet.src_eid) {
+                Ok(name) => name,
+                Err(error) => return Ok(SourceEventConversion::SourceFault(error)),
+            };
+            let Some(dst_chain_name) = self.config.chain_name_by_eid.get(&packet.dst_eid).cloned()
+            else {
+                return Ok(SourceEventConversion::NotOurs);
+            };
+            (src_chain_name, dst_chain_name)
         };
         let mut pathway_extra = IndexMap::new();
         pathway_extra.insert("srcEid".to_string(), Value::from(packet.src_eid));
@@ -753,7 +782,7 @@ where
         }
         extra.insert("sendLibrary".to_string(), Value::from(send_library));
         extra.insert("packetEmitAddress".to_string(), Value::from(log_address));
-        Ok(LzSentEvent {
+        Ok(SourceEventConversion::Converted(LzSentEvent {
             lz_message_id: LzMessageId {
                 pathway_id: PathwayId {
                     src_chain_name,
@@ -768,7 +797,7 @@ where
             source_evidence: Some(source_evidence),
             read_block_pins: Vec::new(),
             extra,
-        })
+        }))
     }
 
     async fn get_ton_transaction_trace(&self, src_tx_hash: &str) -> Result<Value, AppCoreError> {
@@ -922,43 +951,49 @@ where
                     token_version,
                 )
                 .map_err(AppCoreError::Internal)?;
-                let sent_events = events
-                    .into_iter()
-                    .map(|event| self.move_packet_to_lz_sent_event(src_chain_name, src_tx_hash, event))
-                    .collect::<Result<Vec<_>, _>>()?;
-                for mut sent_event in sent_events {
-                    if !lz_message_identity_matches(lz_message_id, &sent_event.lz_message_id)
-                        || lz_message_id.pathway_id.dst_chain_name
-                            != sent_event.lz_message_id.pathway_id.dst_chain_name
-                    {
-                        continue;
+                let mut converted = Vec::with_capacity(events.len());
+                let mut first_source_fault = None;
+                for event in events {
+                    match self.move_packet_to_lz_sent_event(src_chain_name, src_tx_hash, event)? {
+                        SourceEventConversion::Converted(sent_event) => converted.push(sent_event),
+                        SourceEventConversion::NotOurs => {}
+                        SourceEventConversion::SourceFault(error) => {
+                            first_source_fault.get_or_insert(error);
+                        }
                     }
-                    if sent_event.lz_message_id.uln_send_version == ULN_VERSION_V301 {
-                        // `onChainEvent.txHash`: the ledger version on Aptos, the hash on Initia.
-                        let field = if src_chain_name == "initia" { "txhash" } else { "version" };
-                        let version = transaction
-                            .get(field)
-                            .and_then(|version| {
-                                version
-                                    .as_str()
-                                    .map(ToString::to_string)
-                                    .or_else(|| version.as_u64().map(|version| version.to_string()))
-                            })
-                            .unwrap_or_default();
-                        let options = self
-                            .aptos_family_v301_options(
-                                src_chain_name,
-                                &sent_event,
-                                &aptos_ledger_version(&version)?,
-                            )
-                            .await?;
-                        sent_event.extra.insert("options".to_string(), options);
-                    }
-                    return Ok(sent_event);
                 }
-                return Err(AppCoreError::Internal(format!(
-                    "Did not find correct PacketSent() event in tx {src_tx_hash}"
-                )));
+                let mut sent_event = match converted.into_iter().find(|sent_event| {
+                    lz_message_identity_matches(lz_message_id, &sent_event.lz_message_id)
+                        && lz_message_id.pathway_id.dst_chain_name
+                            == sent_event.lz_message_id.pathway_id.dst_chain_name
+                }) {
+                    Some(sent_event) => sent_event,
+                    None => return Err(first_source_fault.unwrap_or_else(|| AppCoreError::Internal(format!(
+                        "Did not find correct PacketSent() event in tx {src_tx_hash}"
+                    )))),
+                };
+                if sent_event.lz_message_id.uln_send_version == ULN_VERSION_V301 {
+                    // `onChainEvent.txHash`: the ledger version on Aptos, the hash on Initia.
+                    let field = if src_chain_name == "initia" { "txhash" } else { "version" };
+                    let version = transaction
+                        .get(field)
+                        .and_then(|version| {
+                            version
+                                .as_str()
+                                .map(ToString::to_string)
+                                .or_else(|| version.as_u64().map(|version| version.to_string()))
+                        })
+                        .unwrap_or_default();
+                    let options = self
+                        .aptos_family_v301_options(
+                            src_chain_name,
+                            &sent_event,
+                            &aptos_ledger_version(&version)?,
+                        )
+                        .await?;
+                    sent_event.extra.insert("options".to_string(), options);
+                }
+                return Ok(sent_event);
             }
             if matches!(
                 lz_message_id.pathway_id.src_chain_name.as_str(),
@@ -975,22 +1010,31 @@ where
                         ))
                     })?;
                 let events = self.get_sui_events(src_chain_name, src_tx_hash).await?;
-                let sent_events = decode_sui_packet_sent_events(&events, trusted)
-                    .map_err(AppCoreError::Internal)?
-                    .into_iter()
-                    .map(|event| self.move_packet_to_lz_sent_event(src_chain_name, src_tx_hash, event))
-                    .collect::<Result<Vec<_>, _>>()?;
+                let events = decode_sui_packet_sent_events(&events, trusted)
+                    .map_err(AppCoreError::Internal)?;
+                let mut converted = Vec::with_capacity(events.len());
+                let mut first_source_fault = None;
+                for event in events {
+                    match self.move_packet_to_lz_sent_event(src_chain_name, src_tx_hash, event)? {
+                        SourceEventConversion::Converted(sent_event) => converted.push(sent_event),
+                        SourceEventConversion::NotOurs => {}
+                        SourceEventConversion::SourceFault(error) => {
+                            first_source_fault.get_or_insert(error);
+                        }
+                    }
+                }
                 // Upstream matches the identity alone (`endpoint/sui/index.ts:244-257`); the
                 // version and chain names must agree here too, since the call data is built for
                 // the requested version and the signer is picked by the requested name.
-                return sent_events
+                if let Some(sent_event) = converted
                     .into_iter()
                     .find(|sent_event| lz_message_id_matches(lz_message_id, &sent_event.lz_message_id))
-                    .ok_or_else(|| {
-                        AppCoreError::Internal(format!(
-                            "Did not find correct PacketSent() event in tx {src_tx_hash}"
-                        ))
-                    });
+                {
+                    return Ok(sent_event);
+                }
+                return Err(first_source_fault.unwrap_or_else(|| AppCoreError::Internal(format!(
+                    "Did not find correct PacketSent() event in tx {src_tx_hash}"
+                ))));
             }
             if lz_message_id.pathway_id.src_chain_name == "starknet" {
                 let receipt = self
@@ -1022,22 +1066,35 @@ where
                         "Block hash not yet populated for tx {src_tx_hash}"
                     )));
                 }
-                let sent_events = decode_starknet_packet_sent_events(
+                let events = decode_starknet_packet_sent_events(
                     &receipt,
                     &self.config.trusted_starknet_endpoint_addresses,
                 )
-                .map_err(AppCoreError::Internal)?
-                .into_iter()
-                .map(|event| {
-                    starknet_packet_to_lz_sent_event(src_tx_hash, event, &self.config.chain_name_by_eid)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
+                .map_err(AppCoreError::Internal)?;
+                let mut converted = Vec::with_capacity(events.len());
+                let mut first_source_fault = None;
+                for event in events {
+                    match starknet_packet_to_lz_sent_event(
+                        src_tx_hash,
+                        event,
+                        &self.config.chain_name_by_eid,
+                    )? {
+                        SourceEventConversion::Converted(sent_event) => converted.push(sent_event),
+                        SourceEventConversion::NotOurs => {}
+                        SourceEventConversion::SourceFault(error) => {
+                            first_source_fault.get_or_insert(error);
+                        }
+                    }
+                }
                 // Upstream matches the identity alone (`endpoint/starknet/index.ts:203-212`);
                 // the version and chain names must agree here too.
-                return sent_events
+                if let Some(sent_event) = converted
                     .into_iter()
                     .find(|sent_event| lz_message_id_matches(lz_message_id, &sent_event.lz_message_id))
-                    .ok_or_else(|| packet_does_not_match(src_tx_hash));
+                {
+                    return Ok(sent_event);
+                }
+                return Err(first_source_fault.unwrap_or_else(|| packet_does_not_match(src_tx_hash)));
             }
             if lz_message_id.pathway_id.src_chain_name == "canton" {
                 let snapshot = self.providers.load();
@@ -1066,22 +1123,35 @@ where
                         "Transaction failed for tx {src_tx_hash}"
                     )));
                 }
-                let sent_events = decode_stellar_packet_sent_events(
+                let events = decode_stellar_packet_sent_events(
                     &transaction,
                     &self.config.trusted_stellar_endpoint_addresses,
                 )
-                .map_err(AppCoreError::Internal)?
-                .into_iter()
-                .map(|event| {
-                    stellar_packet_to_lz_sent_event(src_tx_hash, event, &self.config.chain_name_by_eid)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
+                .map_err(AppCoreError::Internal)?;
+                let mut converted = Vec::with_capacity(events.len());
+                let mut first_source_fault = None;
+                for event in events {
+                    match stellar_packet_to_lz_sent_event(
+                        src_tx_hash,
+                        event,
+                        &self.config.chain_name_by_eid,
+                    )? {
+                        SourceEventConversion::Converted(sent_event) => converted.push(sent_event),
+                        SourceEventConversion::NotOurs => {}
+                        SourceEventConversion::SourceFault(error) => {
+                            first_source_fault.get_or_insert(error);
+                        }
+                    }
+                }
                 // Upstream matches the identity alone (`endpoint/stellar/index.ts:266-275`);
                 // the version and chain names must agree here too.
-                let matched = sent_events
+                if let Some(sent_event) = converted
                     .into_iter()
-                    .find(|sent_event| lz_message_id_matches(lz_message_id, &sent_event.lz_message_id));
-                return matched.ok_or_else(|| packet_does_not_match(src_tx_hash));
+                    .find(|sent_event| lz_message_id_matches(lz_message_id, &sent_event.lz_message_id))
+                {
+                    return Ok(sent_event);
+                }
+                return Err(first_source_fault.unwrap_or_else(|| packet_does_not_match(src_tx_hash)));
             }
             if lz_message_id.pathway_id.src_chain_name == "ton" {
                 let trusted = self
@@ -1094,11 +1164,22 @@ where
                         )
                     })?;
                 let trace = self.get_ton_transaction_trace(src_tx_hash).await?;
+                let mut first_source_fault = None;
                 for event in
                     decode_ton_packet_sent_events(&trace, trusted, &self.config.chain_name_by_eid)
                 {
-                    let src_chain_name = self.chain_name_for_eid(event.packet.src_eid)?;
-                    let dst_chain_name = self.chain_name_for_eid(event.packet.dst_eid)?;
+                    let src_chain_name = match self.chain_name_for_eid(event.packet.src_eid) {
+                        Ok(name) => name,
+                        Err(error) => {
+                            first_source_fault.get_or_insert(error);
+                            continue;
+                        }
+                    };
+                    let Some(dst_chain_name) =
+                        self.config.chain_name_by_eid.get(&event.packet.dst_eid).cloned()
+                    else {
+                        continue;
+                    };
                     if src_chain_name != "ton" {
                         continue;
                     }
@@ -1146,9 +1227,9 @@ where
                         return Ok(sent_event);
                     }
                 }
-                return Err(AppCoreError::Internal(
+                return Err(first_source_fault.unwrap_or_else(|| AppCoreError::Internal(
                     "Packet sent event not found or not valid".to_string(),
-                ));
+                )));
             }
             if !self
                 .config
@@ -1169,6 +1250,7 @@ where
                 .parse::<i64>()
                 .map_err(|error| AppCoreError::Internal(error.to_string()))?;
             let logs = receipt.logs;
+            let mut first_source_fault = None;
             for log in logs {
                 let Ok(packet_sent) = decode_evm_packet_sent_log(
                     &log.topics,
@@ -1198,20 +1280,26 @@ where
                 // that aborted the scan for every other event in the receipt, including
                 // the one the request asked for; upstream logs and skips it too
                 // (`evm/index.ts:222-228`).
-                let Ok(sent_event) = self.packet_sent_to_lz_sent_event(
+                let sent_event = match self.packet_sent_to_lz_sent_event(
                     &lz_message_id.pathway_id.src_chain_name,
                     src_tx_hash,
                     packet_sent,
                     &log.address,
                     source_evidence,
-                ) else {
-                    continue;
+                ) {
+                    Ok(SourceEventConversion::Converted(sent_event)) => sent_event,
+                    Ok(SourceEventConversion::NotOurs) => continue,
+                    Ok(SourceEventConversion::SourceFault(error)) => {
+                        first_source_fault.get_or_insert(error);
+                        continue;
+                    }
+                    Err(_) => continue,
                 };
                 if lz_message_id_matches(lz_message_id, &sent_event.lz_message_id) {
                     return Ok(sent_event);
                 }
             }
-            Err(packet_does_not_match(src_tx_hash))
+            Err(first_source_fault.unwrap_or_else(|| packet_does_not_match(src_tx_hash)))
         })
         .await
     }
@@ -1818,9 +1906,12 @@ where
                 .and_then(Value::as_str)?
                 .to_ascii_lowercase(),
         };
-        let event = self
+        let SourceEventConversion::Converted(event) = self
             .packet_sent_to_lz_sent_event(chain, tx_hash, packet_sent, address, source_evidence)
-            .ok()?;
+            .ok()?
+        else {
+            return None;
+        };
         (event.lz_message_id.uln_send_version == ULN_VERSION_V2).then_some(event)
     }
 

@@ -1146,6 +1146,41 @@ fn decode_endpoint_v2_packet_sent_log_matches_ethers_event_data() {
     );
 }
 
+/// A log body any source-chain contract can emit under these topics, with an ABI offset or
+/// length of `2^64-1`, must be refused like other malformed bodies rather than overflow.
+#[test]
+fn decode_packet_sent_log_refuses_overflowing_abi_offset_and_length() {
+    let mut max = [0u8; 32];
+    max[24..].fill(0xff);
+    for (topic, head_words) in [
+        (LEGACY_ULN_V2_PACKET_TOPIC, 1),
+        (ENDPOINT_V2_PACKET_SENT_TOPIC, 3),
+        (ULN_301_PACKET_SENT_TOPIC, 4),
+    ] {
+        let mut in_range_offset = [0u8; 32];
+        in_range_offset[31] = (head_words * 32) as u8;
+        for (first_head_word, expected) in [
+            (max, "dynamic bytes offset out of range"),
+            (in_range_offset, "dynamic bytes body out of range"),
+        ] {
+            let mut data = first_head_word.to_vec();
+            data.extend(std::iter::repeat_n(0u8, (head_words - 1) * 32));
+            data.extend_from_slice(&max);
+            let error = decode_evm_packet_sent_log(
+                &[topic.to_string()],
+                &format!("0x{}", hex::encode(&data)),
+                &|_| 20,
+            )
+            .unwrap_err();
+            assert_eq!(
+                error,
+                AppCoreError::Internal(expected.to_string()),
+                "{topic}"
+            );
+        }
+    }
+}
+
 #[test]
 fn decode_uln301_packet_sent_log_matches_ethers_event_data() {
     let decoded = decode_evm_packet_sent_log(

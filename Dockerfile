@@ -1,6 +1,6 @@
-# Base images are pinned by digest so a rebuild of a given tag is reproducible.
-# Refresh with: docker buildx imagetools inspect rust:1-bookworm
-FROM rust:1-bookworm@sha256:0e2bcaef56d041a486784e54104a81aebe0da44bd03019bd70bc0401e42e4a97 AS builder
+# Base images are pinned by digest, and the builder uses the Rust release CI tests with.
+# Refresh with: docker buildx imagetools inspect rust:1.98.1-bookworm
+FROM rust:1.98.1-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e AS builder
 
 WORKDIR /app
 

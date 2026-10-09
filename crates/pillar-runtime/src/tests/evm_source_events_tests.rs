@@ -135,3 +135,138 @@ async fn evm_source_events_match_gasolina() {
     }
     assert_eq!(compared, 12, "every upstream scenario is replayed");
 }
+
+#[tokio::test]
+async fn evm_read_v1002_unmapped_emitting_chain_is_source_fault() {
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let scenario = fixture["scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|scenario| scenario["name"] == "ReadV1002 match")
+        .unwrap();
+    let request: LzMessageId = serde_json::from_value(scenario["request"].clone()).unwrap();
+    let emitting_eid = request.pathway_id.extra["dstEid"].as_u64().unwrap() as u32;
+    let config = runtime_evm_layerzero_config(
+        fixture["environment"].as_str().unwrap(),
+        &["bsc".to_string(), "ethereum".to_string()],
+    )
+    .unwrap();
+    let mut resolver_config = config.packet_sent_resolver_config;
+    resolver_config.chain_name_by_eid.remove(&emitting_eid);
+    let providers = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "bsc".to_string(),
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://bsc.example".to_string())],
+                1,
+            ),
+        )]),
+        Some(&["bsc".to_string()]),
+    )
+    .unwrap();
+    let resolver = EvmPacketSentResolver::new(
+        &ProviderSnapshotHandle::from_getter(&providers),
+        ScriptedReceipt {
+            receipt: scenario["receipt"].clone(),
+        },
+        resolver_config,
+    );
+    let tx = scenario["receipt"]["transactionHash"].as_str().unwrap();
+    let error = resolver.get_lz_sent_event(tx, &request).await.unwrap_err();
+    assert_eq!(
+        error,
+        AppCoreError::Internal(format!("No chain name for endpoint id {emitting_eid}"))
+    );
+}
+
+#[tokio::test]
+async fn evm_unmapped_source_is_reported_even_when_the_destination_is_unmapped_too() {
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let scenario = fixture["scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|scenario| scenario["name"] == "V302 match")
+        .unwrap();
+    let request: LzMessageId = serde_json::from_value(scenario["request"].clone()).unwrap();
+    let src_eid = request.pathway_id.extra["srcEid"].as_u64().unwrap() as u32;
+    let dst_eid = request.pathway_id.extra["dstEid"].as_u64().unwrap() as u32;
+    let config = runtime_evm_layerzero_config(
+        fixture["environment"].as_str().unwrap(),
+        &["bsc".to_string(), "ethereum".to_string()],
+    )
+    .unwrap();
+    let mut resolver_config = config.packet_sent_resolver_config;
+    resolver_config.chain_name_by_eid.remove(&src_eid);
+    resolver_config.chain_name_by_eid.remove(&dst_eid);
+    let providers = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "bsc".to_string(),
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://bsc.example".to_string())],
+                1,
+            ),
+        )]),
+        Some(&["bsc".to_string()]),
+    )
+    .unwrap();
+    let resolver = EvmPacketSentResolver::new(
+        &ProviderSnapshotHandle::from_getter(&providers),
+        ScriptedReceipt {
+            receipt: scenario["receipt"].clone(),
+        },
+        resolver_config,
+    );
+    let tx = scenario["receipt"]["transactionHash"].as_str().unwrap();
+    let error = resolver.get_lz_sent_event(tx, &request).await.unwrap_err();
+    assert_eq!(
+        error,
+        AppCoreError::Internal(format!("No chain name for endpoint id {src_eid}"))
+    );
+}
+
+/// Any contract can emit a PacketSent topic in the same transaction as a genuine send; a body
+/// whose ABI offset is `2^64-1` must be skipped like other undecodable logs, not abort the scan.
+#[tokio::test]
+async fn evm_genuine_packet_resolves_behind_an_overflowing_untrusted_log() {
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let scenario = fixture["scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|scenario| scenario["name"] == "V302 match")
+        .unwrap();
+    let request: LzMessageId = serde_json::from_value(scenario["request"].clone()).unwrap();
+    let config = runtime_evm_layerzero_config(
+        fixture["environment"].as_str().unwrap(),
+        &["bsc".to_string(), "ethereum".to_string()],
+    )
+    .unwrap();
+    let providers = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "bsc".to_string(),
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://bsc.example".to_string())],
+                1,
+            ),
+        )]),
+        Some(&["bsc".to_string()]),
+    )
+    .unwrap();
+    let mut receipt = scenario["receipt"].clone();
+    let mut poison = receipt["logs"][0].clone();
+    poison["address"] = Value::from("0x9999999999999999999999999999999999999999");
+    poison["data"] = Value::from(format!("0x{:064x}{}", u64::MAX, "0".repeat(64 * 3)));
+    poison["logIndex"] = Value::from("0x7ff");
+    receipt["logs"].as_array_mut().unwrap().insert(0, poison);
+    let resolver = EvmPacketSentResolver::new(
+        &ProviderSnapshotHandle::from_getter(&providers),
+        ScriptedReceipt { receipt },
+        config.packet_sent_resolver_config,
+    );
+    let tx = scenario["receipt"]["transactionHash"].as_str().unwrap();
+    let event = resolver.get_lz_sent_event(tx, &request).await.unwrap();
+    assert_eq!(event.lz_message_id.nonce, request.nonce);
+    assert_eq!(event.message, scenario["outcome"]["event"]["message"]);
+}
