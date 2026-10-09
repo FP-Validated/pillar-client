@@ -97,7 +97,7 @@ const PAYLOAD_SIGNED_FAMILIES: &[FamilyRead] = &[
         receiver: WORD_RECEIVER,
         verifier: "0x3333333333333333333333333333333333333333333333333333333333333333",
         upstream: "packages/sdks/lz-v2-sdk/src/uln/sui/index.ts:501-523 hasPayloadSigned",
-        first_read: Some("sui_"),
+        first_read: Some("package(address: $package)"),
     },
     FamilyRead {
         chain_name: "iotal1",

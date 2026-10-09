@@ -72,8 +72,12 @@ The following are deployment-side controls the software cannot enforce for you:
   entities satisfy (`{}`, `{ "any": 0 }`) is refused (upstream treats the empty
   strategy as trivial); only the `rpc` pool is dispatched, so upstream's TON
   `v2`/`v3`, Aptos/Initia `eventIndexer`, Sui `grpc`/`graphql` and TRON `tronWeb`
-  pools are validated but never dialled; error responses do not vote; and providers
-  observed unhealthy are dispatched last instead of dropped. Configuration
+  pools are still not used as secondary provider pools; for `sui`, operators must
+  point each `rpc` URI at GraphQL instead of JSON-RPC. The GraphQL query path
+  retains the configured provider quorum and exact-value fingerprint checks. This
+  is a deliberate divergence from upstream gasoline, which still uses `sui_*` and
+  `suix_*` JSON-RPC, forced by Sui Foundation's decommission of fullnode JSON-RPC.
+  error responses do not vote; providers observed unhealthy are dispatched last instead of dropped. Configuration
   errors name the file, the JSON line and column, schema field names, and only
   chain, endpoint-type and category names this build defines; an unknown key, an
   entity, a header or any other value from the file appears as a placeholder or

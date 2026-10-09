@@ -35,11 +35,22 @@ impl JsonRpcTransport for ScriptedSui {
         _: HashMap<String, String>,
         body: Value,
     ) -> Result<Value, String> {
+        if body.get("query").and_then(Value::as_str).is_none() {
+            assert!(
+                body["method"].as_str().unwrap().starts_with("iota"),
+                "{body}"
+            );
+            return Ok(json!({"jsonrpc":"2.0","id":1,"result":self.events}));
+        }
         assert!(
-            body["method"].as_str().unwrap().ends_with("x_queryEvents"),
+            body["query"]
+                .as_str()
+                .unwrap()
+                .contains("transaction(digest: $digest)"),
             "{body}"
         );
-        Ok(json!({"jsonrpc": "2.0", "id": 1, "result": self.events}))
+        let nodes = self.events["data"].as_array().unwrap().iter().map(|event| json!({"contents":{"type":{"repr":event["type"]},"json":event["parsedJson"]}})).collect::<Vec<_>>();
+        Ok(json!({"data":{"transaction":{"effects":{"events":{"nodes":nodes}}}}}))
     }
 
     async fn get_json(&self, url: String, _: HashMap<String, String>) -> Result<Value, String> {

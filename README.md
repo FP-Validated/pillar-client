@@ -125,6 +125,16 @@ identifiers are masked, tokens are shown only as a count) and then binds
 `0.0.0.0:$SERVER_PORT`. The process refuses to start if `PILLAR_API_AUTH_TOKENS`
 is missing or holds a token shorter than 32 characters.
 
+Sui provider entries under `chains.sui.rpc` must use a Sui GraphQL RPC URL (for
+example `https://graphql.mainnet.sui.io/graphql` or the corresponding testnet
+endpoint), not a fullnode JSON-RPC URL. The service sends read-only GraphQL
+queries for Sui events, transaction/checkpoint data, shared-object owners, Move
+function signatures and transaction simulation. Configure distinct GraphQL
+providers as usual so the configured provider quorum remains effective. IOTA
+(`iotal1`) continues to use `iota_*` JSON-RPC and must retain IOTA JSON-RPC URLs.
+This change deliberately diverges from upstream gasoline, which still uses Sui
+JSON-RPC; it is required by Sui's JSON-RPC decommission.
+
 On `SIGTERM` or `SIGINT`, shutdown starts at T0. `GET /ready` returns 503 and
 the two signing routes reject new work immediately; the listener continues
 accepting connections until E = T0 + the withdrawal interval, then graceful

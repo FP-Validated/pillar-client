@@ -23,50 +23,68 @@ fn sui_sent_event(dst_chain_name: &str, dst_eid: u64) -> LzSentEvent {
 /// `getNormalizedMoveFunction`: every payload-signed view takes its objects by
 /// immutable reference, which is what the live mainnet response shows.
 fn normalized_immutable(parameters: usize) -> Result<Value, String> {
-    let params: Vec<Value> = (0..parameters)
-        .map(|_| json!({ "Reference": { "Struct": { "module": "uln_302", "name": "Uln302" } } }))
-        .collect();
-    Ok(json!({ "result": { "parameters": params, "return": [], "visibility": "Public" } }))
+    let params = (0..parameters)
+        .map(|_| json!({"repr":"&uln_302::Uln302"}))
+        .collect::<Vec<_>>();
+    Ok(json!({"data":{"package":{"module":{"function":{"parameters":params}}}}}))
 }
 
 fn shared_object(initial_shared_version: u64) -> Result<Value, String> {
-    Ok(json!({
-        "result": [{
-            "data": {
-                "objectId": "0x1",
-                "version": initial_shared_version.to_string(),
-                "owner": { "Shared": { "initial_shared_version": initial_shared_version } }
-            }
-        }]
-    }))
+    Ok(
+        json!({"data":{"object":{"asMoveObject":{"owner":{"__typename":"Shared","initialSharedVersion":initial_shared_version.to_string()}}}}}),
+    )
 }
 
 fn dev_inspect_bytes(bytes: Vec<u8>) -> Result<Value, String> {
-    Ok(json!({
-        "result": { "results": [{ "returnValues": [[bytes, "u8"]] }] }
-    }))
+    use base64::Engine;
+    Ok(
+        json!({"data":{"simulateTransaction":{"effects":{"status":"SUCCESS"},"outputs":[{"returnValues":[{"value":{"bcs":base64::engine::general_purpose::STANDARD.encode(bytes)}}]}]}}}),
+    )
 }
 
-/// `get_confirmations` has three commands; `suiMoveView` reads the last one.
 fn dev_inspect_three_commands(bytes: Vec<u8>) -> Result<Value, String> {
-    Ok(json!({
-        "result": { "results": [
-            { "returnValues": [[[0], "bytes32"]] },
-            { "returnValues": [[[0], "bytes32"]] },
-            { "returnValues": [[bytes, "u64"]] }
-        ] }
-    }))
+    use base64::Engine;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+    Ok(
+        json!({"data":{"simulateTransaction":{"effects":{"status":"SUCCESS"},"outputs":[{"returnValues":[{"value":{"bcs":"AA=="}}]},{"returnValues":[{"value":{"bcs":"AA=="}}]},{"returnValues":[{"value":{"bcs":encoded}}]}]}}}),
+    )
 }
 
 fn dev_inspect_abort(sub_status: i64) -> Result<Value, String> {
-    Ok(json!({
-        "result": {
-            "error": format!("MoveAbort(.., major_status: ABORTED, sub_status: Some({sub_status})) in command 2"),
-            "results": []
-        }
-    }))
+    Ok(
+        json!({"data":{"simulateTransaction":{"effects":{"status":"FAILURE","executionError":{"abortCode":sub_status,"message":"MoveAbort"}},"outputs":[]}}}),
+    )
 }
-
+fn iota_responses(channel: &str, state: u8, required: u64) -> Vec<Result<Value, String>> {
+    let normalized = |parameters| {
+        Ok(
+            json!({"result":{"parameters":(0..parameters).map(|_| json!({"Reference":{"Struct":{"module":"uln_302","name":"Uln302"}}})).collect::<Vec<_>>()}}),
+        )
+    };
+    let shared = |version| {
+        Ok(json!({"result":[{"data":{"owner":{"Shared":{"initial_shared_version":version}}}}]}))
+    };
+    let inspect =
+        |bytes: Vec<u8>| Ok(json!({"result":{"results":[{"returnValues":[[bytes,"u8"]]}]}}));
+    let mut responses = vec![normalized(2), shared(8), inspect(address_bytes(channel))];
+    for _ in 0..4 {
+        responses.push(normalized(6));
+        responses.push(shared(635_685_319));
+    }
+    responses.push(inspect(vec![state]));
+    responses.push(normalized(4));
+    responses.push(shared(635_685_319));
+    let confirmation_results = json!([
+        {"returnValues":[[[0],"bytes32"]]},
+        {"returnValues":[[[0],"bytes32"]]},
+        {"returnValues":[[0u64.to_le_bytes().to_vec(),"u64"]]},
+    ]);
+    responses.push(Ok(json!({"result":{"results":confirmation_results}})));
+    responses.push(normalized(3));
+    responses.push(shared(635_685_319));
+    responses.push(inspect(uln_config_bytes(required)));
+    responses
+}
 fn uln_config_bytes(confirmations: u64) -> Vec<u8> {
     let mut bytes = confirmations.to_le_bytes().to_vec();
     bytes.push(0); // no required DVNs
@@ -156,25 +174,30 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_sui_payload() {
         .expect("an unverified Sui packet must pass without an EVM contract lookup");
 
     let calls = calls.lock().unwrap();
-    let methods: Vec<&str> = calls
-        .iter()
-        .map(|call| call.2["method"].as_str().unwrap())
-        .collect();
-    assert_eq!(methods[0], "sui_getNormalizedMoveFunction");
-    assert_eq!(methods[1], "sui_multiGetObjects");
-    assert_eq!(methods[2], "sui_devInspectTransactionBlock");
-    // The devInspect sender is upstream's MOCK_SENDER, and the payload is the
-    // base64 TransactionKind.
+    assert!(calls[0].2["query"]
+        .as_str()
+        .unwrap()
+        .contains("package(address: $package)"));
+    assert_eq!(calls[0].2["variables"]["module"], "endpoint_v2");
+    assert_eq!(calls[0].2["variables"]["function"], "get_messaging_channel");
+    assert!(calls[1].2["query"]
+        .as_str()
+        .unwrap()
+        .contains("object(address: $address)"));
+    let object_id = calls[1].2["variables"]["address"].as_str().unwrap();
+    assert!(
+        object_id.starts_with("0x") && object_id.len() == 66,
+        "{object_id}"
+    );
+    assert!(calls[2].2["query"]
+        .as_str()
+        .unwrap()
+        .contains("simulateTransaction(transaction: $transaction"));
     assert_eq!(
-        calls[2].2["params"][0],
+        calls[2].2["variables"]["transaction"]["sender"],
         "0x1234567890123456789012345678901234567890123456789012345678901234"
     );
-    assert!(calls[2].2["params"][1].as_str().unwrap().len() > 20);
-    assert!(calls[2].2["params"][2].is_null());
-    // The first normalized lookup targets the endpoint module, not `endpoint`.
-    assert_eq!(calls[0].2["params"][1], "endpoint_v2");
-    assert_eq!(calls[0].2["params"][2], "get_messaging_channel");
-    assert_eq!(calls[1].2["params"][1]["showOwner"], true);
+    assert_eq!(calls[1].2["query"], "query($address: SuiAddress!) { object(address: $address) { asMoveObject { owner { __typename ... on Shared { initialSharedVersion } } } } }");
 }
 
 #[tokio::test]
@@ -272,11 +295,7 @@ async fn runtime_rpc_validation_checks_fail_closed_when_sui_confirmations_are_ze
 #[tokio::test]
 async fn runtime_rpc_validation_checks_use_iota_rpc_namespace() {
     let calls: RecordedJsonCalls = Arc::new(Mutex::new(Vec::new()));
-    let checks = sui_checks(
-        "iotal1",
-        sui_responses(SUI_RECEIVER, 0, None, 15),
-        calls.clone(),
-    );
+    let checks = sui_checks("iotal1", iota_responses(SUI_RECEIVER, 0, 15), calls.clone());
 
     checks
         .validate_payload_not_signed(&sui_sent_event("iotal1", 30_423), Some(VERIFIER), "iotal1")
@@ -391,11 +410,19 @@ async fn runtime_rpc_validation_checks_send_the_live_sui_header_and_reject_its_v
     let recorded = calls.lock().unwrap();
     let header = hex::decode(LIVE_SUI_PACKET_HEADER).unwrap();
     let carried = recorded.iter().any(|(_, _, body)| {
-        body["method"] == "sui_devInspectTransactionBlock"
-            && body["params"][1]
-                .as_str()
-                .and_then(|kind| base64_decode(kind).ok())
-                .is_some_and(|bytes| contains_subslice(&bytes, &header))
+        body["query"]
+            .as_str()
+            .is_some_and(|query| query.contains("simulateTransaction(transaction: $transaction"))
+            && body["variables"]["transaction"]["kind"]["programmableTransaction"]["inputs"]
+                .as_array()
+                .is_some_and(|inputs| {
+                    inputs.iter().any(|input| {
+                        input["pure"]
+                            .as_str()
+                            .and_then(|encoded| base64_decode(encoded).ok())
+                            .is_some_and(|bytes| contains_subslice(&bytes, &header))
+                    })
+                })
     });
     assert!(
         carried,

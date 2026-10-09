@@ -587,47 +587,83 @@ where
     T: JsonRpcTransport,
 {
     use base64::Engine;
+    if chain_name == "iotal1" {
+        let kind = encode_sui_transaction_kind(inputs, commands);
+        let response = transport.post_json_scoped(url.to_string(), headers, json!({"jsonrpc":"2.0","id":1,"method":sui_rpc_method(chain_name,"devInspectTransactionBlock"),"params":[SUI_DEV_INSPECT_MOCK_SENDER,base64::engine::general_purpose::STANDARD.encode(&kind),Value::Null,Value::Null]})).await?;
+        let result = response.get("result").ok_or(RpcError::Unavailable)?;
+        if let Some(error) = result.get("error").and_then(Value::as_str) {
+            return Ok(Err(move_abort_sub_status(error)
+                .map(SuiViewFailure::MoveAbort)
+                .unwrap_or(SuiViewFailure::Unusable)));
+        }
+        let encoded = result
+            .get("results")
+            .and_then(Value::as_array)
+            .and_then(|results| results.last())
+            .and_then(|last| last.get("returnValues"))
+            .and_then(Value::as_array)
+            .and_then(|values| values.first())
+            .and_then(Value::as_array)
+            .and_then(|bytes| bytes.first())
+            .ok_or(RpcError::Unavailable)?;
+        return Ok(Ok(
+            decode_return_value(encoded).ok_or(RpcError::Unavailable)?
+        ));
+    }
 
-    let kind = encode_sui_transaction_kind(inputs, commands);
+    let encode_input = |input: &SuiCallArg| match input {
+        SuiCallArg::Pure(bytes) => {
+            json!({"pure": base64::engine::general_purpose::STANDARD.encode(bytes)})
+        }
+        SuiCallArg::Shared(object) => {
+            json!({"object":{"sharedObject":{"objectId":format!("0x{}",hex::encode(object.object_id)),"initialSharedVersion":object.initial_shared_version.to_string(),"mutable":object.mutable}}})
+        }
+    };
+    let encode_argument = |argument: &SuiArgument| match argument {
+        SuiArgument::Input(index) => json!({"input":{"ix":index}}),
+        SuiArgument::Result(index) => json!({"txResult":{"cmd":index}}),
+    };
+    let transaction = json!({
+        "sender": SUI_DEV_INSPECT_MOCK_SENDER,
+        "kind": {"programmableTransaction": {
+            "inputs": inputs.iter().map(encode_input).collect::<Vec<_>>(),
+            "commands": commands.iter().map(|command| json!({"moveCall":{"package":format!("0x{}",hex::encode(command.package)),"module":command.module,"function":command.function,"typeArguments":[],"arguments":command.arguments.iter().map(encode_argument).collect::<Vec<_>>()}})).collect::<Vec<_>>()
+        }}
+    });
     let body = json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": sui_rpc_method(chain_name, "devInspectTransactionBlock"),
-        "params": [
-            SUI_DEV_INSPECT_MOCK_SENDER,
-            base64::engine::general_purpose::STANDARD.encode(&kind),
-            Value::Null,
-            Value::Null,
-        ],
+        "query": "query($transaction: JSON!) { simulateTransaction(transaction: $transaction, checksEnabled: false, doGasSelection: true) { effects { status executionError { message abortCode } } outputs { returnValues { value { bcs } } } } }",
+        "variables": {"transaction": transaction}
     });
     let response = transport
         .post_json_scoped(url.to_string(), headers, body)
         .await?;
-    let result = response.get("result").ok_or(RpcError::Unavailable)?;
-
-    // An execution error is reported in the result, not as an RPC error.
-    if let Some(error) = result.get("error").and_then(Value::as_str) {
-        return Ok(Err(move_abort_sub_status(error)
-            .map(SuiViewFailure::MoveAbort)
-            .unwrap_or(SuiViewFailure::Unusable)));
+    if response.get("errors").is_some() {
+        return Err(RpcError::Unavailable);
     }
-    // `suiMoveView` reads the last command's results.
-    let encoded = result
-        .get("results")
-        .ok_or(RpcError::Unavailable)?
-        .as_array()
-        .ok_or(RpcError::Unavailable)?
-        .last()
-        .ok_or(RpcError::Unavailable)?
-        .get("returnValues")
-        .ok_or(RpcError::Unavailable)?
-        .as_array()
-        .ok_or(RpcError::Unavailable)?
-        .first()
-        .ok_or(RpcError::Unavailable)?
-        .as_array()
-        .ok_or(RpcError::Unavailable)?
-        .first()
+    let simulation = response
+        .pointer("/data/simulateTransaction")
+        .ok_or(RpcError::Unavailable)?;
+    if let Some(abort_code) = simulation.pointer("/effects/executionError/abortCode") {
+        let code = abort_code
+            .as_i64()
+            .or_else(|| abort_code.as_str()?.parse().ok());
+        let Some(code) = code else {
+            return Ok(Err(SuiViewFailure::Unusable));
+        };
+        return Ok(Err(SuiViewFailure::MoveAbort(code)));
+    }
+    if simulation
+        .pointer("/effects/status")
+        .and_then(Value::as_str)
+        != Some("SUCCESS")
+    {
+        return Ok(Err(SuiViewFailure::Unusable));
+    }
+    let encoded = simulation
+        .get("outputs")
+        .and_then(Value::as_array)
+        .and_then(|outputs| outputs.last())
+        .and_then(|output| output.pointer("/returnValues/0/value/bcs"))
         .ok_or(RpcError::Unavailable)?;
     Ok(Ok(
         decode_return_value(encoded).ok_or(RpcError::Unavailable)?
