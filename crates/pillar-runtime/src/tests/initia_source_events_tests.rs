@@ -14,6 +14,8 @@ const PILLAR_STRICTER: &[&str] = &["V301 request"];
 /// Same status, different text: upstream's body is V8's `JSON.parse` message, which this
 /// service does not reproduce; both answer 500 before matching.
 const TEXT_RESIDUAL: &[&str] = &["data not JSON"];
+/// Upstream throws for an unmapped destination EID; this deployment treats it as a non-match.
+const UNKNOWN_DESTINATION_EID_DIVERGENCES: &[&str] = &["unknown destination eid"];
 
 #[derive(Clone)]
 struct ScriptedInitia {
@@ -44,8 +46,20 @@ fn scripted_resolver(
     environment: &str,
     transaction: &Value,
 ) -> EvmPacketSentResolver<ScriptedInitia> {
+    scripted_resolver_with_missing_eid(environment, transaction, None)
+}
+
+fn scripted_resolver_with_missing_eid(
+    environment: &str,
+    transaction: &Value,
+    missing_eid: Option<u32>,
+) -> EvmPacketSentResolver<ScriptedInitia> {
     let names = ["initia".to_string(), "ethereum".to_string()];
     let config = runtime_evm_layerzero_config(environment, &names).unwrap();
+    let mut resolver_config = config.packet_sent_resolver_config;
+    if let Some(eid) = missing_eid {
+        resolver_config.chain_name_by_eid.remove(&eid);
+    }
     let providers = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "initia".to_string(),
@@ -62,7 +76,7 @@ fn scripted_resolver(
         ScriptedInitia {
             transaction: transaction.clone(),
         },
-        config.packet_sent_resolver_config,
+        resolver_config,
     )
 }
 
@@ -80,6 +94,20 @@ async fn initia_source_events_match_gasolina() {
         let result = scripted_resolver(environment, &scenario["transaction"])
             .get_lz_sent_event(tx_hash, &request)
             .await;
+        if UNKNOWN_DESTINATION_EID_DIVERGENCES.contains(&name) {
+            assert!(theirs["error"].as_str().is_some_and(
+                |message| message.starts_with("Invariant failed: Invalid endpointId: ")
+            ));
+            assert_eq!(
+                result,
+                Err(AppCoreError::Internal(format!(
+                    "Did not find correct PacketSent() event in tx {tx_hash}"
+                ))),
+                "{name}"
+            );
+            labelled += 1;
+            continue;
+        }
         if PILLAR_STRICTER.contains(&name) {
             assert_eq!(
                 result.unwrap_err(),
@@ -129,6 +157,67 @@ async fn initia_source_events_match_gasolina() {
         mismatches.join("\n")
     );
     assert_eq!(exact + labelled, 17, "every upstream scenario is replayed");
-    assert_eq!(labelled, PILLAR_STRICTER.len() + TEXT_RESIDUAL.len());
+    assert_eq!(
+        labelled,
+        PILLAR_STRICTER.len() + TEXT_RESIDUAL.len() + UNKNOWN_DESTINATION_EID_DIVERGENCES.len()
+    );
     assert_eq!(dst_name_refused, 6);
+}
+#[tokio::test]
+async fn initia_unmapped_destination_event_does_not_mask_later_match() {
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let scenarios = fixture["scenarios"].as_array().unwrap();
+    let matching = scenarios
+        .iter()
+        .find(|scenario| scenario["name"] == "match")
+        .unwrap();
+    let unmapped = scenarios
+        .iter()
+        .find(|scenario| scenario["name"] == "unknown destination eid")
+        .unwrap();
+    let mut unknown_event = unmapped["transaction"]["events"][0].clone();
+    let encoded_data = unknown_event["attributes"][1]["value"].as_str().unwrap();
+    let mut event_data: Value = serde_json::from_str(encoded_data).unwrap();
+    event_data["encoded_packet"] = event_data["encoded_packet"]
+        .as_str()
+        .unwrap()
+        .replacen("00007676", "00007cfe", 1)
+        .into();
+    unknown_event["attributes"][1]["value"] = serde_json::to_string(&event_data).unwrap().into();
+    let mut transaction = matching["transaction"].clone();
+    transaction["events"]
+        .as_array_mut()
+        .unwrap()
+        .insert(0, unknown_event);
+    let request: LzMessageId = serde_json::from_value(matching["request"].clone()).unwrap();
+    let result = scripted_resolver(fixture["environment"].as_str().unwrap(), &transaction)
+        .get_lz_sent_event(fixture["txHash"].as_str().unwrap(), &request)
+        .await
+        .unwrap();
+    assert!(lz_message_identity_matches(&request, &result.lz_message_id));
+}
+
+#[tokio::test]
+async fn initia_missing_source_eid_returns_exact_internal_fault() {
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let scenario = fixture["scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|scenario| scenario["name"] == "match")
+        .unwrap();
+    let request: LzMessageId = serde_json::from_value(scenario["request"].clone()).unwrap();
+    let src_eid = request.pathway_id.extra["srcEid"].as_u64().unwrap() as u32;
+    let error = scripted_resolver_with_missing_eid(
+        fixture["environment"].as_str().unwrap(),
+        &scenario["transaction"],
+        Some(src_eid),
+    )
+    .get_lz_sent_event(fixture["txHash"].as_str().unwrap(), &request)
+    .await
+    .unwrap_err();
+    assert_eq!(
+        error,
+        AppCoreError::Internal(format!("No chain name for endpoint id {src_eid}"))
+    );
 }

@@ -12,6 +12,8 @@ const FIXTURE: &str = include_str!("../../tests/gasolina_parity/stellar_source_e
 /// for the requested version, so a `V301` request for the always-`V302` packet is refused; and
 /// only a contract event is accepted, where upstream also takes the host's system events.
 const PILLAR_STRICTER: &[&str] = &["V301 request", "system event type"];
+/// Upstream throws for an unmapped destination EID; this deployment treats it as a non-match.
+const UNKNOWN_DESTINATION_EID_DIVERGENCES: &[&str] = &["unknown destination eid"];
 
 #[derive(Clone)]
 struct ScriptedStellar {
@@ -82,6 +84,14 @@ async fn stellar_source_events_match_gasolina() {
         let result = scripted_resolver(environment, &scenario["transaction"])
             .get_lz_sent_event(tx_hash, &request)
             .await;
+        if UNKNOWN_DESTINATION_EID_DIVERGENCES.contains(&name) {
+            assert!(theirs["error"].as_str().is_some_and(
+                |message| message.starts_with("Invariant failed: Invalid endpointId: ")
+            ));
+            assert!(is_identity_mismatch(&result), "{name}: {result:?}");
+            stricter_refused += 1;
+            continue;
+        }
         let difference = if PILLAR_STRICTER.contains(&name) {
             assert!(theirs.get("event").is_some(), "{name}");
             assert!(is_identity_mismatch(&result), "{name}: {result:?}");
@@ -118,6 +128,37 @@ async fn stellar_source_events_match_gasolina() {
         20,
         "every upstream scenario is replayed"
     );
-    assert_eq!(stricter_refused, PILLAR_STRICTER.len());
+    assert_eq!(
+        stricter_refused,
+        PILLAR_STRICTER.len() + UNKNOWN_DESTINATION_EID_DIVERGENCES.len()
+    );
     assert_eq!(dst_name_refused, 7);
+}
+
+#[tokio::test]
+async fn stellar_unmapped_destination_event_does_not_mask_later_match() {
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let scenarios = fixture["scenarios"].as_array().unwrap();
+    let matching = scenarios
+        .iter()
+        .find(|scenario| scenario["name"] == "match")
+        .unwrap();
+    let unmapped = scenarios
+        .iter()
+        .find(|scenario| scenario["name"] == "unknown destination eid")
+        .unwrap();
+    let mut transaction = matching["transaction"].clone();
+    transaction["events"]["contractEventsXdr"][0]
+        .as_array_mut()
+        .unwrap()
+        .insert(
+            0,
+            unmapped["transaction"]["events"]["contractEventsXdr"][0][0].clone(),
+        );
+    let request: LzMessageId = serde_json::from_value(matching["request"].clone()).unwrap();
+    let result = scripted_resolver(fixture["environment"].as_str().unwrap(), &transaction)
+        .get_lz_sent_event(fixture["txHash"].as_str().unwrap(), &request)
+        .await
+        .unwrap();
+    assert!(lz_message_identity_matches(&request, &result.lz_message_id));
 }

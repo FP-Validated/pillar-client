@@ -262,9 +262,10 @@ not reproduce:
   `skipVId`. Numbers are otherwise read as `JSON.parse` reads them (`7.0` is 7,
   integers past 2^53 round), and v1 chain ids, nonce and addresses take
   upstream's own `parseInt`/`toString` coercions. An unknown v1 chain id is
-  upstream's `Invariant failed: Invalid endpointId: <n>`, the form tiny-invariant
-  throws outside `NODE_ENV=production` (the upstream image sets no `NODE_ENV`);
-  an object-valued v1 sender or receiver is echoed in error bodies with sorted
+  refused as HTTP 400 with the unchanged `Invariant failed: Invalid endpointId: <n>`
+  message, rather than upstream's 500; it is rejected during request conversion
+  before any provider RPC; an object-valued v1 sender or receiver is echoed in
+  error bodies with sorted
   keys, where `JSON.stringify` keeps insertion order.
 - `skipVId: true` is refused with HTTP 400 on both signing routes (`POST /`,
   `POST /v2/resolve-and-sign`) before any provider read, except on the v2 route
@@ -317,6 +318,15 @@ not reproduce:
   other value is a 400 before anything is signed. Upstream's `getFeatherProof`
   signs the bare packet for 2 and throws for anything else; 2 has no deployed
   verifier source, so its meaning cannot be checked and it is not imitated.
+- Source-event scans treat an EID absent from this deployment's chain-name map
+  as a non-match when it is the destination, so an event from a later log can still
+  match; a missing source EID remains an `Internal` fault, but does not mask a later
+  matching event. EVM `ReadV1002` applies this source rule to the emitting chain
+  after the endpoint flip. Upstream raises `Invariant failed: Invalid endpointId`
+  for unknown destination EIDs, while this line safely returns its existing miss
+  result because no pathway can be signed for that destination. Starknet's known
+  legacy cross-stage destination mapping remains available, so its upstream-resolved
+  cross-stage event is not refused.
 - A resolved packet must also agree with the request's destination chain name,
   and, except on Aptos, Movement and Initia sources, with its `ulnSendVersion`
   and source chain name; upstream's `lzMessageIdMatches` compares only eids,

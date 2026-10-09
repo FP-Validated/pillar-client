@@ -107,10 +107,17 @@ pub(crate) fn stellar_packet_to_lz_sent_event(
     src_tx_hash: &str,
     event: StellarPacketSentEvent,
     chain_name_by_eid: &HashMap<u32, String>,
-) -> Result<LzSentEvent, AppCoreError> {
+) -> Result<Option<LzSentEvent>, AppCoreError> {
     let packet = event.packet;
-    let src_chain_name = chain_name_for_packet_eid(chain_name_by_eid, packet.src_eid)?;
-    let dst_chain_name = chain_name_for_packet_eid(chain_name_by_eid, packet.dst_eid)?;
+    let src_chain_name = chain_name_by_eid
+        .get(&packet.src_eid)
+        .cloned()
+        .ok_or_else(|| {
+            AppCoreError::Internal(format!("No chain name for endpoint id {}", packet.src_eid))
+        })?;
+    let Some(dst_chain_name) = chain_name_by_eid.get(&packet.dst_eid).cloned() else {
+        return Ok(None);
+    };
     let options = hex::decode(strip_hex_prefix(&event.options))
         .map_err(|error| AppCoreError::Internal(error.to_string()))?;
     let options =
@@ -130,7 +137,7 @@ pub(crate) fn stellar_packet_to_lz_sent_event(
         "packetEmitAddress".to_string(),
         Value::from(event.endpoint_address),
     );
-    Ok(LzSentEvent {
+    Ok(Some(LzSentEvent {
         lz_message_id: LzMessageId {
             pathway_id: PathwayId {
                 src_chain_name,
@@ -145,7 +152,7 @@ pub(crate) fn stellar_packet_to_lz_sent_event(
         extra,
         source_evidence: None,
         read_block_pins: Vec::new(),
-    })
+    }))
 }
 
 fn map_bytes(fields: &[(ScVal, ScVal)], key: &str) -> Option<Vec<u8>> {

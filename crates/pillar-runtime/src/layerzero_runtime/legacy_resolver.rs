@@ -15,7 +15,7 @@ impl LegacyChainNameResolver for RuntimeLegacyChainNameResolver {
                 return Ok(name.to_string());
             }
         }
-        Err(AppCoreError::Internal(format!(
+        Err(AppCoreError::BadRequest(format!(
             "Invariant failed: Invalid endpointId: {}",
             pillar_core::js_number_f64(id)
         )))
