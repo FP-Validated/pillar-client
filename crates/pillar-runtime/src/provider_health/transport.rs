@@ -142,6 +142,17 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         body: Value,
     ) -> Result<Value, RpcError> {
         let target = rpc_target_for_call()?;
+        if target.as_ref() == "sui" {
+            if body.get("query").and_then(Value::as_str).is_some()
+                && body.get("variables").is_some_and(Value::is_object)
+            {
+                return limited_rpc(&target, self.post_json(url, headers, body)).await;
+            }
+            let (method, query) =
+                super::sui_graphql::request(&body).ok_or(RpcError::Unavailable)?;
+            let response = limited_rpc(&target, self.post_json(url, headers, query)).await?;
+            return Ok(super::sui_graphql::response(&method, response));
+        }
         limited_rpc(&target, self.post_json(url, headers, body)).await
     }
     async fn get_json_scoped(

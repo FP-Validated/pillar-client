@@ -19,7 +19,9 @@ async fn provider_health_probes_sui_latest_checkpoint_like_typescript() {
     let calls = Arc::new(Mutex::new(Vec::new()));
     let transport = RecordingTransport {
         calls: calls.clone(),
-        responses: Arc::new(Mutex::new(vec![Ok(json!({"result": "54321"}))])),
+        responses: Arc::new(Mutex::new(vec![Ok(
+            json!({"data":{"checkpoints":{"nodes":[{"sequenceNumber":"54321"}]}}}),
+        )])),
     };
     let source = RpcProviderHealthSource::from_getter_with_chain_types(
         &getter,
@@ -42,12 +44,10 @@ async fn provider_health_probes_sui_latest_checkpoint_like_typescript() {
     assert_eq!(calls[0].0, "https://sui-rpc.example");
     assert_eq!(calls[0].1.get("x-api-key"), Some(&"token".to_string()));
     assert_eq!(
-        calls[0].2["method"],
-        "sui_getLatestCheckpointSequenceNumber"
+        calls[0].2["query"],
+        "query { checkpoints(last: 1) { nodes { sequenceNumber } } }"
     );
-    assert_eq!(calls[0].2["params"], json!([]));
 }
-
 #[tokio::test]
 async fn provider_health_marks_sui_unhealthy_when_checkpoint_probe_fails() {
     let getter = StaticProviderConfig::new(

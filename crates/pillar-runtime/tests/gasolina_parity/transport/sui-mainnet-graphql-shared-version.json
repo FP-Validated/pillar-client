@@ -1,0 +1,49 @@
+{
+  "provenance": {
+    "endpoint": "https://graphql.mainnet.sui.io/graphql",
+    "captured_at": "2026-10-09",
+    "operation": "simulateTransaction",
+    "query": "query($transaction: JSON!) { simulateTransaction(transaction: $transaction, checksEnabled: false, doGasSelection: true) { effects { status executionError { message abortCode } } outputs { returnValues { value { bcs } } } } }",
+    "shared_object": "0xd45b6890fa030bcb43347c0c69a9e5a1a288d1ca7b86b428014752b472f6bf91",
+    "initial_shared_version": "635685314",
+    "wrong_version_test_value": "8"
+  },
+  "correct_version": {
+    "variables": {
+      "transaction": {
+        "sender": "0x1234567890123456789012345678901234567890123456789012345678901234",
+        "kind": {
+          "programmableTransaction": {
+            "inputs": [
+              { "kind": "SHARED", "mutable": false, "objectId": "0xd45b6890fa030bcb43347c0c69a9e5a1a288d1ca7b86b428014752b472f6bf91", "version": "635685314" },
+              { "kind": "PURE", "pure": "o1bKIBD830TWzs/Ozxi3PDIYjTYeOd/zqWrI3g3sexs=" }
+            ],
+            "commands": [
+              { "moveCall": { "arguments": [{ "input": 0, "kind": "INPUT" }, { "input": 1, "kind": "INPUT" }], "function": "get_messaging_channel", "module": "endpoint_v2", "package": "0x31beaef889b08b9c3b37d19280fc1f8b75bae5b2de2410fc3120f403e9a36dac", "typeArguments": [] } }
+            ]
+          }
+        }
+      }
+    },
+    "raw_response": { "data": { "simulateTransaction": { "effects": { "status": "SUCCESS", "executionError": null }, "outputs": [{ "returnValues": [{ "value": { "bcs": "v1in5d3t7lXpU7w4dopqUU3hODF+XhYX4ndnvwiSsIQ=" } }] }] } } }
+  },
+  "wrong_version": {
+    "variables": {
+      "transaction": {
+        "sender": "0x1234567890123456789012345678901234567890123456789012345678901234",
+        "kind": {
+          "programmableTransaction": {
+            "inputs": [
+              { "kind": "SHARED", "mutable": false, "objectId": "0xd45b6890fa030bcb43347c0c69a9e5a1a288d1ca7b86b428014752b472f6bf91", "version": "8" },
+              { "kind": "PURE", "pure": "o1bKIBD830TWzs/Ozxi3PDIYjTYeOd/zqWrI3g3sexs=" }
+            ],
+            "commands": [
+              { "moveCall": { "arguments": [{ "input": 0, "kind": "INPUT" }, { "input": 1, "kind": "INPUT" }], "function": "get_messaging_channel", "module": "endpoint_v2", "package": "0x31beaef889b08b9c3b37d19280fc1f8b75bae5b2de2410fc3120f403e9a36dac", "typeArguments": [] } }
+            ]
+          }
+        }
+      }
+    },
+    "raw_response": { "data": { "simulateTransaction": { "effects": { "status": "SUCCESS", "executionError": null }, "outputs": [{ "returnValues": [{ "value": { "bcs": "v1in5d3t7lXpU7w4dopqUU3hODF+XhYX4ndnvwiSsIQ=" } }] }] } } }
+  }
+}

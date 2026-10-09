@@ -6,6 +6,10 @@ the Prometheus metric names.
 
 ## Unreleased
 
+### Upgrade / Breaking
+
+- Sui의 `chains.sui.rpc` provider URI는 GraphQL endpoint여야 한다. Pool에 남은 JSON-RPC URL은 실패한 provider로 처리된다. Event와 object 조회에서는 투표하지 않고, readiness와 timestamp 검사에서는 다른 unavailable provider처럼 Missing으로 기록된다. `/provider-health`의 Sui `response` 값은 string에서 number로 바뀐다.
+
 ### Security
 
 - `POST /`의 알 수 없는 v1 chain id는 provider RPC 전에 HTTP 400으로 거부한다. 메시지는 upstream의 `Invariant failed: Invalid endpointId: <n>`을 유지한다. 이전에는 같은 메시지의 500이었다. 이 차이는 upstream과 의도적으로 다르다.
@@ -17,6 +21,7 @@ the Prometheus metric names.
 - READ는 DATA를 검증하며 empty call은 같은 URL, headers, EIP-1898 pin의 code를 조회한다. 정확한 0x code만 NoCode이고 0x00/0x6000은 정상 empty return이다. Data/NoCode/ExecutionRevert의 semantic fingerprint는 기존 category/entity quorum을 거친다. NoCode 또는 execution revert의 유일한 quorum만 HTTP 400의 기존 statusCode/body에 code=UNRESOLVABLE_COMMAND, retryable=false를 추가하며 sign stage에 진입하지 않는다. 단일 negative, timeout, transport, malformed DATA와 일반 RPC 오류는 전역 domain refusal이 아니며 양립하는 quorum 둘은 fail closed한다. Numeric revert code 3 또는 numeric -32000과 정확한 execution reverted 메시지의 조합만 분류하며 provided DATA를 검증·정규화한다. Absent/empty revert DATA는 반환 byte가 없다는 동일 의미로 비교한다.
 - Extra-context HTTP와 Lambda에 기존 typed `signingContext`를 전달한다. Strict-schema policy consumer는 새 필드를 허용해야 한다. 설정하지 않은 policy와 strict boolean-true gate의 동작은 유지한다.
 - Ethereum-style signature 변환은 모든 ECDSA signer에서 recovery ID 2/3을 거부한다. 기존 low-S 정규화 순서와 non-EVM raw recovery ID 형식은 유지한다. KMS 호출 뒤에 거부하므로 cloud signing call 자체를 방지하는 변경은 아니다.
+- Sui read는 fullnode JSON-RPC 폐지에 따라 GraphQL을 쓴다. upstream gasolina는 아직 `sui_*`/`suix_*` JSON-RPC를 쓰므로 의도적인 차이다. Payload 검증은 GraphQL `simulateTransaction`을 직접 호출한다. Mainnet capture에서 shared object의 `version` 값은 서버가 검증하지 않았다. `iotal1`은 `iota_*` JSON-RPC를 유지한다.
 - TON 전용 HTTP JSON decoder는 기존 4 MiB 응답 제한과 512-level JSON container nesting 제한을 적용한다. Trace 변환은 transaction hash 중복, 잘못된 topology, 512개 초과 node와 변환 후 512 container 초과 깊이를 조립 전에 거부한다. 서명과 confirmation에 필요한 scalar 필드만 투영한다. Object와 Array를 직접 조립해 subtree 재직렬화를 제거한다. 생략된 leaf children은 빈 배열로 처리한다. 이 정규화는 children 누락을 거부하는 upstream quorum 함수와 의도적으로 다르다. 원본 JSON은 반복형으로 순회하고 해제한다. JSON nesting과 trace node 수는 다른 단위다.
 
 ### Audit
