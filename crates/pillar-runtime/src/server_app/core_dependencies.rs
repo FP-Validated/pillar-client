@@ -50,6 +50,8 @@ where
             None,
         )
         .map_err(|error| error.to_string())?;
+        // The roster the handle was published with, not a recomputation: the
+        // signers assembled below must match the chains actually serving.
         let available_chain_names = serving_generation.available_chain_names().to_vec();
         let controls =
             crate::execution::RuntimeControls::new(&runtime_config, &available_chain_names).await?;

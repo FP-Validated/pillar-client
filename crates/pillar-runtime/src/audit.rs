@@ -305,8 +305,9 @@ impl PostgresAuditStore {
         if inserted_packet {
             tx.execute("UPDATE pillar_audit_namespace SET attempt_count=attempt_count+1 WHERE namespace=$1", &[namespace]).await.map_err(unavailable)?;
         }
-        let has_capacity_after_attempt =
-            !inserted_packet || namespace_row.get::<_, i64>(0) + 1 < namespace_row.get::<_, i64>(1);
+        let has_capacity_after_attempt = namespace_row.get::<_, i64>(0)
+            + i64::from(inserted_packet)
+            < namespace_row.get::<_, i64>(1);
         let reference = fingerprint(intent.key.reference.as_bytes());
         let version = fingerprint(intent.key.version.as_bytes());
         let identity: &[&(dyn tokio_postgres::types::ToSql + Sync)] = &[
@@ -404,16 +405,21 @@ impl SigningAuditStore for PostgresAuditStore {
                 return healthy;
             }
         }
+        // One budget covers waiting for the probe lane, connecting and querying.
         let started = tokio::time::Instant::now();
         let healthy = match within_deadline(self.config.timeout, self.probe.lock()).await {
             Ok(mut lane) => {
+                // A probe that waited for the lane reuses the result the holder just cached.
                 if let Some((checked_at, healthy)) = *self.health_cache.lock().await {
                     if checked_at.elapsed() < HEALTH_CACHE_TTL {
                         return healthy;
                     }
                 }
+                // A probe granted the lane after its budget ran out fails here instead of dialing.
                 let remaining = self.config.timeout.saturating_sub(started.elapsed());
                 let probe = async {
+                    // Out of the lane while in use: a cancelled or timed-out probe drops its
+                    // connection rather than leaving a possibly wedged one for the next probe.
                     let mut session = lane.take();
                     let result = self.health_inner(&mut session).await;
                     if result.is_ok() {
@@ -773,6 +779,7 @@ mod tests {
         assert!(!store.health_state().load(Ordering::Acquire));
     }
 
+    // Real time throughout: a paused clock can advance past a loopback event before it is observed.
     #[tokio::test]
     async fn audit_readiness_probe_in_flight_does_not_hold_the_signing_session() {
         let timeout = Duration::from_secs(2);

@@ -744,6 +744,8 @@ impl PillarApp {
                 .map_err(|error| {
                     map_sent_event_error(error, &request.src_tx_hash, &request.lz_message_id)
                 })?;
+            // The builder and vId follow the resolved destination, the wallets follow
+            // the requested one; they must be the same chain.
             let resolved = &sent_event.lz_message_id.pathway_id.dst_chain_name;
             if resolved != dst_chain_name {
                 return Err(AppCoreError::Internal(format!(
@@ -760,7 +762,7 @@ impl PillarApp {
                     "resolved PacketSent ULN version {resolved_version} does not match requested ULN version {requested_version}"
                 )));
             }
-            // The builder and vId follow the resolved destination, the wallets follow
+            // A V2 send verified on a V3-family library is signed over the
             // rebuilt V2 event (TS 1.2.66: `hashCallDataBuilder/ulnV3.ts:36-63`).
             if routed_version.is_some() {
                 tracing::info!(

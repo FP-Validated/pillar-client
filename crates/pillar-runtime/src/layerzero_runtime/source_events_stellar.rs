@@ -434,6 +434,7 @@ impl<'a> XdrReader<'a> {
                 Some(ScVal::Other)
             }
             15 => Some(ScVal::Symbol(String::from_utf8(self.opaque()?).ok()?)),
+            // `SCV_VEC` and `SCV_MAP` hold optional pointers: a presence flag, then the items.
             16 => match self.u32()? {
                 0 => Some(ScVal::Vec),
                 1 => {
@@ -452,6 +453,8 @@ impl<'a> XdrReader<'a> {
                 0 => Some(ScVal::Other),
                 1 => {
                     let count = self.u32()? as usize;
+                    // Each pair is two `sc_val`s of at least 4 bytes each, so the
+                    // remaining input bounds the count. See the topic-count guard.
                     if count > self.remaining() / 8 {
                         return None;
                     }
@@ -463,6 +466,7 @@ impl<'a> XdrReader<'a> {
                 }
                 _ => None,
             },
+            // An account address is a `PublicKey` union (ed25519 only), a contract one a hash.
             18 => match self.u32()? {
                 0 => {
                     if self.u32()? != 0 {
@@ -479,8 +483,9 @@ impl<'a> XdrReader<'a> {
                 }),
                 _ => None,
             },
+            // `SCContractInstance`: a `ContractExecutable` union (Wasm hash or the
+            // built-in asset), then optional instance storage.
             19 => {
-                self.u32()?;
                 match self.u32()? {
                     0 => {
                         self.take(32)?;
@@ -504,10 +509,7 @@ impl<'a> XdrReader<'a> {
                 }
                 Some(ScVal::Other)
             }
-            20 => {
-                self.take(32)?;
-                Some(ScVal::Other)
-            }
+            20 => Some(ScVal::Other),
             21 => {
                 self.u64()?;
                 Some(ScVal::Other)
@@ -557,7 +559,7 @@ mod tests {
             (10, 16),
             (11, 32),
             (12, 32),
-            (20, 32),
+            (20, 0),
             (21, 8),
         ] {
             let mut encoded = tag_u32(tag);
@@ -568,11 +570,15 @@ mod tests {
         string.extend_from_slice(&4_u32.to_be_bytes());
         string.extend_from_slice(b"skip");
         cases.push(string);
-        let mut contract = tag_u32(19);
-        contract.extend_from_slice(&0_u32.to_be_bytes());
-        contract.extend_from_slice(&1_u32.to_be_bytes());
-        contract.extend_from_slice(&0_u32.to_be_bytes());
-        cases.push(contract);
+        let mut asset_instance = tag_u32(19);
+        asset_instance.extend_from_slice(&1_u32.to_be_bytes());
+        asset_instance.extend_from_slice(&0_u32.to_be_bytes());
+        cases.push(asset_instance);
+        let mut wasm_instance = tag_u32(19);
+        wasm_instance.extend_from_slice(&0_u32.to_be_bytes());
+        wasm_instance.extend_from_slice(&[0_u8; 32]);
+        wasm_instance.extend_from_slice(&0_u32.to_be_bytes());
+        cases.push(wasm_instance);
         for encoded in cases {
             let mut reader = XdrReader::new(&encoded);
             assert!(reader.sc_val().is_some());

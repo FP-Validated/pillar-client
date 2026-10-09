@@ -436,7 +436,7 @@ async fn case(case: &str) -> (String, Arc<Database>, String) {
 
 #[tokio::test]
 #[ignore = "Requires the explicitly scoped synthetic PostgreSQL instance"]
-async fn postgres_audit_concurrent_fresh_schema_enforces_shared_retained_capacity() {
+async fn postgres_audit_concurrent_fresh_schema_charges_one_packet_once() {
     let (scoped, database, namespace) = case("concurrent").await;
     assert_eq!(
         database
@@ -459,54 +459,52 @@ async fn postgres_audit_concurrent_fresh_schema_enforces_shared_retained_capacit
     let request = read_vertical_request(ReadMarker::BlockNumber);
     let outcomes =
         futures::future::join_all(servers.iter().map(|server| server.post(&request))).await;
-    assert_eq!(
-        outcomes
-            .iter()
-            .filter(|(status, _)| *status == reqwest::StatusCode::OK)
-            .count(),
-        2
-    );
-    assert_eq!(
-        outcomes
-            .iter()
-            .filter(|(status, _)| *status == reqwest::StatusCode::INTERNAL_SERVER_ERROR)
-            .count(),
-        2
-    );
+    // Replays of one packet are retried deliveries, not new retained evidence, so a
+    // quota of 2 must not refuse the third and fourth.
     for (status, body) in outcomes {
-        if status == reqwest::StatusCode::OK {
-            verify(body, &sdk);
-        } else {
-            assert!(body["body"]
-                .as_str()
-                .unwrap()
-                .contains("capacity exhausted"));
-        }
+        assert_eq!(status, reqwest::StatusCode::OK, "response={body}");
+        verify(body, &sdk);
     }
-    assert_eq!(sdk.calls.load(Ordering::SeqCst), 2);
-    assert_eq!(database.count(&namespace, "attempt").await, 2);
-    assert_eq!(
-        database
-            .client
-            .lock()
-            .await
-            .query_one(
-                "SELECT attempt_count FROM pillar_audit_namespace WHERE namespace=$1",
-                &[&namespace]
+    assert_eq!(sdk.calls.load(Ordering::SeqCst), 4);
+    assert_eq!(database.count(&namespace, "attempt").await, 4);
+    assert_eq!(namespace_attempt_count(&database, &namespace).await, 1);
+    for server in &servers {
+        assert_eq!(ready_status(server).await, reqwest::StatusCode::OK);
+    }
+
+    // A packet the namespace has not seen is charged against the quota: forget this one
+    // and fill the namespace, and the same request is now refused before KMS.
+    {
+        let client = database.client.lock().await;
+        client
+            .execute(
+                "DELETE FROM pillar_audit_packet WHERE namespace=$1",
+                &[&namespace],
             )
             .await
-            .unwrap()
-            .get::<_, i64>(0),
-        2
-    );
-    for server in &servers {
-        let response = reqwest::Client::new()
-            .get(format!("http://{}/ready", server.address))
-            .bearer_auth("test-token-0123456789abcdef0123456789")
-            .send()
+            .unwrap();
+        client
+            .execute(
+                "UPDATE pillar_audit_namespace SET attempt_count=max_attempts WHERE namespace=$1",
+                &[&namespace],
+            )
             .await
             .unwrap();
-        assert_eq!(response.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+    }
+    // Readiness serves a store probe cached for 250 ms; let the probes above expire.
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let (status, body) = servers[0].post(&request).await;
+    assert_eq!(status, reqwest::StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(body["body"]
+        .as_str()
+        .unwrap()
+        .contains("capacity exhausted"));
+    assert_eq!(sdk.calls.load(Ordering::SeqCst), 4);
+    for server in &servers {
+        assert_eq!(
+            ready_status(server).await,
+            reqwest::StatusCode::SERVICE_UNAVAILABLE
+        );
         let text = reqwest::Client::new()
             .get(format!("http://{}/metrics", server.address))
             .bearer_auth("test-token-0123456789abcdef0123456789")
@@ -528,8 +526,67 @@ async fn postgres_audit_concurrent_fresh_schema_enforces_shared_retained_capacit
     }
     artifact(
         "concurrent-quota",
-        &json!({"fresh_schema_startups":4,"concurrent_requests":4,"http_200":2,"quota_http_500":2,"sdk_calls":2,"retained_attempts":2,"quota_overrun":0,"all_ready_status":503,"audit_enabled":1,"audit_ready_after_probe":0}),
+        &json!({"fresh_schema_startups":4,"concurrent_replays":4,"http_200":4,"sdk_calls":4,"retained_attempts":4,"namespace_packets_charged":1,"new_packet_when_full_http_500":1,"sdk_calls_after_refusal":4,"all_ready_status_when_full":503,"audit_enabled":1,"audit_ready_after_probe":0}),
     );
+}
+
+#[tokio::test]
+#[ignore = "Requires the explicitly scoped synthetic PostgreSQL instance"]
+async fn postgres_audit_caps_attempts_per_packet_before_kms() {
+    let (url, database, namespace) = case("packet_cap").await;
+    let sdk = Sdk::new(database.clone(), &namespace, Behavior::Normal);
+    let server = Http::open(app(&url, &namespace, 2, sdk.clone()).await.unwrap()).await;
+    let request = read_vertical_request(ReadMarker::BlockNumber);
+    let (status, body) = server.post(&request).await;
+    assert_eq!(status, reqwest::StatusCode::OK, "response={body}");
+    verify(body, &sdk);
+    database
+        .client
+        .lock()
+        .await
+        .execute(
+            "UPDATE pillar_audit_packet SET attempts=63 WHERE namespace=$1",
+            &[&namespace],
+        )
+        .await
+        .unwrap();
+    let (status, body) = server.post(&request).await;
+    assert_eq!(status, reqwest::StatusCode::OK, "response={body}");
+    verify(body, &sdk);
+    let (status, body) = server.post(&request).await;
+    assert_eq!(status, reqwest::StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(body["body"]
+        .as_str()
+        .unwrap()
+        .contains("capacity exhausted"));
+    assert_eq!(sdk.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(database.count(&namespace, "attempt").await, 2);
+    assert_eq!(namespace_attempt_count(&database, &namespace).await, 1);
+    server.close().await;
+}
+
+async fn namespace_attempt_count(database: &Database, namespace: &str) -> i64 {
+    database
+        .client
+        .lock()
+        .await
+        .query_one(
+            "SELECT attempt_count FROM pillar_audit_namespace WHERE namespace=$1",
+            &[&namespace],
+        )
+        .await
+        .unwrap()
+        .get(0)
+}
+
+async fn ready_status(server: &Http) -> reqwest::StatusCode {
+    reqwest::Client::new()
+        .get(format!("http://{}/ready", server.address))
+        .bearer_auth("test-token-0123456789abcdef0123456789")
+        .send()
+        .await
+        .unwrap()
+        .status()
 }
 
 #[tokio::test]
