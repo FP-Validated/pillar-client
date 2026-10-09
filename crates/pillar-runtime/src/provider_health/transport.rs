@@ -199,10 +199,16 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
             }
             let (method, mut query) =
                 super::sui_graphql::request(&body, None).ok_or(RpcError::Unavailable)?;
-            let expected_digest = body
-                .pointer("/params/0/Transaction")
-                .or_else(|| body.pointer("/params/0"))
-                .and_then(Value::as_str);
+            let expected_digest = matches!(
+                method.as_str(),
+                "suix_queryEvents" | "sui_getTransactionBlock"
+            )
+            .then(|| {
+                body.pointer("/params/0/Transaction")
+                    .or_else(|| body.pointer("/params/0"))
+                    .and_then(Value::as_str)
+            })
+            .flatten();
             if method == "suix_queryEvents" {
                 let mut nodes = Vec::new();
                 let mut after: Option<String> = None;
