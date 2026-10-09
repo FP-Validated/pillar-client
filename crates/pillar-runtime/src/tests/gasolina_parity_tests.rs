@@ -46,14 +46,15 @@ fn calculate_guid_reproduces_the_guids_endpoint_v2_emitted() {
     assert_eq!((compared, skipped), (14, vec!["solana".to_string(); 2]));
 }
 
-/// Replays `legacy_message_id.json`: upstream's own `App.signRequestV1` conversion
-/// of a v1 `lzMessageId` (parseInt, lz-definitions' `getNetworkForChainId`,
-/// `toString`) through the production resolver. The one recorded residual is a
-/// nonce JavaScript keeps as NaN, negative or past 2^64, which the typed nonce
-/// cannot hold and refuses.
+/// Upstream's 500 for an unknown v1 chain id is answered as a 400 with the same text.
 const UNKNOWN_ENDPOINT_ID_ERROR_PREFIX: &str = "Invariant failed: Invalid endpointId: ";
 const UNKNOWN_ENDPOINT_ID_DIVERGENCE_COUNT: usize = 31;
 
+/// Replays `legacy_message_id.json`: upstream's own `App.signRequestV1` conversion
+/// of a v1 `lzMessageId` (parseInt, lz-definitions' `getNetworkForChainId`,
+/// `toString`) through the production resolver. Two residuals are recorded: a
+/// nonce JavaScript keeps as NaN, negative or past 2^64, which the typed nonce
+/// cannot hold and refuses, and the 31 unknown chain ids answered as 400s.
 #[test]
 fn legacy_message_ids_convert_like_upstreams_sign_request_v1() {
     let fixture: Value = serde_json::from_str(&gasolina_parity_json("legacy_message_id.json"))

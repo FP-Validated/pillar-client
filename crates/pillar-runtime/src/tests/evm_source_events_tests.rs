@@ -179,3 +179,49 @@ async fn evm_read_v1002_unmapped_emitting_chain_is_source_fault() {
         AppCoreError::Internal(format!("No chain name for endpoint id {emitting_eid}"))
     );
 }
+
+#[tokio::test]
+async fn evm_unmapped_source_is_reported_even_when_the_destination_is_unmapped_too() {
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let scenario = fixture["scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|scenario| scenario["name"] == "V302 match")
+        .unwrap();
+    let request: LzMessageId = serde_json::from_value(scenario["request"].clone()).unwrap();
+    let src_eid = request.pathway_id.extra["srcEid"].as_u64().unwrap() as u32;
+    let dst_eid = request.pathway_id.extra["dstEid"].as_u64().unwrap() as u32;
+    let config = runtime_evm_layerzero_config(
+        fixture["environment"].as_str().unwrap(),
+        &["bsc".to_string(), "ethereum".to_string()],
+    )
+    .unwrap();
+    let mut resolver_config = config.packet_sent_resolver_config;
+    resolver_config.chain_name_by_eid.remove(&src_eid);
+    resolver_config.chain_name_by_eid.remove(&dst_eid);
+    let providers = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "bsc".to_string(),
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://bsc.example".to_string())],
+                1,
+            ),
+        )]),
+        Some(&["bsc".to_string()]),
+    )
+    .unwrap();
+    let resolver = EvmPacketSentResolver::new(
+        &ProviderSnapshotHandle::from_getter(&providers),
+        ScriptedReceipt {
+            receipt: scenario["receipt"].clone(),
+        },
+        resolver_config,
+    );
+    let tx = scenario["receipt"]["transactionHash"].as_str().unwrap();
+    let error = resolver.get_lz_sent_event(tx, &request).await.unwrap_err();
+    assert_eq!(
+        error,
+        AppCoreError::Internal(format!("No chain name for endpoint id {src_eid}"))
+    );
+}

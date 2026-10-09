@@ -427,6 +427,7 @@ where
         );
         let mut extra = IndexMap::new();
         extra.insert("guid".to_string(), Value::from(event.packet.guid));
+        // A V301 send through executor_v1 carries no options (`decoders/index.ts:62-67`).
         let options = match event.options {
             Ok(options) if options == "0x" && event.uln_send_version == ULN_VERSION_V301 => {
                 json!({})
@@ -442,6 +443,8 @@ where
         extra.insert("options".to_string(), options);
         let send_library = match &event.send_library {
             Some(library) => Value::from(normalize_move_account_for_resolver(library)),
+            // Upstream's one Aptos-family extractor serves aptos, movement, initia, sui and
+            // iotal1 (`lz-v2-sdk/src/endpoint/factory.ts:66-68`, `decoders/index.ts:141-145`).
             None => self
                 .config
                 .aptos_v1_source
@@ -1020,6 +1023,9 @@ where
                         }
                     }
                 }
+                // Upstream matches the identity alone (`endpoint/sui/index.ts:244-257`); the
+                // version and chain names must agree here too, since the call data is built for
+                // the requested version and the signer is picked by the requested name.
                 if let Some(sent_event) = converted
                     .into_iter()
                     .find(|sent_event| lz_message_id_matches(lz_message_id, &sent_event.lz_message_id))
@@ -1080,6 +1086,8 @@ where
                         }
                     }
                 }
+                // Upstream matches the identity alone (`endpoint/starknet/index.ts:203-212`);
+                // the version and chain names must agree here too.
                 if let Some(sent_event) = converted
                     .into_iter()
                     .find(|sent_event| lz_message_id_matches(lz_message_id, &sent_event.lz_message_id))
@@ -1135,6 +1143,8 @@ where
                         }
                     }
                 }
+                // Upstream matches the identity alone (`endpoint/stellar/index.ts:266-275`);
+                // the version and chain names must agree here too.
                 if let Some(sent_event) = converted
                     .into_iter()
                     .find(|sent_event| lz_message_id_matches(lz_message_id, &sent_event.lz_message_id))
@@ -1153,11 +1163,11 @@ where
                             "Unsupported LayerZero source chain ton".to_string(),
                         )
                     })?;
-                 let trace = self.get_ton_transaction_trace(src_tx_hash).await?;
+                let trace = self.get_ton_transaction_trace(src_tx_hash).await?;
                 let mut first_source_fault = None;
-                 for event in
-                     decode_ton_packet_sent_events(&trace, trusted, &self.config.chain_name_by_eid)
-                 {
+                for event in
+                    decode_ton_packet_sent_events(&trace, trusted, &self.config.chain_name_by_eid)
+                {
                     let src_chain_name = match self.chain_name_for_eid(event.packet.src_eid) {
                         Ok(name) => name,
                         Err(error) => {
@@ -1165,7 +1175,9 @@ where
                             continue;
                         }
                     };
-                    let Some(dst_chain_name) = self.config.chain_name_by_eid.get(&event.packet.dst_eid).cloned() else {
+                    let Some(dst_chain_name) =
+                        self.config.chain_name_by_eid.get(&event.packet.dst_eid).cloned()
+                    else {
                         continue;
                     };
                     if src_chain_name != "ton" {

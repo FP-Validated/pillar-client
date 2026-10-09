@@ -162,3 +162,28 @@ async fn stellar_unmapped_destination_event_does_not_mask_later_match() {
         .unwrap();
     assert!(lz_message_identity_matches(&request, &result.lz_message_id));
 }
+
+#[tokio::test]
+async fn stellar_a_later_unconvertible_event_still_fails_the_read() {
+    // Upstream converts every event before matching, so any throw fails the read.
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let environment = fixture["environment"].as_str().unwrap();
+    let tx_hash = fixture["txHash"].as_str().unwrap();
+    let scenarios = fixture["scenarios"].as_array().unwrap();
+    let scenario = |name: &str| scenarios.iter().find(|s| s["name"] == name).unwrap();
+    let (matching, broken) = (scenario("match"), scenario("empty options"));
+    let request: LzMessageId = serde_json::from_value(matching["request"].clone()).unwrap();
+    let alone = scripted_resolver(environment, &broken["transaction"])
+        .get_lz_sent_event(tx_hash, &request)
+        .await
+        .unwrap_err();
+    let mut transaction = matching["transaction"].clone();
+    transaction["events"]["contractEventsXdr"][0]
+        .as_array_mut()
+        .unwrap()
+        .push(broken["transaction"]["events"]["contractEventsXdr"][0][0].clone());
+    let combined = scripted_resolver(environment, &transaction)
+        .get_lz_sent_event(tx_hash, &request)
+        .await;
+    assert_eq!(combined, Err(alone));
+}

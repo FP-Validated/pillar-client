@@ -263,10 +263,9 @@ not reproduce:
   integers past 2^53 round), and v1 chain ids, nonce and addresses take
   upstream's own `parseInt`/`toString` coercions. An unknown v1 chain id is
   refused as HTTP 400 with the unchanged `Invariant failed: Invalid endpointId: <n>`
-  message, rather than upstream's 500; it is rejected during request conversion
-  before any provider RPC; an object-valued v1 sender or receiver is echoed in
-  error bodies with sorted
-  keys, where `JSON.stringify` keeps insertion order.
+  message, rather than upstream's 500, during request conversion and before any
+  provider RPC; an object-valued v1 sender or receiver is echoed in error bodies
+  with sorted keys, where `JSON.stringify` keeps insertion order.
 - `skipVId: true` is refused with HTTP 400 on both signing routes (`POST /`,
   `POST /v2/resolve-and-sign`) before any provider read, except on the v2 route
   for a `V2` send to `aptos`; upstream signs a digest without the vId everywhere.
@@ -318,15 +317,19 @@ not reproduce:
   other value is a 400 before anything is signed. Upstream's `getFeatherProof`
   signs the bare packet for 2 and throws for anything else; 2 has no deployed
   verifier source, so its meaning cannot be checked and it is not imitated.
-- Source-event scans treat an EID absent from this deployment's chain-name map
-  as a non-match when it is the destination, so an event from a later log can still
-  match; a missing source EID remains an `Internal` fault, but does not mask a later
-  matching event. EVM `ReadV1002` applies this source rule to the emitting chain
-  after the endpoint flip. Upstream raises `Invariant failed: Invalid endpointId`
-  for unknown destination EIDs, while this line safely returns its existing miss
-  result because no pathway can be signed for that destination. Starknet's known
-  legacy cross-stage destination mapping remains available, so its upstream-resolved
-  cross-stage event is not refused.
+- A trusted `PacketSent` whose destination EID has no chain in this deployment's
+  map or in the legacy cross-stage table is a non-match, so a later event in the
+  same transaction can still resolve. Upstream raises a 500 `Invariant failed:
+  Invalid endpointId` for it; no pathway to that destination can be signed here, so
+  skipping it never admits a packet the request did not name. A missing source EID,
+  or a Move/Sui event whose source maps to another chain, stays an `Internal` fault
+  but is reported only when no event matches; on EVM this was a 400 miss before.
+  EVM `ReadV1002` applies the source rule to the emitting chain after the endpoint
+  flip. Move, Sui, IotaL1, Starknet and Stellar still convert every event before
+  matching, so any other conversion error fails the read as upstream does. Two
+  paths are unchanged: TON's decoder drops destination-unmapped events before the
+  source check, so a TON source-EID gap shows as a miss; and the Aptos V1
+  `OutboundEvent` path (`resolve_aptos_v1_packet`) keeps upstream's behaviour.
 - A resolved packet must also agree with the request's destination chain name,
   and, except on Aptos, Movement and Initia sources, with its `ulnSendVersion`
   and source chain name; upstream's `lzMessageIdMatches` compares only eids,

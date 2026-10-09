@@ -181,7 +181,7 @@ async fn initia_unmapped_destination_event_does_not_mask_later_match() {
     event_data["encoded_packet"] = event_data["encoded_packet"]
         .as_str()
         .unwrap()
-        .replacen("00007676", "00007cfe", 1)
+        .replacen("00007595", "00007cfe", 1)
         .into();
     unknown_event["attributes"][1]["value"] = serde_json::to_string(&event_data).unwrap().into();
     let mut transaction = matching["transaction"].clone();
@@ -220,4 +220,93 @@ async fn initia_missing_source_eid_returns_exact_internal_fault() {
         error,
         AppCoreError::Internal(format!("No chain name for endpoint id {src_eid}"))
     );
+}
+
+#[tokio::test]
+async fn initia_a_later_unconvertible_event_still_fails_the_read() {
+    // Upstream converts every event before matching, so any throw fails the read.
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let environment = fixture["environment"].as_str().unwrap();
+    let tx_hash = fixture["txHash"].as_str().unwrap();
+    let scenarios = fixture["scenarios"].as_array().unwrap();
+    let scenario = |name: &str| scenarios.iter().find(|s| s["name"] == name).unwrap();
+    let (matching, broken) = (scenario("match"), scenario("empty options"));
+    let request: LzMessageId = serde_json::from_value(matching["request"].clone()).unwrap();
+    let alone = scripted_resolver(environment, &broken["transaction"])
+        .get_lz_sent_event(tx_hash, &request)
+        .await
+        .unwrap_err();
+    let mut transaction = matching["transaction"].clone();
+    transaction["events"]
+        .as_array_mut()
+        .unwrap()
+        .push(broken["transaction"]["events"][0].clone());
+    let combined = scripted_resolver(environment, &transaction)
+        .get_lz_sent_event(tx_hash, &request)
+        .await;
+    assert_eq!(combined, Err(alone));
+}
+
+fn match_with_packet_bytes_replaced(from: &str, to: &str) -> (Value, Value, LzMessageId) {
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let matching = fixture["scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|scenario| scenario["name"] == "match")
+        .unwrap()
+        .clone();
+    let mut event = matching["transaction"]["events"][0].clone();
+    let mut data: Value =
+        serde_json::from_str(event["attributes"][1]["value"].as_str().unwrap()).unwrap();
+    let packet = data["encoded_packet"].as_str().unwrap();
+    assert!(packet.contains(from), "fixture packet lacks {from}");
+    data["encoded_packet"] = packet.replacen(from, to, 1).into();
+    event["attributes"][1]["value"] = serde_json::to_string(&data).unwrap().into();
+    let request: LzMessageId = serde_json::from_value(matching["request"].clone()).unwrap();
+    (fixture, event, request)
+}
+
+#[tokio::test]
+async fn initia_source_chain_mismatch_is_reported_only_when_nothing_matches() {
+    // 30326 (initia) -> 30101 (ethereum): a trusted Initia event naming another source chain.
+    let (fixture, mismatched, request) = match_with_packet_bytes_replaced("00007676", "00007595");
+    let environment = fixture["environment"].as_str().unwrap();
+    let tx_hash = fixture["txHash"].as_str().unwrap();
+    let matching = fixture["scenarios"][0]["transaction"].clone();
+    let mut alone = matching.clone();
+    alone["events"] = json!([mismatched.clone()]);
+    let error = scripted_resolver(environment, &alone)
+        .get_lz_sent_event(tx_hash, &request)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error,
+        AppCoreError::Internal("Move PacketSent source chain mismatch".to_string())
+    );
+    let mut both = matching;
+    both["events"].as_array_mut().unwrap().insert(0, mismatched);
+    let resolved = scripted_resolver(environment, &both)
+        .get_lz_sent_event(tx_hash, &request)
+        .await
+        .unwrap();
+    assert!(lz_message_identity_matches(
+        &request,
+        &resolved.lz_message_id
+    ));
+}
+
+#[tokio::test]
+async fn initia_destination_on_another_stage_resolves_through_the_legacy_table() {
+    // 30101 -> 40161, a testnet id absent from the mainnet map but present in the legacy table.
+    let (fixture, event, mut request) = match_with_packet_bytes_replaced("00007595", "00009ce1");
+    request.pathway_id.dst_chain_name = "sepolia".to_string();
+    request.pathway_id.extra["dstEid"] = Value::from(40_161);
+    let mut transaction = fixture["scenarios"][0]["transaction"].clone();
+    transaction["events"] = json!([event]);
+    let resolved = scripted_resolver(fixture["environment"].as_str().unwrap(), &transaction)
+        .get_lz_sent_event(fixture["txHash"].as_str().unwrap(), &request)
+        .await
+        .unwrap();
+    assert_eq!(resolved.lz_message_id.pathway_id.dst_chain_name, "sepolia");
 }
