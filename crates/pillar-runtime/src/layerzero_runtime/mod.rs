@@ -44,11 +44,12 @@ use crate::provider_health::{
     observe_transaction_from, observe_uln_v2_inbound_proof_type, observe_uln_v2_mpt_hash_info,
     parse_block_timestamp_seconds, pathway_extra_string_value, pathway_extra_u32,
     pathway_extra_u64, plan_dispatch, provider_response, provider_uri_parts,
-    required_provider_quorum, resolve_provider_quorum, strip_hex_prefix, timestamp_validity,
-    ton_v3_provider_uri_parts, uln_version_value, AwsLambdaInvokeClient,
-    BlockConfirmationObservation, BlockConfirmationValidity, BlockTime, DispatchEntry,
-    EvmPayloadSignedObservation, EvmTransactionReceipt, ExactQuorumAccumulator, JsonRpcTransport,
-    PayloadSignedValidity, ProviderRankTracker, ReceiveUlnVersion, RpcError, TimestampValidity,
+    required_provider_quorum, resolve_provider_quorum, resolve_provider_quorum_with_zero_signal,
+    strip_hex_prefix, timestamp_validity, ton_v3_provider_uri_parts, uln_version_value,
+    AwsLambdaInvokeClient, BlockConfirmationObservation, BlockConfirmationValidity, BlockTime,
+    DispatchEntry, EvmPayloadSignedObservation, EvmTransactionReceipt, ExactQuorumAccumulator,
+    JsonRpcTransport, PayloadSignedValidity, ProviderRankTracker, QuorumResolutionFailure,
+    ReceiveUlnVersion, RpcError, TimestampValidity,
 };
 use crate::provider_snapshot::ChainDispatch;
 use crate::validation::{ExpirationValidRange, RuntimeAppValidator, RuntimeValidationChecks};

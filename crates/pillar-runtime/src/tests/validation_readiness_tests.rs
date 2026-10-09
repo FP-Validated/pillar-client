@@ -1244,3 +1244,65 @@ async fn no_non_evm_chain_falls_through_to_the_evm_block_confirmation_default() 
         }
     }
 }
+
+#[derive(Clone)]
+struct SolanaReadinessByUrlTransport;
+
+#[async_trait]
+impl JsonRpcTransport for SolanaReadinessByUrlTransport {
+    async fn post_json(
+        &self,
+        url: String,
+        _headers: HashMap<String, String>,
+        body: Value,
+    ) -> Result<Value, String> {
+        if url.ends_with("-c.example") || url.ends_with("-d.example") {
+            return Err("HTTP 500".to_string());
+        }
+        match body["method"].as_str() {
+            Some("getTransaction") => Ok(json!({"result": {"slot": 1000}})),
+            Some("getSlot") => Ok(json!({"result": 1200})),
+            method => Err(format!("unexpected Solana method {method:?}")),
+        }
+    }
+
+    async fn get_json(
+        &self,
+        _url: String,
+        _headers: HashMap<String, String>,
+    ) -> Result<Value, String> {
+        Err("unexpected GET".to_string())
+    }
+}
+
+#[tokio::test]
+async fn solana_readiness_two_of_four_transport_failures_are_non_votes() {
+    let uris = ["a", "b", "c", "d"]
+        .into_iter()
+        .map(|name| ProviderUri::Uri(format!("https://solana-{name}.example")))
+        .collect();
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "solana".to_string(),
+            ProviderConfig::with_distinct_entities(uris, 2),
+        )]),
+        Some(&["solana".to_string()]),
+    )
+    .unwrap();
+    let checks = RuntimeRpcValidationChecks::from_getter(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        SolanaReadinessByUrlTransport,
+    );
+    checks
+        .validate_readiness(
+            &solana_readiness_sent_event(),
+            &SigningContext::Message {
+                expiration: 1,
+                skip_v_id: None,
+                dvn_address: None,
+                block_confirmation: 128,
+            },
+        )
+        .await
+        .expect("two confirmed providers satisfy the absolute 2-of-4 strategy");
+}

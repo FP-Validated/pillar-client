@@ -382,17 +382,22 @@ where
         });
     }
     let context = format!("block confirmation for chain {src_chain_name}");
-    let observation = match resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context).await {
+    let observation = match resolve_provider_quorum_with_zero_signal(
+        requests,
+        provider_config.uris.len(),
+        quorum,
+        &context,
+    )
+    .await
+    {
         Ok(observation) => observation,
-        Err(AppCoreError::Internal(ref message))
-            if message.contains("0 distinct successful responses") =>
-        {
+        Err(QuorumResolutionFailure::ZeroSuccessfulResponses) => {
             return Err(AppCoreError::Internal(format!(
                 "Transaction receipt or block not found for {}",
                 sent_event.tx_hash
             )));
         }
-        Err(error) => return Err(error),
+        Err(QuorumResolutionFailure::Other(error)) => return Err(error),
     };
 
     match observation.validity {
@@ -476,6 +481,14 @@ where
     }
 }
 
+pub(super) fn readiness_response(response: Result<Value, RpcError>) -> Result<Value, RpcError> {
+    let response = response?;
+    if let Some(error) = response.get("error") {
+        return Err(RpcError::Remote(error.to_string()));
+    }
+    Ok(response)
+}
+
 async fn observe_ton_block_confirmations<T>(
     transport: T,
     endpoint: String,
@@ -492,7 +505,7 @@ where
             current_confirmations: None,
         });
     }
-    let current_response = provider_response(
+    let current_response = readiness_response(
         transport
             .get_json_scoped(
                 format!("{}/masterchainInfo", endpoint.trim_end_matches('/')),
@@ -500,24 +513,19 @@ where
             )
             .await,
     )?;
-    let current = current_response.as_ref().and_then(|value| {
-        value
-            .pointer("/last/seqno")
-            .and_then(Value::as_i64)
-            .or_else(|| {
-                value
-                    .pointer("/last/seqno")
-                    .and_then(Value::as_str)?
-                    .parse()
-                    .ok()
-            })
-    });
-    let Some(current) = current else {
-        return Ok(BlockConfirmationObservation {
-            validity: BlockConfirmationValidity::Missing,
-            current_confirmations: None,
+    let current = current_response
+        .pointer("/last/seqno")
+        .and_then(Value::as_i64)
+        .or_else(|| {
+            current_response
+                .pointer("/last/seqno")
+                .and_then(Value::as_str)?
+                .parse()
+                .ok()
         });
-    };
+    let current = current.ok_or_else(|| {
+        RpcError::Remote("TON masterchain info has no valid latest seqno".to_string())
+    })?;
     let confirmations = (current - tx_seqno).max(0);
     let validity = if confirmations >= required_confirmations {
         BlockConfirmationValidity::Sufficient {
@@ -574,18 +582,19 @@ json!({
     );
     let (transaction_response, slot_response) = tokio::join!(transaction, slot);
 
-    let Some((tx_slot, current_slot)) = provider_response(transaction_response)?
-        .and_then(|transaction| parse_solana_transaction_slot(&transaction).ok())
-        .zip(
-            provider_response(slot_response)?
-                .and_then(|slot| parse_solana_current_slot(&slot).ok()),
-        )
-    else {
+    let transaction_response = readiness_response(transaction_response)?;
+    let slot_response = readiness_response(slot_response)?;
+    let transaction_result = transaction_response.get("result").ok_or_else(|| {
+        RpcError::Remote("Solana getTransaction response has no result".to_string())
+    })?;
+    if transaction_result.is_null() {
         return Ok(BlockConfirmationObservation {
             validity: BlockConfirmationValidity::Missing,
             current_confirmations: None,
         });
-    };
+    }
+    let tx_slot = parse_solana_transaction_slot(&transaction_response).map_err(RpcError::Remote)?;
+    let current_slot = parse_solana_current_slot(&slot_response).map_err(RpcError::Remote)?;
 
     let (Some(current_confirmations), Some(required_slot)) = (
         current_slot.checked_sub(tx_slot),
@@ -667,7 +676,7 @@ where
         }),
     );
     let (receipt_response, current_response) = tokio::join!(receipt, current);
-    let receipt_block = provider_response(receipt_response)?.and_then(|response| {
+    let receipt_block = Some(readiness_response(receipt_response)?).and_then(|response| {
         let result = response.get("result")?;
         let hash = result.get("block_hash")?.as_str()?.to_string();
         let number = result
@@ -677,7 +686,7 @@ where
             .ok()?;
         Some((hash, number))
     });
-    let current_block = provider_response(current_response)?
+    let current_block = Some(readiness_response(current_response)?)
         .and_then(|response| response.get("result").and_then(numeric_response))
         .and_then(|value| value.parse::<i64>().ok());
     let (Some((receipt_hash, receipt_number)), Some(current_number)) =
@@ -752,7 +761,7 @@ where
         }),
     );
     let (transaction_response, latest_response) = tokio::join!(transaction, latest);
-    let transaction_ledger = provider_response(transaction_response)?.and_then(|response| {
+    let transaction_ledger = Some(readiness_response(transaction_response)?).and_then(|response| {
         let result = response.get("result")?;
         (result.get("status").and_then(Value::as_str) == Some("SUCCESS")).then(|| {
             result
@@ -762,7 +771,7 @@ where
                 .ok()
         })?
     });
-    let current_ledger = provider_response(latest_response)?.and_then(|response| {
+    let current_ledger = Some(readiness_response(latest_response)?).and_then(|response| {
         response
             .get("result")
             .and_then(|result| result.get("sequence"))
@@ -982,5 +991,21 @@ mod ton_tests {
                 ..
             }
         ));
+    }
+    #[tokio::test]
+    async fn ton_masterchain_transport_failure_is_not_a_missing_vote() {
+        let transport = RecordingTransport {
+            responses: Arc::new(Mutex::new(vec![Err("HTTP 500".to_string())])),
+            urls: Arc::new(Mutex::new(Vec::new())),
+        };
+        let result = observe_ton_block_confirmations(
+            transport,
+            "https://ton-v3.example".to_string(),
+            HashMap::new(),
+            100,
+            5,
+        )
+        .await;
+        assert!(result.is_err(), "transport failures must be non-votes");
     }
 }

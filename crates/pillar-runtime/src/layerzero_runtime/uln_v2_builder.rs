@@ -38,6 +38,11 @@ where
         tx_hash: &str,
         source_evidence: Option<&pillar_core::EvmSourceEvidence>,
     ) -> Result<UlnV2HashInfo, AppCoreError> {
+        if source_evidence.is_none() {
+            return Err(AppCoreError::Internal(
+                "Missing source evidence for MPT proof".to_string(),
+            ));
+        }
         crate::provider_health::rpc_scope(src_chain_name, async {
             let snapshot = self.providers.load();
             let dispatch = snapshot
@@ -167,6 +172,17 @@ where
         expiration: i64,
         v_id: String,
     ) -> Result<pillar_core::HashCallDataResult, AppCoreError> {
+        if sent_event.source_evidence.is_none()
+            && sent_event
+                .extra
+                .get("packetEmitAddress")
+                .and_then(Value::as_str)
+                .is_none()
+        {
+            return Err(AppCoreError::Internal(
+                "Missing source evidence for MPT proof".to_string(),
+            ));
+        }
         let src_chain_name = &sent_event.lz_message_id.pathway_id.src_chain_name;
         let (proof_type, utils_version) =
             self.inbound_proof_library_with_quorum(sent_event).await?;

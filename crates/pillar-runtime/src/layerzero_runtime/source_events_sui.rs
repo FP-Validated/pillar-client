@@ -144,7 +144,7 @@ where
             required_confirmations,
         ));
     }
-    let transaction = provider_response(
+    let transaction_response = super::validation_readiness::readiness_response(
         transport
             .post_json_scoped(
                 url.clone(),
@@ -157,10 +157,12 @@ where
                 }),
             )
             .await,
-    )?
-    .and_then(|response| response.get("result").cloned())
-    .unwrap_or(Value::Null);
-    let latest = provider_response(
+    )?;
+    let transaction = transaction_response
+        .get("result")
+        .cloned()
+        .ok_or_else(|| RpcError::Remote("Sui transaction response has no result".to_string()))?;
+    let latest_response = super::validation_readiness::readiness_response(
         transport
             .post_json_scoped(
                 url,
@@ -173,9 +175,11 @@ where
                 }),
             )
             .await,
-    )?
-    .and_then(|response| response.get("result").cloned())
-    .unwrap_or(Value::Null);
+    )?;
+    let latest = latest_response
+        .get("result")
+        .cloned()
+        .ok_or_else(|| RpcError::Remote("Sui checkpoint response has no result".to_string()))?;
     Ok(observe_sui_block_confirmations(
         &transaction,
         &latest,

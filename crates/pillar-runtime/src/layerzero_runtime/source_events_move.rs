@@ -454,7 +454,7 @@ where
     let transaction = match ledger_version {
         Some(_) => Value::Null,
         None => {
-            let Some(transaction) = provider_response(
+            let transaction = super::validation_readiness::readiness_response(
                 fetch_move_transaction(
                     transport.clone(),
                     chain_name,
@@ -463,13 +463,7 @@ where
                     tx_hash,
                 )
                 .await,
-            )?
-            else {
-                return Ok(BlockConfirmationObservation {
-                    validity: BlockConfirmationValidity::Missing,
-                    current_confirmations: None,
-                });
-            };
+            )?;
             transaction
         }
     };
@@ -505,20 +499,19 @@ where
                 current_confirmations: None,
             });
         };
-        provider_response(transport.get_json_scoped(url, headers.clone()).await)?.and_then(
-            |block| {
+        let block = super::validation_readiness::readiness_response(
+            transport.get_json_scoped(url, headers.clone()).await,
+        )?;
+        block
+            .get("block_height")
+            .and_then(Value::as_i64)
+            .or_else(|| {
                 block
                     .get("block_height")
-                    .and_then(Value::as_i64)
-                    .or_else(|| {
-                        block
-                            .get("block_height")
-                            .and_then(Value::as_str)?
-                            .parse()
-                            .ok()
-                    })
-            },
-        )
+                    .and_then(Value::as_str)?
+                    .parse()
+                    .ok()
+            })
     };
     let Some(tx_height) = tx_height else {
         return Ok(BlockConfirmationObservation {
@@ -526,17 +519,11 @@ where
             current_confirmations: None,
         });
     };
-    let Some(latest) = provider_response(
+    let latest = super::validation_readiness::readiness_response(
         transport
             .get_json_scoped(move_latest_block_url(chain_name, &base), headers)
             .await,
-    )?
-    else {
-        return Ok(BlockConfirmationObservation {
-            validity: BlockConfirmationValidity::Missing,
-            current_confirmations: None,
-        });
-    };
+    )?;
     let current_height = if chain_name == "initia" {
         latest
             .pointer("/block/header/height")
