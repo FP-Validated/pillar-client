@@ -11,6 +11,10 @@ const STELLAR_STRKEY_LENGTH: usize = 56;
 
 /// Decodes a Soroban contract strkey (`C...`) into its 32-byte contract id.
 pub fn stellar_contract_id_from_strkey(value: &str) -> Result<[u8; 32], AppCoreError> {
+    stellar_strkey_payload(value, STELLAR_CONTRACT_VERSION)
+}
+
+fn stellar_strkey_payload(value: &str, version: u8) -> Result<[u8; 32], AppCoreError> {
     if value.len() != STELLAR_STRKEY_LENGTH {
         return Err(AppCoreError::Internal(format!(
             "Stellar contract strkey must be {STELLAR_STRKEY_LENGTH} characters, got {}",
@@ -56,9 +60,9 @@ pub fn stellar_contract_id_from_strkey(value: &str) -> Result<[u8; 32], AppCoreE
             "Stellar contract strkey decoded to {decoded_len} bytes, expected 35"
         )));
     }
-    if decoded[0] != STELLAR_CONTRACT_VERSION {
+    if decoded[0] != version {
         return Err(AppCoreError::Internal(format!(
-            "Stellar strkey has unsupported version byte 0x{:02x}, expected 0x10",
+            "Stellar strkey has unsupported version byte 0x{:02x}, expected 0x{version:02x}",
             decoded[0]
         )));
     }
@@ -224,6 +228,24 @@ fn pack_dvn_call(
     Ok(out)
 }
 
+fn stellar_dvn_address_xdr(value: &str) -> Result<Vec<u8>, AppCoreError> {
+    if value.starts_with('G') {
+        let key = stellar_strkey_payload(value, 0x30)?;
+        let mut encoded = Vec::with_capacity(44);
+        encoded.extend_from_slice(&18_u32.to_be_bytes());
+        encoded.extend_from_slice(&0_u32.to_be_bytes());
+        encoded.extend_from_slice(&0_u32.to_be_bytes());
+        encoded.extend_from_slice(&key);
+        Ok(encoded)
+    } else if value.starts_with('C') {
+        Ok(address_xdr(&stellar_strkey_payload(
+            value,
+            STELLAR_CONTRACT_VERSION,
+        )?))
+    } else {
+        Ok(address_xdr(&address_to_bytes32(value)?))
+    }
+}
 fn calls_xdr(
     proof: &EvmUlnProof,
     dvn_address: &str,
@@ -232,12 +254,12 @@ fn calls_xdr(
 ) -> Result<Vec<u8>, AppCoreError> {
     let packet_header = decode_hex_bytes(&proof.packet_header)?;
     let payload_hash = decode_hex_bytes(&proof.payload_hash)?;
-    let dvn = address_to_bytes32(dvn_address)?;
+    let dvn = stellar_dvn_address_xdr(dvn_address)?;
     let verify_call = call_xdr(
-        uln_302_id,
+        &address_xdr(uln_302_id),
         "verify",
         &[
-            address_xdr(&dvn),
+            dvn.clone(),
             bytes_xdr(&packet_header),
             bytes_xdr(&payload_hash),
             u64_xdr(block_confirmation),
@@ -252,7 +274,7 @@ fn call_xdr(to: &[u8], func: &str, args: &[Vec<u8>]) -> Vec<u8> {
     map_xdr(&[
         (symbol_xdr("args"), vec_xdr(args)),
         (symbol_xdr("func"), symbol_xdr(func)),
-        (symbol_xdr("to"), address_xdr(to)),
+        (symbol_xdr("to"), to.to_vec()),
     ])
 }
 

@@ -179,6 +179,25 @@ async fn stellar_uln_v3_builds_xdr_call_vector_like_upstream() {
     );
     assert_eq!(result.details["ulnCallData"]["methodName"], "verify");
 }
+#[tokio::test]
+async fn stellar_uln_v3_accepts_native_account_dvn_strkey() {
+    let result = StellarUlnPayloadBuilder::new(STELLAR_ULN_302_MAINNET)
+        .unwrap()
+        .build_uln_v3_verify_payload(
+            &non_evm_sent_event("stellar", 30_500),
+            64,
+            1_900_000_000,
+            "500".to_string(),
+            Some("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"),
+        )
+        .await
+        .unwrap();
+    assert!(result.hash_call_data.starts_with("0x"));
+    assert!(result.details["dvnHashCallData"]["dvnCallData"]
+        .as_str()
+        .unwrap()
+        .contains("0000000000000000000000000000000000000000000000000000000000000000"));
+}
 
 #[test]
 fn stellar_contract_id_from_strkey_matches_upstream_mainnet_uln_bytes() {

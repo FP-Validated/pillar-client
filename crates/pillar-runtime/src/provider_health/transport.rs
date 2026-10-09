@@ -2,6 +2,7 @@ use super::*;
 use std::future::Future;
 
 const MAX_JSON_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+const MAX_PAGINATED_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 #[derive(Clone, Debug)]
 pub enum RpcError {
     Admission(pillar_core::execution::BudgetError),
@@ -142,12 +143,13 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         body: Value,
     ) -> Result<Value, RpcError> {
         let target = rpc_target_for_call()?;
-        if target.as_ref() == "iota"
+        if target.as_ref() == "iotal1"
             && body.get("method").and_then(Value::as_str) == Some("iotax_queryEvents")
         {
             let mut page_body = body.clone();
             let mut cursor = Value::Null;
             let mut events = Vec::new();
+            let mut response_bytes = 0usize;
             for page in 0..21 {
                 page_body["params"][1] = cursor.clone();
                 page_body["params"][2] = Value::from(50);
@@ -157,9 +159,23 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
                     self.post_json(url.clone(), headers.clone(), page_body.clone()),
                 )
                 .await?;
+                response_bytes = accumulate_paginated_response_bytes(response_bytes, &response)
+                    .ok_or_else(|| {
+                        RpcError::Remote("IOTA transaction exceeds 16 MiB response limit".into())
+                    })?;
                 let Some(items) = response.pointer("/result/data").and_then(Value::as_array) else {
                     return Ok(response);
                 };
+                if let Some(expected) = body
+                    .pointer("/params/0/Transaction")
+                    .and_then(Value::as_str)
+                {
+                    if items.iter().any(|item| {
+                        item.pointer("/id/txDigest").and_then(Value::as_str) != Some(expected)
+                    }) {
+                        return Err(RpcError::Remote("IOTA transaction digest mismatch".into()));
+                    }
+                }
                 events.extend(items.iter().cloned());
                 if events.len() > 1024 {
                     return Err(RpcError::Remote(
@@ -212,6 +228,7 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
             if method == "suix_queryEvents" {
                 let mut nodes = Vec::new();
                 let mut after: Option<String> = None;
+                let mut response_bytes = 0usize;
                 for page in 0..21 {
                     let (_, page_query) = super::sui_graphql::request(&body, after.as_deref())
                         .ok_or(RpcError::Unavailable)?;
@@ -221,6 +238,15 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
                         self.post_json(url.clone(), headers.clone(), query.clone()),
                     )
                     .await?;
+                    let Some(total_bytes) =
+                        accumulate_paginated_response_bytes(response_bytes, &response)
+                    else {
+                        return Ok(super::sui_graphql::response(
+                            &method,
+                            json!({"errors":[{"message":"Sui transaction exceeds 16 MiB response limit"}]}),
+                        ));
+                    };
+                    response_bytes = total_bytes;
                     if let Some(expected) = expected_digest {
                         if response
                             .pointer("/data/transaction/digest")
@@ -289,6 +315,16 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
                 }
             }
             return Ok(super::sui_graphql::response(&method, response));
+        }
+        if target.as_ref() == "iotal1"
+            && body.get("method").and_then(Value::as_str) == Some("iota_getTransactionBlock")
+        {
+            let response = limited_rpc(&target, self.post_json(url, headers, body.clone())).await?;
+            let expected = body.pointer("/params/0").and_then(Value::as_str);
+            if response.pointer("/result/digest").and_then(Value::as_str) != expected {
+                return Err(RpcError::Remote("IOTA transaction digest mismatch".into()));
+            }
+            return Ok(response);
         }
         limited_rpc(&target, self.post_json(url, headers, body)).await
     }
@@ -698,6 +734,11 @@ pub(crate) fn drop_json_value_safely(value: Value) {
     }
 }
 
+fn accumulate_paginated_response_bytes(total: usize, response: &Value) -> Option<usize> {
+    total
+        .checked_add(response.to_string().len())
+        .filter(|bytes| *bytes <= MAX_PAGINATED_RESPONSE_BYTES)
+}
 fn extend_bounded_json(buffer: &mut Vec<u8>, chunk: &[u8]) -> Result<(), String> {
     if buffer
         .len()
@@ -723,5 +764,89 @@ mod tests {
             .unwrap_err()
             .contains("exceeds"));
         assert_eq!(buffer.len(), MAX_JSON_RESPONSE_BYTES);
+    }
+    #[test]
+    fn paginated_response_budget_is_cumulative_across_pages() {
+        let response = Value::String("x".repeat(MAX_PAGINATED_RESPONSE_BYTES / 2));
+        let total = accumulate_paginated_response_bytes(0, &response).unwrap();
+        assert!(total < MAX_PAGINATED_RESPONSE_BYTES);
+        assert!(accumulate_paginated_response_bytes(total, &response).is_none());
+    }
+    #[derive(Clone, Default)]
+    struct IotaPageTransport(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+    #[async_trait]
+    impl JsonRpcTransport for IotaPageTransport {
+        async fn post_json(
+            &self,
+            _: String,
+            _: HashMap<String, String>,
+            body: Value,
+        ) -> Result<Value, String> {
+            use std::sync::atomic::Ordering;
+            self.0.fetch_add(1, Ordering::SeqCst);
+            let start = body["params"][1].as_u64().unwrap_or(0) as usize;
+            let end = (start + 50).min(51);
+            let data = (start..end)
+                .map(|_| json!({"id":{"txDigest":"digest"}}))
+                .collect::<Vec<_>>();
+            Ok(
+                json!({"jsonrpc":"2.0","id":1,"result":{"data":data,"hasNextPage":end<51,"nextCursor":if end<51 {Value::from(end as u64)} else {Value::Null}}}),
+            )
+        }
+
+        async fn get_json(&self, _: String, _: HashMap<String, String>) -> Result<Value, String> {
+            unreachable!()
+        }
+    }
+
+    #[tokio::test]
+    async fn iota_query_events_dispatch_follows_the_chain_cursor() {
+        let transport = IotaPageTransport::default();
+        let body = json!({"jsonrpc":"2.0","id":1,"method":"iotax_queryEvents","params":[{"Transaction":"digest"},null,50,false]});
+        let response = crate::provider_health::rpc_scope("iotal1", async {
+            transport
+                .post_json_scoped("https://iota.example".into(), HashMap::new(), body)
+                .await
+        })
+        .await
+        .unwrap();
+        assert_eq!(response["result"]["data"].as_array().unwrap().len(), 51);
+        assert_eq!(transport.0.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+    #[derive(Clone)]
+    struct WrongIotaDigest;
+
+    #[async_trait]
+    impl JsonRpcTransport for WrongIotaDigest {
+        async fn post_json(
+            &self,
+            _: String,
+            _: HashMap<String, String>,
+            _: Value,
+        ) -> Result<Value, String> {
+            Ok(json!({"jsonrpc":"2.0","id":1,"result":{"digest":"another-digest"}}))
+        }
+
+        async fn get_json(&self, _: String, _: HashMap<String, String>) -> Result<Value, String> {
+            unreachable!()
+        }
+    }
+
+    #[tokio::test]
+    async fn iota_transaction_read_rejects_a_different_digest() {
+        let result = crate::provider_health::rpc_scope("iotal1", async {
+            WrongIotaDigest
+                .post_json_scoped(
+                    "https://iota.example".into(),
+                    HashMap::new(),
+                    json!({"jsonrpc":"2.0","id":1,"method":"iota_getTransactionBlock","params":["requested-digest",{"showEvents":true}]}),
+                )
+                .await
+        })
+        .await;
+        assert!(
+            matches!(result, Err(RpcError::Remote(message)) if message.contains("digest mismatch"))
+        );
     }
 }

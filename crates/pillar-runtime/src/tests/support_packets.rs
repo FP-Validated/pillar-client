@@ -258,7 +258,9 @@ fn solana_packet_sent_event_instruction(packet_return: &str) -> Value {
     let mut event = hex::decode("e445a52e51cb9a1d005ca7c98b2eab52").unwrap();
     event.extend_from_slice(&(packet.len() as u32).to_le_bytes());
     event.extend_from_slice(packet);
-    event.extend_from_slice(&0_u32.to_le_bytes());
+    let options = hex::decode("00030100110100000000000000000000000000000000").unwrap();
+    event.extend_from_slice(&(options.len() as u32).to_le_bytes());
+    event.extend_from_slice(&options);
     event.extend_from_slice(&send_library);
     json!({
         "programId": "76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6",

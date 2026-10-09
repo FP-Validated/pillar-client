@@ -752,6 +752,7 @@ async fn packet_sent_resolver_decodes_solana_program_return_packet() {
         "hyperliquid"
     );
     assert_eq!(sent_event.lz_message_id.nonce, 286);
+    assert!(sent_event.extra["options"].is_object());
     assert_eq!(
         sent_event.extra["guid"],
         "0xef08c522ae69e298671d4cb1f58084a21e5be098ed9a5170afa468e26a53a9fc"

@@ -50,9 +50,17 @@ impl JsonRpcTransport for ScriptedSui {
             );
             let all = self.events["data"].as_array().unwrap();
             assert_eq!(body["params"][3], false, "IOTA events must be ascending");
-            let start = if body["params"][1].is_null() { 0 } else { 50 };
+            let start = body["params"][1].as_u64().unwrap_or(0) as usize;
             let end = (start + 50).min(all.len());
-            let page = json!({"data":all[start..end],"hasNextPage":end < all.len(),"nextCursor":if end < all.len() {Value::from("page-1")} else {Value::Null}});
+            let data = all[start..end]
+                .iter()
+                .map(|event| {
+                    let mut event = event.clone();
+                    event["id"]["txDigest"] = body["params"][0]["Transaction"].clone();
+                    event
+                })
+                .collect::<Vec<_>>();
+            let page = json!({"data":data,"hasNextPage":end < all.len(),"nextCursor":if end < all.len() {Value::from(end as u64)} else {Value::Null}});
             return Ok(json!({"jsonrpc":"2.0","id":1,"result":page}));
         }
         assert!(
@@ -64,12 +72,14 @@ impl JsonRpcTransport for ScriptedSui {
         );
         let all = self.events["data"].as_array().unwrap();
         let after = body["variables"]["after"].as_str();
-        let start = if after.is_some() { 50 } else { 0 };
+        let start = after
+            .and_then(|cursor| cursor.parse::<usize>().ok())
+            .unwrap_or(0);
         let end = (start + 50).min(all.len());
         let nodes = all[start..end].iter().map(|event| json!({"contents":{"type":{"repr":event["type"]},"json":event["parsedJson"]}})).collect::<Vec<_>>();
         let has_next = end < all.len();
         Ok(
-            json!({"data":{"transaction":{"digest":body["variables"]["digest"],"effects":{"events":{"nodes":nodes,"pageInfo":{"hasNextPage":has_next,"endCursor":if has_next {"page-1"} else {"page-2"}}}}}}}),
+            json!({"data":{"transaction":{"digest":self.events.get("digestOverride").and_then(Value::as_str).unwrap_or(body["variables"]["digest"].as_str().unwrap()),"effects":{"events":{"nodes":nodes,"pageInfo":{"hasNextPage":has_next,"endCursor":if has_next {end.to_string()} else {String::new()}}}}}}}),
         )
     }
 
@@ -207,7 +217,7 @@ async fn sui_source_resolution_includes_leading_packet_and_rejects_overbound_tra
         .clone();
     let noise = json!({"type":"0x2::noise::Noise","parsedJson":{}});
     events.resize(51, noise.clone());
-    events[0] = packet_event.clone();
+    events[50] = packet_event.clone();
     source["data"] = Value::Array(events);
     let request: LzMessageId = serde_json::from_value(scenario["request"].clone()).unwrap();
     let resolver = scripted_resolver(fixture["environment"].as_str().unwrap(), "sui", &source);
@@ -253,7 +263,7 @@ async fn iota_source_resolution_follows_ascending_event_cursors() {
         .unwrap()
         .clone();
     events.resize(51, json!({"type":"0x2::noise::Noise","parsedJson":{}}));
-    events[0] = packet;
+    events[50] = packet;
     source["data"] = Value::Array(events);
     let request: LzMessageId = serde_json::from_value(scenario["request"].clone()).unwrap();
     let resolver = scripted_resolver(fixture["environment"].as_str().unwrap(), "iotal1", &source);
@@ -342,6 +352,27 @@ async fn sui_events_from_two_urls_of_one_entity_do_not_meet_a_two_entity_quorum(
     assert!(
         matches!(&error, AppCoreError::Internal(message)
             if message.starts_with("No Sui transaction events quorum")),
+        "{error:?}"
+    );
+}
+#[tokio::test]
+async fn sui_provider_with_wrong_transaction_digest_loses_its_vote() {
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let scenario = fixture["scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|scenario| scenario["chain"] == "sui" && scenario["name"] == "V302 match")
+        .unwrap();
+    let request: LzMessageId = serde_json::from_value(scenario["request"].clone()).unwrap();
+    let mut wrong = scenario["response"].clone();
+    wrong["digestOverride"] = Value::from("another-transaction-digest");
+    let error = scripted_resolver(fixture["environment"].as_str().unwrap(), "sui", &wrong)
+        .get_lz_sent_event(fixture["digest"].as_str().unwrap(), &request)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, AppCoreError::Internal(ref message) if message.starts_with("No Sui transaction events quorum")),
         "{error:?}"
     );
 }
