@@ -96,12 +96,11 @@ pub async fn aws_mnemonic_signer_assembly_from_config_with_metrics(
 pub async fn production_aws_mnemonic_secret_client(
     region: Option<&String>,
 ) -> Result<AwsSecretsManagerMnemonicClient, String> {
-    let mut config_loader = aws_config::defaults(aws_config::BehaviorVersion::latest());
-    if let Some(region) = region {
-        config_loader =
-            config_loader.region(aws_sdk_secretsmanager::config::Region::new(region.clone()));
-    }
-    let config = config_loader.load().await;
+    let region = region.cloned().unwrap_or_else(|| "us-east-1".to_string());
+    let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+        .region(aws_sdk_secretsmanager::config::Region::new(region))
+        .load()
+        .await;
     Ok(AwsSecretsManagerMnemonicClient::new(
         aws_sdk_secretsmanager::Client::new(&config),
     ))

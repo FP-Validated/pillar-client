@@ -319,6 +319,7 @@ async fn apply_refreshed_snapshot(
             let candidate = serving.candidate(snapshot.get_provider_configs().clone());
             match accept_refreshed_snapshot(&candidate, requested_csv) {
                 Ok(()) => {
+                    let previous = serving.load();
                     let weakened = candidate
                         .available_chain_names()
                         .iter()
@@ -328,7 +329,16 @@ async fn apply_refreshed_snapshot(
                                 .is_some_and(|config| config.single_entity_trust_root())
                         })
                         .collect::<Vec<_>>();
-                    if !weakened.is_empty() {
+                    let previously_weakened = previous
+                        .available_chain_names()
+                        .iter()
+                        .filter(|chain| {
+                            previous
+                                .provider_config(chain)
+                                .is_ok_and(|config| config.single_entity_trust_root())
+                        })
+                        .collect::<Vec<_>>();
+                    if weakened != previously_weakened && !weakened.is_empty() {
                         tracing::warn!(target: "pillar_runtime", chains = ?weakened, "provider config refresh accepted chains whose quorum can be met by a single entity");
                     }
                     metrics.set_provider_single_entity_chains(weakened.len());
@@ -387,10 +397,13 @@ async fn load_remote_snapshot(
     source: &RemoteProviderSource,
     required_chain_names: Option<&[String]>,
 ) -> Result<StaticProviderConfig, String> {
-    source
-        .load(loader.as_ref(), required_chain_names)
-        .await
-        .map_err(|error| error.to_string())
+    tokio::time::timeout(
+        Duration::from_secs(30),
+        source.load(loader.as_ref(), required_chain_names),
+    )
+    .await
+    .map_err(|_| "remote provider config load timed out after 30 seconds".to_string())?
+    .map_err(|error| error.to_string())
 }
 
 pub(crate) fn enforce_runtime_core_signer_production_policy(
@@ -483,6 +496,39 @@ mod tests {
         ) -> Result<String, ConfigError> {
             panic!("these tests inject the outcome directly and never fetch")
         }
+    }
+    struct PendingLoader;
+
+    #[async_trait]
+    impl RemoteProviderConfigLoader for PendingLoader {
+        async fn load_provider_config(
+            &self,
+            _request: RemoteProviderConfigRequest,
+        ) -> Result<String, ConfigError> {
+            std::future::pending().await
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn remote_provider_config_load_timeout_returns_error() {
+        let loader: Arc<dyn RemoteProviderConfigLoader> = Arc::new(PendingLoader);
+        let source = RemoteProviderSource {
+            providers: RemoteProviderConfigRequest::S3 {
+                bucket: "bucket".to_string(),
+                key: "providers-v2.json".to_string(),
+                region: None,
+            },
+            strategy: RemoteProviderConfigRequest::S3 {
+                bucket: "bucket".to_string(),
+                key: "quorum-strategy.json".to_string(),
+                region: None,
+            },
+        };
+        let load = tokio::spawn(async move { load_remote_snapshot(&loader, &source, None).await });
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(31)).await;
+        let error = load.await.unwrap().unwrap_err();
+        assert!(error.contains("timed out after 30 seconds"), "{error}");
     }
 
     /// Drives one refresh outcome against a caller-owned registry - the same
@@ -621,6 +667,7 @@ mod tests {
             .unwrap()
             .contains("bsc"));
 
+        logs.lock().clear();
         let serving = owner_serving(TWO);
         let registry = Arc::new(Mutex::new(PillarMetrics::new()));
         let unchanged = refresh_with(&serving, &registry, Ok(refreshed_snapshot(TWO))).await;
@@ -628,6 +675,7 @@ mod tests {
             rendered_gauge(&unchanged, "pillar_provider_single_entity_chains"),
             0.0
         );
+        assert!(logs.lock().is_empty(), "unchanged set must not warn");
     }
 
     #[tokio::test]

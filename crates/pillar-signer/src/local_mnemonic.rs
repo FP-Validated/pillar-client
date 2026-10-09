@@ -6,7 +6,11 @@ use hmac::{Hmac, Mac};
 use k256::ecdsa::SigningKey as EcdsaSigningKey;
 use pbkdf2::pbkdf2_hmac;
 use sha2::Sha512;
-use std::{collections::HashMap, str::FromStr, sync::Arc};
+use std::{
+    collections::HashMap,
+    str::FromStr,
+    sync::{Arc, OnceLock},
+};
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::factory::RawSignerAdapterFactory;
@@ -18,12 +22,12 @@ use crate::types::{
 type HmacSha512 = Hmac<Sha512>;
 
 struct DerivedSeeds {
-    bip39: Zeroizing<[u8; 64]>,
-    ton: Zeroizing<[u8; 64]>,
+    bip39: OnceLock<Result<Zeroizing<[u8; 64]>, String>>,
+    ton: OnceLock<Result<Zeroizing<[u8; 64]>, String>>,
 }
 pub struct LocalMnemonicRawSignerAdapter {
     pub(crate) mnemonic: LocalMnemonic,
-    seeds: Result<DerivedSeeds, String>,
+    seeds: DerivedSeeds,
 }
 
 impl std::fmt::Debug for LocalMnemonicRawSignerAdapter {
@@ -37,15 +41,13 @@ impl std::fmt::Debug for LocalMnemonicRawSignerAdapter {
 
 impl LocalMnemonicRawSignerAdapter {
     pub fn new(mnemonic: LocalMnemonic) -> Self {
-        let seeds = (|| {
-            let parsed = Mnemonic::parse_in_normalized(Language::English, &mnemonic.mnemonic)
-                .map_err(|error| error.to_string())?;
-            Ok::<_, String>(DerivedSeeds {
-                bip39: Zeroizing::new(parsed.to_seed("")),
-                ton: ton_hd_seed(&mnemonic.mnemonic, "").map_err(|error| error.to_string())?,
-            })
-        })();
-        Self { mnemonic, seeds }
+        Self {
+            mnemonic,
+            seeds: DerivedSeeds {
+                bip39: OnceLock::new(),
+                ton: OnceLock::new(),
+            },
+        }
     }
 
     fn ecdsa_signing_key(&self, seed_kind: SeedKind) -> Result<EcdsaSigningKey, SignerError> {
@@ -67,14 +69,28 @@ impl LocalMnemonicRawSignerAdapter {
     }
 
     fn seed(&self, seed_kind: SeedKind) -> Result<&[u8; 64], SignerError> {
-        let seeds = self
-            .seeds
-            .as_ref()
-            .map_err(|error| SignerError::Message(error.clone()))?;
-        Ok(match seed_kind {
-            SeedKind::Bip39 => &seeds.bip39,
-            SeedKind::Ton => &seeds.ton,
-        })
+        match seed_kind {
+            SeedKind::Bip39 => self
+                .seeds
+                .bip39
+                .get_or_init(|| {
+                    Mnemonic::parse_in_normalized(Language::English, &self.mnemonic.mnemonic)
+                        .map(|parsed| Zeroizing::new(parsed.to_seed("")))
+                        .map_err(|error| error.to_string())
+                })
+                .as_ref()
+                .map(|seed| &**seed)
+                .map_err(|error| SignerError::Message(error.clone())),
+            SeedKind::Ton => self
+                .seeds
+                .ton
+                .get_or_init(|| {
+                    ton_hd_seed(&self.mnemonic.mnemonic, "").map_err(|error| error.to_string())
+                })
+                .as_ref()
+                .map(|seed| &**seed)
+                .map_err(|error| SignerError::Message(error.clone())),
+        }
     }
 
     fn ed25519_seed(&self, seed_kind: SeedKind) -> Result<Zeroizing<[u8; 32]>, SignerError> {

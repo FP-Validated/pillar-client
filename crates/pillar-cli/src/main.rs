@@ -125,7 +125,11 @@ async fn serve_until(
         let (stream, _) = match accepted {
             Ok(connection) => connection,
             Err(error) => {
-                tracing::error!(?error, "TCP accept failed; continuing");
+                tracing::error!(?error, "TCP accept failed; backing off");
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_millis(100)) => {},
+                    signalled = &mut shutdown => break 'accept signalled?,
+                }
                 continue;
             }
         };
@@ -151,7 +155,11 @@ async fn serve_until(
             let (stream, _) = match accepted {
                 Ok(connection) => connection,
                 Err(error) => {
-                    tracing::error!(?error, "TCP accept failed; continuing");
+                    tracing::error!(?error, "TCP accept failed; backing off");
+                    tokio::select! {
+                        _ = tokio::time::sleep(Duration::from_millis(100)) => {},
+                        _ = &mut end => break,
+                    }
                     continue;
                 }
             };
@@ -341,14 +349,21 @@ where
             TokioIo::new(IdleTimeoutIo::new(
                 io,
                 keep_alive_timeout,
-                max_connection_lifetime,
+                if control.is_some() {
+                    max_connection_lifetime + request_timeout
+                } else {
+                    max_connection_lifetime
+                },
             )),
             service,
         );
     tokio::pin!(connection);
+    let lifetime = tokio::time::sleep(max_connection_lifetime);
+    tokio::pin!(lifetime);
     if let Some((_, mut close)) = control {
         tokio::select! {
             result = &mut connection => result?,
+            _ = &mut lifetime => { connection.as_mut().graceful_shutdown(); connection.await?; }
             _ = close.changed() => { connection.as_mut().graceful_shutdown(); connection.await?; }
         }
     } else {
