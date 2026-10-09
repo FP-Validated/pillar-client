@@ -226,7 +226,7 @@ where
         };
 
         if compute.setting == EvmReadComputeSetting::OnlyMap {
-            return Ok(format!("0x{}", mapped_responses.join("")));
+            return Ok(mapped_responses.join(""));
         }
 
         let call_data = build_evm_lz_reduce_call_data(cmd, &mapped_responses)?;
@@ -239,7 +239,7 @@ where
                 blocks,
             )
             .await?;
-        decode_evm_bytes_result(&raw)
+        Ok(strip_hex_prefix(&decode_evm_bytes_result(&raw)?).to_string())
     }
 }
 
@@ -278,7 +278,7 @@ where
             self.resolve_compute_payload(&sent_event.message, compute, responses, blocks)
                 .await
         } else {
-            let mut resolved_payload = String::from("0x");
+            let mut resolved_payload = String::new();
             for response in responses {
                 resolved_payload.push_str(&response.response);
             }

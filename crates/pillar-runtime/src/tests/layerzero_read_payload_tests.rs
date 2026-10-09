@@ -248,7 +248,7 @@ async fn runtime_evm_read_payload_resolver_calls_request_block_marker() {
         .await
         .unwrap();
 
-    assert_eq!(resolved, "0x1234");
+    assert_eq!(resolved, "1234");
     let calls = calls.lock().unwrap();
     assert_eq!(calls[0].0, "https://bsc-rpc.example");
     assert_eq!(calls[0].2["method"], "eth_call");
@@ -342,7 +342,7 @@ async fn runtime_evm_read_payload_resolver_requires_exact_result_quorum() {
         .await
         .unwrap();
 
-    assert_eq!(resolved, "0x1234");
+    assert_eq!(resolved, "1234");
     assert_eq!(calls.lock().unwrap().len(), 3);
 }
 
@@ -482,7 +482,7 @@ async fn runtime_evm_read_payload_resolver_counts_two_urls_of_one_entity_as_one_
     ])
     .await
     .expect("two distinct entities meet any:2");
-    assert_eq!(resolved, "0x1234");
+    assert_eq!(resolved, "1234");
 
     let error = resolve_read_with_entities([
         ("shared_external", "alchemy"),
@@ -538,7 +538,7 @@ async fn runtime_evm_read_payload_resolver_uses_resolved_timestamp_marker() {
         .await
         .unwrap();
 
-    assert_eq!(resolved, "0xabcd");
+    assert_eq!(resolved, "abcd");
     let calls = calls.lock().unwrap();
     assert_eq!(calls[0].2["params"][1], pinned_block(BSC_BLOCK_64_HASH));
 }
@@ -578,7 +578,7 @@ async fn runtime_evm_read_payload_resolver_applies_only_map_compute() {
         .await
         .unwrap();
 
-    assert_eq!(resolved, "0xbbcc");
+    assert_eq!(resolved, "bbcc");
     let calls = calls.lock().unwrap();
     assert_eq!(calls.len(), 2);
     assert_eq!(calls[0].2["params"][1], pinned_block(BSC_BLOCK_64_HASH));
@@ -624,7 +624,7 @@ async fn runtime_evm_read_payload_resolver_applies_only_reduce_compute() {
         .await
         .unwrap();
 
-    assert_eq!(resolved, "0xccdd");
+    assert_eq!(resolved, "ccdd");
     let calls = calls.lock().unwrap();
     assert_eq!(calls.len(), 2);
     assert_eq!(
@@ -673,7 +673,7 @@ async fn runtime_evm_read_payload_resolver_applies_map_reduce_compute() {
         .await
         .unwrap();
 
-    assert_eq!(resolved, "0xddee");
+    assert_eq!(resolved, "ddee");
     let calls = calls.lock().unwrap();
     assert_eq!(calls.len(), 3);
     assert_eq!(calls[1].2["params"][1], pinned_block(BSC_BLOCK_65_HASH));
@@ -690,7 +690,7 @@ async fn reqwest_read_empty_call_smoke_covers_code_and_pinned_quorum() {
 
     let (deployed_empty, deployed_servers) =
         run_reqwest_read_code_case(vec![json!({ "result": "0x6000" })], 1).await;
-    assert_eq!(deployed_empty.unwrap(), "0x");
+    assert_eq!(deployed_empty.unwrap(), "");
     let deployed_requests = collect_local_read_rpc_requests(deployed_servers).await;
     assert_eq!(deployed_requests.len(), 2);
 

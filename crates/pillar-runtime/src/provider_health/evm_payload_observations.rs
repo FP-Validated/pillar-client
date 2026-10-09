@@ -199,18 +199,22 @@ where
     let read = async {
         let (receive_contract, view_contract) =
             evm_receive_contract_pair(observation.contracts, receive_version)?;
-        let config_call_data =
-            build_evm_get_uln_config_call_data(observation.oapp, observation.remote_eid)?;
         let verifiable_call_data = build_evm_verifiable_call_data(observation.proof)?;
-        let config_result = eth_call(
-            transport.clone(),
-            url.clone(),
-            headers.clone(),
-            receive_contract,
-            &config_call_data,
-        )
-        .await?;
-        let inbound_confirmations = decode_evm_uln_config_confirmations(&config_result)?;
+        let inbound_confirmations = if receive_version == "ReadV1002" {
+            0
+        } else {
+            let config_call_data =
+                build_evm_get_uln_config_call_data(observation.oapp, observation.remote_eid)?;
+            let config_result = eth_call(
+                transport.clone(),
+                url.clone(),
+                headers.clone(),
+                receive_contract,
+                &config_call_data,
+            )
+            .await?;
+            decode_evm_uln_config_confirmations(&config_result)?
+        };
         let dvn_confirmed = if let Some(verifier_address) = observation.verifier_address {
             let hash_lookup_call_data =
                 build_evm_hash_lookup_call_data(observation.proof, verifier_address)?;

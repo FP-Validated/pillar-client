@@ -744,15 +744,23 @@ impl PillarApp {
                 .map_err(|error| {
                     map_sent_event_error(error, &request.src_tx_hash, &request.lz_message_id)
                 })?;
-            // The builder and vId follow the resolved destination, the wallets follow
-            // the requested one; they must be the same chain.
             let resolved = &sent_event.lz_message_id.pathway_id.dst_chain_name;
             if resolved != dst_chain_name {
                 return Err(AppCoreError::Internal(format!(
                     "resolved PacketSent destination {resolved} does not match requested destination {dst_chain_name}"
                 )));
             }
-            // A V2 send verified on a V3-family library is signed over the
+            // The resolved event must also use the requested ULN version, except V2-to-V3 routing.
+            let requested_version = request.lz_message_id.uln_send_version.as_str().unwrap_or_default();
+            let resolved_version = sent_event.lz_message_id.uln_send_version.as_str().unwrap_or_default();
+            if resolved_version != requested_version
+                && !(requested_version == "V2" && resolved_version == "V3")
+            {
+                return Err(AppCoreError::BadRequest(format!(
+                    "resolved PacketSent ULN version {resolved_version} does not match requested ULN version {requested_version}"
+                )));
+            }
+            // The builder and vId follow the resolved destination, the wallets follow
             // rebuilt V2 event (TS 1.2.66: `hashCallDataBuilder/ulnV3.ts:36-63`).
             if routed_version.is_some() {
                 tracing::info!(
@@ -946,12 +954,29 @@ impl PillarApp {
             .await;
         let signatures = sign_result?;
 
-        let payload = details
+        let resolved_payload = details
             .pointer("/proof/resolvedPayload")
-            .or_else(|| details.pointer("/proof/payload"))
             .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
+            .unwrap_or_default();
+        let request_payload = details
+            .pointer("/proof/payload")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let payload = if sent_event.lz_message_id.uln_send_version.as_str() == Some("ReadV1002") {
+            let payload = if resolved_payload.is_empty() || resolved_payload == "0x" {
+                request_payload
+            } else {
+                resolved_payload
+            };
+            payload.strip_prefix("0x").unwrap_or(payload).to_string()
+        } else {
+            details
+                .pointer("/proof/resolvedPayload")
+                .or_else(|| details.pointer("/proof/payload"))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        };
 
         let response = PillarApiResponse {
             signatures,

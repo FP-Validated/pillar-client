@@ -42,10 +42,18 @@ fn execute_digest_uses_kinobi_field_order() {
 
 #[test]
 fn solana_public_key_decodes_base58_like_sdk() {
+    let base58 = public_key_bytes(SOLANA_ULN_PROGRAM_ID).unwrap();
     assert_eq!(
-        hex::encode(public_key_bytes(SOLANA_ULN_PROGRAM_ID).unwrap()),
+        hex::encode(base58),
         "619e429a1de67854bd455ee6643f568d6236cde8e9442a3abf029f016faae630"
     );
+}
+
+#[test]
+fn solana_public_key_accepts_equivalent_0x_hex() {
+    let base58 = public_key_bytes(SOLANA_ULN_PROGRAM_ID).unwrap();
+    let hex = format!("0x{}", hex::encode(base58));
+    assert_eq!(public_key_bytes(&hex).unwrap(), base58);
 }
 
 #[test]
