@@ -42,10 +42,19 @@ fn mpt_receipt(block_hash: &str) -> Value {
 
 #[tokio::test]
 async fn runtime_evm_uln_v2_payload_builder_derives_mpt_hash_info_with_quorum() {
-    run_mpt_payload(None, mpt_receipt(MPT_BLOCK_HASH))
-        .await
-        .0
-        .unwrap();
+    run_mpt_payload(
+        Some(mpt_evidence(MPT_BLOCK_HASH)),
+        mpt_receipt(MPT_BLOCK_HASH),
+    )
+    .await
+    .0
+    .unwrap();
+}
+#[tokio::test]
+async fn runtime_evm_uln_v2_mpt_refuses_missing_source_evidence() {
+    let (result, calls) = run_mpt_payload(None, mpt_receipt(MPT_BLOCK_HASH)).await;
+    result.expect_err("missing source evidence must fail before reading the block");
+    assert_eq!(calls, 5, "no block read when source binding is absent");
 }
 
 /// The MPT proof is built from the block the *second* receipt read names, so a receipt
@@ -176,6 +185,7 @@ async fn run_mpt_payload(
         assert_eq!(calls[4].2["method"], "eth_getTransactionReceipt");
         assert_eq!(calls[5].2["method"], "eth_getBlockByHash");
         assert_eq!(calls[5].2["params"][0], MPT_BLOCK_HASH);
+        assert_eq!(calls[5].2["params"][1], false);
     }
     (result, count)
 }

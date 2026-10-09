@@ -38,11 +38,12 @@ where
             "Receipt transactionHash does not match requested transaction".to_string(),
         ));
     }
-    if let Some(evidence) = source_evidence {
-        validate_receipt_binding(&receipt, evidence, tx_hash).map_err(|reason| {
-            AppCoreError::BadRequest(format!("source receipt binding changed: {reason}"))
-        })?;
-    }
+    let evidence = source_evidence.ok_or_else(|| {
+        AppCoreError::Internal("Missing source evidence for MPT proof".to_string())
+    })?;
+    validate_receipt_binding(&receipt, evidence, tx_hash).map_err(|reason| {
+        AppCoreError::BadRequest(format!("source receipt binding changed: {reason}"))
+    })?;
     let block_hash = receipt_result
         .get("blockHash")
         .and_then(Value::as_str)
@@ -54,7 +55,7 @@ where
             headers,
             json!({
                 "method": "eth_getBlockByHash",
-                "params": [block_hash.clone(), true],
+                "params": [block_hash.clone(), false],
                 "id": 1,
                 "jsonrpc": "2.0",
             }),
