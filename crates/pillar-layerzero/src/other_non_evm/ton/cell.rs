@@ -62,6 +62,9 @@ pub fn boc_from_bytes_with_limits(
     if !boc_header_is_safe(&bytes, max_cells) {
         return Err(map_err("invalid BOC header"));
     }
+    if boc_root_depth(&bytes).is_none_or(|depth| depth > MAX_CELL_DEPTH) {
+        return Err(map_err("TON cell depth exceeds protocol limit"));
+    }
     catch_unwind(AssertUnwindSafe(|| {
         let root = BoC::from_bytes(std::sync::Arc::new(bytes))
             .map_err(map_err)?
@@ -72,16 +75,17 @@ pub fn boc_from_bytes_with_limits(
         let mut cells = vec![root.clone()];
         let mut visited = std::collections::HashSet::new();
         while let Some(cell) = cells.pop() {
-            let hash = cell.hash().map_err(map_err)?.clone();
-            if !visited.insert(hash) {
-                continue;
-            }
             if reject_exotic
                 && (cell.cell_type() != CellType::Ordinary || cell.level_mask().mask() != 0)
             {
                 return Err(map_err("exotic TON cells are not supported"));
             }
-            cells.extend(cell.refs().iter().cloned());
+            let refs = cell.refs();
+            // Refs are inline in each Arc-backed cell; their address identifies the node.
+            if refs.is_empty() || !visited.insert(refs.as_ptr() as usize) {
+                continue;
+            }
+            cells.extend(refs.iter().cloned());
         }
         Ok(root)
     }))
@@ -90,6 +94,7 @@ pub fn boc_from_bytes_with_limits(
 
 pub const MAX_MESSAGE_CELLS: usize = 1 << 13;
 pub const MAX_ACCOUNT_STATE_CELLS: usize = 1 << 16;
+pub const MAX_CELL_DEPTH: usize = 1024;
 
 fn boc_header_is_safe(bytes: &[u8], max_cells: usize) -> bool {
     if bytes.len() < 10 || bytes[..4] != [0xb5, 0xee, 0x9c, 0x72] {
@@ -151,7 +156,62 @@ fn boc_header_is_safe(bytes: &[u8], max_cells: usize) -> bool {
         .checked_add(crc_size)
         .is_some_and(|end| end <= bytes.len())
 }
-
+// Check wire references before constructing TonCells so a refused deep tree cannot recursively drop.
+fn boc_root_depth(bytes: &[u8]) -> Option<usize> {
+    let flags = *bytes.get(4)?;
+    let has_idx = flags & 0x80 != 0;
+    let size_bytes = usize::from(flags & 7);
+    let offset_bytes = usize::from(*bytes.get(5)?);
+    let mut cursor = 6;
+    let cells = read_boc_uint(bytes, &mut cursor, size_bytes)?;
+    let roots = read_boc_uint(bytes, &mut cursor, size_bytes)?;
+    read_boc_uint(bytes, &mut cursor, size_bytes)?;
+    let data_size = read_boc_uint(bytes, &mut cursor, offset_bytes)?;
+    if roots != 1 {
+        return None;
+    }
+    let root = read_boc_uint(bytes, &mut cursor, size_bytes)?;
+    if root >= cells {
+        return None;
+    }
+    let index_size = if has_idx {
+        cells.checked_mul(offset_bytes)?
+    } else {
+        0
+    };
+    cursor = cursor.checked_add(index_size)?;
+    let data_end = cursor.checked_add(data_size)?;
+    if data_end > bytes.len() {
+        return None;
+    }
+    let mut refs_by_cell = Vec::with_capacity(cells);
+    for index in 0..cells {
+        let d1 = *bytes.get(cursor)?;
+        let d2 = *bytes.get(cursor + 1)?;
+        cursor += 2;
+        cursor = cursor.checked_add(usize::from(d2 / 2 + d2 % 2))?;
+        let refs_count = usize::from(d1 & 7);
+        let mut refs = Vec::with_capacity(refs_count);
+        for _ in 0..refs_count {
+            let reference = read_boc_uint(bytes, &mut cursor, size_bytes)?;
+            if reference <= index || reference >= cells {
+                return None;
+            }
+            refs.push(reference);
+        }
+        refs_by_cell.push(refs);
+    }
+    if cursor != data_end {
+        return None;
+    }
+    let mut depths = vec![0usize; cells];
+    for index in (0..cells).rev() {
+        for &reference in &refs_by_cell[index] {
+            depths[index] = depths[index].max(depths[reference].checked_add(1)?);
+        }
+    }
+    Some(depths[root])
+}
 fn read_boc_uint(bytes: &[u8], cursor: &mut usize, width: usize) -> Option<usize> {
     let end = cursor.checked_add(width)?;
     let value = bytes
@@ -303,12 +363,56 @@ mod tests {
     }
     #[test]
     fn refuses_a_chain_that_would_overflow_ton_cell_depth() {
-        let cell_count = u32::from(u16::MAX) as usize + 1;
+        let boc = make_deep_chain(MAX_CELL_DEPTH + 2);
+        assert_eq!(boc_root_depth(&boc), Some(MAX_CELL_DEPTH + 1));
+        assert!(boc_from_bytes_with_limits(boc, MAX_ACCOUNT_STATE_CELLS, true).is_err());
+    }
+
+    #[test]
+    fn rejects_account_chain_above_limit_in_two_mib_worker() {
+        const CHILD: &str = "PILLAR_TON_DEEP_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            let boc = make_deep_chain(MAX_ACCOUNT_STATE_CELLS - 1);
+            let worker = std::thread::Builder::new()
+                .stack_size(2 * 1024 * 1024)
+                .spawn(move || boc_from_bytes_with_limits(boc, MAX_ACCOUNT_STATE_CELLS, true))
+                .unwrap();
+            assert!(worker.join().expect("worker must return normally").is_err());
+            return;
+        }
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "other_non_evm::ton::cell::tests::rejects_account_chain_above_limit_in_two_mib_worker", "--nocapture"])
+            .env(CHILD, "1")
+            .status()
+            .unwrap();
+        assert!(status.success(), "child test failed: {status}");
+    }
+
+    fn make_deep_chain(cell_count: usize) -> Vec<u8> {
         let data_size = (cell_count - 1) * 5 + 2;
         let mut boc = vec![
-            0xb5, 0xee, 0x9c, 0x72, 3, 3, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0x03, 0xff, 0xfe,
+            0xb5,
+            0xee,
+            0x9c,
+            0x72,
+            3,
+            3,
+            ((cell_count >> 16) & 0xff) as u8,
+            ((cell_count >> 8) & 0xff) as u8,
+            (cell_count & 0xff) as u8,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            ((data_size >> 16) & 0xff) as u8,
+            ((data_size >> 8) & 0xff) as u8,
+            (data_size & 0xff) as u8,
+            0,
+            0,
+            0,
         ];
-        boc.extend_from_slice(&[0, 0, 0]);
         for index in 0..cell_count {
             if index + 1 == cell_count {
                 boc.extend_from_slice(&[0, 0]);
@@ -318,9 +422,73 @@ mod tests {
                 boc.extend_from_slice(&next.to_be_bytes()[1..]);
             }
         }
-        assert_eq!(boc.len() - 21, data_size);
+        boc
+    }
+
+    #[test]
+    fn parses_maximal_account_state_boc() {
+        let boc = make_flat_boc(MAX_ACCOUNT_STATE_CELLS);
+        assert!(boc_from_bytes_with_limits(boc, MAX_ACCOUNT_STATE_CELLS, true).is_ok());
+    }
+
+    #[test]
+    fn parses_maximal_message_boc() {
+        let boc = make_flat_boc(MAX_MESSAGE_CELLS);
+        assert!(boc_from_bytes_with_limits(boc, MAX_MESSAGE_CELLS, true).is_ok());
+    }
+
+    fn make_flat_boc(cell_count: usize) -> Vec<u8> {
+        let data_size = cell_count * 2;
+        let mut boc = vec![
+            0xb5,
+            0xee,
+            0x9c,
+            0x72,
+            3,
+            3,
+            ((cell_count >> 16) & 0xff) as u8,
+            ((cell_count >> 8) & 0xff) as u8,
+            (cell_count & 0xff) as u8,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            ((data_size >> 16) & 0xff) as u8,
+            ((data_size >> 8) & 0xff) as u8,
+            (data_size & 0xff) as u8,
+            0,
+            0,
+            0,
+        ];
+        boc.resize(21 + data_size, 0);
+        boc
+    }
+    #[test]
+    fn refuses_deep_chain_on_message_cell_cap_path() {
+        let boc = make_deep_chain(MAX_MESSAGE_CELLS + 1);
         assert!(boc_from_bytes(boc).is_err());
     }
+    #[test]
+    fn refuses_forged_level_mask_pruned_branch_boc() {
+        let mut c_builder = TonCell::builder();
+        c_builder.write_bits([0xcd], 8).unwrap();
+        let c = c_builder.build().unwrap();
+        let hash = c.hash().unwrap();
+        let depth = c.depth().unwrap();
+
+        let mut boc = vec![
+            0xb5, 0xee, 0x9c, 0x72, 3, 3, 0, 0, 5, 0, 0, 1, 0, 0, 0, 0, 0, 61, 0, 0, 0, 2, 0, 0, 0,
+            1, 0, 0, 2, 1, 2, 0xab, 0, 0, 3, 1, 2, 0xab, 0, 0, 4, 0x28, 72, 1, 1,
+        ];
+        boc.extend_from_slice(hash.as_slice());
+        boc.extend_from_slice(&depth.to_be_bytes());
+        boc.extend_from_slice(&[0, 2, 0xcd]);
+        assert_eq!(boc.len(), 21 + 61);
+        assert!(boc_from_bytes_with_limits(boc, MAX_MESSAGE_CELLS, true).is_err());
+    }
+
     #[test]
     fn validates_repeated_reference_dag_in_linear_time() {
         let mut boc = vec![0xb5, 0xee, 0x9c, 0x72, 1, 1, 40, 1, 0, 236, 0];
