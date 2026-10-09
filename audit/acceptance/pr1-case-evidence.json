@@ -518,9 +518,10 @@
   "inRepoCaseTests": {
     "recordedAtKst": "2026-10-09T16:59:23+09:00",
     "sourceBase": "abe9d60053ea582f0f0d1d0635f0f80523b5790d",
-    "sourceState": "the commit that adds this entry on branch fix/client-review-20261009; its tests were run on that working tree, which differs from the commit only by this ledger and Markdown",
+    "sourceState": "commit 8b4022073787451cdd3c98b5119d95fa0f9fcf71 on branch fix/client-review-20261009, merged to main as b7fc3ab41fec6632db69b3d8b33ceab10ff45525; the local run used a working tree that differed from that commit only by this ledger, AUDIT section 15 and two comment-only line wraps, and hosted CI ran the merged commit itself",
     "command": "cargo +1.98.1 test --workspace --locked",
     "result": {"passed": 1004, "failed": 0, "ignored": 15, "note": "top-level test counts; one nested child-process run of an already-counted test is excluded"},
+    "hostedCi": {"run": "37903096415", "attempt": 1, "event": "push", "ref": "refs/heads/main", "headSha": "b7fc3ab41fec6632db69b3d8b33ceab10ff45525", "checkoutTree": "a3231a193e7bd25fe5999d1ac80973d16e0962d7", "conclusion": "success", "jobs": "6/6", "workspaceTests": {"passed": 1004, "failed": 0, "ignored": 15, "note": "the job log reports 1005 including the nested child-process run"}, "observedAtKst": "2026-10-09T17:45:29+09:00"},
     "purpose": "Each stable case ID maps to committed tests that CI runs from a plain clone. The earlier artifact paths under retest-250-20261007 are maintainer-local history and stay unchanged; they are not current evidence.",
     "cases": [
       {"caseId": "A2-FINALITY-LAG", "tests": ["crates/pillar-runtime/src/tests/core_app_tests.rs::production_vertical_polygon_and_tron_enforce_finality_and_canonical_headers (finalized_lag, polygon and tron)", "crates/pillar-runtime/src/tests/validation_readiness_tests.rs::polygon_readiness_binds_canonical_header_at_receipt_height (finalized behind receipt)"]},

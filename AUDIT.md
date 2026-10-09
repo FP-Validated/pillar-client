@@ -410,7 +410,7 @@ Final directory의 원시 logs는 harness 행을 포함한 worker tool-output �
 | --- | --- | --- |
 | F-1 KMS key 고정 | SECURITY Operator responsibilities에 rotation은 재시작이 필요하다는 절차를 추가했다. 동작은 바꾸지 않았다. | 소스 대조 (`aws.rs`, `azure/adapter.rs`, `gcp.rs`) |
 | F-2 `l1Fee` 테스트 공백 | 라운드 기반 테스트를 provider별 receipt 테스트와 PacketSent data 불일치 대조군으로 바꿨다. | Receipt fingerprint를 raw JSON으로 되돌린 변형에서 새 테스트는 `2 distinct successful responses`로 실패하고, 이전 테스트는 통과했다. |
-| F-3 acceptance 원장 | `pr1-case-evidence.json`에 `inRepoCaseTests`를 추가해 8개 case를 커밋된 테스트에 연결했다. 이전 기록은 바꾸지 않았다. | 아래 workspace 실행 |
+| F-3 acceptance 원장 | `pr1-case-evidence.json`에 `inRepoCaseTests`를 추가해 8개 case를 커밋된 테스트에 연결했다. 이전 기록은 바꾸지 않았다. | 아래 로컬 workspace 실행과 hosted CI run `37903096415` |
 | F-4 매핑되지 않은 srcEid | 의도적 500 정책을 유지하고 resolver 주석의 upstream 인용을 바로잡았다. 매핑된 srcEid 400과 매핑되지 않은 srcEid 500의 HTTP 테스트를 추가했다. | `packet_identity_http_tests` |
 | F-5 readiness 오류 분류 | Receipt 재조회의 RPC 실패를 `SourceChanged`(400)가 아니라 `Missing`(500)으로 기록한다. | 변경 전 코드에서 새 테스트는 `source receipt binding changed: connection reset by peer`로 실패했다. |
 | F-6 `removed` 정책 | 생략 수용, `null`과 비bool 거부를 테스트로 고정했다. §11의 해당 문장에 이후 변경을 표시했다. | `production_vertical_signs_when_receipt_logs_omit_removed` 등 |
@@ -425,9 +425,32 @@ Final directory의 원시 logs는 harness 행을 포함한 worker tool-output �
 | `cargo +1.98.1 test --workspace --locked` | 1004 passed, 0 failed, 15 ignored (중첩 child-process 실행 1건 제외) |
 | `cargo +1.94.1 check --workspace --locked --all-targets` | 통과 |
 | 변경 전 코드 대비 변형 검증 | 위 F-2, F-5 행 |
+| Hosted CI run `37903096415` (`b7fc3ab`, main push) | 6/6 jobs 성공. Workspace 1004 passed, 0 failed, 15 ignored (중첩 실행 1건 제외) |
 
 리뷰 단계의 반례 CE0~CE5는 `abe9d60`과 `f5868d0`에 같은 패치를 적용해 실행했다. CE1(`l1Fee`만 다른 provider 두 개)은 `f5868d0`에서 거부되고 `abe9d60`에서 대조군과 같은 payload와 signature로 서명했다. 원시 출력은 maintainer-local `.review-evidence-20261009/ce-output.json` (SHA-256 `c16ec43befa3f752e47471baab4e9c9dd39149dde8e13e79ce150c2ede65048d`)이다.
 
-**남은 범위:** 원본 351 comparisons 재실행, live provider의 Polygon/Tron `finalized` 지원, on-chain acceptance, live KMS rotation, live Lambda와 policy server 확인은 이 절의 범위가 아니다. §13의 공통 근거 범위를 따른다.
+### 운영 배포, 2026-10-09
 
-근거: 로컬 fmt/clippy/test/MSRV 실행, 변경 전 코드 대비 변형 실행, 리뷰 반례 원시 출력 · 2026-10-09 17:00 KST
+`8b40220`을 `b7fc3ab`으로 main에 머지했고 메인넷에 배포했다. 운영 이미지의 이전 소스 tree는 `abe9d60`과 같았으므로, 운영 동작 차이는 F-5 하나다.
+
+| 단계 | 결과 |
+| --- | --- |
+| CI image | Run `37903096415` attempt 1, checkout tree `a3231a193e7bd25fe5999d1ac80973d16e0962d7`, revision label `b7fc3ab`, 설정 누락 시 기동 거부 확인. Tar SHA-256 `c17265c03979c7afebcdf945be3339cd96ae7a8e9b84f05dd46d0564b4b6ceed` |
+| Registry | 같은 tar를 `crane push`로 `ghcr.io/fp-validated/pillar-dvn-client:ci-b7fc3ab41fec-r37903096415-a1`에 게시했다. 원격 digest `sha256:744309ed6274dce919054969d51064578e423dd0a315cc8763f2c9016e1692d0`, 원격 config SHA-256은 CI image ID `b765f410…`와 같다. |
+| GitOps | `FP-Validated/ovh-chain-repo` `f9af3f9`. Image tag 한 줄만 바꿨고 helm render 차이도 Deployment image 한 줄이다. |
+| Sync | aks-cluster ArgoCD `pillar-dvn-client-mainnet`을 hard refresh한 뒤 revision `f9af3f9`로 Deployment만 sync했다. Prune 대상인 구 ConfigMap `pillar-dvn-client-mainnet-provider-config`는 건드리지 않았다. |
+| Rollout | ovh-cluster `layerzero-mainnet` Deployment revision 18, 3/3 Ready, 세 pod 모두 새 digest, restart 0 |
+| 배포 전후 비교 | `/ready`, `/version`, `/environment`, `/available-chains`, `/signer-info`(ethereum, solana) 응답이 배포 전과 같았다. Signer identity는 바뀌지 않았다. |
+| 서명 경로 | 배포 직후 관측 시점에 서명 요청이 0건이었다. 운영 서명 경로는 아직 관측하지 않았다. |
+
+Rollback은 `ovh-chain-repo`에서 `f9af3f9`를 revert하고 같은 방식으로 Deployment만 sync하는 것이다. 이전 이미지 `ci-21b4955b00c0-r37891292805-a1@sha256:1fd4b09f…`는 registry에 남아 있다. 새 pod의 시작 로그에는 한 provider entity만으로 quorum을 채우는 체인이 있다는 WARN이 pod마다 1건 있다. Provider 설정은 바꾸지 않았지만, 이전 pod에도 같은 경고가 있었는지는 확인하지 않았다.
+
+**남은 검증:**
+
+- 운영 서명 경로: 실제 DVN 요청이 들어온 뒤 sign stage 성공 지표, signer 오류 지표와 destination on-chain 검증을 읽기 전용으로 확인한다.
+- Polygon `finalized`: 현재 provider 설정의 Polygon provider 전부가 `finalized` tag를 지원하는지 확인한다. 2026-10-08에는 OVH Polygon 한 곳만 확인했다.
+- 시작 WARN: provider 설정의 entity 구성으로 이 경고가 원래 있던 것인지 확인한다.
+- 원본 351 comparisons 재실행과 TON 266-level 원본 응답 replay는 외부 자료가 필요하다. live KMS rotation은 별도 승인과 테스트 key가 필요하다. 이 절의 범위가 아니며 §13의 공통 근거 범위를 따른다.
+- 현재 운영 설정에는 Tron이 없고 extra-context가 설정되어 있지 않다. Tron finality와 live Lambda/policy server 확인은 그 설정이 생길 때 수행한다.
+
+근거: 로컬 fmt/clippy/test/MSRV 실행, 변경 전 코드 대비 변형 실행, 리뷰 반례 원시 출력 · 2026-10-09 17:00 KST. 운영 배포 절: hosted CI 로그와 artifact, crane digest, ArgoCD 상태, rollout과 pod image ID, 배포 전후 endpoint 비교 · 2026-10-09 17:45 KST
