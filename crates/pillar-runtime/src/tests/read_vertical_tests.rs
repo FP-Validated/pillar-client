@@ -506,6 +506,36 @@ async fn production_read_vertical_signs_state_from_the_validated_block() {
     }
 }
 
+#[tokio::test]
+async fn production_read_vertical_refuses_reverted_read_lib_config_before_signing() {
+    let (app, calls) =
+        read_vertical_app(ReadChain::ReadLibConfigReverts, ReadMarker::BlockNumber).await;
+
+    let error = app
+        .sign_request_v2(read_vertical_request(ReadMarker::BlockNumber))
+        .await
+        .expect_err("a reverted ReadLib1002 config call must refuse signing");
+    assert!(error.to_string().contains("payload-signed"), "{error}");
+    let stages = stages_of(&app).await;
+    assert!(
+        stages.iter().all(|stage| stage != "sign"),
+        "stages={stages:?}"
+    );
+    let config_calls = calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, _, body)| {
+            body["method"] == "eth_call"
+                && body["params"][0]["data"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .starts_with("0x8eb0bf30")
+        })
+        .count();
+    assert_eq!(config_calls, 1);
+}
+
 /// Readiness agrees on block 0x40 = A; before the builder reads, the chain
 /// reorganises so that 0x40 = B. Both providers still agree with each other,
 /// so the refusal comes from the pin, and the key is never reached.
