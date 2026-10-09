@@ -105,6 +105,17 @@ async fn sui_source_events_match_gasolina() {
             .get_lz_sent_event(digest, &request)
             .await;
         let resolved = result.is_ok();
+        // GraphQL renders `vector<u8>` as base64, so a JSON-RPC-only digit-string encoding
+        // reaching the Sui GraphQL path is a malformed provider answer, not a packet.
+        if chain == "sui" && name == "options as a type-1 digit string" {
+            assert!(
+                matches!(&result, Err(AppCoreError::Internal(message))
+                    if message.starts_with("No Sui transaction events quorum")),
+                "{chain} {name}: {result:?}"
+            );
+            stricter_refused += 1;
+            continue;
+        }
         match (
             pillar_stricter(name, digest),
             outcome_of(&result, &scenario["outcome"]),
@@ -148,6 +159,7 @@ async fn sui_source_events_match_gasolina() {
         42,
         "every upstream scenario is replayed"
     );
-    assert_eq!(stricter_refused, 8);
-    assert_eq!(dst_name_refused, 12);
+    // Eight version/encoding refusals across both chains, plus the Sui GraphQL digit-string one.
+    assert_eq!(stricter_refused, 9);
+    assert_eq!(dst_name_refused, 11);
 }

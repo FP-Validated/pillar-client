@@ -3,6 +3,8 @@ use super::*;
 /// A Sui address in the fixture's ULN receive config.
 const VERIFIER: &str = "0x0c12321ebe562b8fb8a74e6d29f144ea199a8f31a4cea3a417ce72477f6dfebb";
 const SUI_RECEIVER: &str = "0x1111111111111111111111111111111111111111111111111111111111111111";
+const SIMULATION_CAPTURE: &str =
+    include_str!("../../tests/gasolina_parity/transport/sui-mainnet-graphql-shared-version.json");
 
 fn sui_sent_event(dst_chain_name: &str, dst_eid: u64) -> LzSentEvent {
     let mut event = payload_signed_sent_event();
@@ -278,6 +280,20 @@ async fn runtime_rpc_validation_checks_fail_closed_on_other_sui_aborts() {
 }
 
 #[tokio::test]
+async fn runtime_rpc_validation_checks_fail_closed_on_string_sui_abort_code() {
+    let response = Ok(
+        json!({"data":{"simulateTransaction":{"effects":{"status":"FAILURE","executionError":{"abortCode":"7","message":"MoveAbort"}},"outputs":[]}}}),
+    );
+    let responses = sui_responses(SUI_RECEIVER, 0, Some(response), 15);
+    let checks = sui_checks("sui", responses, Arc::new(Mutex::new(Vec::new())));
+    let error = checks
+        .validate_payload_not_signed(&sui_sent_event("sui", 30_350), Some(VERIFIER), "sui")
+        .await
+        .unwrap_err();
+    assert!(matches!(error, AppCoreError::Internal(_)), "{error}");
+}
+
+#[tokio::test]
 async fn runtime_rpc_validation_checks_fail_closed_when_sui_confirmations_are_zero_and_required_is_zero(
 ) {
     // A pathway requiring zero confirmations is satisfied by zero, which is the
@@ -332,17 +348,26 @@ async fn runtime_rpc_validation_checks_fail_closed_on_non_shared_sui_object() {
     // The encoder only supports shared inputs; an owned object must fail rather
     // than be guessed at.
     let mut responses = sui_responses(SUI_RECEIVER, 0, None, 15);
-    responses[1] = Ok(json!({
-        "result": [{ "data": { "objectId": "0x1", "version": "5",
-                               "owner": { "AddressOwner": "0x2" } } }]
-    }));
-    let checks = sui_checks("sui", responses, Arc::new(Mutex::new(Vec::new())));
+    responses[1] =
+        Ok(json!({"data":{"object":{"asMoveObject":{"owner":{"__typename":"AddressOwner"}}}}}));
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let checks = sui_checks("sui", responses, calls.clone());
 
     let error = checks
         .validate_payload_not_signed(&sui_sent_event("sui", 30_350), Some(VERIFIER), "sui")
         .await
         .unwrap_err();
     assert!(matches!(error, AppCoreError::Internal(_)), "{error}");
+    let queries: Vec<String> = calls
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(_, _, body)| body["query"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(queries.len(), 2, "stopped at the owner read: {queries:?}");
+    assert!(queries
+        .iter()
+        .all(|query| !query.contains("simulateTransaction")));
 }
 
 #[tokio::test]
@@ -395,11 +420,11 @@ fn live_sui_sent_event() -> LzSentEvent {
 #[tokio::test]
 async fn runtime_rpc_validation_checks_send_the_live_sui_header_and_reject_its_verified_state() {
     let calls: RecordedJsonCalls = Arc::new(Mutex::new(Vec::new()));
-    let checks = sui_checks(
-        "sui",
-        sui_responses(LIVE_SUI_RECEIVER, 2, None, 1),
-        calls.clone(),
+    let mut responses = sui_responses(LIVE_SUI_RECEIVER, 2, None, 1);
+    responses[1] = Ok(
+        json!({"data":{"object":{"asMoveObject":{"owner":{"__typename":"Shared","initialSharedVersion":"635685314"}}}}}),
     );
+    let checks = sui_checks("sui", responses, calls.clone());
 
     let error = checks
         .validate_payload_not_signed(&live_sui_sent_event(), Some(VERIFIER), "sui")
@@ -408,6 +433,23 @@ async fn runtime_rpc_validation_checks_send_the_live_sui_header_and_reject_its_v
     assert!(matches!(error, AppCoreError::BadRequest(_)), "{error}");
 
     let recorded = calls.lock().unwrap();
+    let capture: Value = serde_json::from_str(SIMULATION_CAPTURE).unwrap();
+    let captured =
+        &capture["correct_version"]["variables"]["transaction"]["kind"]["programmableTransaction"];
+    let generated = recorded
+        .iter()
+        .find(|(_, _, body)| {
+            body["query"].as_str().is_some_and(|query| {
+                query.contains("simulateTransaction(transaction: $transaction")
+            }) && body["variables"]["transaction"]["kind"]["programmableTransaction"]["commands"][0]
+                ["moveCall"]["function"]
+                == "get_messaging_channel"
+        })
+        .expect("production code generated get_messaging_channel simulation");
+    let programmable = &generated.2["variables"]["transaction"]["kind"]["programmableTransaction"];
+    assert_eq!(programmable["inputs"], captured["inputs"]);
+    assert_eq!(programmable["commands"], captured["commands"]);
+
     let header = hex::decode(LIVE_SUI_PACKET_HEADER).unwrap();
     let carried = recorded.iter().any(|(_, _, body)| {
         body["query"]

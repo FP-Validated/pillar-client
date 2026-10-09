@@ -132,8 +132,10 @@ queries for Sui events, transaction/checkpoint data, shared-object owners, Move
 function signatures and transaction simulation. Configure distinct GraphQL
 providers as usual so the configured provider quorum remains effective. IOTA
 (`iotal1`) continues to use `iota_*` JSON-RPC and must retain IOTA JSON-RPC URLs.
-This change deliberately diverges from upstream gasoline, which still uses Sui
+This change deliberately diverges from upstream gasolina, which still uses Sui
 JSON-RPC; it is required by Sui's JSON-RPC decommission.
+A JSON-RPC URL left in the Sui pool is treated as a failing provider, so it
+reduces the number of providers that can meet the quorum.
 
 On `SIGTERM` or `SIGINT`, shutdown starts at T0. `GET /ready` returns 503 and
 the two signing routes reject new work immediately; the listener continues

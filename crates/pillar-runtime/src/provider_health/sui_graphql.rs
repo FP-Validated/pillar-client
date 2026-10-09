@@ -318,12 +318,7 @@ fn normalize_graphql_event_json(event_type: &str, parsed: &mut Value) -> bool {
         let Some(encoded) = object.get(field).and_then(Value::as_str) else {
             continue;
         };
-        if encoded.starts_with("0x")
-            || (field == "options"
-                && !encoded.is_empty()
-                && encoded.len() % 2 == 0
-                && encoded.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        {
+        if encoded.starts_with("0x") {
             continue;
         }
         use base64::Engine;
@@ -435,5 +430,15 @@ mod tests {
         ] {
             assert_eq!(timestamp_millis(bad), None);
         }
+    }
+
+    #[test]
+    fn packet_options_decode_hex_looking_text_as_base64() {
+        let mut parsed = json!({"options":"AAAA"});
+        assert!(normalize_graphql_event_json(
+            "0x1::messaging_channel::PacketSentEvent",
+            &mut parsed
+        ));
+        assert_eq!(parsed["options"], json!([0, 0, 0]));
     }
 }
