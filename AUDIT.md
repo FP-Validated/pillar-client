@@ -329,6 +329,7 @@ The follow-up to baseline f5868d0428cf3edb585dca5a396c02e37d3d0ade changed sourc
 - Receipt quorum compares typed semantic fields and checks receipt/log transaction and block identity plus `removed=false`. Optional `0x` prefixes normalize for comparison without changing the RPC wire value. Source-evidence expansion means validation audit hashes are not byte-comparable with the earlier schema.
 - TON's 512 limit is JSON container nesting, not trace-node depth; envelope-dependent usable trace depth is about 254. The reported original depth-266 response was unavailable; its replay remains unverified.
 - Public LayerZero-v2 commit `9c741e7f9790639537b1710a203bcdfd73b0b9ac` supports the 64-byte signer `X||Y` layout and offset 17. The 2026-10-07 finalized Solana account read (slot `454171112`, owner `9U6MUTuH9XZFoP993kq3We6gu95NbJhNM82cdpbpyF9n`) matched the Azure fixture; response SHA-256 `ca5c00de9c4104173926b95f8ad7f36e6b811c0c0b8d86d1e972605c43548e14`. This did not establish deployed-program/source correspondence or an independent Azure public-key match.
+- Later changes supersede three of these dated statements: `5360159` accepts an omitted `removed` as `false` and refuses `null` or a non-boolean; the same commit caps TON trace nodes at 512 alongside JSON nesting; and the 2026-10-08 probe in §12 matched the immutable Azure key version's public key. §15 records the 2026-10-09 review follow-up.
 
 | Reference evidence | Recorded value / limitation |
 | --- | --- |
@@ -400,3 +401,33 @@ Final directory의 원시 logs는 harness 행을 포함한 worker tool-output �
 **변경과 검증 범위:** READ HTTP E2E 및 감사 문서의 수정이다. Numeric regression, fixture TCP HTTP, targeted Clippy, formatting과 독립 source/artifact 검토를 수행했다. Source-bound 기록과 운영 acceptance는 별도 범위로 유지한다. RE-001과 원본 comparison ledger의 판정은 §13의 공통 근거 범위를 따른다.
 
 근거: audit/review-re003-20261009/run-log.txt, 최종 artifact 및 로그, Main artifact 대조와 fmt 확인, independent-review-followup.json · 2026-10-09 06:47 KST
+
+## 15. 2026-10-09 클라이언트 리뷰 후속 조치
+
+기준 커밋 `abe9d60`에 대한 리뷰의 finding F-1~F-7을 조치했다. 서명 정책은 F-5 하나만 바뀌었고, 나머지는 테스트와 문서다.
+
+| Finding | 조치 | 검증 |
+| --- | --- | --- |
+| F-1 KMS key 고정 | SECURITY Operator responsibilities에 rotation은 재시작이 필요하다는 절차를 추가했다. 동작은 바꾸지 않았다. | 소스 대조 (`aws.rs`, `azure/adapter.rs`, `gcp.rs`) |
+| F-2 `l1Fee` 테스트 공백 | 라운드 기반 테스트를 provider별 receipt 테스트와 PacketSent data 불일치 대조군으로 바꿨다. | Receipt fingerprint를 raw JSON으로 되돌린 변형에서 새 테스트는 `2 distinct successful responses`로 실패하고, 이전 테스트는 통과했다. |
+| F-3 acceptance 원장 | `pr1-case-evidence.json`에 `inRepoCaseTests`를 추가해 8개 case를 커밋된 테스트에 연결했다. 이전 기록은 바꾸지 않았다. | 아래 workspace 실행 |
+| F-4 매핑되지 않은 srcEid | 의도적 500 정책을 유지하고 resolver 주석의 upstream 인용을 바로잡았다. 매핑된 srcEid 400과 매핑되지 않은 srcEid 500의 HTTP 테스트를 추가했다. | `packet_identity_http_tests` |
+| F-5 readiness 오류 분류 | Receipt 재조회의 RPC 실패를 `SourceChanged`(400)가 아니라 `Missing`(500)으로 기록한다. | 변경 전 코드에서 새 테스트는 `source receipt binding changed: connection reset by peer`로 실패했다. |
+| F-6 `removed` 정책 | 생략 수용, `null`과 비bool 거부를 테스트로 고정했다. §11의 해당 문장에 이후 변경을 표시했다. | `production_vertical_signs_when_receipt_logs_omit_removed` 등 |
+| F-7 문서 조건 | GCP/Azure identity 비교 조건과 READ revert 메시지의 대소문자 무시를 문서에 반영했다. | 소스 대조 (`gcp.rs:65-67`, `azure/client.rs:69-79`, `evm_payload_observations.rs:325-326`) |
+
+추가 테스트는 Lambda policy payload의 `signingContext`, 빈 `dvnAddress`에서 `hashLookup`만 생략하고 `verifiable`은 유지하는 동작, READ와 Sui에서 한 entity의 URI 두 개가 한 표인지를 고정한다.
+
+| 검증 | 결과 |
+| --- | --- |
+| `cargo +1.98.1 fmt --all --check` | 통과 |
+| `cargo +1.98.1 clippy --workspace --all-targets --locked -- -D warnings` | 통과 |
+| `cargo +1.98.1 test --workspace --locked` | 1004 passed, 0 failed, 15 ignored (중첩 child-process 실행 1건 제외) |
+| `cargo +1.94.1 check --workspace --locked --all-targets` | 통과 |
+| 변경 전 코드 대비 변형 검증 | 위 F-2, F-5 행 |
+
+리뷰 단계의 반례 CE0~CE5는 `abe9d60`과 `f5868d0`에 같은 패치를 적용해 실행했다. CE1(`l1Fee`만 다른 provider 두 개)은 `f5868d0`에서 거부되고 `abe9d60`에서 대조군과 같은 payload와 signature로 서명했다. 원시 출력은 maintainer-local `.review-evidence-20261009/ce-output.json` (SHA-256 `c16ec43befa3f752e47471baab4e9c9dd39149dde8e13e79ce150c2ede65048d`)이다.
+
+**남은 범위:** 원본 351 comparisons 재실행, live provider의 Polygon/Tron `finalized` 지원, on-chain acceptance, live KMS rotation, live Lambda와 policy server 확인은 이 절의 범위가 아니다. §13의 공통 근거 범위를 따른다.
+
+근거: 로컬 fmt/clippy/test/MSRV 실행, 변경 전 코드 대비 변형 실행, 리뷰 반례 원시 출력 · 2026-10-09 17:00 KST

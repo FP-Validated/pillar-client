@@ -1273,13 +1273,9 @@ where
                     packet_log_topics: log.topics,
                     packet_log_data: log.data,
                 };
-                // Non-fatal for the same reason the decode above is. A batching
-                // transaction can emit several PacketSent events, and this
-                // conversion fails for an unbound emitter/event pair, an unknown send
-                // library or an endpoint id this deployment does not map. Propagating
-                // that aborted the scan for every other event in the receipt, including
-                // the one the request asked for; upstream logs and skips it too
-                // (`evm/index.ts:222-228`).
+                // Unconvertible events are skipped so one bad PacketSent cannot hide the
+                // requested one; unlike upstream (`lz-v2-sdk/src/endpoint/evm/index.ts:181-199`),
+                // an unmapped source eid is returned as a 500 when nothing matches.
                 let sent_event = match self.packet_sent_to_lz_sent_event(
                     &lz_message_id.pathway_id.src_chain_name,
                     src_tx_hash,

@@ -192,6 +192,43 @@ async fn receipt_without_a_trusted_packet_sent_is_upstreams_400_without_signing(
     assert_upstream_mismatch(forged, evm_packet_sent_request("V302")).await;
 }
 
+fn with_packet_src_eid(eid_hex: &str) -> Value {
+    let mut receipt = packet_sent_endpoint_v2_data();
+    let data = receipt["logs"][0]["data"]
+        .as_str()
+        .unwrap()
+        .replacen("00007595", eid_hex, 1);
+    receipt["logs"][0]["data"] = Value::from(data);
+    receipt
+}
+
+#[tokio::test]
+async fn trusted_event_from_another_mapped_source_eid_is_a_client_error_without_signing() {
+    assert_upstream_mismatch(
+        with_packet_src_eid("00007596"),
+        evm_packet_sent_request("V302"),
+    )
+    .await;
+}
+
+/// A deliberate divergence (SECURITY.md): upstream skips the unconvertible event and
+/// answers the 400 miss (`lz-v2-sdk/src/endpoint/evm/index.ts:181-199`).
+#[tokio::test]
+async fn trusted_event_from_an_unmapped_source_eid_is_a_server_error_without_signing() {
+    let (router, signer_calls, _) = router_over_receipt(vec![Ok(
+        json!({ "result": with_packet_src_eid("00007fff") }),
+    )]);
+
+    let (status, body) = post(router, &evm_packet_sent_request("V302")).await;
+
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+    assert_eq!(
+        body,
+        json!({ "statusCode": 500, "body": "No chain name for endpoint id 32767" })
+    );
+    assert_eq!(signer_calls.load(Ordering::SeqCst), 0);
+}
+
 #[tokio::test]
 async fn resolver_failure_quoting_the_mismatch_text_stays_a_server_error() {
     let (router, signer_calls) = router_over_failing_resolver(

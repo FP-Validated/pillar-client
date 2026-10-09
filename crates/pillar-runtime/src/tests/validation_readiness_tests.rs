@@ -576,6 +576,50 @@ async fn runtime_rpc_validation_checks_refuses_a_source_receipt_that_changed_aft
 }
 
 #[tokio::test]
+async fn runtime_rpc_validation_checks_reports_a_failed_receipt_reread_as_unavailable() {
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "ethereum".to_string(),
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://eth-a.example".to_string())],
+                1,
+            ),
+        )]),
+        Some(&["ethereum".to_string()]),
+    )
+    .unwrap();
+    let transport = RecordingTransport {
+        calls: Arc::new(Mutex::new(Vec::new())),
+        responses: Arc::new(Mutex::new(vec![
+            Err("connection reset by peer".to_string()),
+            Ok(latest_block("0x67")),
+        ])),
+    };
+    let error = RuntimeRpcValidationChecks::from_getter(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        transport,
+    )
+    .validate_readiness(
+        &readiness_sent_event_bound_to("0xaaa", 100, 0),
+        &SigningContext::Message {
+            expiration: 1,
+            skip_v_id: None,
+            dvn_address: None,
+            block_confirmation: 2,
+        },
+    )
+    .await
+    .expect_err("a failed receipt read must not pass readiness");
+    assert!(
+        matches!(error, AppCoreError::Internal(_))
+            && error
+                .to_string()
+                .contains("Transaction receipt or block not found"),
+        "a transport failure is an unavailable provider, not a changed source: {error}"
+    );
+}
+
+#[tokio::test]
 async fn runtime_rpc_validation_checks_validates_solana_message_readiness_with_slots() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(

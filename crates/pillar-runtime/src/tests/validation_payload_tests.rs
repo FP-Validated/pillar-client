@@ -774,6 +774,45 @@ async fn runtime_rpc_validation_checks_rejects_false_lambda_body() {
         .starts_with("Extra context validation failed:"));
     assert!(matches!(err, AppCoreError::BadRequest(_)));
 }
+
+#[tokio::test]
+async fn runtime_rpc_validation_checks_sends_the_typed_signing_context_to_the_policy_lambda() {
+    let lambda_calls = Arc::new(Mutex::new(Vec::new()));
+    let checks = runtime_rpc_extra_context_checks(
+        RuntimeExtraContextConfig {
+            request_url: None,
+            request_auth_token: None,
+            aws_lambda_name: Some("policy-lambda".to_string()),
+        },
+        vec![transaction_result(
+            "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+        )],
+        Arc::new(Mutex::new(Vec::new())),
+    )
+    .with_extra_context_lambda_client(Arc::new(RecordingLambdaClient {
+        calls: lambda_calls.clone(),
+        responses: Arc::new(Mutex::new(vec![Ok(json!({ "body": true }))])),
+    }));
+
+    checks
+        .validate_extra_context(&payload_signed_sent_event(), &policy_message_context())
+        .await
+        .expect("the policy Lambda allowed the request");
+
+    let calls = lambda_calls.lock().unwrap();
+    assert_eq!(calls.len(), 1);
+    let (function_name, payload) = &calls[0];
+    assert_eq!(function_name, "policy-lambda");
+    assert_eq!(
+        payload["signingContext"],
+        serde_json::to_value(policy_message_context()).unwrap()
+    );
+    assert_eq!(
+        payload["from"],
+        "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"
+    );
+    assert!(payload["sentEvent"].is_object(), "{payload}");
+}
 #[tokio::test]
 async fn runtime_rpc_validation_checks_rejects_unsafe_lambda_responses() {
     let responses = [

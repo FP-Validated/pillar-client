@@ -515,5 +515,24 @@
     "credentialBoundary": {"preparationStageSecretRead": false, "thisSelfQuerySecretRead": false, "earlierMainDirectProbesAtKst": ["2026-10-08 22:38", "2026-10-08 22:49"], "earlierProbeEndpointSource": "Secret payload read into memory only", "credentialStoredDisclosedOrChanged": false},
     "fixedVerifiedPolicy": "Existing per-case verified flags and original351 coverage are not promoted by hosted/rollout evidence; retain false/incomplete unless original case identity and same-case baseline/current linkage are demonstrated."
   },
+  "inRepoCaseTests": {
+    "recordedAtKst": "2026-10-09T16:59:23+09:00",
+    "sourceBase": "abe9d60053ea582f0f0d1d0635f0f80523b5790d",
+    "sourceState": "the commit that adds this entry on branch fix/client-review-20261009; its tests were run on that working tree, which differs from the commit only by this ledger and Markdown",
+    "command": "cargo +1.98.1 test --workspace --locked",
+    "result": {"passed": 1004, "failed": 0, "ignored": 15, "note": "top-level test counts; one nested child-process run of an already-counted test is excluded"},
+    "purpose": "Each stable case ID maps to committed tests that CI runs from a plain clone. The earlier artifact paths under retest-250-20261007 are maintainer-local history and stay unchanged; they are not current evidence.",
+    "cases": [
+      {"caseId": "A2-FINALITY-LAG", "tests": ["crates/pillar-runtime/src/tests/core_app_tests.rs::production_vertical_polygon_and_tron_enforce_finality_and_canonical_headers (finalized_lag, polygon and tron)", "crates/pillar-runtime/src/tests/validation_readiness_tests.rs::polygon_readiness_binds_canonical_header_at_receipt_height (finalized behind receipt)"]},
+      {"caseId": "A2-FINALITY-EQUAL-CONTROL", "tests": ["crates/pillar-runtime/src/tests/validation_readiness_tests.rs::polygon_readiness_binds_canonical_header_at_receipt_height (finalized == receipt height)", "crates/pillar-runtime/src/tests/core_app_tests.rs::production_vertical_polygon_and_tron_enforce_finality_and_canonical_headers (canonical_number_valid)"]},
+      {"caseId": "A2-FINALITY-UNAVAILABLE", "tests": ["crates/pillar-runtime/src/tests/validation_readiness_tests.rs::polygon_readiness_binds_canonical_header_at_receipt_height (null finalized header is not a height lag)", "crates/pillar-runtime/src/tests/core_app_tests.rs::production_vertical_polygon_and_tron_enforce_finality_and_canonical_headers (canonical_number_missing)"]},
+      {"caseId": "A3-READ-NOCODE-EMPTY", "tests": ["crates/pillar-runtime/src/tests/layerzero_read_payload_tests.rs::reqwest_read_empty_call_smoke_covers_code_and_pinned_quorum", "crates/pillar-runtime/src/tests/read_data_http_e2e.rs::reqwest_http_full_consumer_enforces_read_data_and_provider_quorum (no_code_negative_q2)"]},
+      {"caseId": "A3-READ-CODE-PRESENT-EMPTY-CONTROL", "tests": ["crates/pillar-runtime/src/tests/read_vertical_tests.rs::production_read_vertical_accepts_empty_call_only_for_nonempty_pinned_code", "crates/pillar-runtime/src/tests/read_data_http_e2e.rs::reqwest_http_full_consumer_enforces_read_data_and_provider_quorum (empty_call_with_0x6000_code)"]},
+      {"caseId": "A3-READ-REVERT", "tests": ["crates/pillar-runtime/src/tests/read_data_http_e2e.rs::reqwest_http_full_consumer_enforces_read_data_and_provider_quorum (revert_negative_q2, standard_revert_negative_q2)"]},
+      {"caseId": "A4-RECEIPT-IDENTITY-AND-REMOVED", "tests": ["crates/pillar-runtime/src/tests/core_app_tests.rs::production_vertical_never_signs_for_malformed_source_receipt_metadata (receipt tx hash, log tx hash, removed true/null/non-boolean)", "crates/pillar-runtime/src/tests/core_app_tests.rs::production_vertical_signs_when_receipt_logs_omit_removed", "crates/pillar-runtime/src/tests/core_app_tests.rs::production_vertical_never_signs_when_packet_data_changes_on_readiness_reread", "crates/pillar-runtime/src/tests/validation_readiness_tests.rs::runtime_rpc_validation_checks_refuses_a_source_receipt_that_changed_after_resolution"]},
+      {"caseId": "B3-RECEIPT-SEMANTIC-QUORUM-METADATA-CONTROL", "tests": ["crates/pillar-runtime/src/tests/core_app_tests.rs::production_vertical_accepts_l1_fee_difference_between_providers", "crates/pillar-runtime/src/tests/core_app_tests.rs::production_vertical_never_signs_when_providers_disagree_on_packet_data"], "discrimination": "With the receipt fingerprint mutated back to raw JSON, the provider test failed with '2 distinct successful responses' while the removed round-based test still passed; the packet-data control passed in both."}
+    ],
+    "verifiedPolicy": "Per-case verified stays false: these are current regression tests, not same-case baseline replays of the original 351-comparison ledger."
+  },
   "confirmedAtKst": "2026-10-08T23:01:32+09:00"
 }

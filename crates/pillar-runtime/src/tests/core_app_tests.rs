@@ -376,6 +376,8 @@ struct VerticalTransport {
     calls: RecordedJsonCalls,
     receipt_rounds: Arc<Mutex<Option<ReceiptRounds>>>,
     receipt: Arc<Mutex<Option<Value>>>,
+    /// Receipts keyed by a source URL fragment, served on every read of that provider.
+    receipt_by_provider: Arc<Vec<(&'static str, Value)>>,
     dst_endpoint_v2: &'static str,
     dst_receive_uln_302: &'static str,
     dst_receive_uln_302_view: &'static str,
@@ -422,7 +424,14 @@ impl JsonRpcTransport for VerticalTransport {
                 {
                     return Err("receipt unavailable at this provider".to_string());
                 }
-                let receipt = if let Some(rounds) = self.receipt_rounds.lock().unwrap().as_mut() {
+                let by_provider = self
+                    .receipt_by_provider
+                    .iter()
+                    .find(|(provider, _)| url.contains(provider))
+                    .map(|(_, receipt)| receipt.clone());
+                let receipt = if by_provider.is_some() {
+                    by_provider
+                } else if let Some(rounds) = self.receipt_rounds.lock().unwrap().as_mut() {
                     rounds.answer()
                 } else {
                     self.receipt.lock().unwrap().clone()
@@ -760,15 +769,44 @@ async fn vertical_app_with_extra_context(
     .await
 }
 
-async fn vertical_app_with_receipt_rounds(
-    env: &VerticalEnvironment,
-    receipts: Vec<Value>,
-) -> (RuntimeServerApp<VerticalTransport>, RecordedJsonCalls) {
+/// The source pool as two single-URI entities under a quorum of two.
+fn two_source_provider_env(env: &VerticalEnvironment) -> HashMap<String, String> {
     let mut vars = vertical_env_map(env);
     vars.extend([(LZ_PROVIDER_CONFIG.to_string(), providers_json(format!(r#"{{"{}":{{"uris":["https://src-rpc-a.example","https://src-rpc-b.example"],"quorum":2}},"{}":{{"uris":["https://dst-rpc.example"],"quorum":1}}}}"#,
     env.src_chain, env.dst_chain))), (LZ_QUORUM_STRATEGY_CONFIG.to_string(), strategy_json(format!(r#"{{"{}":{{"uris":["https://src-rpc-a.example","https://src-rpc-b.example"],"quorum":2}},"{}":{{"uris":["https://dst-rpc.example"],"quorum":1}}}}"#,
     env.src_chain, env.dst_chain)))]);
-    vertical_app_with_transport(env, vars, None, Some(receipts), true).await
+    vars
+}
+
+async fn vertical_app_with_receipt_rounds(
+    env: &VerticalEnvironment,
+    receipts: Vec<Value>,
+) -> (RuntimeServerApp<VerticalTransport>, RecordedJsonCalls) {
+    vertical_app_with_transport(
+        env,
+        two_source_provider_env(env),
+        None,
+        Some(receipts),
+        true,
+    )
+    .await
+}
+
+/// Each of the two source providers answers its own receipt on every read.
+async fn vertical_app_with_provider_receipts(
+    env: &VerticalEnvironment,
+    receipt_a: Value,
+    receipt_b: Value,
+) -> (RuntimeServerApp<VerticalTransport>, RecordedJsonCalls) {
+    vertical_app_with_source_receipts(
+        env,
+        two_source_provider_env(env),
+        None,
+        None,
+        vec![("src-rpc-a", receipt_a), ("src-rpc-b", receipt_b)],
+        true,
+    )
+    .await
 }
 
 async fn vertical_app_with_transport(
@@ -776,6 +814,25 @@ async fn vertical_app_with_transport(
     vars: HashMap<String, String>,
     receipt: Option<Value>,
     receipt_rounds: Option<Vec<Value>>,
+    extra_context_verdict: bool,
+) -> (RuntimeServerApp<VerticalTransport>, RecordedJsonCalls) {
+    vertical_app_with_source_receipts(
+        env,
+        vars,
+        receipt,
+        receipt_rounds,
+        Vec::new(),
+        extra_context_verdict,
+    )
+    .await
+}
+
+async fn vertical_app_with_source_receipts(
+    env: &VerticalEnvironment,
+    vars: HashMap<String, String>,
+    receipt: Option<Value>,
+    receipt_rounds: Option<Vec<Value>>,
+    receipt_by_provider: Vec<(&'static str, Value)>,
     extra_context_verdict: bool,
 ) -> (RuntimeServerApp<VerticalTransport>, RecordedJsonCalls) {
     let calls: RecordedJsonCalls = Arc::new(Mutex::new(Vec::new()));
@@ -789,6 +846,7 @@ async fn vertical_app_with_transport(
     let transport = VerticalTransport {
         calls: calls.clone(),
         receipt: Arc::new(Mutex::new(receipt)),
+        receipt_by_provider: Arc::new(receipt_by_provider),
         receipt_rounds: Arc::new(Mutex::new(receipt_rounds.map(ReceiptRounds::new))),
         dst_endpoint_v2: env.dst_endpoint_v2,
         dst_receive_uln_302: env.dst_receive_uln_302,
@@ -1382,7 +1440,7 @@ async fn production_vertical_signs_on_two_distinct_entities() {
 #[tokio::test]
 async fn production_vertical_never_signs_for_malformed_source_receipt_metadata() {
     type ReceiptCorruption = fn(&mut Value);
-    let corruptions: [(&str, ReceiptCorruption); 3] = [
+    let corruptions: [(&str, ReceiptCorruption); 5] = [
         ("receipt transaction hash", |receipt| {
             receipt["result"]["transactionHash"] =
                 Value::from("0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd");
@@ -1393,6 +1451,12 @@ async fn production_vertical_never_signs_for_malformed_source_receipt_metadata()
         }),
         ("removed log", |receipt| {
             receipt["result"]["logs"][0]["removed"] = Value::Bool(true);
+        }),
+        ("null removed state", |receipt| {
+            receipt["result"]["logs"][0]["removed"] = Value::Null;
+        }),
+        ("non-boolean removed state", |receipt| {
+            receipt["result"]["logs"][0]["removed"] = Value::from("false");
         }),
     ];
     for (field, corrupt) in corruptions {
@@ -1415,31 +1479,109 @@ async fn production_vertical_never_signs_for_malformed_source_receipt_metadata()
 }
 
 #[tokio::test]
-async fn production_vertical_accepts_l1_fee_metadata_difference_between_receipt_reads() {
-    let baseline_receipt = vertical_receipt(&MAINNET_VERTICAL);
-    let (baseline_app, _) = vertical_app_with_receipt_rounds(
-        &MAINNET_VERTICAL,
-        vec![baseline_receipt.clone(), baseline_receipt],
-    )
-    .await;
-    let baseline = baseline_app
-        .sign_request_v2(vertical_request(&MAINNET_VERTICAL))
-        .await
-        .expect("matching provider receipts must produce a positive control signature");
-
-    let mut first = vertical_receipt(&MAINNET_VERTICAL);
-    let mut second = first.clone();
-    first["result"]["l1Fee"] = Value::from("0x2");
-    second["result"]["l1Fee"] = Value::from("0x1");
-    let (app, _) = vertical_app_with_receipt_rounds(&MAINNET_VERTICAL, vec![first, second]).await;
+async fn production_vertical_signs_when_receipt_logs_omit_removed() {
+    let mut receipt = vertical_receipt(&MAINNET_VERTICAL);
+    for log in receipt["result"]["logs"]
+        .as_array_mut()
+        .expect("receipt logs")
+    {
+        log.as_object_mut().expect("receipt log").remove("removed");
+    }
+    let (app, _) = vertical_app(&MAINNET_VERTICAL, Some(receipt)).await;
     let response = app
         .sign_request_v2(vertical_request(&MAINNET_VERTICAL))
         .await
-        .expect("metadata-only receipt differences preserve packet quorum");
-    assert!(
-        !response.signatures.is_empty(),
-        "valid matched payload returned no signature"
+        .expect("a receipt whose logs omit `removed` is still a canonical receipt");
+    assert!(!response.signatures.is_empty());
+    let stages = stages_of(&app).await;
+    assert_eq!(
+        stages
+            .iter()
+            .filter(|stage| stage.as_str() == "sign")
+            .count(),
+        1,
+        "omitted removed state entered the sign stage exactly once: {stages:?}"
     );
+}
+
+/// Only the `hashLookup` duplicate query depends on `dvnAddress`; `verifiable` always runs, which
+/// is stricter than upstream skipping the whole check (`app.ts:308-309`, SECURITY.md).
+#[tokio::test]
+async fn production_vertical_skips_only_the_duplicate_query_for_an_empty_dvn_address() {
+    for (dvn_address, checked) in [
+        ("0x4444444444444444444444444444444444444444", true),
+        ("", false),
+    ] {
+        let mut vars = vertical_env_map(&MAINNET_VERTICAL);
+        vars.remove(pillar_config::EXTRA_CONTEXT_REQUEST_URL);
+        vars.remove(pillar_config::EXTRA_CONTEXT_REQUEST_AUTH_TOKEN);
+        let (app, calls) = vertical_app_with_transport(
+            &MAINNET_VERTICAL,
+            vars,
+            Some(vertical_receipt(&MAINNET_VERTICAL)),
+            None,
+            true,
+        )
+        .await;
+        let mut request = vertical_request(&MAINNET_VERTICAL);
+        request.signing_context = SigningContext::Message {
+            expiration: 1_751_500_000,
+            skip_v_id: None,
+            dvn_address: Some(dvn_address.to_string()),
+            block_confirmation: 1,
+        };
+        let response = app
+            .sign_request_v2(request)
+            .await
+            .unwrap_or_else(|error| panic!("dvnAddress {dvn_address:?}: {error}"));
+        assert!(!response.signatures.is_empty());
+        let selector_reads = |selector: &str| {
+            calls
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(_, _, body)| {
+                    body["method"] == "eth_call"
+                        && body["params"][0]["data"]
+                            .as_str()
+                            .is_some_and(|data| data.starts_with(selector))
+                })
+                .count()
+        };
+        let hash_lookups = selector_reads("0x3c782a52");
+        assert_eq!(
+            hash_lookups > 0,
+            checked,
+            "dvnAddress {dvn_address:?} made {hash_lookups} hashLookup reads"
+        );
+        assert!(
+            selector_reads("0x27d12cd9") > 0,
+            "dvnAddress {dvn_address:?} skipped the verifiable read"
+        );
+    }
+}
+
+#[tokio::test]
+async fn production_vertical_accepts_l1_fee_difference_between_providers() {
+    let receipt = vertical_receipt(&MAINNET_VERTICAL);
+    let (baseline_app, _) =
+        vertical_app_with_provider_receipts(&MAINNET_VERTICAL, receipt.clone(), receipt.clone())
+            .await;
+    let baseline = baseline_app
+        .sign_request_v2(vertical_request(&MAINNET_VERTICAL))
+        .await
+        .expect("identical provider receipts must produce a positive control signature");
+
+    let mut receipt_a = receipt.clone();
+    let mut receipt_b = receipt;
+    receipt_a["result"]["l1Fee"] = Value::from("0x1");
+    receipt_b["result"]["l1Fee"] = Value::from("0x2");
+    let (app, _) =
+        vertical_app_with_provider_receipts(&MAINNET_VERTICAL, receipt_a, receipt_b).await;
+    let response = app
+        .sign_request_v2(vertical_request(&MAINNET_VERTICAL))
+        .await
+        .expect("providers that differ only in l1Fee must reach receipt quorum");
     assert!(
         !response.payload.is_empty(),
         "valid matched payload was empty"
@@ -1460,6 +1602,34 @@ async fn production_vertical_accepts_l1_fee_metadata_difference_between_receipt_
             .count(),
         1,
         "valid quorum entered the sign stage exactly once: {stages:?}"
+    );
+}
+
+#[tokio::test]
+async fn production_vertical_never_signs_when_providers_disagree_on_packet_data() {
+    let receipt_a = vertical_receipt(&MAINNET_VERTICAL);
+    let mut receipt_b = receipt_a.clone();
+    let data = receipt_b["result"]["logs"][0]["data"]
+        .as_str()
+        .expect("fixture data")
+        .to_string();
+    let last_byte = if data.ends_with("00") { "01" } else { "00" };
+    receipt_b["result"]["logs"][0]["data"] =
+        Value::from(format!("{}{last_byte}", &data[..data.len() - 2]));
+    let (app, _) =
+        vertical_app_with_provider_receipts(&MAINNET_VERTICAL, receipt_a, receipt_b).await;
+    let error = app
+        .sign_request_v2(vertical_request(&MAINNET_VERTICAL))
+        .await
+        .expect_err("providers that disagree on PacketSent data must not reach quorum");
+    assert!(
+        error.to_string().contains("No receipt quorum"),
+        "unexpected refusal: {error}"
+    );
+    let stages = stages_of(&app).await;
+    assert!(
+        stages.iter().all(|stage| stage != "sign"),
+        "disagreeing providers reached the signer: {stages:?}"
     );
 }
 

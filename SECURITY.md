@@ -53,6 +53,19 @@ The following are deployment-side controls the software cannot enforce for you:
   front of it; the process speaks plain HTTP by design.
 - Use `SIGNER_TYPE=KMS` in production and scope the KMS key policy to this
   workload only. Mnemonic backends keep key material in process environment.
+- Plan KMS key rotation as a restart. Each signer resolves its key on first use
+  and keeps that identity for the process lifetime: AWS ECDSA signs with the
+  immutable key ARN an alias resolved to, Azure with the key version a versionless
+  id resolved to, and GCP with the configured key version
+  (`crates/pillar-signer/src/{aws.rs,azure/adapter.rs,gcp.rs}`). Retargeting an
+  alias or adding a key version does not change what a running process signs
+  with, and disabling the pinned key fails every signature on it until the process
+  restarts. Roll replicas in the same change that updates the DVN's registered
+  signer, and configure versioned key ids so replicas started at different times
+  cannot resolve different keys. A sign response naming another key is refused
+  (`signing key identity changed`); GCP and Azure can compare only when the
+  response names a key, and they refuse a nameless response only with durable
+  audit enabled.
 - Require at least two distinct entities for every chain's `rpc` strategy, for
   example `{ "allOf": [{ "any": 2 }] }`. A strategy that one entity can satisfy
   makes that operator the trust root for the event you attest to; the startup
@@ -664,7 +677,7 @@ Addresses live in `stellar_uln_302_for_environment`,
   두 요청은 readiness가 검증한 같은 EIP-1898 block hash와 `requireCanonical:true`를 사용한다.
   Code가 정확한 `0x`이면 runtime은 `NoCode` 관측을 entity quorum의 표로 기록한다.
   `0x00` 등 byte가 있는 code는 정상 empty return을 허용한다. 별도 call/code quorum은 없다.
-  Runtime은 numeric error code `3`, 또는 code `-32000`과 정확한 `execution reverted` 메시지의 조합만 `ExecutionRevert`로 분류한다.
+  Runtime은 numeric error code `3`, 또는 code `-32000`과 대소문자를 구분하지 않고 일치하는 `execution reverted` 메시지의 조합만 `ExecutionRevert`로 분류한다.
   Runtime은 제공된 revert DATA의 타입과 hex octet을 검증하고 대소문자를 정규화한다.
   생략된 DATA와 유효한 `0x`는 반환 byte가 없다는 같은 관측이다. 서로 다른 nonempty DATA는 같은 표가 아니다.
   Runtime은 `NoCode` 또는 `ExecutionRevert`의 유일한 entity quorum만 non-retryable domain refusal로 변환한다.
@@ -672,7 +685,7 @@ Addresses live in `stellar_uln_302_for_environment`,
   Timeout, transport 장애, malformed DATA와 일반 RPC 오류는 표를 얻지 못한다. Quorum 부족은 domain refusal이 아니라 기존 internal 오류다.
   불량 provider 하나가 있어도 서로 다른 정상 entity 두 개는 quorum 2로 정상 서명한다.
   정상과 부정 관측이 각각 quorum을 만족하면 runtime은 모호한 결과를 거부한다.
-  운영자는 hash pin을 준수하는 provider만 READ route에 구성하고 미준수 provider로의 failover를 차단해야 한다. EIP-1898 파라미터 전송만으로 provider의 준수를 입증하지 않는다.
+  운영자는 hash pin을 준수하는 provider만 READ route에 구성하고 미준수 provider로의 failover를 차단해야 한다. EIP-1898 파라미터 전송만으로 provider의 준수를 입증하지 않는다. `retryable=false` 판단도 이 전제에 의존한다.
 - Extra-context의 HTTP와 Lambda 요청은 `sentEvent`, `from`, typed `signingContext`를 포함한다.
   MESSAGE와 READ의 기존 Serde 형식과 optional omission을 유지한다.
   Closed-schema policy handler는 새 필드를 허용해야 한다.
