@@ -2,6 +2,7 @@
   "provenance": {
     "endpoint": "https://graphql.mainnet.sui.io/graphql",
     "capturedAt": "2026-10-09",
+    "note": "simulateVerifiable was captured with the shared input field `initialSharedVersion`; the stored request was later renamed to `version` without recapture. The server treats the field as advisory (see sui-mainnet-graphql-shared-version.json), so the response stands.",
     "network": "Sui mainnet",
     "configuredContracts": {
       "utilsPackage": "0x00245ba36f7a1cc643a2b037450dff1e4399e18069c6545fb5fcaaf37d39d7dc",

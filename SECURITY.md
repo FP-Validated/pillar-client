@@ -84,9 +84,9 @@ The following are deployment-side controls the software cannot enforce for you:
   dropped. A live mainnet capture showed that `simulateTransaction` still succeeds
   with a wrong shared `version`, so that field is advisory (fixture:
   `sui-mainnet-graphql-shared-version.json`).
-  Event `vector<u8>` fields are read as GraphQL renders them, base64 (or an explicit
-  `0x` hex string); upstream's JSON-RPC digit-string options form is not accepted on
-  the Sui GraphQL path and fails that provider's answer.
+  Event `vector<u8>` fields are read as base64, as GraphQL renders them, or as an
+  explicit `0x` hex string; a value that does not decode fails that provider's
+  answer, so upstream's JSON-RPC digit-string options form is not supported here.
   Configuration errors name the file, the JSON line and column, schema field names, and only
   chain, endpoint-type and category names this build defines; an unknown key, an
   entity, a header or any other value from the file appears as a placeholder or
