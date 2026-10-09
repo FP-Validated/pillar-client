@@ -8,6 +8,7 @@
 // - testnet sha256:af2550ce8fe1dc5e3a393840f89c83d3cd2db6b300e232e20616780baf376884
 // - sandbox sha256:de5be02fb6404d692eb5784308309d145b90243923a0ce67f44d0cb0d2098c56
 // Entries: 335
+// Body sha256: 8248d5033ad286c85e556b34fdc519132d53c0c536aa67e30269682524eae09e
 
 pub(crate) const CHAIN_MAX_ETH_GET_LOGS_BLOCK_RANGE: &[(&str, &str, u32)] = &[
     ("mainnet", "abstract", 500),

@@ -28,6 +28,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
       - run: node scripts/check-generated-config-integrity.mjs
       - run: node scripts/build-acceptance-matrix.mjs --check
 
@@ -93,7 +96,14 @@ jobs:
           if-no-files-found: error
 
   container:
+    name: container image
+    # The image artifact is only produced after the tests, supply-chain checks and
+    # generated-table integrity it is supposed to stand for have passed.
     needs: [build, supply-chain, generated-config]
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -170,6 +180,12 @@ jobs:
           printf '{"actualExitStatus":%s,"missingConfigMessageObserved":%s,"stepPassed":%s}\n' \
             "$status" "$message_observed" "$step_passed" > "$out/container-preflight-result.json"
           test "$step_passed" = true
+      - name: Attest the saved image tar
+        # Fork pull requests get no OIDC token; pushes to main and v* tags are what ship.
+        if: github.event_name == 'push'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/pillar-image-artifact/pillar-client-ci.tar
       - name: Finalize image diagnostics report
         if: always()
         run: node scripts/ci-container-artifact.mjs report "$RUNNER_TEMP/pillar-image-artifact"

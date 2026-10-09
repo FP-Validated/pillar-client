@@ -8,6 +8,7 @@
 // - testnet sha256:1fac021a61e5df03f22c87bcc526e4c5143a25ebffcc9474aa07cc4756bf5a9c
 // - sandbox sha256:f0ebfe7b91c63eb08c04b4edf4848460be28c05480ed83dd3ac76ef5548086c7
 // Entries: 1259
+// Body sha256: cdc135c998fdcd81d97fa909cc9c319416e84a1bb862bd90cb8584365dc70d69
 
 pub(crate) const LZ_ENVIRONMENT_ULN_CHAIN_STATUS: &[(&str, &str, &str, &str, u32)] = &[
     ("mainnet", "V2", "abstract", "ACTIVE", 4),
