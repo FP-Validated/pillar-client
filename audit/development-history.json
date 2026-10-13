@@ -1,0 +1,2434 @@
+{
+  "repository": "https://github.com/FP-Validated/pillar-client",
+  "sourceBaseline": "3f39fbad972794e5a9c598ea46a310334a4a4415",
+  "sourceTree": "78fb3f76eddb56ac20a33a9c4db1e37f1a0ae6e2",
+  "publicRoot": "cfa8564b622fa14e40d9bb11a8a6d38f332ceea8",
+  "sourceCommitCount": 153,
+  "taskCount": 79,
+  "method": "Retrospective task grouping of the unchanged canonical public history; not original tickets or approvals.",
+  "statusMeaning": "Landed means the changes were committed in the public history through the source baseline; later tasks may supersede them. It does not mean independently accepted, fully tested or deployed.",
+  "sourceMeaning": "Source commits cover each chronological landing window, including merged branches. A split window appears under multiple tasks; scopePaths identifies the files assigned to each task, not per-hunk attribution to each source commit.",
+  "tasks": [
+    {
+      "title": "Import the public Pillar DVN client",
+      "status": "landed",
+      "sourceCommits": [
+        "cfa8564b622fa14e40d9bb11a8a6d38f332ceea8"
+      ],
+      "sourceLandingCommits": [
+        "cfa8564b622fa14e40d9bb11a8a6d38f332ceea8"
+      ],
+      "scopePaths": [
+        ".dockerignore",
+        ".github/workflows/ci.yml",
+        ".gitignore",
+        ".ignore",
+        "CHANGELOG.md",
+        "CONTRIBUTING.md",
+        "Cargo.lock",
+        "Cargo.toml",
+        "Dockerfile",
+        "LICENSE",
+        "README.md",
+        "SECURITY.md",
+        "crates/pillar-api/Cargo.toml",
+        "crates/pillar-api/examples/qa-server.rs",
+        "crates/pillar-api/examples/static_server.rs",
+        "crates/pillar-api/fixtures/http_snapshots/available_chains.json",
+        "crates/pillar-api/fixtures/http_snapshots/health.json",
+        "crates/pillar-api/fixtures/http_snapshots/malformed_json.json",
+        "crates/pillar-api/fixtures/http_snapshots/metrics.json",
+        "crates/pillar-api/fixtures/http_snapshots/provider_health.json",
+        "crates/pillar-api/fixtures/http_snapshots/signer_info_ethereum.json",
+        "crates/pillar-api/fixtures/http_snapshots/signer_info_missing_chain_name.json",
+        "crates/pillar-api/fixtures/http_snapshots/v1_body_unwrap.json",
+        "crates/pillar-api/fixtures/http_snapshots/v2_skip_v_id_rejection.json",
+        "crates/pillar-api/fixtures/http_snapshots/version_missing.json",
+        "crates/pillar-api/src/lib.rs",
+        "crates/pillar-bench/Cargo.toml",
+        "crates/pillar-bench/benches/hot_paths.rs",
+        "crates/pillar-bench/benches/hot_paths/api_envelope.rs",
+        "crates/pillar-bench/benches/hot_paths/common.rs",
+        "crates/pillar-bench/benches/hot_paths/filter.rs",
+        "crates/pillar-bench/benches/hot_paths/hash_call_data.rs",
+        "crates/pillar-bench/benches/hot_paths/provider_health.rs",
+        "crates/pillar-bench/benches/hot_paths/signer_kms.rs",
+        "crates/pillar-cli/Cargo.toml",
+        "crates/pillar-cli/src/main.rs",
+        "crates/pillar-client/Cargo.toml",
+        "crates/pillar-client/src/lib.rs",
+        "crates/pillar-client/tests/url_obfuscation_parity.rs",
+        "crates/pillar-config/Cargo.toml",
+        "crates/pillar-config/src/generated_layerzero_environment.rs",
+        "crates/pillar-config/src/generated_layerzero_evm.rs",
+        "crates/pillar-config/src/generated_ton_layerzero.rs",
+        "crates/pillar-config/src/lib.rs",
+        "crates/pillar-config/src/provider_validation.rs",
+        "crates/pillar-config/src/provider_validation_tests/config.rs",
+        "crates/pillar-config/src/provider_validation_tests/entry_validation.rs",
+        "crates/pillar-config/src/provider_validation_tests/mod.rs",
+        "crates/pillar-config/src/provider_validation_tests/strategy.rs",
+        "crates/pillar-core/Cargo.toml",
+        "crates/pillar-core/src/lib.rs",
+        "crates/pillar-core/src/provider_health_cache.rs",
+        "crates/pillar-layerzero/Cargo.toml",
+        "crates/pillar-layerzero/src/abi.rs",
+        "crates/pillar-layerzero/src/abi/decode.rs",
+        "crates/pillar-layerzero/src/abi/details.rs",
+        "crates/pillar-layerzero/src/abi/encode.rs",
+        "crates/pillar-layerzero/src/aptos.rs",
+        "crates/pillar-layerzero/src/aptos/hash.rs",
+        "crates/pillar-layerzero/src/builders.rs",
+        "crates/pillar-layerzero/src/evm.rs",
+        "crates/pillar-layerzero/src/evm_v2.rs",
+        "crates/pillar-layerzero/src/evm_v3.rs",
+        "crates/pillar-layerzero/src/lib.rs",
+        "crates/pillar-layerzero/src/other_non_evm.rs",
+        "crates/pillar-layerzero/src/other_non_evm/starknet.rs",
+        "crates/pillar-layerzero/src/other_non_evm/stellar.rs",
+        "crates/pillar-layerzero/src/other_non_evm/ton/address.rs",
+        "crates/pillar-layerzero/src/other_non_evm/ton/builders.rs",
+        "crates/pillar-layerzero/src/other_non_evm/ton/cell.rs",
+        "crates/pillar-layerzero/src/other_non_evm/ton/cl_declare.rs",
+        "crates/pillar-layerzero/src/other_non_evm/ton/dict.rs",
+        "crates/pillar-layerzero/src/other_non_evm/ton/mod.rs",
+        "crates/pillar-layerzero/src/other_non_evm/ton/options.rs",
+        "crates/pillar-layerzero/src/other_non_evm/ton/payload.rs",
+        "crates/pillar-layerzero/src/other_non_evm/ton/payload_signed.rs",
+        "crates/pillar-layerzero/src/other_non_evm/ton/proxy.rs",
+        "crates/pillar-layerzero/src/packet.rs",
+        "crates/pillar-layerzero/src/packet/event.rs",
+        "crates/pillar-layerzero/src/read_v1002.rs",
+        "crates/pillar-layerzero/src/read_v1002/command.rs",
+        "crates/pillar-layerzero/src/router.rs",
+        "crates/pillar-layerzero/src/solana.rs",
+        "crates/pillar-layerzero/src/sui.rs",
+        "crates/pillar-layerzero/src/sui_bcs.rs",
+        "crates/pillar-layerzero/src/tests.rs",
+        "crates/pillar-layerzero/src/tests/non_evm_vectors/corpus_and_routing.rs",
+        "crates/pillar-layerzero/src/tests/non_evm_vectors/mod.rs",
+        "crates/pillar-layerzero/src/tests/non_evm_vectors/move_vectors.rs",
+        "crates/pillar-layerzero/src/tests/non_evm_vectors/solana_vectors.rs",
+        "crates/pillar-layerzero/src/tests/non_evm_vectors/sui_iotamove_vectors.rs",
+        "crates/pillar-layerzero/src/tests/official_vectors.rs",
+        "crates/pillar-layerzero/src/tests/other_non_evm.rs",
+        "crates/pillar-layerzero/src/tests/solana_builder_tests.rs",
+        "crates/pillar-layerzero/src/tests/solana_payload_signed_tests.rs",
+        "crates/pillar-layerzero/src/types.rs",
+        "crates/pillar-layerzero/tests/non_evm_vectors/upstream_non_evm_layerzero_vectors.json",
+        "crates/pillar-layerzero/tests/official_vectors/packet_v1_encoded.hex",
+        "crates/pillar-layerzero/tests/official_vectors/packet_v1_header.hex",
+        "crates/pillar-layerzero/tests/official_vectors/packet_v1_payload_hash.hex",
+        "crates/pillar-layerzero/tests/official_vectors/read_cmd_codec_v1_request.hex",
+        "crates/pillar-layerzero/tests/official_vectors/read_cmd_codec_v1_request_compute.hex",
+        "crates/pillar-layerzero/tests/official_vectors/read_cmd_hash.hex",
+        "crates/pillar-layerzero/tests/official_vectors/read_lib1002_verify_calldata.hex",
+        "crates/pillar-layerzero/tests/official_vectors/read_resolved_payload_hash.hex",
+        "crates/pillar-layerzero/tests/official_vectors/receive_uln_verify_calldata.hex",
+        "crates/pillar-metrics/Cargo.toml",
+        "crates/pillar-metrics/src/lib.rs",
+        "crates/pillar-metrics/src/primitives.rs",
+        "crates/pillar-runtime/Cargo.toml",
+        "crates/pillar-runtime/src/config_loader.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/config/evm.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/config/mod.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/config/non_evm.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/config/parts.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/core_app.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/legacy_resolver.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/mod.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/packet_resolver.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/read_payload.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_move.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_starknet.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_stellar.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_sui.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_ton.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/ton_v3_builder.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/types.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/uln_v2_builder.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_extra_context.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_impl.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_payload.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_payload_solana.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_payload_sui.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_payload_ton.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_read_markers.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_readiness.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_timestamp.rs",
+        "crates/pillar-runtime/src/lib.rs",
+        "crates/pillar-runtime/src/provider_health/aptos.rs",
+        "crates/pillar-runtime/src/provider_health/chain_probes.rs",
+        "crates/pillar-runtime/src/provider_health/chain_probes_aptos.rs",
+        "crates/pillar-runtime/src/provider_health/chain_probes_misc.rs",
+        "crates/pillar-runtime/src/provider_health/chain_probes_ton_initia.rs",
+        "crates/pillar-runtime/src/provider_health/evm_helpers.rs",
+        "crates/pillar-runtime/src/provider_health/evm_observations.rs",
+        "crates/pillar-runtime/src/provider_health/evm_payload_observations.rs",
+        "crates/pillar-runtime/src/provider_health/evm_transaction_observations.rs",
+        "crates/pillar-runtime/src/provider_health/evm_uln_observations.rs",
+        "crates/pillar-runtime/src/provider_health/initia.rs",
+        "crates/pillar-runtime/src/provider_health/mod.rs",
+        "crates/pillar-runtime/src/provider_health/normalize.rs",
+        "crates/pillar-runtime/src/provider_health/quorum.rs",
+        "crates/pillar-runtime/src/provider_health/rank.rs",
+        "crates/pillar-runtime/src/provider_health/read_time_marker_resolver.rs",
+        "crates/pillar-runtime/src/provider_health/source.rs",
+        "crates/pillar-runtime/src/provider_health/source_probes.rs",
+        "crates/pillar-runtime/src/provider_health/ton.rs",
+        "crates/pillar-runtime/src/provider_health/transport.rs",
+        "crates/pillar-runtime/src/provider_health/tron.rs",
+        "crates/pillar-runtime/src/provider_health/types.rs",
+        "crates/pillar-runtime/src/provider_health/uri_common.rs",
+        "crates/pillar-runtime/src/provider_snapshot.rs",
+        "crates/pillar-runtime/src/server_app/core_dependencies.rs",
+        "crates/pillar-runtime/src/server_app/env.rs",
+        "crates/pillar-runtime/src/server_app/mod.rs",
+        "crates/pillar-runtime/src/server_app/runtime_core.rs",
+        "crates/pillar-runtime/src/server_app/server_trait.rs",
+        "crates/pillar-runtime/src/server_app/types.rs",
+        "crates/pillar-runtime/src/signer_runtime/assembly.rs",
+        "crates/pillar-runtime/src/signer_runtime/aws_secret.rs",
+        "crates/pillar-runtime/src/signer_runtime/chain_types.rs",
+        "crates/pillar-runtime/src/signer_runtime/config.rs",
+        "crates/pillar-runtime/src/signer_runtime/getters.rs",
+        "crates/pillar-runtime/src/signer_runtime/mod.rs",
+        "crates/pillar-runtime/src/signer_runtime/types.rs",
+        "crates/pillar-runtime/src/startup_report.rs",
+        "crates/pillar-runtime/src/tests/core_app_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_config_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_packet_resolver_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_non_evm_wiring_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_rejection_tests/matrix.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_rejection_tests/mod.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_rejection_tests/sui_iotamove.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_wiring_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_read_payload_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_uln_v2_feather_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_uln_v2_mpt_tests.rs",
+        "crates/pillar-runtime/src/tests/mod.rs",
+        "crates/pillar-runtime/src/tests/provider_config_refresh_tests.rs",
+        "crates/pillar-runtime/src/tests/provider_health_aptos_tests.rs",
+        "crates/pillar-runtime/src/tests/provider_health_common_tests.rs",
+        "crates/pillar-runtime/src/tests/provider_health_evm_tests.rs",
+        "crates/pillar-runtime/src/tests/provider_health_initia_tests.rs",
+        "crates/pillar-runtime/src/tests/provider_health_solana_concurrency_tests.rs",
+        "crates/pillar-runtime/src/tests/provider_health_stellar_solana_probe_tests.rs",
+        "crates/pillar-runtime/src/tests/provider_health_sui_starknet_tests.rs",
+        "crates/pillar-runtime/src/tests/provider_health_ton_tests.rs",
+        "crates/pillar-runtime/src/tests/provider_health_tron_tests.rs",
+        "crates/pillar-runtime/src/tests/read_time_marker_resolver_tests.rs",
+        "crates/pillar-runtime/src/tests/server_app_tests.rs",
+        "crates/pillar-runtime/src/tests/signer_config_tests.rs",
+        "crates/pillar-runtime/src/tests/signer_kms_config_tests.rs",
+        "crates/pillar-runtime/src/tests/signer_kms_wallet_policy_tests.rs",
+        "crates/pillar-runtime/src/tests/signer_local_tests.rs",
+        "crates/pillar-runtime/src/tests/startup_report_tests.rs",
+        "crates/pillar-runtime/src/tests/support_app.rs",
+        "crates/pillar-runtime/src/tests/support_core.rs",
+        "crates/pillar-runtime/src/tests/support_packets.rs",
+        "crates/pillar-runtime/src/tests/support_rpc.rs",
+        "crates/pillar-runtime/src/tests/support_transports.rs",
+        "crates/pillar-runtime/src/tests/support_validation_layerzero.rs",
+        "crates/pillar-runtime/src/tests/validation_app_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_payload_receive_library_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_payload_sui_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_payload_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_payload_ton_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_read_markers_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_readiness_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_timestamp_tests.rs",
+        "crates/pillar-runtime/src/validation.rs",
+        "crates/pillar-signer/Cargo.toml",
+        "crates/pillar-signer/src/aws.rs",
+        "crates/pillar-signer/src/aws/tests.rs",
+        "crates/pillar-signer/src/azure.rs",
+        "crates/pillar-signer/src/azure/adapter.rs",
+        "crates/pillar-signer/src/azure/client.rs",
+        "crates/pillar-signer/src/azure/factory.rs",
+        "crates/pillar-signer/src/azure/hedge_tests.rs",
+        "crates/pillar-signer/src/azure/key_id.rs",
+        "crates/pillar-signer/src/azure/tests.rs",
+        "crates/pillar-signer/src/chain_address.rs",
+        "crates/pillar-signer/src/chain_address/base.rs",
+        "crates/pillar-signer/src/chain_address/base/tests.rs",
+        "crates/pillar-signer/src/chain_address/chains.rs",
+        "crates/pillar-signer/src/chain_address/hash.rs",
+        "crates/pillar-signer/src/chain_address/kind.rs",
+        "crates/pillar-signer/src/chain_address/kind/tests.rs",
+        "crates/pillar-signer/src/chain_address/tests.rs",
+        "crates/pillar-signer/src/factory.rs",
+        "crates/pillar-signer/src/gcp.rs",
+        "crates/pillar-signer/src/gcp/tests.rs",
+        "crates/pillar-signer/src/kms_signature.rs",
+        "crates/pillar-signer/src/kms_signature/tests.rs",
+        "crates/pillar-signer/src/lib.rs",
+        "crates/pillar-signer/src/local_mnemonic.rs",
+        "crates/pillar-signer/src/local_mnemonic/factory_tests.rs",
+        "crates/pillar-signer/src/local_mnemonic/tests.rs",
+        "crates/pillar-signer/src/tests.rs",
+        "crates/pillar-signer/src/types.rs",
+        "crates/pillar-signer/src/unsupported_signature_type_tests.rs",
+        "deny.toml",
+        "scripts/check-layerzero-environment-parity.mjs",
+        "scripts/generate-layerzero-environment-capability.mjs",
+        "scripts/generate-layerzero-static-config.mjs",
+        "scripts/generate-ton-static-config.mjs"
+      ]
+    },
+    {
+      "title": "Bound HTTP connections to in-flight requests",
+      "status": "landed",
+      "sourceCommits": [
+        "006c8a15c23be5ca8e50a979bda1fc019b72723a"
+      ],
+      "sourceLandingCommits": [
+        "006c8a15c23be5ca8e50a979bda1fc019b72723a"
+      ],
+      "scopePaths": [
+        "CHANGELOG.md",
+        "Cargo.toml",
+        "README.md",
+        "SECURITY.md",
+        "crates/pillar-cli/src/main.rs",
+        "crates/pillar-core/src/lib.rs"
+      ]
+    },
+    {
+      "title": "Fix sign metrics and request validation",
+      "status": "landed",
+      "sourceCommits": [
+        "52d38565edc39612fb89e098e02188cebba41a60"
+      ],
+      "sourceLandingCommits": [
+        "52d38565edc39612fb89e098e02188cebba41a60"
+      ],
+      "scopePaths": [
+        "CHANGELOG.md",
+        "README.md",
+        "SECURITY.md",
+        "crates/pillar-api/fixtures/http_snapshots/metrics.json",
+        "crates/pillar-api/src/lib.rs",
+        "crates/pillar-core/src/lib.rs",
+        "crates/pillar-metrics/src/lib.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/core_app.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/mod.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/packet_resolver.rs",
+        "crates/pillar-runtime/src/tests/core_app_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_packet_resolver_tests.rs"
+      ]
+    },
+    {
+      "title": "Scope upstream parity claims to verified provenance",
+      "status": "landed",
+      "sourceCommits": [
+        "ecad146bc037a85a5912577af207efac973b9c88",
+        "1859f6dada7ef61a88f546be15d70345dd7a1ae5"
+      ],
+      "sourceLandingCommits": [
+        "ecad146bc037a85a5912577af207efac973b9c88",
+        "1859f6dada7ef61a88f546be15d70345dd7a1ae5"
+      ],
+      "scopePaths": [
+        "CHANGELOG.md",
+        "SECURITY.md",
+        "crates/pillar-api/src/lib.rs",
+        "crates/pillar-core/src/lib.rs",
+        "crates/pillar-runtime/src/tests/core_app_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_packet_resolver_tests.rs"
+      ]
+    },
+    {
+      "title": "Classify unsupported protocol versions as caller errors",
+      "status": "landed",
+      "sourceCommits": [
+        "10ff8c68a12a498d058f4f34bdc28886d04569b7"
+      ],
+      "sourceLandingCommits": [
+        "10ff8c68a12a498d058f4f34bdc28886d04569b7"
+      ],
+      "scopePaths": [
+        "crates/pillar-api/src/lib.rs",
+        "crates/pillar-core/src/lib.rs"
+      ]
+    },
+    {
+      "title": "Derive the signed proof from the packet and enable READ",
+      "status": "landed",
+      "sourceCommits": [
+        "340bf059a62475afd0b874f621d57465f94d5b20"
+      ],
+      "sourceLandingCommits": [
+        "340bf059a62475afd0b874f621d57465f94d5b20"
+      ],
+      "scopePaths": [
+        "crates/pillar-layerzero/src/lib.rs",
+        "crates/pillar-layerzero/src/packet.rs",
+        "crates/pillar-layerzero/src/packet/event.rs",
+        "crates/pillar-layerzero/src/tests.rs",
+        "crates/pillar-layerzero/src/tests/official_vectors.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/mod.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/packet_resolver.rs",
+        "crates/pillar-runtime/src/tests/layerzero_packet_resolver_tests.rs",
+        "crates/pillar-runtime/src/tests/support_packets.rs"
+      ]
+    },
+    {
+      "title": "Guard generated LayerZero configuration and chain-family routing",
+      "status": "landed",
+      "sourceCommits": [
+        "cfc0fd66a1b387590dbfd54a8a4a24e0559324a5",
+        "a96f03dd2b54afa9b5c7dc88a18525c5a824689f",
+        "14c1bc7998a2d6043f920bc91154ac1806c036e2"
+      ],
+      "sourceLandingCommits": [
+        "cfc0fd66a1b387590dbfd54a8a4a24e0559324a5",
+        "a96f03dd2b54afa9b5c7dc88a18525c5a824689f",
+        "14c1bc7998a2d6043f920bc91154ac1806c036e2"
+      ],
+      "scopePaths": [
+        ".github/workflows/ci.yml",
+        "crates/pillar-runtime/src/tests/layerzero_packet_resolver_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_payload_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_readiness_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_timestamp_tests.rs",
+        "scripts/check-generated-config-integrity.mjs"
+      ]
+    },
+    {
+      "title": "Document config generation and a runnable TON command",
+      "status": "landed",
+      "sourceCommits": [
+        "a326db14bc532217f7fb49bb4a3a4cb7ba836dbd"
+      ],
+      "sourceLandingCommits": [
+        "a326db14bc532217f7fb49bb4a3a4cb7ba836dbd"
+      ],
+      "scopePaths": [
+        "README.md"
+      ]
+    },
+    {
+      "title": "Exercise signing and extra-context behavior on real dependencies",
+      "status": "landed",
+      "sourceCommits": [
+        "3389b7529556a05a5a6fe94e701e975723be85dc",
+        "342f245f0683ce1c604a4cf44aac0dbc10b03e32",
+        "88ad9877eb82166542c41707487fe3f965ca6bfe"
+      ],
+      "sourceLandingCommits": [
+        "3389b7529556a05a5a6fe94e701e975723be85dc",
+        "342f245f0683ce1c604a4cf44aac0dbc10b03e32",
+        "88ad9877eb82166542c41707487fe3f965ca6bfe"
+      ],
+      "scopePaths": [
+        "crates/pillar-runtime/src/tests/core_app_tests.rs"
+      ]
+    },
+    {
+      "title": "Read the endpoint vId from the EndpointV1 table",
+      "status": "landed",
+      "sourceCommits": [
+        "64e9638ee00f8381add89c8997283c65622737c8"
+      ],
+      "sourceLandingCommits": [
+        "64e9638ee00f8381add89c8997283c65622737c8"
+      ],
+      "scopePaths": [
+        "crates/pillar-layerzero/src/builders.rs",
+        "crates/pillar-layerzero/src/tests.rs",
+        "crates/pillar-layerzero/src/tests/non_evm_vectors/corpus_and_routing.rs",
+        "crates/pillar-layerzero/src/tests/non_evm_vectors/move_vectors.rs",
+        "crates/pillar-layerzero/src/tests/other_non_evm.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/config/evm.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/config/mod.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/core_app.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/mod.rs",
+        "crates/pillar-runtime/src/lib.rs",
+        "crates/pillar-runtime/src/server_app/mod.rs",
+        "crates/pillar-runtime/src/server_app/runtime_core.rs",
+        "crates/pillar-runtime/src/tests/core_app_tests.rs",
+        "crates/pillar-runtime/src/tests/gasolina_parity_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_non_evm_wiring_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_rejection_tests/matrix.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_rejection_tests/sui_iotamove.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_wiring_tests.rs",
+        "crates/pillar-runtime/src/tests/mod.rs",
+        "crates/pillar-runtime/tests/gasolina_parity/v_id_by_chain_name.json"
+      ]
+    },
+    {
+      "title": "Compare EVM and TON vectors with upstream outputs",
+      "status": "landed",
+      "sourceCommits": [
+        "16b4bab2f9dfb898d6f3ea1f92413b700c081e1e",
+        "8bff13ffefdb2a6799232980b7bba90284cbf9fc"
+      ],
+      "sourceLandingCommits": [
+        "16b4bab2f9dfb898d6f3ea1f92413b700c081e1e",
+        "8bff13ffefdb2a6799232980b7bba90284cbf9fc"
+      ],
+      "scopePaths": [
+        "crates/pillar-layerzero/src/other_non_evm/ton/builders.rs",
+        "crates/pillar-layerzero/src/other_non_evm/ton/cell.rs",
+        "crates/pillar-layerzero/src/other_non_evm/ton/payload.rs",
+        "crates/pillar-layerzero/tests/gasolina_parity/ton_dvn_verify.json",
+        "crates/pillar-runtime/src/tests/gasolina_parity_tests.rs",
+        "crates/pillar-runtime/tests/gasolina_parity/evm_signing_path.json",
+        "scripts/gasolina-parity/README.md",
+        "scripts/gasolina-parity/emit-evm-signing-path.ts",
+        "scripts/gasolina-parity/emit-ton-dvn-verify.ts",
+        "scripts/gasolina-parity/emit-v-id-table.ts"
+      ]
+    },
+    {
+      "title": "Clarify parity documentation coverage",
+      "status": "landed",
+      "sourceCommits": [
+        "44f4d14b4b20d09731830c5385a00f76e4d5a0aa"
+      ],
+      "sourceLandingCommits": [
+        "44f4d14b4b20d09731830c5385a00f76e4d5a0aa"
+      ],
+      "scopePaths": [
+        "scripts/gasolina-parity/README.md"
+      ]
+    },
+    {
+      "title": "Cover historical packet resolution and signer reachability",
+      "status": "landed",
+      "sourceCommits": [
+        "eeb9f359a49d7a74aa8fd7be052d48505ded22c9",
+        "c35b976e46558acf07cbfc44b3796c9721682e49"
+      ],
+      "sourceLandingCommits": [
+        "eeb9f359a49d7a74aa8fd7be052d48505ded22c9",
+        "c35b976e46558acf07cbfc44b3796c9721682e49"
+      ],
+      "scopePaths": [
+        "crates/pillar-layerzero/src/other_non_evm/stellar.rs",
+        "crates/pillar-runtime/examples/eid_map.rs",
+        "crates/pillar-runtime/src/tests/gasolina_parity_tests.rs",
+        "crates/pillar-runtime/tests/gasolina_parity/historical_pathways.json",
+        "crates/pillar-runtime/tests/gasolina_parity/historical_smoke.json",
+        "scripts/gasolina-parity/README.md",
+        "scripts/gasolina-parity/emit-historical-smoke.ts"
+      ]
+    },
+    {
+      "title": "Match signer derivation for Solana and Initia",
+      "status": "landed",
+      "sourceCommits": [
+        "e12d1266d1fed4411ab88ec35e300bf0add1c70b"
+      ],
+      "sourceLandingCommits": [
+        "e12d1266d1fed4411ab88ec35e300bf0add1c70b"
+      ],
+      "scopePaths": [
+        "crates/pillar-runtime/src/tests/gasolina_parity_tests.rs",
+        "crates/pillar-runtime/tests/gasolina_parity/historical_smoke.json",
+        "crates/pillar-signer/src/chain_address/chains.rs",
+        "crates/pillar-signer/src/chain_address/tests.rs",
+        "scripts/gasolina-parity/README.md",
+        "scripts/gasolina-parity/emit-historical-smoke.ts"
+      ]
+    },
+    {
+      "title": "Validate TON proxy decoding against upstream state",
+      "status": "landed",
+      "sourceCommits": [
+        "b34ca84fab0a2d69a694f35948f9350b8e512c29"
+      ],
+      "sourceLandingCommits": [
+        "b34ca84fab0a2d69a694f35948f9350b8e512c29"
+      ],
+      "scopePaths": [
+        "crates/pillar-layerzero/src/other_non_evm/ton/proxy.rs",
+        "crates/pillar-layerzero/tests/gasolina_parity/ton_proxy_target.json",
+        "scripts/gasolina-parity/README.md",
+        "scripts/gasolina-parity/emit-ton-proxy-target.ts"
+      ]
+    },
+    {
+      "title": "Compare TON pathway and returned signatures at service boundaries",
+      "status": "landed",
+      "sourceCommits": [
+        "169b1ff4824a70b7747885ce55ea3a927318ad9e",
+        "48202066154c38428a7067cb1450125a13aa1436",
+        "1fc3e4ed511c343a293c54a30f76cdc60570eb01"
+      ],
+      "sourceLandingCommits": [
+        "169b1ff4824a70b7747885ce55ea3a927318ad9e",
+        "48202066154c38428a7067cb1450125a13aa1436",
+        "1fc3e4ed511c343a293c54a30f76cdc60570eb01"
+      ],
+      "scopePaths": [
+        "crates/pillar-runtime/src/tests/gasolina_parity_tests.rs",
+        "crates/pillar-runtime/tests/gasolina_parity/historical_pathways.json",
+        "crates/pillar-runtime/tests/gasolina_parity/historical_smoke.json",
+        "scripts/gasolina-parity/README.md",
+        "scripts/gasolina-parity/emit-historical-smoke.ts"
+      ]
+    },
+    {
+      "title": "Refuse superseded destinations and dead provider votes",
+      "status": "landed",
+      "sourceCommits": [
+        "439a77c0c41b96ed2dc9a49250c38c9b68f9fe2c"
+      ],
+      "sourceLandingCommits": [
+        "439a77c0c41b96ed2dc9a49250c38c9b68f9fe2c"
+      ],
+      "scopePaths": [
+        "crates/pillar-config/src/lib.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/config/evm.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/config/mod.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/config/parts.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/mod.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/unavailable_builder.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_payload.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_payload_solana.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_payload_sui.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_payload_ton.rs",
+        "crates/pillar-runtime/src/provider_health/evm_payload_observations.rs",
+        "crates/pillar-runtime/src/tests/gasolina_parity_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_non_evm_wiring_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_rejection_tests/matrix.rs",
+        "crates/pillar-runtime/src/tests/mod.rs",
+        "crates/pillar-runtime/src/tests/payload_signed_family_tests.rs",
+        "crates/pillar-runtime/src/tests/stellar_provenance_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_payload_ton_tests.rs",
+        "crates/pillar-runtime/tests/onchain_provenance/stellar_deployment.json"
+      ]
+    },
+    {
+      "title": "Validate service URLs and prevent outbound path splicing",
+      "status": "landed",
+      "sourceCommits": [
+        "451f716c7595fc3c4c56533ba2f83b172a925d08"
+      ],
+      "sourceLandingCommits": [
+        "451f716c7595fc3c4c56533ba2f83b172a925d08"
+      ],
+      "scopePaths": [
+        "Cargo.lock",
+        "Cargo.toml",
+        "crates/pillar-config/Cargo.toml",
+        "crates/pillar-config/src/lib.rs",
+        "crates/pillar-runtime/Cargo.toml",
+        "crates/pillar-runtime/src/layerzero_runtime/mod.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/packet_resolver.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_move.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_starknet.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_stellar.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_extra_context.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_payload.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_payload_sui.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_readiness.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_timestamp.rs",
+        "crates/pillar-runtime/src/provider_health/source.rs",
+        "crates/pillar-runtime/src/tests/layerzero_packet_resolver_tests.rs"
+      ],
+      "rationale": "Refs: INPUT-01, GATE-02, GATE2-01, GATE2-02, GATE-14 in the security audit."
+    },
+    {
+      "title": "Apply the srcTxHash shape gate to v1",
+      "status": "landed",
+      "sourceCommits": [
+        "a137f2da3377b85bf6f4a989673d9fbefd75b2be"
+      ],
+      "sourceLandingCommits": [
+        "a137f2da3377b85bf6f4a989673d9fbefd75b2be"
+      ],
+      "scopePaths": [
+        "crates/pillar-api/src/lib.rs",
+        "crates/pillar-core/src/lib.rs"
+      ],
+      "rationale": "Refs: INPUT-04, GATE-01 in the security audit."
+    },
+    {
+      "title": "Classify the Aptos ULN V2 refusal as caller error",
+      "status": "landed",
+      "sourceCommits": [
+        "014b391de30d4833fde5948128a7706328bdc3cd"
+      ],
+      "sourceLandingCommits": [
+        "014b391de30d4833fde5948128a7706328bdc3cd"
+      ],
+      "scopePaths": [
+        "crates/pillar-layerzero/src/aptos.rs",
+        "crates/pillar-layerzero/src/aptos/hash.rs"
+      ],
+      "rationale": "Refs: SIGN-01, GATE-04 in the security audit."
+    },
+    {
+      "title": "Redact seed phrases and zeroize derived signing material",
+      "status": "landed",
+      "sourceCommits": [
+        "05d49b6c2ac1cebe026c5c91f8f2a80ed0a1fe1b"
+      ],
+      "sourceLandingCommits": [
+        "05d49b6c2ac1cebe026c5c91f8f2a80ed0a1fe1b"
+      ],
+      "scopePaths": [
+        "crates/pillar-runtime/src/signer_runtime/aws_secret.rs",
+        "crates/pillar-runtime/src/signer_runtime/config.rs",
+        "crates/pillar-runtime/src/signer_runtime/mod.rs",
+        "crates/pillar-runtime/src/tests/signer_local_tests.rs",
+        "crates/pillar-signer/Cargo.toml",
+        "crates/pillar-signer/src/kms_signature.rs",
+        "crates/pillar-signer/src/local_mnemonic.rs",
+        "crates/pillar-signer/src/local_mnemonic/tests.rs",
+        "crates/pillar-signer/src/types.rs"
+      ],
+      "rationale": "Refs: SIGN-02, SIGN-03 in the security audit."
+    },
+    {
+      "title": "Bound provider-health caching and the HTTP header phase",
+      "status": "landed",
+      "sourceCommits": [
+        "7aa894465fef718bf70f9905f89f75dd7773ffee"
+      ],
+      "sourceLandingCommits": [
+        "7aa894465fef718bf70f9905f89f75dd7773ffee"
+      ],
+      "scopePaths": [
+        "crates/pillar-cli/src/main.rs",
+        "crates/pillar-metrics/src/lib.rs",
+        "crates/pillar-runtime/src/server_app/core_dependencies.rs",
+        "crates/pillar-runtime/src/server_app/env.rs",
+        "crates/pillar-runtime/src/server_app/mod.rs",
+        "crates/pillar-runtime/src/server_app/server_trait.rs",
+        "crates/pillar-runtime/src/server_app/types.rs",
+        "crates/pillar-runtime/src/tests/server_app_tests.rs"
+      ],
+      "rationale": "Refs: INPUT-05, INPUT-06 in the security audit."
+    },
+    {
+      "title": "Make parity table generation work from a plain checkout",
+      "status": "landed",
+      "sourceCommits": [
+        "6c02a1b5c09b5dd5d796759e5ad2bf82d5ecbd12"
+      ],
+      "sourceLandingCommits": [
+        "6c02a1b5c09b5dd5d796759e5ad2bf82d5ecbd12"
+      ],
+      "scopePaths": [
+        "crates/pillar-layerzero/src/other_non_evm/ton/address.rs",
+        "scripts/gasolina-parity/README.md",
+        "scripts/gasolina-parity/emit-historical-smoke.ts",
+        "scripts/gasolina-parity/emit-v-id-table.ts"
+      ]
+    },
+    {
+      "title": "Expose an optional unauthenticated signing route",
+      "status": "landed",
+      "sourceCommits": [
+        "75e998840c31774a7de93d3ff83a523191d9838f"
+      ],
+      "sourceLandingCommits": [
+        "75e998840c31774a7de93d3ff83a523191d9838f"
+      ],
+      "scopePaths": [
+        "CHANGELOG.md",
+        "crates/pillar-api/src/lib.rs",
+        "crates/pillar-config/src/lib.rs",
+        "crates/pillar-runtime/src/server_app/server_trait.rs",
+        "crates/pillar-runtime/src/startup_report.rs",
+        "crates/pillar-runtime/src/tests/core_app_tests.rs",
+        "crates/pillar-runtime/src/tests/gasolina_parity_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_app_tests.rs"
+      ]
+    },
+    {
+      "title": "Update version to 2.2.0",
+      "status": "landed",
+      "sourceCommits": [
+        "11c2e690f234c2e689bd1b07129eff6c41daf456"
+      ],
+      "sourceLandingCommits": [
+        "11c2e690f234c2e689bd1b07129eff6c41daf456"
+      ],
+      "scopePaths": [
+        "CHANGELOG.md",
+        "Cargo.lock",
+        "Cargo.toml",
+        "README.md",
+        "SECURITY.md"
+      ]
+    },
+    {
+      "title": "Allow disabling bearer authentication on every route",
+      "status": "landed",
+      "sourceCommits": [
+        "cef619a8b924288235cf0c451d9b1194dc5f1bfc"
+      ],
+      "sourceLandingCommits": [
+        "cef619a8b924288235cf0c451d9b1194dc5f1bfc"
+      ],
+      "scopePaths": [
+        "CHANGELOG.md",
+        "README.md",
+        "crates/pillar-api/src/lib.rs",
+        "crates/pillar-config/src/lib.rs",
+        "crates/pillar-runtime/src/server_app/server_trait.rs",
+        "crates/pillar-runtime/src/startup_report.rs",
+        "crates/pillar-runtime/src/tests/core_app_tests.rs",
+        "crates/pillar-runtime/src/tests/gasolina_parity_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_app_tests.rs"
+      ]
+    },
+    {
+      "title": "Derive the advertised Solana address from its key",
+      "status": "landed",
+      "sourceCommits": [
+        "88746eb2df4c2bfd1cbcbdcfa6016432b0f0a9d9"
+      ],
+      "sourceLandingCommits": [
+        "88746eb2df4c2bfd1cbcbdcfa6016432b0f0a9d9"
+      ],
+      "scopePaths": [
+        "crates/pillar-runtime/src/tests/gasolina_parity_tests.rs",
+        "crates/pillar-signer/src/chain_address/chains.rs",
+        "crates/pillar-signer/src/chain_address/tests.rs"
+      ]
+    },
+    {
+      "title": "Use transaction version 1 for Solana RPC reads",
+      "status": "landed",
+      "sourceCommits": [
+        "d972729b06d705666d147ad45a7be729ddff8e8f"
+      ],
+      "sourceLandingCommits": [
+        "d972729b06d705666d147ad45a7be729ddff8e8f"
+      ],
+      "scopePaths": [
+        "crates/pillar-runtime/src/layerzero_runtime/packet_resolver.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_readiness.rs",
+        "crates/pillar-runtime/src/lib.rs",
+        "crates/pillar-runtime/src/provider_health/evm_transaction_observations.rs",
+        "crates/pillar-runtime/src/tests/layerzero_packet_resolver_tests.rs",
+        "crates/pillar-runtime/src/tests/mod.rs",
+        "crates/pillar-runtime/src/tests/solana_v1_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_payload_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_readiness_tests.rs"
+      ]
+    },
+    {
+      "title": "Update version to 2.3.0",
+      "status": "landed",
+      "sourceCommits": [
+        "5fd4ed80de3581a60775f7a9dedf5dab68288d95"
+      ],
+      "sourceLandingCommits": [
+        "5fd4ed80de3581a60775f7a9dedf5dab68288d95"
+      ],
+      "scopePaths": [
+        "CHANGELOG.md",
+        "Cargo.lock",
+        "Cargo.toml"
+      ]
+    },
+    {
+      "title": "Update rustls for RUSTSEC-2026-0285",
+      "status": "landed",
+      "sourceCommits": [
+        "1c952bd1b010baa26b05d00683415d846999331a"
+      ],
+      "sourceLandingCommits": [
+        "1c952bd1b010baa26b05d00683415d846999331a"
+      ],
+      "scopePaths": [
+        "Cargo.lock"
+      ]
+    },
+    {
+      "title": "Ignore local code-intelligence index state",
+      "status": "landed",
+      "sourceCommits": [
+        "613d74acd364f968fa0713f5946d33bd9722991b"
+      ],
+      "sourceLandingCommits": [
+        "613d74acd364f968fa0713f5946d33bd9722991b"
+      ],
+      "scopePaths": [
+        ".gitignore"
+      ]
+    },
+    {
+      "title": "Reject unsafe chain names and forged request log records",
+      "status": "landed",
+      "sourceCommits": [
+        "35789ae41fdda129b17441da024a82b222129921",
+        "68e67df00d4b84b6a7b206112f391e622c99ee6c",
+        "536bf9c82cc326f44510b12a3184f6842cc8bb75"
+      ],
+      "sourceLandingCommits": [
+        "35789ae41fdda129b17441da024a82b222129921",
+        "68e67df00d4b84b6a7b206112f391e622c99ee6c",
+        "536bf9c82cc326f44510b12a3184f6842cc8bb75"
+      ],
+      "scopePaths": [
+        "Cargo.lock",
+        "crates/pillar-api/Cargo.toml",
+        "crates/pillar-api/src/lib.rs",
+        "crates/pillar-api/tests/log_record_forgery.rs"
+      ]
+    },
+    {
+      "title": "Bound HTTP reads and writes by the request deadline",
+      "status": "landed",
+      "sourceCommits": [
+        "35789ae41fdda129b17441da024a82b222129921",
+        "68e67df00d4b84b6a7b206112f391e622c99ee6c",
+        "536bf9c82cc326f44510b12a3184f6842cc8bb75"
+      ],
+      "sourceLandingCommits": [
+        "35789ae41fdda129b17441da024a82b222129921",
+        "68e67df00d4b84b6a7b206112f391e622c99ee6c",
+        "536bf9c82cc326f44510b12a3184f6842cc8bb75"
+      ],
+      "scopePaths": [
+        "crates/pillar-cli/Cargo.toml",
+        "crates/pillar-cli/src/main.rs"
+      ]
+    },
+    {
+      "title": "Bind packet proofs to receipts and trusted receive libraries",
+      "status": "landed",
+      "sourceCommits": [
+        "35789ae41fdda129b17441da024a82b222129921",
+        "68e67df00d4b84b6a7b206112f391e622c99ee6c",
+        "536bf9c82cc326f44510b12a3184f6842cc8bb75"
+      ],
+      "sourceLandingCommits": [
+        "35789ae41fdda129b17441da024a82b222129921",
+        "68e67df00d4b84b6a7b206112f391e622c99ee6c",
+        "536bf9c82cc326f44510b12a3184f6842cc8bb75"
+      ],
+      "scopePaths": [
+        "crates/pillar-bench/benches/hot_paths/hash_call_data.rs",
+        "crates/pillar-core/src/lib.rs",
+        "crates/pillar-layerzero/src/other_non_evm/stellar.rs",
+        "crates/pillar-layerzero/src/solana.rs",
+        "crates/pillar-layerzero/src/tests.rs",
+        "crates/pillar-layerzero/src/tests/solana_payload_signed_tests.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/mod.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/packet_resolver.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_starknet.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_stellar.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/ton_v3_builder.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_extra_context.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_impl.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_payload.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_readiness.rs",
+        "crates/pillar-runtime/src/provider_health/evm_helpers.rs",
+        "crates/pillar-runtime/src/provider_health/evm_observations.rs",
+        "crates/pillar-runtime/src/provider_health/evm_payload_observations.rs",
+        "crates/pillar-runtime/src/provider_health/transport.rs",
+        "crates/pillar-runtime/src/provider_health/types.rs",
+        "crates/pillar-runtime/src/tests/core_app_tests.rs",
+        "crates/pillar-runtime/src/tests/gasolina_parity_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_config_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_non_evm_wiring_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_rejection_tests/matrix.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_rejection_tests/sui_iotamove.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_wiring_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_read_payload_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_uln_v2_feather_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_uln_v2_mpt_tests.rs",
+        "crates/pillar-runtime/src/tests/payload_signed_family_tests.rs",
+        "crates/pillar-runtime/src/tests/solana_v1_tests.rs",
+        "crates/pillar-runtime/src/tests/support_core.rs",
+        "crates/pillar-runtime/src/tests/support_packets.rs",
+        "crates/pillar-runtime/src/tests/support_validation_layerzero.rs",
+        "crates/pillar-runtime/src/tests/validation_app_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_payload_receive_library_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_payload_sui_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_payload_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_payload_ton_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_readiness_tests.rs",
+        "crates/pillar-runtime/src/validation.rs"
+      ],
+      "rationale": "Require positive extra-context verdicts and validate source-event bindings.\nRun receive-library checks independently of caller-supplied payloads."
+    },
+    {
+      "title": "Document signing and HTTP trust boundaries",
+      "status": "landed",
+      "sourceCommits": [
+        "35789ae41fdda129b17441da024a82b222129921",
+        "68e67df00d4b84b6a7b206112f391e622c99ee6c",
+        "536bf9c82cc326f44510b12a3184f6842cc8bb75"
+      ],
+      "sourceLandingCommits": [
+        "35789ae41fdda129b17441da024a82b222129921",
+        "68e67df00d4b84b6a7b206112f391e622c99ee6c",
+        "536bf9c82cc326f44510b12a3184f6842cc8bb75"
+      ],
+      "scopePaths": [
+        "CHANGELOG.md",
+        "SECURITY.md"
+      ]
+    },
+    {
+      "title": "Redact bearer credentials and zeroize mnemonic storage",
+      "status": "landed",
+      "sourceCommits": [
+        "7312d748102837e538bbdd18e73f9e6e3e0384d9"
+      ],
+      "sourceLandingCommits": [
+        "7312d748102837e538bbdd18e73f9e6e3e0384d9"
+      ],
+      "scopePaths": [
+        "CHANGELOG.md",
+        "Cargo.lock",
+        "Cargo.toml",
+        "crates/pillar-config/Cargo.toml",
+        "crates/pillar-config/src/lib.rs",
+        "crates/pillar-runtime/Cargo.toml",
+        "crates/pillar-runtime/src/layerzero_runtime/types.rs",
+        "crates/pillar-runtime/src/signer_runtime/aws_secret.rs",
+        "crates/pillar-runtime/src/tests/signer_config_tests.rs",
+        "crates/pillar-runtime/src/tests/signer_local_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_app_tests.rs",
+        "crates/pillar-signer/src/local_mnemonic/factory_tests.rs",
+        "crates/pillar-signer/src/local_mnemonic/tests.rs",
+        "crates/pillar-signer/src/types.rs"
+      ]
+    },
+    {
+      "title": "Update version to 2.4.0",
+      "status": "landed",
+      "sourceCommits": [
+        "1d228f38aae34b6fe4a34c35729bbce5931cf5f0"
+      ],
+      "sourceLandingCommits": [
+        "1d228f38aae34b6fe4a34c35729bbce5931cf5f0"
+      ],
+      "scopePaths": [
+        "CHANGELOG.md",
+        "Cargo.lock",
+        "Cargo.toml"
+      ]
+    },
+    {
+      "title": "Pin READ calls to the block validated by readiness",
+      "status": "landed",
+      "sourceCommits": [
+        "addf054ca6bedbeb74d331702a1cc1cc41fb5202"
+      ],
+      "sourceLandingCommits": [
+        "addf054ca6bedbeb74d331702a1cc1cc41fb5202"
+      ],
+      "scopePaths": [
+        "CHANGELOG.md",
+        "SECURITY.md",
+        "crates/pillar-bench/benches/hot_paths/hash_call_data.rs",
+        "crates/pillar-core/src/lib.rs",
+        "crates/pillar-layerzero/src/tests.rs",
+        "crates/pillar-layerzero/src/tests/solana_payload_signed_tests.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/mod.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/packet_resolver.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/read_payload.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_starknet.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_stellar.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/ton_v3_builder.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_impl.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_read_markers.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_readiness.rs",
+        "crates/pillar-runtime/src/provider_health/evm_payload_observations.rs",
+        "crates/pillar-runtime/src/tests/core_app_tests.rs",
+        "crates/pillar-runtime/src/tests/gasolina_parity_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_config_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_non_evm_wiring_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_rejection_tests/matrix.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_rejection_tests/sui_iotamove.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_wiring_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_read_payload_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_uln_v2_feather_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_uln_v2_mpt_tests.rs",
+        "crates/pillar-runtime/src/tests/mod.rs",
+        "crates/pillar-runtime/src/tests/read_vertical_tests.rs",
+        "crates/pillar-runtime/src/tests/solana_v1_tests.rs",
+        "crates/pillar-runtime/src/tests/support_core.rs",
+        "crates/pillar-runtime/src/tests/support_packets.rs",
+        "crates/pillar-runtime/src/tests/support_rpc.rs",
+        "crates/pillar-runtime/src/tests/support_validation_layerzero.rs",
+        "crates/pillar-runtime/src/tests/validation_app_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_read_markers_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_readiness_tests.rs",
+        "crates/pillar-runtime/src/validation.rs"
+      ]
+    },
+    {
+      "title": "Update version to 2.4.1",
+      "status": "landed",
+      "sourceCommits": [
+        "da8d7227f03c10d7aa6ad48abb0a100c6df8c24a"
+      ],
+      "sourceLandingCommits": [
+        "da8d7227f03c10d7aa6ad48abb0a100c6df8c24a"
+      ],
+      "scopePaths": [
+        "CHANGELOG.md",
+        "Cargo.lock",
+        "Cargo.toml"
+      ]
+    },
+    {
+      "title": "Add bounded execution, durable audit, and provider quorum validation",
+      "status": "landed",
+      "sourceCommits": [
+        "1f6d0e6f2ce6379f8cdf1aca180fa182a45c3e68",
+        "a4d8ff3d1b2a0e70e140bd77aea99539de103c09",
+        "ff249a1b83edcc25a099d5b7e0706d4c36248b67",
+        "70141ac9f47bbfe0893405b62bae45395b3ad8ed"
+      ],
+      "sourceLandingCommits": [
+        "1f6d0e6f2ce6379f8cdf1aca180fa182a45c3e68",
+        "a4d8ff3d1b2a0e70e140bd77aea99539de103c09",
+        "ff249a1b83edcc25a099d5b7e0706d4c36248b67",
+        "70141ac9f47bbfe0893405b62bae45395b3ad8ed"
+      ],
+      "scopePaths": [
+        "Cargo.lock",
+        "Cargo.toml",
+        "Dockerfile",
+        "crates/pillar-api/Cargo.toml",
+        "crates/pillar-api/fixtures/http_framework_golden.json",
+        "crates/pillar-api/fixtures/http_snapshots/metrics.json",
+        "crates/pillar-api/fixtures/zod_v2_golden.json",
+        "crates/pillar-api/src/express.rs",
+        "crates/pillar-api/src/lib.rs",
+        "crates/pillar-api/src/phase1_tests.rs",
+        "crates/pillar-api/tests/log_record_forgery.rs",
+        "crates/pillar-bench/benches/hot_paths/hash_call_data.rs",
+        "crates/pillar-bench/benches/hot_paths/provider_health.rs",
+        "crates/pillar-bench/benches/hot_paths/signer_kms.rs",
+        "crates/pillar-cli/Cargo.toml",
+        "crates/pillar-cli/src/connections.rs",
+        "crates/pillar-cli/src/drain_tests.rs",
+        "crates/pillar-cli/src/main.rs",
+        "crates/pillar-cli/src/phase1_review_e2e.rs",
+        "crates/pillar-cli/src/phase1_tests.rs",
+        "crates/pillar-config/Cargo.toml",
+        "crates/pillar-config/examples/provider-config/converted/providers-v2.json",
+        "crates/pillar-config/examples/provider-config/converted/quorum-strategy.json",
+        "crates/pillar-config/examples/provider-config/labels.json",
+        "crates/pillar-config/examples/provider-config/legacy-providers.json",
+        "crates/pillar-config/examples/provider_config.rs",
+        "crates/pillar-config/src/execution.rs",
+        "crates/pillar-config/src/generated_chain_metadata.rs",
+        "crates/pillar-config/src/generated_layerzero_environment.rs",
+        "crates/pillar-config/src/generated_layerzero_evm.rs",
+        "crates/pillar-config/src/generated_layerzero_legacy_chain_ids.rs",
+        "crates/pillar-config/src/generated_ton_layerzero.rs",
+        "crates/pillar-config/src/lib.rs",
+        "crates/pillar-config/src/provider_validation.rs",
+        "crates/pillar-config/src/provider_validation_tests/config.rs",
+        "crates/pillar-config/src/provider_validation_tests/entry_validation.rs",
+        "crates/pillar-config/src/provider_validation_tests/mod.rs",
+        "crates/pillar-config/src/provider_validation_tests/strategy.rs",
+        "crates/pillar-config/src/provider_validation_tests/upstream_any.rs",
+        "crates/pillar-config/src/provider_validation_tests/upstream_cross_category.rs",
+        "crates/pillar-config/src/provider_validation_tests/upstream_grouping.rs",
+        "crates/pillar-config/src/provider_validation_tests/upstream_minimum_prefix.rs",
+        "crates/pillar-config/src/provider_validation_tests/upstream_ordering.rs",
+        "crates/pillar-config/src/provider_validation_tests/upstream_precompute.rs",
+        "crates/pillar-config/src/provider_validation_tests/upstream_precompute_restrictions.rs",
+        "crates/pillar-config/src/provider_validation_tests/upstream_satisfiability.rs",
+        "crates/pillar-config/src/provider_validation_tests/upstream_strategy.rs",
+        "crates/pillar-config/src/provider_validation_tests/upstream_utilities.rs",
+        "crates/pillar-config/src/provider_validation_tests/upstream_validation.rs",
+        "crates/pillar-config/src/provider_validation_tests/v2_files.rs",
+        "crates/pillar-config/src/test_support.rs",
+        "crates/pillar-core/Cargo.toml",
+        "crates/pillar-core/src/audit.rs",
+        "crates/pillar-core/src/audit_tests.rs",
+        "crates/pillar-core/src/audit_workers.rs",
+        "crates/pillar-core/src/execution.rs",
+        "crates/pillar-core/src/execution_tests.rs",
+        "crates/pillar-core/src/lib.rs",
+        "crates/pillar-core/src/provider_health_cache.rs",
+        "crates/pillar-core/tests/gasolina_parity/expiration_bound.json",
+        "crates/pillar-layerzero/src/abi.rs",
+        "crates/pillar-layerzero/src/adapter_params.rs",
+        "crates/pillar-layerzero/src/aptos.rs",
+        "crates/pillar-layerzero/src/evm.rs",
+        "crates/pillar-layerzero/src/lib.rs",
+        "crates/pillar-layerzero/src/other_non_evm.rs",
+        "crates/pillar-layerzero/src/other_non_evm/canton.rs",
+        "crates/pillar-layerzero/src/other_non_evm/stellar.rs",
+        "crates/pillar-layerzero/src/other_non_evm/ton/mod.rs",
+        "crates/pillar-layerzero/src/other_non_evm/ton/options.rs",
+        "crates/pillar-layerzero/src/other_non_evm/ton/payload_signed.rs",
+        "crates/pillar-layerzero/src/packet.rs",
+        "crates/pillar-layerzero/src/solana.rs",
+        "crates/pillar-layerzero/src/tests.rs",
+        "crates/pillar-layerzero/src/tests/non_evm_vectors/solana_vectors.rs",
+        "crates/pillar-layerzero/src/tests/other_non_evm.rs",
+        "crates/pillar-layerzero/src/types.rs",
+        "crates/pillar-layerzero/tests/gasolina_parity/canton_digest.json",
+        "crates/pillar-layerzero/tests/gasolina_parity/canton_signer_address.json",
+        "crates/pillar-layerzero/tests/non_evm_vectors/upstream_non_evm_layerzero_vectors.json",
+        "crates/pillar-metrics/Cargo.toml",
+        "crates/pillar-metrics/src/http_accounting.rs",
+        "crates/pillar-metrics/src/lib.rs",
+        "crates/pillar-runtime/Cargo.toml",
+        "crates/pillar-runtime/src/audit.rs",
+        "crates/pillar-runtime/src/config_loader.rs",
+        "crates/pillar-runtime/src/execution.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/canton_ledger.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/canton_sequencer.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/config/evm.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/config/mod.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/config/non_evm.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/config/parts.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/core_app.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/legacy_resolver.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/mod.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/packet_resolver.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/read_payload.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/relayer_options.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_move.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_starknet.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_stellar.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_sui.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_ton.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/ton_v3_builder.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/types.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/uln_v2_builder.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_extra_context.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_impl.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_payload.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_payload_solana.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_payload_stellar.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_payload_sui.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_payload_ton.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_read_markers.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_readiness.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_timestamp.rs",
+        "crates/pillar-runtime/src/lib.rs",
+        "crates/pillar-runtime/src/provider_health/chain_probes.rs",
+        "crates/pillar-runtime/src/provider_health/chain_probes_aptos.rs",
+        "crates/pillar-runtime/src/provider_health/chain_probes_misc.rs",
+        "crates/pillar-runtime/src/provider_health/chain_probes_ton_initia.rs",
+        "crates/pillar-runtime/src/provider_health/evm_helpers.rs",
+        "crates/pillar-runtime/src/provider_health/evm_observations.rs",
+        "crates/pillar-runtime/src/provider_health/evm_payload_observations.rs",
+        "crates/pillar-runtime/src/provider_health/evm_transaction_observations.rs",
+        "crates/pillar-runtime/src/provider_health/evm_uln_observations.rs",
+        "crates/pillar-runtime/src/provider_health/mod.rs",
+        "crates/pillar-runtime/src/provider_health/normalize.rs",
+        "crates/pillar-runtime/src/provider_health/quorum.rs",
+        "crates/pillar-runtime/src/provider_health/rank.rs",
+        "crates/pillar-runtime/src/provider_health/rpc_context.rs",
+        "crates/pillar-runtime/src/provider_health/source.rs",
+        "crates/pillar-runtime/src/provider_health/source_probes.rs",
+        "crates/pillar-runtime/src/provider_health/transport.rs",
+        "crates/pillar-runtime/src/provider_health/types.rs",
+        "crates/pillar-runtime/src/provider_snapshot.rs",
+        "crates/pillar-runtime/src/server_app/core_dependencies.rs",
+        "crates/pillar-runtime/src/server_app/env.rs",
+        "crates/pillar-runtime/src/server_app/mod.rs",
+        "crates/pillar-runtime/src/server_app/runtime_core.rs",
+        "crates/pillar-runtime/src/server_app/server_trait.rs",
+        "crates/pillar-runtime/src/server_app/types.rs",
+        "crates/pillar-runtime/src/signer_runtime/assembly.rs",
+        "crates/pillar-runtime/src/signer_runtime/chain_types.rs",
+        "crates/pillar-runtime/src/signer_runtime/getters.rs",
+        "crates/pillar-runtime/src/signer_runtime/mod.rs",
+        "crates/pillar-runtime/src/startup_report.rs",
+        "crates/pillar-runtime/src/tests/aptos_transport_wire_tests.rs",
+        "crates/pillar-runtime/src/tests/aptos_ulnv2_destination_tests.rs",
+        "crates/pillar-runtime/src/tests/audit_reconnect_e2e.rs",
+        "crates/pillar-runtime/src/tests/background_headroom_e2e.rs",
+        "crates/pillar-runtime/src/tests/canton_ledger_tests.rs",
+        "crates/pillar-runtime/src/tests/canton_sequencer_tests.rs",
+        "crates/pillar-runtime/src/tests/chain_binding_parity_tests.rs",
+        "crates/pillar-runtime/src/tests/core_app_tests.rs",
+        "crates/pillar-runtime/src/tests/evm_catalog_parity_tests.rs",
+        "crates/pillar-runtime/src/tests/evm_options_tests.rs",
+        "crates/pillar-runtime/src/tests/evm_source_events_tests.rs",
+        "crates/pillar-runtime/src/tests/gasolina_parity_tests.rs",
+        "crates/pillar-runtime/src/tests/health_availability_e2e.rs",
+        "crates/pillar-runtime/src/tests/initia_source_events_tests.rs",
+        "crates/pillar-runtime/src/tests/kms_headroom_tests.rs",
+        "crates/pillar-runtime/src/tests/kms_queued_contention_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_config_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_packet_resolver_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_non_evm_wiring_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_rejection_tests/aptos_v301_destination.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_rejection_tests/matrix.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_rejection_tests/mod.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_rejection_tests/move_v302_destination.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_rejection_tests/move_v302_resolve_and_sign.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_rejection_tests/nonevm_destination_diff.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_rejection_tests/nonevm_refusal_arms.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_rejection_tests/sui_iotamove.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_rejection_tests/ton_v302_destination.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_wiring_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_read_payload_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_uln_v2_feather_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_uln_v2_mpt_tests.rs",
+        "crates/pillar-runtime/src/tests/mod.rs",
+        "crates/pillar-runtime/src/tests/move_source_events_tests.rs",
+        "crates/pillar-runtime/src/tests/move_source_parity_tests.rs",
+        "crates/pillar-runtime/src/tests/packet_identity_http_tests.rs",
+        "crates/pillar-runtime/src/tests/payload_signed_family_tests.rs",
+        "crates/pillar-runtime/src/tests/phase1_tests.rs",
+        "crates/pillar-runtime/src/tests/postgres_audit_e2e.rs",
+        "crates/pillar-runtime/src/tests/provider_config_refresh_tests.rs",
+        "crates/pillar-runtime/src/tests/provider_health_aptos_tests.rs",
+        "crates/pillar-runtime/src/tests/provider_health_common_tests.rs",
+        "crates/pillar-runtime/src/tests/provider_health_evm_tests.rs",
+        "crates/pillar-runtime/src/tests/provider_health_initia_tests.rs",
+        "crates/pillar-runtime/src/tests/provider_health_solana_concurrency_tests.rs",
+        "crates/pillar-runtime/src/tests/provider_health_stellar_solana_probe_tests.rs",
+        "crates/pillar-runtime/src/tests/provider_health_sui_starknet_tests.rs",
+        "crates/pillar-runtime/src/tests/provider_health_ton_tests.rs",
+        "crates/pillar-runtime/src/tests/provider_health_tron_tests.rs",
+        "crates/pillar-runtime/src/tests/read_vertical_tests.rs",
+        "crates/pillar-runtime/src/tests/server_app_tests.rs",
+        "crates/pillar-runtime/src/tests/signer_kms_config_tests.rs",
+        "crates/pillar-runtime/src/tests/solana_v1_tests.rs",
+        "crates/pillar-runtime/src/tests/source_replay_parity_tests.rs",
+        "crates/pillar-runtime/src/tests/starknet_source_events_tests.rs",
+        "crates/pillar-runtime/src/tests/startup_report_tests.rs",
+        "crates/pillar-runtime/src/tests/stellar_payload_signed_tests.rs",
+        "crates/pillar-runtime/src/tests/stellar_provenance_tests.rs",
+        "crates/pillar-runtime/src/tests/stellar_source_events_tests.rs",
+        "crates/pillar-runtime/src/tests/sui_source_events_tests.rs",
+        "crates/pillar-runtime/src/tests/support_app.rs",
+        "crates/pillar-runtime/src/tests/support_core.rs",
+        "crates/pillar-runtime/src/tests/support_packets.rs",
+        "crates/pillar-runtime/src/tests/support_rpc.rs",
+        "crates/pillar-runtime/src/tests/support_validation_layerzero.rs",
+        "crates/pillar-runtime/src/tests/transport_wire_tests.rs",
+        "crates/pillar-runtime/src/tests/uln_v2_receive_route_tests.rs",
+        "crates/pillar-runtime/src/tests/uln_v2_refresh_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_app_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_payload_receive_library_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_payload_sui_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_payload_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_payload_ton_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_read_markers_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_readiness_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_timestamp_tests.rs",
+        "crates/pillar-runtime/src/validation.rs",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/003-mainnet-bridge-channels.request.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/003-mainnet-bridge-channels.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/004-mainnet-bridge-get_receive_msglib-101.request.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/004-mainnet-bridge-get_receive_msglib-101.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/005-mainnet-bridge-get_config-pillar-strings.request.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/005-mainnet-bridge-get_config-pillar-strings.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/005-movement-mainnet-v302-get_config-pillar-u32-strings.request.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/005-movement-mainnet-v302-get_config-pillar-u32-strings.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/006-movement-mainnet-v302-get_config-u32-numbers.request.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/006-movement-mainnet-v302-get_config-u32-numbers.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/008-mainnet-bridge-get_config-u64-string-u8-number.request.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/008-mainnet-bridge-get_config-u64-string-u8-number.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/009-mainnet-v302-get_config-pillar-u32-strings.request.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/009-mainnet-v302-get_config-pillar-u32-strings.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/010-mainnet-v302-get_config-u32-numbers.request.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/010-mainnet-v302-get_config-u32-numbers.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/011-mainnet-bridge-inbound_nonce-101.request.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/011-mainnet-bridge-inbound_nonce-101.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/012-mainnet-bridge-channel-remote-101.request.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/012-mainnet-bridge-channel-remote-101.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/013-mainnet-bridge-payload_hashs-74756-absent.request.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/013-mainnet-bridge-payload_hashs-74756-absent.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/015-mainnet-uln301-verifiable-synthetic.request.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/015-mainnet-uln301-verifiable-synthetic.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/016-mainnet-uln301-get_verification_confirmations-synthetic.request.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/016-mainnet-uln301-get_verification_confirmations-synthetic.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/023-testnet-bridge-channels.request.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/023-testnet-bridge-channels.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/024-testnet-bridge-get_receive_msglib-10161.request.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/024-testnet-bridge-get_receive_msglib-10161.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/032-testnet-bridge-get_config-10161-typed.request.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/032-testnet-bridge-get_config-10161-typed.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/034-testnet-bridge-inbound_nonce-10161-unconfigured.request.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/034-testnet-bridge-inbound_nonce-10161-unconfigured.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/035-testnet-bridge-channel-remote-10161-absent.request.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/035-testnet-bridge-channel-remote-10161-absent.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/037-mainnet-uaaccount-no-channels-404.request.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/037-mainnet-uaaccount-no-channels-404.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/038-mainnet-short-address-get_receive_msglib.request.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/038-mainnet-short-address-get_receive_msglib.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/039-mainnet-padded-address-get_receive_msglib.request.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/039-mainnet-padded-address-get_receive_msglib.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/040-mainnet-short-address-channels-404.request.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/040-mainnet-short-address-channels-404.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/041-mainnet-noprefix-address-get_receive_msglib.request.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/041-mainnet-noprefix-address-get_receive_msglib.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_public_node/README.md",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_ulnv2_destination.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_v1_source.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_v301_payload_signed.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_v301_source_provenance.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_v301_source_tx.json",
+        "crates/pillar-runtime/tests/gasolina_parity/aptos_v301_source_upstream.json",
+        "crates/pillar-runtime/tests/gasolina_parity/canton_sequencer.json",
+        "crates/pillar-runtime/tests/gasolina_parity/chain_bindings.json",
+        "crates/pillar-runtime/tests/gasolina_parity/chain_bindings_accounted.json",
+        "crates/pillar-runtime/tests/gasolina_parity/evm_catalog_destination.json",
+        "crates/pillar-runtime/tests/gasolina_parity/evm_options.json",
+        "crates/pillar-runtime/tests/gasolina_parity/evm_source_events.json",
+        "crates/pillar-runtime/tests/gasolina_parity/historical_smoke.json",
+        "crates/pillar-runtime/tests/gasolina_parity/initia_source_events.json",
+        "crates/pillar-runtime/tests/gasolina_parity/legacy_message_id.json",
+        "crates/pillar-runtime/tests/gasolina_parity/move_source_events.json",
+        "crates/pillar-runtime/tests/gasolina_parity/non_evm_destination.json",
+        "crates/pillar-runtime/tests/gasolina_parity/source_replay/solana-getTransaction-jsonParsed.response.json",
+        "crates/pillar-runtime/tests/gasolina_parity/source_replay/ton-trace-quorum.json",
+        "crates/pillar-runtime/tests/gasolina_parity/source_replay/ton-v3-events.response.json",
+        "crates/pillar-runtime/tests/gasolina_parity/source_replay/ton-v3-traces.response.json",
+        "crates/pillar-runtime/tests/gasolina_parity/source_replay/tron-eth_blockNumber.response.json",
+        "crates/pillar-runtime/tests/gasolina_parity/source_replay/tron-eth_getTransactionReceipt.response.json",
+        "crates/pillar-runtime/tests/gasolina_parity/source_replay/upstream-stage3-events.json",
+        "crates/pillar-runtime/tests/gasolina_parity/starknet_source_events.json",
+        "crates/pillar-runtime/tests/gasolina_parity/stellar_payload_signed.json",
+        "crates/pillar-runtime/tests/gasolina_parity/stellar_source_events.json",
+        "crates/pillar-runtime/tests/gasolina_parity/sui_source_events.json",
+        "crates/pillar-runtime/tests/gasolina_parity/ton_v302_destination.json",
+        "crates/pillar-runtime/tests/gasolina_parity/transport/source_replay/aptos/003-mainnet-bridge-channels.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/transport/source_replay/aptos/004-mainnet-bridge-get_receive_msglib-101.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/transport/source_replay/aptos/008-mainnet-bridge-get_config-u64-string-u8-number.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/transport/source_replay/aptos/010-mainnet-v302-get_config-u32-numbers.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/transport/source_replay/aptos/011-mainnet-bridge-inbound_nonce-101.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/transport/source_replay/aptos/012-mainnet-bridge-channel-remote-101.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/transport/source_replay/aptos/013-mainnet-bridge-payload_hashs-74756-absent.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/transport/source_replay/aptos/015-mainnet-uln301-verifiable-synthetic.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/transport/source_replay/aptos/016-mainnet-uln301-get_verification_confirmations-synthetic.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/transport/source_replay/aptos/movement-v302-get-config.response.body",
+        "crates/pillar-runtime/tests/gasolina_parity/transport/upstream_aptos_transport.json",
+        "crates/pillar-runtime/tests/gasolina_parity/transport/upstream_requests.json",
+        "crates/pillar-runtime/tests/gasolina_parity/v1_refresh.json",
+        "crates/pillar-runtime/tests/gasolina_parity/v2_v3_route.json",
+        "crates/pillar-runtime/tests/gasolina_parity/v_id_by_chain_name.json",
+        "crates/pillar-runtime/tests/onchain_provenance/dvn_vid.json",
+        "crates/pillar-runtime/tests/onchain_provenance/ton_testnet_delivered_packet.json",
+        "crates/pillar-signer/Cargo.toml",
+        "crates/pillar-signer/src/aws.rs",
+        "crates/pillar-signer/src/aws/tests.rs",
+        "crates/pillar-signer/src/azure.rs",
+        "crates/pillar-signer/src/azure/adapter.rs",
+        "crates/pillar-signer/src/azure/client.rs",
+        "crates/pillar-signer/src/azure/hedge_tests.rs",
+        "crates/pillar-signer/src/azure/phase1_tests.rs",
+        "crates/pillar-signer/src/azure/tests.rs",
+        "crates/pillar-signer/src/azure/wire_e2e.rs",
+        "crates/pillar-signer/src/chain_address.rs",
+        "crates/pillar-signer/src/chain_address/base.rs",
+        "crates/pillar-signer/src/chain_address/chains.rs",
+        "crates/pillar-signer/src/chain_address/kind.rs",
+        "crates/pillar-signer/src/chain_address/kind/tests.rs",
+        "crates/pillar-signer/src/chain_address/tests.rs",
+        "crates/pillar-signer/src/effects.rs",
+        "crates/pillar-signer/src/gcp.rs",
+        "crates/pillar-signer/src/gcp/tests.rs",
+        "crates/pillar-signer/src/lib.rs",
+        "crates/pillar-signer/src/local_mnemonic.rs",
+        "crates/pillar-signer/src/types.rs",
+        "crates/pillar-signer/src/unsupported_signature_type_tests.rs",
+        "crates/pillar-signer/tests/gasolina_parity/canton_sign.json",
+        "scripts/build-acceptance-matrix.mjs",
+        "scripts/check-generated-config-integrity.mjs",
+        "scripts/check-layerzero-environment-parity.mjs",
+        "scripts/gasolina-parity/README.md",
+        "scripts/gasolina-parity/boundary/excluded-chain-boundary.mjs",
+        "scripts/gasolina-parity/boundary/run-emitter.sh",
+        "scripts/gasolina-parity/emit-aptos-transport-wire.ts",
+        "scripts/gasolina-parity/emit-aptos-ulnv2-destination.ts",
+        "scripts/gasolina-parity/emit-aptos-v1-source.ts",
+        "scripts/gasolina-parity/emit-aptos-v301-payload-signed.ts",
+        "scripts/gasolina-parity/emit-aptos-v301-source.ts",
+        "scripts/gasolina-parity/emit-canton-digest.ts",
+        "scripts/gasolina-parity/emit-canton-signer-address.ts",
+        "scripts/gasolina-parity/emit-chain-bindings.ts",
+        "scripts/gasolina-parity/emit-evm-catalog-destination.ts",
+        "scripts/gasolina-parity/emit-evm-options.ts",
+        "scripts/gasolina-parity/emit-evm-source-events.ts",
+        "scripts/gasolina-parity/emit-expiration-bound.ts",
+        "scripts/gasolina-parity/emit-historical-smoke.ts",
+        "scripts/gasolina-parity/emit-http-framework-golden.ts",
+        "scripts/gasolina-parity/emit-initia-source-events.ts",
+        "scripts/gasolina-parity/emit-legacy-message-id-golden.ts",
+        "scripts/gasolina-parity/emit-move-source-events.ts",
+        "scripts/gasolina-parity/emit-nonevm-destination.ts",
+        "scripts/gasolina-parity/emit-source-replay-sol-tron-ton.ts",
+        "scripts/gasolina-parity/emit-starknet-source-events.ts",
+        "scripts/gasolina-parity/emit-stellar-payload-signed.ts",
+        "scripts/gasolina-parity/emit-stellar-source-events.ts",
+        "scripts/gasolina-parity/emit-sui-source-events.ts",
+        "scripts/gasolina-parity/emit-ton-trace-quorum.ts",
+        "scripts/gasolina-parity/emit-ton-v302-destination.ts",
+        "scripts/gasolina-parity/emit-v-id-table.ts",
+        "scripts/gasolina-parity/emit-v1-refresh.ts",
+        "scripts/gasolina-parity/emit-v2-v3-route.ts",
+        "scripts/gasolina-parity/emit-ve3-sequencer.ts",
+        "scripts/gasolina-parity/emit-ve3-sign.ts",
+        "scripts/gasolina-parity/emit-zod-v2-golden.ts",
+        "scripts/generate-chain-metadata-config.mjs",
+        "scripts/generate-layerzero-legacy-chain-ids.mjs",
+        "scripts/generate-layerzero-static-config.mjs"
+      ],
+      "rationale": "Enforce shared request budgets and persist signing attempts.\nAlign chain adapters and provider selection with upstream contracts."
+    },
+    {
+      "title": "Pin audit CI and document acceptance evidence",
+      "status": "landed",
+      "sourceCommits": [
+        "1f6d0e6f2ce6379f8cdf1aca180fa182a45c3e68",
+        "a4d8ff3d1b2a0e70e140bd77aea99539de103c09",
+        "ff249a1b83edcc25a099d5b7e0706d4c36248b67",
+        "70141ac9f47bbfe0893405b62bae45395b3ad8ed"
+      ],
+      "sourceLandingCommits": [
+        "1f6d0e6f2ce6379f8cdf1aca180fa182a45c3e68",
+        "a4d8ff3d1b2a0e70e140bd77aea99539de103c09",
+        "ff249a1b83edcc25a099d5b7e0706d4c36248b67",
+        "70141ac9f47bbfe0893405b62bae45395b3ad8ed"
+      ],
+      "scopePaths": [
+        ".github/workflows/ci.yml",
+        "AUDIT.md",
+        "CHANGELOG.md",
+        "CONTRIBUTING.md",
+        "README.md",
+        "SECURITY.md",
+        "audit/acceptance/acceptance-rows.csv",
+        "audit/acceptance/acceptance-rows.md"
+      ]
+    },
+    {
+      "title": "Isolate audit probes and harden signing trust boundaries",
+      "status": "landed",
+      "sourceCommits": [
+        "7dc694ca53ef4941532a39808e71530b5300d9a5",
+        "3edb5d237120c9c37493c2ad8be3a69cfcc8c20e",
+        "1f3daa1a74fa811ad8ffc658a5c3236b47f38633",
+        "93e11196b132186bd9ae4b03fe399b868442e7de"
+      ],
+      "sourceLandingCommits": [
+        "7dc694ca53ef4941532a39808e71530b5300d9a5",
+        "3edb5d237120c9c37493c2ad8be3a69cfcc8c20e",
+        "1f3daa1a74fa811ad8ffc658a5c3236b47f38633",
+        "93e11196b132186bd9ae4b03fe399b868442e7de"
+      ],
+      "scopePaths": [
+        "AUDIT.md",
+        "Cargo.lock",
+        "SECURITY.md",
+        "crates/pillar-client/src/lib.rs",
+        "crates/pillar-client/tests/transport_debug_redaction.rs",
+        "crates/pillar-config/src/lib.rs",
+        "crates/pillar-config/src/provider_validation.rs",
+        "crates/pillar-config/src/provider_validation_tests/config.rs",
+        "crates/pillar-config/src/provider_validation_tests/entry_validation.rs",
+        "crates/pillar-config/src/provider_validation_tests/strategy.rs",
+        "crates/pillar-config/src/provider_validation_tests/upstream_precompute.rs",
+        "crates/pillar-config/src/provider_validation_tests/upstream_precompute_restrictions.rs",
+        "crates/pillar-config/src/provider_validation_tests/v2_files.rs",
+        "crates/pillar-runtime/Cargo.toml",
+        "crates/pillar-runtime/src/audit.rs",
+        "crates/pillar-runtime/src/config_loader.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_readiness.rs",
+        "crates/pillar-runtime/src/signer_runtime/aws_secret.rs",
+        "crates/pillar-runtime/src/tests/audit_reconnect_e2e.rs"
+      ],
+      "rationale": "Separate readiness connections from signing transactions.\nTighten TLS policy, secret redaction, signer ordering, and TON bounds."
+    },
+    {
+      "title": "Update version to 2.5.0",
+      "status": "landed",
+      "sourceCommits": [
+        "d3b282150e51594fd91d825c1aa56ffe8584680a"
+      ],
+      "sourceLandingCommits": [
+        "d3b282150e51594fd91d825c1aa56ffe8584680a"
+      ],
+      "scopePaths": [
+        "AUDIT.md",
+        "CHANGELOG.md",
+        "Cargo.lock",
+        "Cargo.toml"
+      ],
+      "releaseTag": {
+        "name": "v2.5.0",
+        "targetCommit": "f5868d0428cf3edb585dca5a396c02e37d3d0ade"
+      },
+      "releaseNote": "The version-update commit is not the public tag target; the tagged source includes the CI/readiness follow-up fixes."
+    },
+    {
+      "title": "Satisfy Clippy 1.98.1 in EVM signer ordering",
+      "status": "landed",
+      "sourceCommits": [
+        "d947947057f0759f05c94e34faae3663723ed216"
+      ],
+      "sourceLandingCommits": [
+        "d947947057f0759f05c94e34faae3663723ed216"
+      ],
+      "scopePaths": [
+        "AUDIT.md",
+        "CHANGELOG.md",
+        "crates/pillar-client/src/lib.rs"
+      ]
+    },
+    {
+      "title": "Prevent expired audit probes from dialing",
+      "status": "landed",
+      "sourceCommits": [
+        "ad3d24babacf192d7905d6a18d9ff0f28868ab0f",
+        "f5868d0428cf3edb585dca5a396c02e37d3d0ade"
+      ],
+      "sourceLandingCommits": [
+        "ad3d24babacf192d7905d6a18d9ff0f28868ab0f",
+        "f5868d0428cf3edb585dca5a396c02e37d3d0ade"
+      ],
+      "scopePaths": [
+        "AUDIT.md",
+        "CHANGELOG.md",
+        "SECURITY.md",
+        "crates/pillar-runtime/src/audit.rs"
+      ],
+      "rationale": "Check the remaining deadline after acquiring the readiness lane.\nCount dial attempts directly in the readiness regressions."
+    },
+    {
+      "title": "Harden signing, READ, and TON source validation",
+      "status": "landed",
+      "sourceCommits": [
+        "80e0ad21d07e808082b4c351cb71f42de7f8fd29",
+        "53601593cfb92877857efcb0fc27d8a045d4ccf0",
+        "87b4bae121280a67fb589f60bbd0deebafae2eab",
+        "9e29dc93acbeaf13bc65a6eaf85ef4de0ac71473",
+        "c4f05a6376ea8937ce21504fc708385d953398eb",
+        "4395c70c7d580bd862951bd6decfcdb7aa748238"
+      ],
+      "sourceLandingCommits": [
+        "4395c70c7d580bd862951bd6decfcdb7aa748238"
+      ],
+      "scopePaths": [
+        "Cargo.lock",
+        "Cargo.toml",
+        "crates/pillar-api/src/lib.rs",
+        "crates/pillar-core/src/lib.rs",
+        "crates/pillar-runtime/Cargo.toml",
+        "crates/pillar-runtime/src/layerzero_runtime/mod.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/packet_resolver.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/read_payload.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_ton.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/uln_v2_builder.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_extra_context.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_impl.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_readiness.rs",
+        "crates/pillar-runtime/src/provider_health/evm_helpers.rs",
+        "crates/pillar-runtime/src/provider_health/evm_observations.rs",
+        "crates/pillar-runtime/src/provider_health/evm_payload_observations.rs",
+        "crates/pillar-runtime/src/provider_health/evm_uln_observations.rs",
+        "crates/pillar-runtime/src/provider_health/mod.rs",
+        "crates/pillar-runtime/src/provider_health/transport.rs",
+        "crates/pillar-runtime/src/tests/aptos_ulnv2_destination_tests.rs",
+        "crates/pillar-runtime/src/tests/core_app_tests.rs",
+        "crates/pillar-runtime/src/tests/gasolina_parity_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_rejection_tests/aptos_v301_destination.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_rejection_tests/nonevm_destination_diff.rs",
+        "crates/pillar-runtime/src/tests/layerzero_parts_rejection_tests/nonevm_refusal_arms.rs",
+        "crates/pillar-runtime/src/tests/layerzero_read_payload_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_uln_v2_mpt_tests.rs",
+        "crates/pillar-runtime/src/tests/read_data_http_e2e.rs",
+        "crates/pillar-runtime/src/tests/read_vertical_tests.rs",
+        "crates/pillar-runtime/src/tests/support_core.rs",
+        "crates/pillar-runtime/src/tests/support_packets.rs",
+        "crates/pillar-runtime/src/tests/support_validation_layerzero.rs",
+        "crates/pillar-runtime/src/tests/transport_wire_tests.rs",
+        "crates/pillar-runtime/src/tests/uln_v2_receive_route_tests.rs",
+        "crates/pillar-runtime/src/tests/uln_v2_refresh_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_app_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_payload_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_readiness_tests.rs",
+        "crates/pillar-runtime/src/validation.rs",
+        "crates/pillar-signer/src/kms_signature.rs",
+        "crates/pillar-signer/src/kms_signature/tests.rs",
+        "crates/pillar-signer/src/local_mnemonic.rs"
+      ]
+    },
+    {
+      "title": "Capture runtime image and TON release evidence in CI",
+      "status": "landed",
+      "sourceCommits": [
+        "80e0ad21d07e808082b4c351cb71f42de7f8fd29",
+        "53601593cfb92877857efcb0fc27d8a045d4ccf0",
+        "87b4bae121280a67fb589f60bbd0deebafae2eab",
+        "9e29dc93acbeaf13bc65a6eaf85ef4de0ac71473",
+        "c4f05a6376ea8937ce21504fc708385d953398eb",
+        "4395c70c7d580bd862951bd6decfcdb7aa748238"
+      ],
+      "sourceLandingCommits": [
+        "4395c70c7d580bd862951bd6decfcdb7aa748238"
+      ],
+      "scopePaths": [
+        ".github/workflows/ci.yml",
+        "audit/acceptance/pr1-case-evidence.json",
+        "audit/acceptance/pr1-case-evidence.md",
+        "scripts/ci-container-artifact.mjs",
+        "scripts/ci-ton-release-gate.sh",
+        "scripts/ci-ton-release-summary.mjs"
+      ]
+    },
+    {
+      "title": "Document audit remediation and rollout limits",
+      "status": "landed",
+      "sourceCommits": [
+        "80e0ad21d07e808082b4c351cb71f42de7f8fd29",
+        "53601593cfb92877857efcb0fc27d8a045d4ccf0",
+        "87b4bae121280a67fb589f60bbd0deebafae2eab",
+        "9e29dc93acbeaf13bc65a6eaf85ef4de0ac71473",
+        "c4f05a6376ea8937ce21504fc708385d953398eb",
+        "4395c70c7d580bd862951bd6decfcdb7aa748238"
+      ],
+      "sourceLandingCommits": [
+        "4395c70c7d580bd862951bd6decfcdb7aa748238"
+      ],
+      "scopePaths": [
+        "AUDIT.md",
+        "CHANGELOG.md",
+        "README.md",
+        "SECURITY.md"
+      ]
+    },
+    {
+      "title": "Correct READ observation counts and parity reproduction",
+      "status": "landed",
+      "sourceCommits": [
+        "98974c0afc123959a72fc2729bc909cc2cfb00bd",
+        "15e5015f22416c67eb99c33f9b52816d536f0c05",
+        "b02898ad02a812729124df8e596af7f7a2866256"
+      ],
+      "sourceLandingCommits": [
+        "b02898ad02a812729124df8e596af7f7a2866256"
+      ],
+      "scopePaths": [
+        "AUDIT.md",
+        "CHANGELOG.md",
+        "README.md",
+        "SECURITY.md",
+        "audit/acceptance/pr1-case-evidence.json",
+        "audit/acceptance/pr1-case-evidence.md",
+        "crates/pillar-runtime/src/tests/read_data_http_e2e.rs",
+        "scripts/gasolina-parity/README.md"
+      ]
+    },
+    {
+      "title": "Resolve DVN routes and migrate Sui reads to GraphQL",
+      "status": "landed",
+      "sourceCommits": [
+        "96265515fb20a927fc7d93edcdc722df1d70e872",
+        "352774a2b670436b092faace8a122924a613b1ba",
+        "5d24a8b27448253e51ba7292b7c4020f3c873cb8",
+        "8a583d1c4a8e8311d5ab3fbc9ff0b49f2b3ba122",
+        "3ed0d8f4426faaffc900624148be75df2f574a83",
+        "e4c605a8c17adc6f86ddf1034f9b81a68b0bac40",
+        "5787b04db475a9efa41c54b3d7ba413ec23fa05e",
+        "200711f8a68f4b034c382b273d2515e0495cf164",
+        "10056e01e24d8fdfcc112f9974e5036c4183b52b",
+        "a6c9876349a1cf198c0f534e9939f8ffb060ffc9",
+        "8c63d1145956a7ccff3535634cb2b9a585088c13",
+        "d7a7f9c42247eae9eade616b2d44e9c2f1c501bc",
+        "cfcd6ec2af55651ff82ac18ac960788524b35fa9",
+        "abe9d60053ea582f0f0d1d0635f0f80523b5790d"
+      ],
+      "sourceLandingCommits": [
+        "abe9d60053ea582f0f0d1d0635f0f80523b5790d"
+      ],
+      "scopePaths": [
+        "crates/pillar-layerzero/src/abi/decode.rs",
+        "crates/pillar-layerzero/src/tests.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/legacy_resolver.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/mod.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/packet_resolver.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_starknet.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_stellar.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_payload_sui.rs",
+        "crates/pillar-runtime/src/provider_health/mod.rs",
+        "crates/pillar-runtime/src/provider_health/sui_graphql.rs",
+        "crates/pillar-runtime/src/provider_health/transport.rs",
+        "crates/pillar-runtime/src/tests/core_app_tests.rs",
+        "crates/pillar-runtime/src/tests/evm_source_events_tests.rs",
+        "crates/pillar-runtime/src/tests/gasolina_parity_tests.rs",
+        "crates/pillar-runtime/src/tests/initia_source_events_tests.rs",
+        "crates/pillar-runtime/src/tests/payload_signed_family_tests.rs",
+        "crates/pillar-runtime/src/tests/provider_health_sui_starknet_tests.rs",
+        "crates/pillar-runtime/src/tests/source_replay_parity_tests.rs",
+        "crates/pillar-runtime/src/tests/starknet_source_events_tests.rs",
+        "crates/pillar-runtime/src/tests/stellar_source_events_tests.rs",
+        "crates/pillar-runtime/src/tests/sui_source_events_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_payload_sui_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_payload_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_readiness_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_timestamp_tests.rs",
+        "crates/pillar-runtime/tests/gasolina_parity/transport/sui-mainnet-graphql-payload-support.json",
+        "crates/pillar-runtime/tests/gasolina_parity/transport/sui-mainnet-graphql-shared-version.json",
+        "crates/pillar-runtime/tests/gasolina_parity/transport/sui-mainnet-graphql-source-transaction.json"
+      ],
+      "rationale": "Preserve resolver ordering and defer unknown endpoint IDs during scans.\nReject overflowing PacketSent offsets and validate Sui provider responses."
+    },
+    {
+      "title": "Pin CI validation and document resolver compatibility",
+      "status": "landed",
+      "sourceCommits": [
+        "96265515fb20a927fc7d93edcdc722df1d70e872",
+        "352774a2b670436b092faace8a122924a613b1ba",
+        "5d24a8b27448253e51ba7292b7c4020f3c873cb8",
+        "8a583d1c4a8e8311d5ab3fbc9ff0b49f2b3ba122",
+        "3ed0d8f4426faaffc900624148be75df2f574a83",
+        "e4c605a8c17adc6f86ddf1034f9b81a68b0bac40",
+        "5787b04db475a9efa41c54b3d7ba413ec23fa05e",
+        "200711f8a68f4b034c382b273d2515e0495cf164",
+        "10056e01e24d8fdfcc112f9974e5036c4183b52b",
+        "a6c9876349a1cf198c0f534e9939f8ffb060ffc9",
+        "8c63d1145956a7ccff3535634cb2b9a585088c13",
+        "d7a7f9c42247eae9eade616b2d44e9c2f1c501bc",
+        "cfcd6ec2af55651ff82ac18ac960788524b35fa9",
+        "abe9d60053ea582f0f0d1d0635f0f80523b5790d"
+      ],
+      "sourceLandingCommits": [
+        "abe9d60053ea582f0f0d1d0635f0f80523b5790d"
+      ],
+      "scopePaths": [
+        ".github/workflows/ci.yml",
+        "CHANGELOG.md",
+        "Dockerfile",
+        "README.md",
+        "SECURITY.md"
+      ],
+      "rationale": "Pin the image builder to the validated compiler."
+    },
+    {
+      "title": "Classify failed EVM receipt rereads as unavailable",
+      "status": "landed",
+      "sourceCommits": [
+        "8b4022073787451cdd3c98b5119d95fa0f9fcf71",
+        "b7fc3ab41fec6632db69b3d8b33ceab10ff45525"
+      ],
+      "sourceLandingCommits": [
+        "b7fc3ab41fec6632db69b3d8b33ceab10ff45525"
+      ],
+      "scopePaths": [
+        "AUDIT.md",
+        "CHANGELOG.md",
+        "README.md",
+        "SECURITY.md",
+        "audit/acceptance/pr1-case-evidence.json",
+        "audit/acceptance/pr1-case-evidence.md",
+        "crates/pillar-runtime/src/layerzero_runtime/packet_resolver.rs",
+        "crates/pillar-runtime/src/provider_health/evm_observations.rs",
+        "crates/pillar-runtime/src/tests/core_app_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_read_payload_tests.rs",
+        "crates/pillar-runtime/src/tests/packet_identity_http_tests.rs",
+        "crates/pillar-runtime/src/tests/sui_source_events_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_payload_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_readiness_tests.rs"
+      ]
+    },
+    {
+      "title": "Record mainnet rollout evidence and remaining live checks",
+      "status": "landed",
+      "sourceCommits": [
+        "84a4bdb7bfe47b3cc9276be1fab8149002892606"
+      ],
+      "sourceLandingCommits": [
+        "84a4bdb7bfe47b3cc9276be1fab8149002892606"
+      ],
+      "scopePaths": [
+        "AUDIT.md",
+        "audit/acceptance/pr1-case-evidence.json",
+        "audit/acceptance/pr1-case-evidence.md"
+      ]
+    },
+    {
+      "title": "Update version to 2.6.0",
+      "status": "landed",
+      "sourceCommits": [
+        "09cec5c3975aa743abb29f6783b115e0d93d3af6"
+      ],
+      "sourceLandingCommits": [
+        "09cec5c3975aa743abb29f6783b115e0d93d3af6"
+      ],
+      "scopePaths": [
+        "AUDIT.md",
+        "CHANGELOG.md",
+        "Cargo.lock",
+        "Cargo.toml"
+      ]
+    },
+    {
+      "title": "Record the 2.6.0 retest scope and evidence",
+      "status": "landed",
+      "sourceCommits": [
+        "548c691e9219b69ba16e22bae669a15c57db3e26"
+      ],
+      "sourceLandingCommits": [
+        "548c691e9219b69ba16e22bae669a15c57db3e26"
+      ],
+      "scopePaths": [
+        "AUDIT.md",
+        "CHANGELOG.md",
+        "SECURITY.md",
+        "audit/acceptance/pr1-case-evidence.md",
+        "audit/retest-2.6.0.md"
+      ]
+    },
+    {
+      "title": "Exclude failed provider reads from readiness votes",
+      "status": "landed",
+      "sourceCommits": [
+        "7a2c33fd4ded71ba9a74e50f4e02cc105fefb0ea",
+        "37f6661c69241625449413457da3b2f110b90a20"
+      ],
+      "sourceLandingCommits": [
+        "37f6661c69241625449413457da3b2f110b90a20"
+      ],
+      "scopePaths": [
+        "crates/pillar-runtime/src/layerzero_runtime/validation_readiness.rs",
+        "crates/pillar-runtime/src/provider_health/evm_observations.rs",
+        "crates/pillar-runtime/src/provider_health/evm_uln_observations.rs",
+        "crates/pillar-runtime/src/tests/layerzero_uln_v2_mpt_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_readiness_tests.rs"
+      ]
+    },
+    {
+      "title": "Protect signer secrets and durable audit capacity",
+      "status": "landed",
+      "sourceCommits": [
+        "5763ada0a7d6a7727492daf0a0eada299f296729",
+        "c458da167712cd215c9da791764c95a2b189e1c9"
+      ],
+      "sourceLandingCommits": [
+        "c458da167712cd215c9da791764c95a2b189e1c9"
+      ],
+      "scopePaths": [
+        "Cargo.lock",
+        "Cargo.toml",
+        "crates/pillar-api/src/lib.rs",
+        "crates/pillar-core/src/audit.rs",
+        "crates/pillar-core/src/audit_tests.rs",
+        "crates/pillar-runtime/src/audit.rs",
+        "crates/pillar-runtime/src/server_app/server_trait.rs",
+        "crates/pillar-runtime/src/tests/audit_reconnect_e2e.rs",
+        "crates/pillar-signer/src/azure/wire_e2e.rs",
+        "crates/pillar-signer/src/local_mnemonic.rs",
+        "crates/pillar-signer/src/local_mnemonic/tests.rs"
+      ]
+    },
+    {
+      "title": "Correct non-EVM event decoding and quorum handling",
+      "status": "landed",
+      "sourceCommits": [
+        "93853af8cc9bb91c485e87f0fdb80d77404d3773",
+        "759f10a3359a71e093f214764cd063475bf2e0fc",
+        "da2e05b352e9a9456c361a5ff537cf3becc9533a"
+      ],
+      "sourceLandingCommits": [
+        "da2e05b352e9a9456c361a5ff537cf3becc9533a"
+      ],
+      "scopePaths": [
+        "crates/pillar-runtime/src/layerzero_runtime/packet_resolver.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_stellar.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_payload_ton.rs",
+        "crates/pillar-runtime/src/provider_health/sui_graphql.rs",
+        "crates/pillar-runtime/src/provider_health/transport.rs",
+        "crates/pillar-runtime/src/tests/stellar_source_events_tests.rs",
+        "crates/pillar-runtime/src/tests/sui_source_events_tests.rs"
+      ]
+    },
+    {
+      "title": "Correct READ payload compatibility and validation",
+      "status": "landed",
+      "sourceCommits": [
+        "07fb5ed80f8041cb32e00ce0c9500ab40ec43b52",
+        "937a3a69a7302f8635b959b07ee979e24331d6f3",
+        "9db5b1e6e4791ab3579be75dc06d14e8209ea2f1"
+      ],
+      "sourceLandingCommits": [
+        "9db5b1e6e4791ab3579be75dc06d14e8209ea2f1"
+      ],
+      "scopePaths": [
+        "crates/pillar-core/src/lib.rs",
+        "crates/pillar-layerzero/src/solana.rs",
+        "crates/pillar-layerzero/src/tests/non_evm_vectors/solana_vectors.rs",
+        "crates/pillar-layerzero/src/tests/solana_builder_tests.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/read_payload.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_read_markers.rs",
+        "crates/pillar-runtime/src/provider_health/evm_helpers.rs",
+        "crates/pillar-runtime/src/provider_health/evm_payload_observations.rs",
+        "crates/pillar-runtime/src/tests/core_app_tests.rs",
+        "crates/pillar-runtime/src/tests/layerzero_read_payload_tests.rs",
+        "crates/pillar-runtime/src/tests/packet_identity_http_tests.rs",
+        "crates/pillar-runtime/src/tests/read_data_http_e2e.rs",
+        "crates/pillar-runtime/src/tests/read_vertical_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_read_markers_tests.rs"
+      ]
+    },
+    {
+      "title": "Validate provider labels and bound RPC response bodies",
+      "status": "landed",
+      "sourceCommits": [
+        "45af150f670315201401e34255aefa6b85430654",
+        "6ab887243e049a80385405314080b443f5beef8c",
+        "31916222f6842e7979b244fae114c560cd99f645"
+      ],
+      "sourceLandingCommits": [
+        "31916222f6842e7979b244fae114c560cd99f645"
+      ],
+      "scopePaths": [
+        ".github/workflows/ci.yml",
+        "Cargo.lock",
+        "README.md",
+        "SECURITY.md",
+        "crates/pillar-config/Cargo.toml",
+        "crates/pillar-config/examples/provider_config.rs",
+        "crates/pillar-config/src/execution.rs",
+        "crates/pillar-config/src/provider_validation.rs",
+        "crates/pillar-config/src/provider_validation_tests/v2_files.rs",
+        "crates/pillar-metrics/src/lib.rs",
+        "crates/pillar-runtime/src/config_loader.rs",
+        "crates/pillar-runtime/src/server_app/core_dependencies.rs",
+        "crates/pillar-runtime/src/startup_report.rs",
+        "crates/pillar-runtime/src/tests/provider_config_refresh_tests.rs"
+      ]
+    },
+    {
+      "title": "Attest runtime images and stabilize log-capture regressions",
+      "status": "landed",
+      "sourceCommits": [
+        "4e7711af7e4a051dbcbb6e324845b57dcd944bdd",
+        "6e02c0f3e2d70ee35ce524c2537ea2548aee323a",
+        "b04a0d917de8e8db4b4438b3fb56b6c3bfa763fa"
+      ],
+      "sourceLandingCommits": [
+        "6e02c0f3e2d70ee35ce524c2537ea2548aee323a",
+        "b04a0d917de8e8db4b4438b3fb56b6c3bfa763fa"
+      ],
+      "scopePaths": [
+        ".github/workflows/ci.yml",
+        "Dockerfile",
+        "README.md",
+        "SECURITY.md",
+        "crates/pillar-cli/src/healthcheck.rs",
+        "crates/pillar-cli/src/main.rs",
+        "crates/pillar-config/src/generated_chain_metadata.rs",
+        "crates/pillar-config/src/generated_layerzero_environment.rs",
+        "crates/pillar-config/src/generated_layerzero_evm.rs",
+        "crates/pillar-config/src/generated_layerzero_legacy_chain_ids.rs",
+        "crates/pillar-config/src/generated_ton_layerzero.rs",
+        "crates/pillar-config/src/provider_validation_tests/v2_files.rs",
+        "crates/pillar-runtime/src/config_loader.rs",
+        "crates/pillar-runtime/src/server_app/core_dependencies.rs",
+        "scripts/check-generated-config-integrity.mjs",
+        "scripts/generate-chain-metadata-config.mjs",
+        "scripts/generate-layerzero-environment-capability.mjs",
+        "scripts/generate-layerzero-legacy-chain-ids.mjs",
+        "scripts/generate-layerzero-static-config.mjs",
+        "scripts/generate-ton-static-config.mjs",
+        "scripts/generated-body-digest.mjs"
+      ],
+      "rationale": "Hash generated table bodies and drop curl from the runtime image.\nRegister log callsites before capturing their regression output."
+    },
+    {
+      "title": "Correct Stellar layouts and restore per-attempt audit quotas",
+      "status": "landed",
+      "sourceCommits": [
+        "2ddecd873b010b8d524827b81559aed4c33beb92",
+        "810692b88daaf58b7f7e35b75839d8819e987db5",
+        "cd82438862e94d625cb026dee6d0721d5a094be0"
+      ],
+      "sourceLandingCommits": [
+        "2ddecd873b010b8d524827b81559aed4c33beb92",
+        "810692b88daaf58b7f7e35b75839d8819e987db5",
+        "cd82438862e94d625cb026dee6d0721d5a094be0"
+      ],
+      "scopePaths": [
+        "AUDIT.md",
+        "README.md",
+        "SECURITY.md",
+        "crates/pillar-core/src/audit.rs",
+        "crates/pillar-core/src/audit_tests.rs",
+        "crates/pillar-core/src/lib.rs",
+        "crates/pillar-runtime/src/audit.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_stellar.rs",
+        "crates/pillar-runtime/src/server_app/core_dependencies.rs",
+        "crates/pillar-runtime/src/tests/audit_reconnect_e2e.rs",
+        "crates/pillar-signer/src/azure/wire_e2e.rs"
+      ],
+      "rationale": "Cache readiness under its dedicated probe lane.\nKeep per-packet audit regressions and operator guidance aligned."
+    },
+    {
+      "title": "Treat readiness provider failures as non-votes",
+      "status": "landed",
+      "sourceCommits": [
+        "469f12da9ffba9a32422f7799c5997ed004b51e2",
+        "9439fe7493592ca4b19e5a7e953b92f5873e5489",
+        "b27333e20fd274dc8be5a0c235abb846bfa79196"
+      ],
+      "sourceLandingCommits": [
+        "9439fe7493592ca4b19e5a7e953b92f5873e5489",
+        "b27333e20fd274dc8be5a0c235abb846bfa79196"
+      ],
+      "scopePaths": [
+        "SECURITY.md",
+        "crates/pillar-runtime/src/layerzero_runtime/mod.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_move.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_sui.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/uln_v2_builder.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_readiness.rs",
+        "crates/pillar-runtime/src/provider_health/evm_uln_observations.rs",
+        "crates/pillar-runtime/src/provider_health/quorum.rs",
+        "crates/pillar-runtime/src/tests/layerzero_uln_v2_mpt_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_readiness_tests.rs"
+      ]
+    },
+    {
+      "title": "Harden Sui, IOTA, Stellar, and Solana packet handling",
+      "status": "landed",
+      "sourceCommits": [
+        "f656cfb1762a0ac259ac5dd630ed2e5db56212e2",
+        "af2eaefc59096cc8fadaf2eb4c022c448456a2f9",
+        "96d1928806f74b2a1f41803c3bbcea9dd1c89991"
+      ],
+      "sourceLandingCommits": [
+        "96d1928806f74b2a1f41803c3bbcea9dd1c89991"
+      ],
+      "scopePaths": [
+        "crates/pillar-layerzero/src/other_non_evm/stellar.rs",
+        "crates/pillar-layerzero/src/tests/other_non_evm.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/packet_resolver.rs",
+        "crates/pillar-runtime/src/provider_health/transport.rs",
+        "crates/pillar-runtime/src/tests/layerzero_packet_resolver_tests.rs",
+        "crates/pillar-runtime/src/tests/sui_source_events_tests.rs",
+        "crates/pillar-runtime/src/tests/support_packets.rs"
+      ]
+    },
+    {
+      "title": "Bound TON BoC parsing and message chunk sizes",
+      "status": "landed",
+      "sourceCommits": [
+        "cd8b10ac702baf48a571835a9dab5ace18c7cd04",
+        "243686deadc0b6dc91636eef8c01a35b25d7a332"
+      ],
+      "sourceLandingCommits": [
+        "243686deadc0b6dc91636eef8c01a35b25d7a332"
+      ],
+      "scopePaths": [
+        "Cargo.lock",
+        "crates/pillar-layerzero/Cargo.toml",
+        "crates/pillar-layerzero/src/lib.rs",
+        "crates/pillar-layerzero/src/other_non_evm.rs",
+        "crates/pillar-layerzero/src/other_non_evm/ton/builders.rs",
+        "crates/pillar-layerzero/src/other_non_evm/ton/cell.rs",
+        "crates/pillar-layerzero/src/other_non_evm/ton/mod.rs",
+        "crates/pillar-layerzero/tests/gasolina_parity/ton_dvn_verify.json",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_ton.rs",
+        "crates/pillar-runtime/src/tests/source_replay_parity_tests.rs"
+      ]
+    },
+    {
+      "title": "Bound configuration, signer, and connection lifetimes",
+      "status": "landed",
+      "sourceCommits": [
+        "99f22deb53f4660aa1d50342d34ba42df29b796a",
+        "f5ab40459612095398742d29af8494d4c750097b",
+        "58e1dc8435063b4ff0e2b55aaf205afa62318418"
+      ],
+      "sourceLandingCommits": [
+        "58e1dc8435063b4ff0e2b55aaf205afa62318418"
+      ],
+      "scopePaths": [
+        ".github/workflows/ci.yml",
+        "crates/pillar-api/src/lib.rs",
+        "crates/pillar-cli/src/main.rs",
+        "crates/pillar-config/src/lib.rs",
+        "crates/pillar-config/src/provider_validation.rs",
+        "crates/pillar-metrics/src/lib.rs",
+        "crates/pillar-runtime/src/config_loader.rs",
+        "crates/pillar-runtime/src/server_app/server_trait.rs",
+        "crates/pillar-runtime/src/signer_runtime/assembly.rs",
+        "crates/pillar-runtime/src/tests/provider_config_refresh_tests.rs",
+        "crates/pillar-signer/src/local_mnemonic.rs",
+        "crates/pillar-signer/src/local_mnemonic/tests.rs"
+      ]
+    },
+    {
+      "title": "Restore READ signing compatibility and regression coverage",
+      "status": "landed",
+      "sourceCommits": [
+        "525828776b38a0e2a67bb2f7afc92cc9a9521bcd",
+        "86046cd5bb5411f84e3406e366682bb922ba4aa9",
+        "8c43be01413dcb6a28e1115a14f03077fb75240f"
+      ],
+      "sourceLandingCommits": [
+        "8c43be01413dcb6a28e1115a14f03077fb75240f"
+      ],
+      "scopePaths": [
+        "crates/pillar-core/src/lib.rs",
+        "crates/pillar-layerzero/src/abi.rs",
+        "crates/pillar-layerzero/src/lib.rs",
+        "crates/pillar-layerzero/src/solana.rs",
+        "crates/pillar-layerzero/src/tests.rs",
+        "crates/pillar-layerzero/src/tests/non_evm_vectors/solana_vectors.rs",
+        "crates/pillar-layerzero/src/tests/solana_builder_tests.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_read_markers.rs",
+        "crates/pillar-runtime/src/provider_health/evm_payload_observations.rs",
+        "crates/pillar-runtime/src/provider_health/mod.rs",
+        "crates/pillar-runtime/src/tests/read_data_http_e2e.rs",
+        "crates/pillar-runtime/src/tests/read_vertical_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_read_markers_tests.rs"
+      ]
+    },
+    {
+      "title": "Preserve readiness failures and reject malformed votes",
+      "status": "landed",
+      "sourceCommits": [
+        "47797296c7c23da12408324258b076f3a5569d09",
+        "d39168c7a4b9ccaf5572b38ad6092376223f72cf",
+        "c947674fcaaaecb4d191cf717d57bc82c7ffc5a6",
+        "e33af25b15585ff0e63e75020cf657588dfd297c",
+        "f5d7f85b3cc590f48cf198449afa508113dc18f3"
+      ],
+      "sourceLandingCommits": [
+        "f5d7f85b3cc590f48cf198449afa508113dc18f3"
+      ],
+      "scopePaths": [
+        "crates/pillar-layerzero/src/abi.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_move.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_payload.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_readiness.rs",
+        "crates/pillar-runtime/src/provider_health/quorum.rs",
+        "crates/pillar-runtime/src/tests/validation_readiness_tests.rs"
+      ]
+    },
+    {
+      "title": "Validate TON BoCs and propagate Solana option errors",
+      "status": "landed",
+      "sourceCommits": [
+        "c73a93f25022f700a72d14a16caf8c3c309535f1",
+        "eed8be406b6b0ee1da2ee18f3c10f047474d4d1d",
+        "1fd0570e3bf53105afe84e0bbe62f8dbfe58e9f0",
+        "754de710e92cfb271ebeed7d356580325dd3310e"
+      ],
+      "sourceLandingCommits": [
+        "1fd0570e3bf53105afe84e0bbe62f8dbfe58e9f0",
+        "754de710e92cfb271ebeed7d356580325dd3310e"
+      ],
+      "scopePaths": [
+        "AUDIT.md",
+        "README.md",
+        "SECURITY.md",
+        "crates/pillar-layerzero/src/other_non_evm/ton/cell.rs",
+        "crates/pillar-layerzero/src/other_non_evm/ton/payload.rs",
+        "crates/pillar-layerzero/tests/gasolina_parity/ton_dvn_verify.json",
+        "crates/pillar-runtime/src/layerzero_runtime/packet_resolver.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/relayer_options.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_ton.rs",
+        "crates/pillar-runtime/src/tests/layerzero_packet_resolver_tests.rs",
+        "crates/pillar-runtime/src/tests/validation_payload_ton_tests.rs"
+      ]
+    },
+    {
+      "title": "Restore signer validation and bound request IO",
+      "status": "landed",
+      "sourceCommits": [
+        "f6bbf6bbf33352fb6393a7d9c7db6d239be4acc8",
+        "15c22d29810b6e696177ea16c889f410471ae8b5",
+        "06f80f14986e4f2240b169ef4e39fe82cf27bd43",
+        "94112277b8d13d03b7154ac7babcce61157130da"
+      ],
+      "sourceLandingCommits": [
+        "15c22d29810b6e696177ea16c889f410471ae8b5",
+        "06f80f14986e4f2240b169ef4e39fe82cf27bd43",
+        "94112277b8d13d03b7154ac7babcce61157130da"
+      ],
+      "scopePaths": [
+        "AUDIT.md",
+        "CHANGELOG.md",
+        "README.md",
+        "SECURITY.md",
+        "crates/pillar-cli/src/main.rs",
+        "crates/pillar-config/src/lib.rs",
+        "crates/pillar-runtime/src/signer_runtime/assembly.rs",
+        "crates/pillar-runtime/src/signer_runtime/config.rs",
+        "crates/pillar-runtime/src/tests/signer_config_tests.rs",
+        "crates/pillar-signer/src/local_mnemonic.rs",
+        "crates/pillar-signer/src/local_mnemonic/tests.rs",
+        "scripts/gasolina-parity/README.md",
+        "scripts/gasolina-parity/emit-ton-dvn-verify.ts"
+      ]
+    },
+    {
+      "title": "Reject malformed Aptos reads and warn on loopback providers",
+      "status": "landed",
+      "sourceCommits": [
+        "91337ea592a1aed44c964b4368e4e46310403a19",
+        "43b88a6a7f1c07a87c237f6ed1110cb273d13f57"
+      ],
+      "sourceLandingCommits": [
+        "43b88a6a7f1c07a87c237f6ed1110cb273d13f57"
+      ],
+      "scopePaths": [
+        "crates/pillar-runtime/Cargo.toml",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_move.rs",
+        "crates/pillar-runtime/src/server_app/core_dependencies.rs"
+      ]
+    },
+    {
+      "title": "Validate TON BoC DAGs and record review evidence",
+      "status": "landed",
+      "sourceCommits": [
+        "0589720e93d845d6a9cd92aa8100e7257191900b",
+        "6e22f98c02665aa7ce7f98812c4c3d46cde12ec1",
+        "b87be2b7d1c2953937b64b5ce634842e1366cd0b",
+        "b3bac03243b458489aee1dfbc44845f5b682a098"
+      ],
+      "sourceLandingCommits": [
+        "6e22f98c02665aa7ce7f98812c4c3d46cde12ec1",
+        "b87be2b7d1c2953937b64b5ce634842e1366cd0b",
+        "b3bac03243b458489aee1dfbc44845f5b682a098"
+      ],
+      "scopePaths": [
+        "AUDIT.md",
+        "CHANGELOG.md",
+        "crates/pillar-layerzero/src/lib.rs",
+        "crates/pillar-layerzero/src/other_non_evm.rs",
+        "crates/pillar-layerzero/src/other_non_evm/ton/cell.rs",
+        "crates/pillar-layerzero/src/other_non_evm/ton/mod.rs",
+        "crates/pillar-layerzero/src/other_non_evm/ton/payload_signed.rs",
+        "crates/pillar-layerzero/src/other_non_evm/ton/proxy.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_ton.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_payload_ton.rs"
+      ]
+    },
+    {
+      "title": "Reject malformed Move readiness versions",
+      "status": "landed",
+      "sourceCommits": [
+        "a5af7ad255d350a4acfedb8589b99b4cce676a4e",
+        "5763b9e7f0426dddf142993c22b5c20b457c9058"
+      ],
+      "sourceLandingCommits": [
+        "5763b9e7f0426dddf142993c22b5c20b457c9058"
+      ],
+      "scopePaths": [
+        "crates/pillar-runtime/src/layerzero_runtime/source_events_move.rs"
+      ]
+    },
+    {
+      "title": "Bound TON BoC depth and validate node identity",
+      "status": "landed",
+      "sourceCommits": [
+        "a052fa0b91b6e836a5eb76384fb7b7ee1c717ecd",
+        "73a8da546a74966098d19693f129bd79fac86b4a"
+      ],
+      "sourceLandingCommits": [
+        "73a8da546a74966098d19693f129bd79fac86b4a"
+      ],
+      "scopePaths": [
+        "crates/pillar-layerzero/src/other_non_evm/ton/cell.rs",
+        "crates/pillar-layerzero/src/other_non_evm/ton/payload_signed.rs"
+      ]
+    },
+    {
+      "title": "Bound TON receive config and handle stored cell hashes",
+      "status": "landed",
+      "sourceCommits": [
+        "a0ad592421c5411dda746fdab4838882aadb6054",
+        "a55bd45a48caac356e279cc9caf85934c4f07453",
+        "7731afd62ea9a0e8ffdfaa54dcad202656762838",
+        "ae888393f44e3428261a2eed6aad179943b4ab6b",
+        "b7ecb00b4bf8bc9c7b90822b30597a3b73074163",
+        "ccf4c01c1f40c66fd6e63c1b4f7dbe6071dddaf7"
+      ],
+      "sourceLandingCommits": [
+        "a55bd45a48caac356e279cc9caf85934c4f07453",
+        "7731afd62ea9a0e8ffdfaa54dcad202656762838",
+        "ae888393f44e3428261a2eed6aad179943b4ab6b",
+        "b7ecb00b4bf8bc9c7b90822b30597a3b73074163",
+        "ccf4c01c1f40c66fd6e63c1b4f7dbe6071dddaf7"
+      ],
+      "scopePaths": [
+        "AUDIT.md",
+        "CHANGELOG.md",
+        "crates/pillar-layerzero/src/other_non_evm/ton/cell.rs",
+        "crates/pillar-runtime/src/layerzero_runtime/validation_payload_ton.rs",
+        "crates/pillar-runtime/tests/onchain_provenance/ton_mainnet_default_receive_config.b64",
+        "crates/pillar-runtime/tests/onchain_provenance/ton_mainnet_uln_storage.b64"
+      ]
+    },
+    {
+      "title": "Update version to 2.6.1",
+      "status": "landed",
+      "sourceCommits": [
+        "5aed3a0e6b6d6b7bf023a0cfbc87e5038e5187b2"
+      ],
+      "sourceLandingCommits": [
+        "5aed3a0e6b6d6b7bf023a0cfbc87e5038e5187b2"
+      ],
+      "scopePaths": [
+        "AUDIT.md",
+        "CHANGELOG.md",
+        "Cargo.lock",
+        "Cargo.toml"
+      ]
+    },
+    {
+      "title": "Translate documentation to English",
+      "status": "landed",
+      "sourceCommits": [
+        "e9eaaa17ae2aff99146e4124d996f7ed822bccb0"
+      ],
+      "sourceLandingCommits": [
+        "e9eaaa17ae2aff99146e4124d996f7ed822bccb0"
+      ],
+      "scopePaths": [
+        "AUDIT.md",
+        "CHANGELOG.md",
+        "README.md",
+        "SECURITY.md",
+        "audit/acceptance/pr1-case-evidence.json",
+        "audit/acceptance/pr1-case-evidence.md",
+        "audit/retest-2.6.0.md"
+      ]
+    },
+    {
+      "title": "Check errors on every Sui and IOTA event page",
+      "status": "landed",
+      "sourceCommits": [
+        "cbd1fa23777c14382cf08e772ad0a59630142970"
+      ],
+      "sourceLandingCommits": [
+        "cbd1fa23777c14382cf08e772ad0a59630142970"
+      ],
+      "scopePaths": [
+        "CHANGELOG.md",
+        "crates/pillar-runtime/src/provider_health/transport.rs",
+        "crates/pillar-runtime/src/tests/sui_source_events_tests.rs"
+      ]
+    },
+    {
+      "title": "Update version to 2.6.2",
+      "status": "landed",
+      "sourceCommits": [
+        "3f39fbad972794e5a9c598ea46a310334a4a4415"
+      ],
+      "sourceLandingCommits": [
+        "3f39fbad972794e5a9c598ea46a310334a4a4415"
+      ],
+      "scopePaths": [
+        "AUDIT.md",
+        "CHANGELOG.md",
+        "Cargo.lock",
+        "Cargo.toml"
+      ]
+    }
+  ]
+}

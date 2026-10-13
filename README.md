@@ -549,7 +549,9 @@ Benchmarks are opt-in: `cargo bench -p pillar-bench`.
 
 Report a suspected vulnerability privately to the maintainers rather than in a
 public issue. Reviewers start at [AUDIT.md](AUDIT.md): threat model, trust
-boundaries, reproduction steps, acceptance evidence and opt-in E2E tests.
+boundaries, reproduction steps, acceptance evidence and opt-in E2E tests. The
+[development and security history](audit/development-history.md) connects the
+original public commits to their objectives, delivered work and evidence limits.
 
 ## License
 
