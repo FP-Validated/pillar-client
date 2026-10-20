@@ -149,33 +149,80 @@ where
         src_chain_name: &str,
         src_tx_hash: &str,
     ) -> Result<Value, AppCoreError> {
-        let result = self
-            .get_quorum_rpc_result(
-                src_chain_name,
-                json!({
-                    "method": "getTransaction",
-                    "params": [
-                        src_tx_hash,
-                        {
-
-                            "encoding": "jsonParsed",
-                            "commitment": "finalized",
-                            "maxSupportedTransactionVersion": crate::SOLANA_MAX_SUPPORTED_TRANSACTION_VERSION,
-                        },
-                    ],
-                    "id": 1,
-                    "jsonrpc": "2.0",
-                }),
-                "Solana transaction",
-            )
-            .await?;
-        // Upstream's Solana quorum call returns null rather than throwing
-        // NotFoundError, so its sdk's plain `Transaction not found` 500 follows
-        // (`multiprovider/src/solana.ts:222-258`, `endpoint/solana/index.ts:154-156`).
-        if result.is_null() {
-            return Err(AppCoreError::Internal("Transaction not found".to_string()));
+        let snapshot = self.providers.load();
+        let provider_config = snapshot.provider_config(src_chain_name)?;
+        let quorum = required_provider_quorum(provider_config, src_chain_name)?;
+        let mut requests = FuturesUnordered::new();
+        for (index, uri) in provider_config.uris.iter().enumerate() {
+            let transport = self.transport.clone();
+            let (url, headers) = provider_uri_parts(uri);
+            let request = json!({
+                "method": "getTransaction",
+                "params": [
+                    src_tx_hash,
+                    {
+                        "encoding": "jsonParsed",
+                        "commitment": "finalized",
+                        "maxSupportedTransactionVersion": crate::SOLANA_MAX_SUPPORTED_TRANSACTION_VERSION,
+                    },
+                ],
+                "id": 1,
+                "jsonrpc": "2.0",
+            });
+            requests.push(async move {
+                let response = transport.post_json_scoped(url, headers, request).await;
+                (index, provider_response(response))
+            });
         }
-        Ok(result)
+        let mut accumulator = ExactQuorumAccumulator::new(quorum, 0..provider_config.uris.len());
+        while let Some((index, response)) = requests.next().await {
+            let observation = response.and_then(|response| {
+                response
+                    .and_then(|mut response| response.get_mut("result").map(Value::take))
+                    .map(|result| {
+                        if result.is_null() {
+                            return Ok(("null".to_string(), result));
+                        }
+                        let (normalized, _) =
+                            crate::provider_health::solana_transaction_projection(
+                                &result,
+                                Some(&self.config.trusted_solana_endpoint_program_ids),
+                            )
+                            .map_err(|error| RpcError::Remote(error.to_string()))?;
+                        let fingerprint =
+                            crate::provider_health::canonical_json_fingerprint(&normalized)
+                                .map_err(|error| RpcError::Remote(error.to_string()))?;
+                        Ok((fingerprint, normalized))
+                    })
+                    .transpose()
+            });
+            match observation {
+                Ok(Some((fingerprint, value))) => {
+                    accumulator.record_json_result(index, fingerprint, value)?;
+                }
+                Ok(None) => {
+                    accumulator.record_result(index, Ok(None))?;
+                }
+                Err(error) => {
+                    accumulator.record_result(index, Err(error))?;
+                }
+            }
+            if let Some(value) = accumulator.unambiguous_result() {
+                return if value.is_null() {
+                    Err(AppCoreError::Internal("Transaction not found".to_string()))
+                } else {
+                    Ok(value)
+                };
+            }
+        }
+        let result = self
+            .finish_quorum(src_chain_name, accumulator, "Solana transaction")
+            .await?;
+        if result.is_null() {
+            Err(AppCoreError::Internal("Transaction not found".to_string()))
+        } else {
+            Ok(result)
+        }
     }
     async fn get_move_transaction(
         &self,

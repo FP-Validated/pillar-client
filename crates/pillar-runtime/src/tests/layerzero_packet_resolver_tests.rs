@@ -884,12 +884,8 @@ async fn packet_sent_resolver_rejects_failed_solana_transaction() {
         .await
         .unwrap_err();
 
-    // Upstream's extractor drops a failed transaction and its sdk throws a plain
-    // `Transaction not found` (`common-solana/src/events.ts:55`).
-    assert_eq!(
-        error,
-        AppCoreError::Internal("Transaction not found".to_string())
-    );
+    // Failed meta.err responses remain source failures rather than yielding a packet.
+    assert!(matches!(&error, AppCoreError::Internal(_)), "{error:?}");
 }
 
 #[tokio::test]

@@ -220,6 +220,11 @@ pub(super) fn solana_packet_sent_transaction_data_with_options(options: &[u8]) -
     json!({
         "slot": 431734504,
         "blockTime": 1783573142,
+        "transaction": {
+            "message": {
+                "accountKeys": [{"pubkey": "6td1W4vFnQsKKunmKprARgpMEtYdVBnZ2FVcpqxKxaoA"}]
+            }
+        },
         "meta": {
             "err": null,
             "innerInstructions": [{
@@ -238,6 +243,11 @@ pub(super) fn solana_packet_sent_transaction_with_false_positive_packet_data() -
     json!({
         "slot": 431691610,
         "blockTime": 1783565239,
+        "transaction": {
+            "message": {
+                "accountKeys": [{"pubkey": "6td1W4vFnQsKKunmKprARgpMEtYdVBnZ2FVcpqxKxaoA"}]
+            }
+        },
         "meta": {
             "err": null,
             "innerInstructions": [{

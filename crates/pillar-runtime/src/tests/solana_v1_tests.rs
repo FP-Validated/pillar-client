@@ -149,12 +149,7 @@ async fn solana_v1_transaction_bodies_read_like_v0_on_every_solana_read_path() {
     .unwrap();
 }
 
-/// Fee-payer observations reach provider quorum through a fingerprint of the
-/// five fields TS `solanaParsedTransactionQuorumFn` compares, not the whole RPC
-/// body. v1 adds `transactionConfig` and a `version` of `1` to that body, so
-/// widening the fingerprint to the raw response would let two honest providers
-/// disagree over fields nobody validates; narrowing it would let a provider
-/// swap the fee payer or the event data unnoticed.
+// Ignore v1 metadata without allowing fee-payer or event-data substitution.
 #[test]
 fn solana_quorum_fingerprint_ignores_v1_fields_and_still_binds_the_compared_ones() {
     let v1 = json!({ "result": solana_v1_transaction(parsed_account_keys()) });
@@ -198,12 +193,11 @@ fn solana_quorum_fingerprint_ignores_v1_fields_and_still_binds_the_compared_ones
             "/result/meta/err" => json!({ "InstructionError": [0, "InvalidArgument"] }),
             _ => json!("11111111111111111111111111111111"),
         };
-        assert_ne!(
-            fingerprint,
-            parse_solana_transaction_from_observation(&tampered)
-                .unwrap()
-                .fingerprint,
-            "{pointer}"
-        );
+        let observation = parse_solana_transaction_from_observation(&tampered);
+        if pointer == "/result/meta/err" {
+            assert!(observation.is_err());
+        } else {
+            assert_ne!(fingerprint, observation.unwrap().fingerprint, "{pointer}");
+        }
     }
 }

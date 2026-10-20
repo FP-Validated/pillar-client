@@ -4,6 +4,109 @@ fn record(name: &str, value: Value) {
     super::round1_artifact(name, value);
 }
 
+#[test]
+fn round1_solana_projection_ignores_metadata_but_binds_consumed_fields() {
+    let mut first = json!({
+        "result": {
+            "slot": 42,
+            "blockTime": 123,
+            "transaction": {"message": {"accountKeys": [{"pubkey": "FeePayer"}]}},
+            "meta": {
+                "err": null,
+                "innerInstructions": [{"index": 1, "instructions": [{"programId": "Endpoint", "data": "packet-data"}]}],
+                "fee": 5000,
+                "logMessages": ["provider detail"]
+            }
+        }
+    });
+    let baseline =
+        crate::provider_health::parse_solana_transaction_from_observation(&first).unwrap();
+    record(
+        "solana-metadata-projection",
+        json!({"baseline_fingerprint": baseline.fingerprint}),
+    );
+    first["result"]["meta"]["fee"] = json!(9000);
+    first["result"]["meta"]["logMessages"] = json!(["different provider detail"]);
+    first["result"]["meta"]["innerInstructions"][0]["index"] = json!(8);
+    let metadata_variant =
+        crate::provider_health::parse_solana_transaction_from_observation(&first).unwrap();
+    record(
+        "solana-metadata-variant",
+        json!({"variant_fingerprint": metadata_variant.fingerprint}),
+    );
+    assert_eq!(baseline.fingerprint, metadata_variant.fingerprint);
+
+    for (name, pointer, value) in [
+        ("slot", "/result/slot", json!(43)),
+        ("blockTime", "/result/blockTime", json!(124)),
+        (
+            "fee payer",
+            "/result/transaction/message/accountKeys/0/pubkey",
+            json!("Other"),
+        ),
+        (
+            "inner program",
+            "/result/meta/innerInstructions/0/instructions/0/programId",
+            json!("OtherProgram"),
+        ),
+        (
+            "inner data",
+            "/result/meta/innerInstructions/0/instructions/0/data",
+            json!("other-data"),
+        ),
+    ] {
+        let mut changed = first.clone();
+        *changed.pointer_mut(pointer).unwrap() = value;
+        let observation =
+            crate::provider_health::parse_solana_transaction_from_observation(&changed).unwrap();
+        record(
+            &format!("solana-consumed-field-{}", name.replace(' ', "-")),
+            json!({"field": name, "baseline": baseline.fingerprint, "mutated": observation.fingerprint}),
+        );
+        assert_ne!(baseline.fingerprint, observation.fingerprint, "{name}");
+    }
+    for invalid_err in [json!(false), json!({})] {
+        let artifact_name = if invalid_err.is_boolean() {
+            "solana-invalid-err-boolean"
+        } else {
+            "solana-invalid-err-object"
+        };
+        let mut malformed = first.clone();
+        malformed["result"]["meta"]["err"] = invalid_err;
+        let observed =
+            crate::provider_health::parse_solana_transaction_from_observation(&malformed);
+        record(artifact_name, json!({"result": format!("{observed:?}")}));
+        assert!(observed.is_err());
+    }
+    let mut missing_err = first.clone();
+    missing_err["result"]["meta"]
+        .as_object_mut()
+        .unwrap()
+        .remove("err");
+    let observed = crate::provider_health::parse_solana_transaction_from_observation(&missing_err);
+    record(
+        "solana-missing-err",
+        json!({"result": format!("{observed:?}")}),
+    );
+    assert!(observed.is_err());
+    let mut invalid_slot = first.clone();
+    invalid_slot["result"]["slot"] = json!("not-a-slot");
+    let observed = crate::provider_health::parse_solana_transaction_from_observation(&invalid_slot);
+    record(
+        "solana-invalid-slot",
+        json!({"result": format!("{observed:?}")}),
+    );
+    assert!(observed.is_err());
+    let mut invalid_time = first;
+    invalid_time["result"]["blockTime"] = json!("123");
+    let observed = crate::provider_health::parse_solana_transaction_from_observation(&invalid_time);
+    record(
+        "solana-invalid-block-time",
+        json!({"result": format!("{observed:?}")}),
+    );
+    assert!(observed.is_err());
+}
+
 fn recorded_solana_request() -> LzMessageId {
     let fixture: Value = serde_json::from_str(include_str!(
         "../../tests/gasolina_parity/source_replay/upstream-stage3-events.json"
@@ -17,6 +120,68 @@ fn recorded_solana_request() -> LzMessageId {
     }
 }
 
+#[tokio::test]
+async fn round1_solana_source_resolver_quorums_only_consumed_projection() {
+    let first: Value = serde_json::from_str(include_str!(
+        "../../tests/gasolina_parity/source_replay/solana-getTransaction-jsonParsed.response.json"
+    ))
+    .unwrap();
+    let tx_hash = first
+        .pointer("/result/transaction/signatures/0")
+        .and_then(Value::as_str)
+        .unwrap()
+        .to_string();
+    let mut second = first.clone();
+    second["result"]["meta"]["fee"] = json!(999_999);
+    second["result"]["meta"]["logMessages"] = json!(["provider-specific log"]);
+    second["result"]["meta"]["computeUnitsConsumed"] = json!(1);
+    second["result"]["meta"]["innerInstructions"][0]["index"] = json!(99);
+    record(
+        "solana-source-quorum-responses",
+        json!({
+            "first_fee": first.pointer("/result/meta/fee"),
+            "second_fee": second.pointer("/result/meta/fee"),
+            "first_inner_index": first.pointer("/result/meta/innerInstructions/0/index"),
+            "second_inner_index": second.pointer("/result/meta/innerInstructions/0/index"),
+        }),
+    );
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "solana".to_string(),
+            ProviderConfig::with_distinct_entities(
+                vec![
+                    ProviderUri::Uri("https://solana-a.example".to_string()),
+                    ProviderUri::Uri("https://solana-b.example".to_string()),
+                ],
+                2,
+            ),
+        )]),
+        Some(&["solana".to_string()]),
+    )
+    .unwrap();
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let resolver = EvmPacketSentResolver::new(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        RecordingTransport {
+            calls: calls.clone(),
+            responses: Arc::new(Mutex::new(vec![Ok(first), Ok(second)])),
+        },
+        runtime_evm_layerzero_config("mainnet", &["solana".to_string(), "bsc".to_string()])
+            .unwrap()
+            .packet_sent_resolver_config,
+    );
+    let result = resolver
+        .get_lz_sent_event(&tx_hash, &recorded_solana_request())
+        .await;
+    record(
+        "solana-source-quorum-resolution",
+        json!({
+            "result": format!("{result:?}"),
+            "calls": calls.lock().unwrap().clone(),
+        }),
+    );
+    assert_eq!(result.unwrap().lz_message_id.nonce, 3826);
+}
 async fn resolve_solana_with_untrusted_large_instruction() -> Result<LzSentEvent, AppCoreError> {
     let mut response: Value = serde_json::from_str(include_str!(
         "../../tests/gasolina_parity/source_replay/solana-getTransaction-jsonParsed.response.json"

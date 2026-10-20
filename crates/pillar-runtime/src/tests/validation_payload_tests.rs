@@ -962,9 +962,12 @@ async fn runtime_rpc_validation_checks_resolves_solana_transaction_from_address(
     let calls = Arc::new(Mutex::new(Vec::new()));
     let transport = RecordingTransport {
         calls: calls.clone(),
-        responses: Arc::new(Mutex::new(vec![solana_transaction_result(
-            "6td1W4vFnQsKKunmKprARgpMEtYdVBnZ2FVcpqxKxaoA",
-        )])),
+        responses: Arc::new(Mutex::new(vec![{
+            let mut response =
+                solana_transaction_result("6td1W4vFnQsKKunmKprARgpMEtYdVBnZ2FVcpqxKxaoA").unwrap();
+            response["result"]["blockTime"] = json!(1_734_321_234u64);
+            Ok(response)
+        }])),
     };
     let checks = RuntimeRpcValidationChecks::from_getter(
         &ProviderSnapshotHandle::from_getter(&getter),
