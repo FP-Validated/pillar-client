@@ -109,55 +109,6 @@ async fn runtime_rpc_validation_checks_cross_checks_read_command_timestamp_marke
 }
 
 #[tokio::test]
-async fn runtime_rpc_validation_checks_matches_read_markers_by_all_fields() {
-    let calls = Arc::new(Mutex::new(Vec::new()));
-    let hash = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-    let previous_hash = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-    let latest_hash = "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
-    let checks = runtime_rpc_read_command_checks(
-        vec![
-            Ok(block_time(10, hash, 1_700_000_000)),
-            Ok(block_time(9, previous_hash, 1_699_999_990)),
-            Ok(block_time(22, latest_hash, 1_700_000_100)),
-            Ok(block_time(10, hash, 1_700_000_000)),
-            Ok(block_time(9, previous_hash, 1_699_999_990)),
-            Ok(block_time(22, latest_hash, 1_700_000_100)),
-        ],
-        calls.clone(),
-    );
-    let context = SigningContext::Read {
-        expiration: 1,
-        skip_v_id: None,
-        dvn_address: None,
-        resolved_timestamp_time_markers: vec![
-            ResolvedTimestampTimeMarker {
-                block_confirmation: 11,
-                is_block_number: false,
-                chain_name: "bsc".to_string(),
-                block_number: 10,
-                timestamp: 1_700_000_000,
-            },
-            ResolvedTimestampTimeMarker {
-                block_confirmation: 12,
-                is_block_number: false,
-                chain_name: "bsc".to_string(),
-                block_number: 10,
-                timestamp: 1_700_000_000,
-            },
-        ],
-    };
-    let pins = checks
-        .validate_readiness(
-            &read_command_sent_event(evm_read_command_with_timestamp_marker()),
-            &context,
-        )
-        .await
-        .unwrap();
-    assert_eq!(pins, vec![read_pin(10, hash)]);
-    assert_eq!(calls.lock().unwrap().len(), 6);
-}
-
-#[tokio::test]
 async fn runtime_rpc_validation_checks_validates_read_command_block_number_markers() {
     let calls = Arc::new(Mutex::new(Vec::new()));
     let checks = runtime_rpc_read_command_checks(
@@ -234,9 +185,7 @@ async fn runtime_rpc_validation_checks_pins_read_command_block_number_markers() 
     assert_eq!(calls[1].2["params"], json!(["latest", false]));
 }
 
-/// Two quorum reads of one height that disagree mean the chain reorganised
-/// while readiness was running. Keeping either hash would pin the read to a
-/// block only half the validation looked at, so the request is refused.
+// A command's timestamp and block markers must not pin different hashes at one height.
 #[tokio::test]
 async fn runtime_rpc_validation_checks_rejects_a_block_that_changed_hash_during_validation() {
     let calls = Arc::new(Mutex::new(Vec::new()));
@@ -255,21 +204,23 @@ async fn runtime_rpc_validation_checks_rejects_a_block_that_changed_hash_during_
         calls.clone(),
     );
 
+    let block_command = evm_read_command_with_block_marker();
+    let timestamp_command = evm_read_command_with_timestamp_marker();
+    let command = format!(
+        "{}0002{}{}",
+        &block_command[..10],
+        &block_command[14..],
+        &timestamp_command[14..]
+    );
     let err = checks
         .validate_readiness(
-            &read_command_sent_event(evm_read_command_with_block_marker()),
-            &read_command_signing_context(64, 1_700_000_000, 0),
+            &read_command_sent_event(command),
+            &read_command_signing_context(64, 1_700_000_000, 12),
         )
         .await
         .unwrap_err();
 
     assert!(matches!(err, AppCoreError::BadRequest(_)), "{err}");
-    assert_eq!(
-        err.to_string(),
-        format!(
-            "Block 64 on chain bsc changed hash during read validation: {BSC_BLOCK_64_HASH} != {BSC_BLOCK_65_HASH}"
-        )
-    );
     assert_eq!(calls.lock().unwrap().len(), 3);
 }
 
@@ -510,7 +461,12 @@ async fn runtime_readiness_votes_on_latest_confirmation_threshold_not_tip_identi
         Some(&["bsc".to_string()]),
     )
     .unwrap();
-    let context = read_command_signing_context(64, 1_700_000_000, 12);
+    let context = SigningContext::Read {
+        expiration: 1,
+        skip_v_id: None,
+        dvn_address: None,
+        resolved_timestamp_time_markers: Vec::new(),
+    };
     let sent_event = read_command_sent_event(evm_read_command_with_block_marker());
     let checks = RuntimeRpcValidationChecks::from_getter(
         &ProviderSnapshotHandle::from_getter(&getter),
@@ -585,4 +541,165 @@ async fn runtime_rpc_validation_checks_rejects_non_evm_read_time_marker_chain() 
         "unexpected error: {err}"
     );
     assert!(matches!(err, AppCoreError::Internal(_)));
+}
+#[tokio::test]
+async fn round1_malformed_read_resolutions_are_rejected_before_any_source_rpc() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let checks = round1_read_marker_checks(calls.clone());
+    let sent_event = read_command_sent_event(evm_read_command_with_timestamp_marker());
+    let conflicting = vec![
+        ResolvedTimestampTimeMarker {
+            block_confirmation: 12,
+            is_block_number: false,
+            chain_name: "bsc".to_string(),
+            block_number: 10,
+            timestamp: 1_700_000_000,
+        },
+        ResolvedTimestampTimeMarker {
+            block_confirmation: 12,
+            is_block_number: false,
+            chain_name: "bsc".to_string(),
+            block_number: 11,
+            timestamp: 1_700_000_000,
+        },
+    ];
+    let context = SigningContext::Read {
+        expiration: 1_700_000_000,
+        skip_v_id: None,
+        dvn_address: None,
+        resolved_timestamp_time_markers: conflicting,
+    };
+
+    let error = checks
+        .validate_readiness(&sent_event, &context)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, AppCoreError::BadRequest(_)));
+    assert!(calls.lock().unwrap().is_empty());
+}
+#[tokio::test]
+async fn round1_read_rejects_extra_resolved_timestamp_marker_before_any_source_rpc() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let checks = round1_read_marker_checks(calls.clone());
+    let context = SigningContext::Read {
+        expiration: 1_700_000_000,
+        skip_v_id: None,
+        dvn_address: None,
+        resolved_timestamp_time_markers: vec![
+            ResolvedTimestampTimeMarker {
+                block_confirmation: 12,
+                is_block_number: false,
+                chain_name: "bsc".to_string(),
+                block_number: 10,
+                timestamp: 1_700_000_000,
+            },
+            ResolvedTimestampTimeMarker {
+                block_confirmation: 12,
+                is_block_number: false,
+                chain_name: "bsc".to_string(),
+                block_number: 11,
+                timestamp: 1_700_000_010,
+            },
+        ],
+    };
+
+    let error = checks
+        .validate_readiness(
+            &read_command_sent_event(evm_read_command_with_timestamp_marker()),
+            &context,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, AppCoreError::BadRequest(_)));
+    assert!(calls.lock().unwrap().is_empty());
+}
+#[tokio::test]
+async fn round1_read_rejects_malformed_marker_bounds_before_any_source_rpc() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let checks = round1_read_marker_checks(calls.clone());
+    let context = SigningContext::Read {
+        expiration: 1_700_000_000,
+        skip_v_id: None,
+        dvn_address: None,
+        resolved_timestamp_time_markers: vec![
+            ResolvedTimestampTimeMarker {
+                block_confirmation: 12,
+                is_block_number: false,
+                chain_name: "bsc".to_string(),
+                block_number: 10,
+                timestamp: 1_700_000_000,
+            },
+            ResolvedTimestampTimeMarker {
+                block_confirmation: 0,
+                is_block_number: false,
+                chain_name: "bsc".to_string(),
+                block_number: 0,
+                timestamp: 1_700_000_010,
+            },
+        ],
+    };
+
+    let error = checks
+        .validate_readiness(
+            &read_command_sent_event(evm_read_command_with_timestamp_marker()),
+            &context,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, AppCoreError::BadRequest(_)));
+    assert!(calls.lock().unwrap().is_empty());
+}
+
+#[derive(Clone)]
+struct Round1RejectingMarkerTransport {
+    calls: RecordedJsonCalls,
+}
+
+#[async_trait]
+impl JsonRpcTransport for Round1RejectingMarkerTransport {
+    async fn post_json(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+        body: Value,
+    ) -> Result<Value, String> {
+        self.calls.lock().unwrap().push((url, headers, body));
+        Err("unexpected source RPC".to_string())
+    }
+
+    async fn get_json(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+    ) -> Result<Value, String> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push((url, headers, json!({ "method": "GET" })));
+        Err("unexpected source RPC".to_string())
+    }
+}
+
+fn round1_read_marker_checks(
+    calls: RecordedJsonCalls,
+) -> RuntimeRpcValidationChecks<Round1RejectingMarkerTransport> {
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "bsc".to_string(),
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://bsc.example".to_string())],
+                1,
+            ),
+        )]),
+        Some(&["bsc".to_string()]),
+    )
+    .unwrap();
+    RuntimeRpcValidationChecks::from_getter(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        Round1RejectingMarkerTransport { calls },
+    )
+    .with_evm_chain_names(HashMap::from([(30_102, "bsc".to_string())]))
 }

@@ -21,6 +21,13 @@ impl RuntimeValidationChecks for FixedValidationChecks {
         Ok(self.current_timestamp)
     }
 
+    fn validate_read_preflight(
+        &self,
+        _sent_event: &LzSentEvent,
+        _signing_context: &SigningContext,
+    ) -> Result<(), AppCoreError> {
+        Ok(())
+    }
     async fn validate_readiness(
         &self,
         _sent_event: &LzSentEvent,

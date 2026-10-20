@@ -62,6 +62,8 @@ pub const EXPIRED_TIMESTAMP_ERROR_PREFIX: &str = "Expiration has already passed"
 pub const PACKET_IDENTITY_MISMATCH_ERROR_SUFFIX: &str =
     "does not match the requested pathway identity";
 const MAX_CONCURRENT_WALLET_SIGNS: usize = 8;
+pub const MAX_READ_REQUESTS: u16 = 256;
+pub const MAX_READ_MARKERS: usize = MAX_READ_REQUESTS as usize + 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -647,13 +649,31 @@ impl PillarApp {
             "sign workflow started"
         );
 
-        if request.lz_message_id.uln_send_version == "ReadV1002"
-            && !matches!(request.signing_context, SigningContext::Read { .. })
+        let requested_read = request.lz_message_id.uln_send_version == "ReadV1002";
+        let context_is_read = matches!(&request.signing_context, SigningContext::Read { .. });
+        if requested_read != context_is_read {
+            return Err(AppCoreError::BadRequest(if requested_read {
+                format!(
+                    "Invalid protocol type for ReadV1002 on pathway {}",
+                    pathway_json(&request.lz_message_id.pathway_id)
+                )
+            } else {
+                format!(
+                    "READ signing context requires ReadV1002 on pathway {}",
+                    pathway_json(&request.lz_message_id.pathway_id)
+                )
+            }));
+        }
+        if let SigningContext::Read {
+            resolved_timestamp_time_markers,
+            ..
+        } = &request.signing_context
         {
-            return Err(AppCoreError::BadRequest(format!(
-                "Invalid protocol type for ReadV1002 on pathway {}",
-                pathway_json(&request.lz_message_id.pathway_id)
-            )));
+            if resolved_timestamp_time_markers.len() > MAX_READ_MARKERS {
+                return Err(AppCoreError::BadRequest(format!(
+                    "resolvedTimestampTimeMarkers count exceeds maximum {MAX_READ_MARKERS}"
+                )));
+            }
         }
 
         if let SigningContext::Message {

@@ -4,10 +4,131 @@ impl<T> RuntimeRpcValidationChecks<T>
 where
     T: JsonRpcTransport,
 {
-    /// Validates every READ time marker and returns the block each one was
-    /// validated against. The hashes are what `read_payload.rs` pins its
-    /// `eth_call`s to; without them the read would be answered from whatever
-    /// block sits at the same height when the builder runs.
+    pub(crate) fn validate_read_markers_preflight(
+        &self,
+        sent_event: &LzSentEvent,
+        markers: &[ResolvedTimestampTimeMarker],
+    ) -> Result<(), AppCoreError> {
+        if markers.len() > pillar_core::MAX_READ_MARKERS {
+            return Err(AppCoreError::BadRequest(format!(
+                "resolvedTimestampTimeMarkers count exceeds maximum {}",
+                pillar_core::MAX_READ_MARKERS
+            )));
+        }
+        let mut block_numbers_by_timestamp = HashMap::new();
+        let mut unique_markers = Vec::with_capacity(markers.len());
+        let mut seen_markers = HashSet::new();
+        for marker in markers {
+            if marker.is_block_number {
+                return Err(AppCoreError::BadRequest(
+                    "resolvedTimestampTimeMarkers must contain timestamp markers".to_string(),
+                ));
+            }
+            if !seen_markers.insert((
+                marker.chain_name.as_str(),
+                marker.timestamp,
+                marker.block_number,
+                marker.block_confirmation,
+            )) {
+                continue;
+            }
+            if marker
+                .block_number
+                .checked_add(marker.block_confirmation)
+                .is_none()
+            {
+                return Err(AppCoreError::BadRequest(
+                    "block confirmation range overflow".to_string(),
+                ));
+            }
+            if marker.block_confirmation < 0 {
+                return Err(AppCoreError::BadRequest(
+                    "blockConfirmation cannot be negative".to_string(),
+                ));
+            }
+            if marker.timestamp < 0 {
+                return Err(AppCoreError::BadRequest(
+                    "resolved timestamp cannot be negative".to_string(),
+                ));
+            }
+            if marker.block_number < 1 {
+                return Err(AppCoreError::BadRequest(format!(
+                    "Invalid resolved time marker for chainName {}: blockNumber {} must be >= 1",
+                    marker.chain_name, marker.block_number
+                )));
+            }
+            let key = (marker.chain_name.as_str(), marker.timestamp);
+            if block_numbers_by_timestamp
+                .insert(key, marker.block_number)
+                .is_some_and(|block_number| block_number != marker.block_number)
+            {
+                return Err(AppCoreError::BadRequest(format!(
+                    "Conflicting resolved blocks for chainName {} timestamp {}",
+                    marker.chain_name, marker.timestamp
+                )));
+            }
+            unique_markers.push(marker);
+        }
+        if sent_event.lz_message_id.uln_send_version.as_str() == Some(ULN_VERSION_READ_V1002) {
+            let command_markers = extract_evm_read_resolved_time_markers(&sent_event.message)?;
+            let mut matched = vec![false; unique_markers.len()];
+            for marker in command_markers {
+                let chain_name = self
+                    .evm_chain_name_by_eid
+                    .get(&marker.target_eid)
+                    .ok_or_else(|| {
+                        AppCoreError::BadRequest(format!(
+                            "No chainName found for read command endpointId {}",
+                            marker.target_eid
+                        ))
+                    })?;
+                if let ReadTimeMarker::BlockNumber { block_number } = marker.marker {
+                    if block_number > i64::MAX as u64
+                        || (block_number as i64)
+                            .checked_add(i64::from(marker.block_confirmation))
+                            .is_none()
+                    {
+                        return Err(AppCoreError::BadRequest(format!(
+                            "Invalid read command block number for chainName {chain_name}: {block_number}"
+                        )));
+                    }
+                }
+                if let ReadTimeMarker::Timestamp { timestamp } = marker.marker {
+                    if timestamp > i64::MAX as u64 {
+                        return Err(AppCoreError::BadRequest(format!(
+                            "Invalid read command timestamp {timestamp}"
+                        )));
+                    }
+                    let found = unique_markers
+                        .iter()
+                        .enumerate()
+                        .position(|(index, resolved)| {
+                            !matched[index]
+                                && resolved.chain_name == *chain_name
+                                && resolved.timestamp == timestamp as i64
+                                && resolved.block_confirmation == marker.block_confirmation as i64
+                        });
+                    match found {
+                        Some(index) => matched[index] = true,
+                        None => {
+                            return Err(AppCoreError::BadRequest(format!(
+                                "Missing resolved timestamp time marker for chainName {chain_name} timestamp {timestamp} and blockConfirmation {}",
+                                marker.block_confirmation
+                            )))
+                        }
+                    }
+                }
+            }
+            if matched.iter().any(|matched| !matched) {
+                return Err(AppCoreError::BadRequest(
+                    "resolvedTimestampTimeMarkers do not match ReadV1002 timestamp markers"
+                        .to_string(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) async fn validate_read_time_markers(
         &self,
         sent_event: &LzSentEvent,
@@ -19,7 +140,16 @@ where
             self.validate_read_command_markers(&command_markers, markers, &mut pins)
                 .await?;
         }
+        let mut seen_markers = HashSet::new();
         for marker in markers {
+            if !seen_markers.insert((
+                marker.chain_name.as_str(),
+                marker.timestamp,
+                marker.block_number,
+                marker.block_confirmation,
+            )) {
+                continue;
+            }
             if marker.is_block_number {
                 return Err(AppCoreError::BadRequest(
                     "resolvedTimestampTimeMarkers must contain timestamp markers".to_string(),

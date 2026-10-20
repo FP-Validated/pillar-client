@@ -182,6 +182,14 @@ impl<T: JsonRpcTransport> RuntimeValidationChecks for A3Checks<T> {
         Ok(self.current_timestamp)
     }
 
+    fn validate_read_preflight(
+        &self,
+        _: &LzSentEvent,
+        _: &SigningContext,
+    ) -> Result<(), AppCoreError> {
+        Ok(())
+    }
+
     async fn validate_readiness(
         &self,
         _: &LzSentEvent,

@@ -28,6 +28,12 @@ pub trait RuntimeValidationChecks: Send + Sync + 'static {
         signing_context: &SigningContext,
     ) -> Result<Vec<ReadBlockPin>, AppCoreError>;
 
+    fn validate_read_preflight(
+        &self,
+        sent_event: &LzSentEvent,
+        signing_context: &SigningContext,
+    ) -> Result<(), AppCoreError>;
+
     async fn validate_payload_not_signed(
         &self,
         sent_event: &LzSentEvent,
@@ -88,7 +94,9 @@ where
         request: &PillarApiRequestV2,
         sent_event: &LzSentEvent,
     ) -> Result<(), AppCoreError> {
-        validate_message_hash_for_pillar(request, sent_event)
+        validate_message_hash_for_pillar(request, sent_event)?;
+        self.checks
+            .validate_read_preflight(sent_event, &request.signing_context)
     }
 
     async fn validate_readiness(

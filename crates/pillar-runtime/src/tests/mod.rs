@@ -60,6 +60,7 @@ fn round1_artifact(name: &str, value: Value) {
 
 mod canton_ledger_tests;
 mod canton_sequencer_tests;
+mod round1_core_e2e;
 mod round1_memory_budget_e2e;
 mod round1_parser_admission_e2e;
 mod round1_resource_e2e;

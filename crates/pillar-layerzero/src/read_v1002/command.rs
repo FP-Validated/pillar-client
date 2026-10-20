@@ -1,12 +1,10 @@
-use pillar_core::AppCoreError;
+use pillar_core::{AppCoreError, MAX_READ_REQUESTS};
 
 use crate::abi::decode_hex_bytes;
 use crate::types::{
     EvmReadCommand, EvmReadCompute, EvmReadComputeSetting, EvmReadRequest, ReadResolvedTimeMarker,
     ReadTimeMarker,
 };
-
-const MAX_READ_REQUESTS: u16 = 256;
 
 pub fn decode_evm_read_command(cmd: &str) -> Result<EvmReadCommand, AppCoreError> {
     let bytes = decode_hex_bytes(cmd)?;

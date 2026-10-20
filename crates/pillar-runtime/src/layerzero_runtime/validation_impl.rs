@@ -14,15 +14,30 @@ where
             .await
     }
 
+    fn validate_read_preflight(
+        &self,
+        sent_event: &LzSentEvent,
+        signing_context: &SigningContext,
+    ) -> Result<(), AppCoreError> {
+        if let SigningContext::Read {
+            resolved_timestamp_time_markers,
+            ..
+        } = signing_context
+        {
+            self.validate_read_markers_preflight(sent_event, resolved_timestamp_time_markers)?;
+        }
+        Ok(())
+    }
+
     async fn validate_readiness(
         &self,
         sent_event: &LzSentEvent,
         signing_context: &SigningContext,
     ) -> Result<Vec<ReadBlockPin>, AppCoreError> {
+        self.validate_read_preflight(sent_event, signing_context)?;
         self.validate_readiness_with_quorum(sent_event, signing_context)
             .await
     }
-
     async fn validate_payload_not_signed(
         &self,
         sent_event: &LzSentEvent,
