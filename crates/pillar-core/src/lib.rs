@@ -261,6 +261,21 @@ pub struct EvmSourceEvidence {
     pub packet_log_data: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StarknetSourceEvidence {
+    pub block_hash: String,
+    pub block_number: i64,
+    pub transaction_hash: String,
+    pub event_index: u64,
+    pub event: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum SourceEvidence {
+    Evm(EvmSourceEvidence),
+    Starknet(StarknetSourceEvidence),
+}
+
 /// The block a READ time marker was validated against, agreed on by provider
 /// quorum during readiness. The payload resolver issues every `eth_call` for
 /// that marker against this exact hash (EIP-1898, `requireCanonical`), so a
@@ -280,7 +295,7 @@ pub struct LzSentEvent {
     pub message: String,
     pub tx_hash: String,
     #[serde(skip)]
-    pub source_evidence: Option<EvmSourceEvidence>,
+    pub source_evidence: Option<SourceEvidence>,
     /// Filled from readiness before the hash builder runs; never caller input.
     #[serde(skip)]
     pub read_block_pins: Vec<ReadBlockPin>,

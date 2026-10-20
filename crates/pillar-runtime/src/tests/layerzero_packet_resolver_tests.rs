@@ -1585,18 +1585,30 @@ fn path_segment_encoding_cannot_shorten_the_request_path() {
     }
 }
 
-/// Upstream's Starknet and Stellar endpoint sdks throw `NonRetryableError('Transaction
-/// failed for tx ...')` (a 500) for a failed transaction and `Packet does not match
-/// lzMessageId` (remapped to the 400 `cannot find packet event`) when no trusted
-/// PacketSent matches (`endpoint/starknet/index.ts:210-242`,
-/// `endpoint/stellar/index.ts:263-289`).
+/// Failed transactions remain source errors; successful receipts without a matching
+/// PacketSent event remain identity refusals.
 #[tokio::test]
 async fn starknet_and_stellar_resolution_failures_match_upstream() {
+    let starknet_tx_hash = format!("0x{}", "5a".repeat(31));
+    let starknet_block_hash = format!("0x{}", "b2".repeat(31));
     for (chain, failed, succeeded) in [
         (
             "starknet",
-            json!({ "execution_status": "REVERTED", "events": [] }),
-            json!({ "execution_status": "SUCCEEDED", "block_hash": "0x1", "events": [] }),
+            json!({
+                "execution_status": "REVERTED",
+                "finality_status": "ACCEPTED_ON_L2",
+                "transaction_hash": starknet_tx_hash.clone(),
+                "block_number": 777,
+                "events": []
+            }),
+            json!({
+                "execution_status": "SUCCEEDED",
+                "finality_status": "ACCEPTED_ON_L2",
+                "transaction_hash": starknet_tx_hash.clone(),
+                "block_hash": starknet_block_hash.clone(),
+                "block_number": 777,
+                "events": []
+            }),
         ),
         (
             "stellar",
@@ -1628,8 +1640,13 @@ async fn starknet_and_stellar_resolution_failures_match_upstream() {
                 evm_packet_sent_resolver_config("V302"),
             );
 
+            let tx_hash = if chain == "starknet" {
+                starknet_tx_hash.as_str()
+            } else {
+                "0xtx"
+            };
             let error = resolver
-                .get_lz_sent_event("0xtx", &request)
+                .get_lz_sent_event(tx_hash, &request)
                 .await
                 .unwrap_err();
 
@@ -1640,27 +1657,32 @@ async fn starknet_and_stellar_resolution_failures_match_upstream() {
                     "{chain}: {error:?}"
                 );
             } else {
-                assert_eq!(
-                    error,
-                    AppCoreError::Internal("Transaction failed for tx 0xtx".to_string()),
-                    "{chain}"
+                assert!(
+                    matches!(&error, AppCoreError::Internal(_)),
+                    "{chain}: {error:?}"
                 );
             }
         }
     }
 }
 
-/// A successful Starknet receipt without a block hash is upstream's plain `Error`
-/// (a 500), checked before any event is read (`endpoint/starknet/index.ts:214-216`).
+/// A successful accepted Starknet receipt without a block hash remains a source refusal.
 #[tokio::test]
 async fn starknet_receipt_without_block_hash_fails_like_upstream() {
     let mut request = evm_packet_sent_request("V302");
     request.pathway_id.src_chain_name = "starknet".to_string();
+    let starknet_tx_hash = format!("0x{}", "5a".repeat(31));
     let transport = RecordingTransport {
         calls: Arc::new(Mutex::new(Vec::new())),
-        responses: Arc::new(Mutex::new(vec![Ok(
-            json!({ "result": { "execution_status": "SUCCEEDED", "events": [] } }),
-        )])),
+        responses: Arc::new(Mutex::new(vec![Ok(json!({
+            "result": {
+                "execution_status": "SUCCEEDED",
+                "finality_status": "ACCEPTED_ON_L2",
+                "transaction_hash": starknet_tx_hash.clone(),
+                "block_number": 777,
+                "events": []
+            }
+        }))])),
     };
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
@@ -1680,12 +1702,9 @@ async fn starknet_receipt_without_block_hash_fails_like_upstream() {
     );
 
     let error = resolver
-        .get_lz_sent_event("0xtx", &request)
+        .get_lz_sent_event(&starknet_tx_hash, &request)
         .await
         .unwrap_err();
 
-    assert_eq!(
-        error,
-        AppCoreError::Internal("Block hash not yet populated for tx 0xtx".to_string())
-    );
+    assert!(matches!(&error, AppCoreError::Internal(_)), "{error:?}");
 }

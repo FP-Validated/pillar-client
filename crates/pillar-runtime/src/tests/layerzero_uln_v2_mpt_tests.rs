@@ -43,7 +43,9 @@ fn mpt_receipt(block_hash: &str) -> Value {
 #[tokio::test]
 async fn runtime_evm_uln_v2_payload_builder_derives_mpt_hash_info_with_quorum() {
     run_mpt_payload(
-        Some(mpt_evidence(MPT_BLOCK_HASH)),
+        Some(pillar_core::SourceEvidence::Evm(mpt_evidence(
+            MPT_BLOCK_HASH,
+        ))),
         mpt_receipt(MPT_BLOCK_HASH),
     )
     .await
@@ -65,13 +67,20 @@ async fn runtime_evm_uln_v2_mpt_refuses_missing_source_evidence() {
 #[tokio::test]
 async fn runtime_evm_uln_v2_mpt_refuses_a_receipt_that_changed_after_resolution() {
     let evidence = mpt_evidence(MPT_BLOCK_HASH);
-    let (result, calls) =
-        run_mpt_payload(Some(evidence.clone()), mpt_receipt(MPT_BLOCK_HASH)).await;
+    let (result, calls) = run_mpt_payload(
+        Some(pillar_core::SourceEvidence::Evm(evidence.clone())),
+        mpt_receipt(MPT_BLOCK_HASH),
+    )
+    .await;
     result.expect("an unchanged receipt still builds");
     assert_eq!(calls, 6);
 
     let other = "0x0909090909090909090909090909090909090909090909090909090909090909";
-    let (result, calls) = run_mpt_payload(Some(evidence), mpt_receipt(other)).await;
+    let (result, calls) = run_mpt_payload(
+        Some(pillar_core::SourceEvidence::Evm(evidence)),
+        mpt_receipt(other),
+    )
+    .await;
     // A provider whose receipt contradicts the captured evidence is a failed provider
     // response, so with quorum 1 the request fails before any block is read.
     result.expect_err("a re-included receipt must not build a proof");
@@ -79,7 +88,7 @@ async fn runtime_evm_uln_v2_mpt_refuses_a_receipt_that_changed_after_resolution(
 }
 
 async fn run_mpt_payload(
-    source_evidence: Option<pillar_core::EvmSourceEvidence>,
+    source_evidence: Option<pillar_core::SourceEvidence>,
     receipt: Value,
 ) -> (Result<pillar_core::HashCallDataResult, AppCoreError>, usize) {
     let calls = Arc::new(Mutex::new(Vec::new()));

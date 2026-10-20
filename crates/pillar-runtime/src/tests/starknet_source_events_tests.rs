@@ -80,7 +80,9 @@ async fn starknet_source_events_match_gasolina() {
         let name = scenario["name"].as_str().unwrap();
         let theirs = &scenario["outcome"];
         let request: LzMessageId = serde_json::from_value(scenario["request"].clone()).unwrap();
-        let result = scripted_resolver(environment, &scenario["receipt"])
+        let mut receipt = scenario["receipt"].clone();
+        receipt["transaction_hash"] = Value::from(format!("0x00{}", &tx_hash[2..]));
+        let result = scripted_resolver(environment, &receipt)
             .get_lz_sent_event(tx_hash, &request)
             .await;
         if UNKNOWN_DESTINATION_EID_DIVERGENCES.contains(&name) {

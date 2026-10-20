@@ -172,7 +172,11 @@ where
         expiration: i64,
         v_id: String,
     ) -> Result<pillar_core::HashCallDataResult, AppCoreError> {
-        if sent_event.source_evidence.is_none()
+        let evm_source_evidence = match sent_event.source_evidence.as_ref() {
+            Some(pillar_core::SourceEvidence::Evm(evidence)) => Some(evidence),
+            _ => None,
+        };
+        if evm_source_evidence.is_none()
             && sent_event
                 .extra
                 .get("packetEmitAddress")
@@ -229,7 +233,7 @@ where
                 self.mpt_hash_info_with_quorum(
                     src_chain_name,
                     &sent_event.tx_hash,
-                    sent_event.source_evidence.as_ref(),
+                    evm_source_evidence,
                 )
                 .await?
             }

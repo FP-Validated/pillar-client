@@ -73,13 +73,19 @@ pub(crate) fn extra_context_sent_event_payload(sent_event: &LzSentEvent) -> Valu
             "blockHash": sent_event
                 .source_evidence
                 .as_ref()
-                .map(|evidence| evidence.block_hash.as_str())
+                .map(|evidence| match evidence {
+                    pillar_core::SourceEvidence::Evm(evidence) => evidence.block_hash.as_str(),
+                    pillar_core::SourceEvidence::Starknet(evidence) => evidence.block_hash.as_str(),
+                })
                 .or_else(|| sent_event.extra.get("blockHash").and_then(Value::as_str))
                 .unwrap_or_default(),
             "blockNumber": sent_event
                 .source_evidence
                 .as_ref()
-                .map(|evidence| evidence.block_number)
+                .map(|evidence| match evidence {
+                    pillar_core::SourceEvidence::Evm(evidence) => evidence.block_number,
+                    pillar_core::SourceEvidence::Starknet(evidence) => evidence.block_number,
+                })
                 .or_else(|| sent_event.extra.get("blockNumber").and_then(Value::as_i64))
                 .unwrap_or_default(),
         }),

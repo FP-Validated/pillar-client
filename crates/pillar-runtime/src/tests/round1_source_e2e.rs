@@ -182,6 +182,157 @@ async fn round1_solana_source_resolver_quorums_only_consumed_projection() {
     );
     assert_eq!(result.unwrap().lz_message_id.nonce, 3826);
 }
+async fn resolve_starknet_fixture_event(receipt: Value) -> LzSentEvent {
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../tests/gasolina_parity/starknet_source_events.json"
+    ))
+    .unwrap();
+    let tx_hash = fixture["txHash"].as_str().unwrap();
+    let request: LzMessageId =
+        serde_json::from_value(fixture["scenarios"][0]["request"].clone()).unwrap();
+    let config =
+        runtime_evm_layerzero_config("mainnet", &["starknet".to_string(), "ethereum".to_string()])
+            .unwrap();
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "starknet".to_string(),
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://starknet.example".to_string())],
+                1,
+            ),
+        )]),
+        Some(&["starknet".to_string()]),
+    )
+    .unwrap();
+    EvmPacketSentResolver::new(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        RecordingTransport {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            responses: Arc::new(Mutex::new(vec![Ok(json!({"result": receipt}))])),
+        },
+        config.packet_sent_resolver_config,
+    )
+    .get_lz_sent_event(tx_hash, &request)
+    .await
+    .unwrap()
+}
+
+async fn validate_starknet_readiness(
+    sent_event: &LzSentEvent,
+    receipt: Value,
+) -> (
+    Result<Vec<pillar_core::ReadBlockPin>, AppCoreError>,
+    Vec<RecordedJsonCall>,
+) {
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "starknet".to_string(),
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://starknet.example".to_string())],
+                1,
+            ),
+        )]),
+        Some(&["starknet".to_string()]),
+    )
+    .unwrap();
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../tests/gasolina_parity/starknet_source_events.json"
+    ))
+    .unwrap();
+    let canonical_receipt = &fixture["scenarios"][0]["receipt"];
+    let calls: RecordedJsonCalls = Arc::new(Mutex::new(Vec::new()));
+    let checks = RuntimeRpcValidationChecks::from_getter(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        RecordingTransport {
+            calls: calls.clone(),
+            responses: Arc::new(Mutex::new(vec![
+                Ok(json!({"result": receipt})),
+                Ok(json!({"result": 800})),
+                Ok(json!({"result": {
+                    "block_hash": canonical_receipt["block_hash"],
+                    "block_number": canonical_receipt["block_number"]
+                }})),
+            ])),
+        },
+    );
+    let result = checks
+        .validate_readiness(
+            sent_event,
+            &SigningContext::Message {
+                expiration: 0,
+                skip_v_id: None,
+                dvn_address: None,
+                block_confirmation: 0,
+            },
+        )
+        .await;
+    let calls = calls.lock().unwrap().clone();
+    (result, calls)
+}
+
+#[tokio::test]
+async fn round1_starknet_readiness_binds_resolved_event_to_current_canonical_receipt() {
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../tests/gasolina_parity/starknet_source_events.json"
+    ))
+    .unwrap();
+    let receipt = fixture["scenarios"][0]["receipt"].clone();
+    let sent_event = resolve_starknet_fixture_event(receipt.clone()).await;
+    let initial_event = receipt["events"][0].clone();
+    let initial_hash = receipt["block_hash"].clone();
+
+    let mut progressed = receipt.clone();
+    progressed["finality_status"] = json!("ACCEPTED_ON_L1");
+    let (stable, stable_calls) = validate_starknet_readiness(&sent_event, progressed).await;
+    record(
+        "starknet-stable-finality-progress",
+        json!({"result": format!("{stable:?}"), "calls": stable_calls}),
+    );
+    stable.unwrap();
+
+    let mut reorg = receipt.clone();
+    reorg["block_hash"] =
+        json!("0xabababababababababababababababababababababababababababababababab");
+    let (reorg_result, reorg_calls) = validate_starknet_readiness(&sent_event, reorg.clone()).await;
+    record(
+        "starknet-reorg",
+        json!({"resolved_hash": initial_hash, "current_hash": reorg["block_hash"], "result": format!("{reorg_result:?}"), "calls": reorg_calls}),
+    );
+    assert!(reorg_result.is_err());
+
+    let mut changed_event = receipt.clone();
+    changed_event["events"][0]["data"][0] = json!("0x4");
+    let (event_result, event_calls) =
+        validate_starknet_readiness(&sent_event, changed_event.clone()).await;
+    record(
+        "starknet-selected-event-mutation",
+        json!({"resolved_event": initial_event, "current_event": changed_event["events"][0], "result": format!("{event_result:?}"), "calls": event_calls}),
+    );
+    assert!(event_result.is_err());
+
+    let mut shifted_event = receipt.clone();
+    shifted_event["events"]
+        .as_array_mut()
+        .unwrap()
+        .insert(0, json!({"from_address": "0x1", "keys": [], "data": []}));
+    let (placement_result, placement_calls) =
+        validate_starknet_readiness(&sent_event, shifted_event.clone()).await;
+    record(
+        "starknet-selected-event-placement",
+        json!({"selected_event": initial_event, "current_events": shifted_event["events"], "result": format!("{placement_result:?}"), "calls": placement_calls}),
+    );
+    assert!(placement_result.is_err());
+    let mut reverted = receipt;
+    reverted["execution_status"] = json!("REVERTED");
+    let (revert_result, revert_calls) =
+        validate_starknet_readiness(&sent_event, reverted.clone()).await;
+    record(
+        "starknet-execution-revert",
+        json!({"execution_status": reverted["execution_status"], "result": format!("{revert_result:?}"), "calls": revert_calls}),
+    );
+    assert!(revert_result.is_err());
+}
+
 async fn resolve_solana_with_untrusted_large_instruction() -> Result<LzSentEvent, AppCoreError> {
     let mut response: Value = serde_json::from_str(include_str!(
         "../../tests/gasolina_parity/source_replay/solana-getTransaction-jsonParsed.response.json"

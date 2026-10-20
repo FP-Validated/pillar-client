@@ -334,18 +334,21 @@ fn readiness_sent_event_bound_to(
     log_index: u64,
 ) -> LzSentEvent {
     LzSentEvent {
-        source_evidence: Some(pillar_core::EvmSourceEvidence {
-            block_hash: block_hash.to_string(),
-            block_number,
-            status: "1".to_string(),
-            packet_log_index: log_index,
-            transaction_hash: "0xtx".to_string(),
-            packet_log_address: "0x1a44076050125825900e736c501f859c50fe728c".to_string(),
-            packet_log_topics: vec![
-                "0x1ab700d4ced0c005b164c0f789fd09fcbb0156d4c2041b8a3bfbcd961cd1567f".to_string(),
-            ],
-            packet_log_data: "0x00".to_string(),
-        }),
+        source_evidence: Some(pillar_core::SourceEvidence::Evm(
+            pillar_core::EvmSourceEvidence {
+                block_hash: block_hash.to_string(),
+                block_number,
+                status: "1".to_string(),
+                packet_log_index: log_index,
+                transaction_hash: "0xtx".to_string(),
+                packet_log_address: "0x1a44076050125825900e736c501f859c50fe728c".to_string(),
+                packet_log_topics: vec![
+                    "0x1ab700d4ced0c005b164c0f789fd09fcbb0156d4c2041b8a3bfbcd961cd1567f"
+                        .to_string(),
+                ],
+                packet_log_data: "0x00".to_string(),
+            },
+        )),
         ..readiness_sent_event()
     }
 }
@@ -1311,9 +1314,22 @@ async fn malformed_readiness_is_not_a_quorum_vote(chain: &str, family: Malformed
         &ProviderSnapshotHandle::from_getter(&getter),
         MalformedReadinessTransport(family),
     );
+    let mut sent_event = move_readiness_sent_event(chain, "0xtx");
+    if chain == "starknet" {
+        sent_event.tx_hash = "0x1".to_string();
+        sent_event.source_evidence = Some(pillar_core::SourceEvidence::Starknet(
+            pillar_core::StarknetSourceEvidence {
+                block_hash: "0x2".to_string(),
+                block_number: 100,
+                transaction_hash: "0x1".to_string(),
+                event_index: 0,
+                event: json!({}),
+            },
+        ));
+    }
     let error = checks
         .validate_readiness(
-            &move_readiness_sent_event(chain, "0xtx"),
+            &sent_event,
             &SigningContext::Message {
                 expiration: 1,
                 skip_v_id: None,

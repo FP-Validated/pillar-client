@@ -156,7 +156,10 @@ fn providers(chain: &str) -> StaticProviderConfig {
     .unwrap()
 }
 
-fn sent_event_from(upstream: &Value, source_evidence: Option<EvmSourceEvidence>) -> LzSentEvent {
+fn sent_event_from(
+    upstream: &Value,
+    source_evidence: Option<pillar_core::SourceEvidence>,
+) -> LzSentEvent {
     let pathway = &upstream["lzMessageId"]["pathwayId"];
     let mut extra = IndexMap::new();
     for key in ["srcEid", "dstEid", "sender", "receiver"] {
@@ -244,7 +247,7 @@ async fn evm_uln_v2_refresh_matches_gasolina() {
     let upstream_event = &evm["sentEvent"];
     let event = sent_event_from(
         upstream_event,
-        Some(EvmSourceEvidence {
+        Some(pillar_core::SourceEvidence::Evm(EvmSourceEvidence {
             block_hash: upstream_event["onChainEvent"]["blockHash"]
                 .as_str()
                 .unwrap()
@@ -261,7 +264,7 @@ async fn evm_uln_v2_refresh_matches_gasolina() {
             packet_log_address: String::new(),
             packet_log_topics: Vec::new(),
             packet_log_data: String::new(),
-        }),
+        })),
     );
     let mut compared = 0;
     for scenario in evm["scenarios"].as_array().unwrap() {
@@ -306,7 +309,11 @@ async fn evm_uln_v2_refresh_matches_gasolina() {
                 if outcome["refreshed"].is_null() && outcome.get("error").is_none() => {}
             (outcome, Ok(Some(refreshed))) if outcome["refreshed"].is_object() => {
                 let theirs = &outcome["refreshed"];
-                let evidence = refreshed.sent_event.source_evidence.as_ref().unwrap();
+                let Some(pillar_core::SourceEvidence::Evm(evidence)) =
+                    refreshed.sent_event.source_evidence.as_ref()
+                else {
+                    panic!("{name}: EVM source evidence");
+                };
                 assert_eq!(
                     refreshed.sent_event.tx_hash,
                     theirs["onChainEvent"]["txHash"].as_str().unwrap(),

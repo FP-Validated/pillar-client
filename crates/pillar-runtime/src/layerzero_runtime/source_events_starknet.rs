@@ -11,10 +11,10 @@ const UNEXPECTED_END: &str = "Unexpected end of response";
 #[derive(Debug, Clone)]
 pub(crate) struct StarknetPacketSentEvent {
     pub(crate) endpoint_address: String,
-    /// The `send_library` key as upstream's `.toString()` of its felt renders it: decimal.
     pub(crate) send_library: String,
     pub(crate) packet: LzPacketV1,
     pub(crate) options: String,
+    pub(crate) source_evidence: pillar_core::StarknetSourceEvidence,
 }
 
 /// Upstream's `getPacketSentEventsFromTxHash` after the receipt checks
@@ -36,13 +36,14 @@ pub(crate) fn decode_starknet_packet_sent_events(
         .unwrap_or_default();
     events
         .iter()
-        .filter(|event| {
+        .enumerate()
+        .filter(|(_, event)| {
             let selector = event.pointer("/keys/0").and_then(Value::as_str);
             let from = event.get("from_address").and_then(Value::as_str);
             selector == Some(PACKET_SENT_EVENT_SELECTOR)
                 && from.is_some_and(|from| filters.contains(from))
         })
-        .map(|event| {
+        .map(|(event_index, event)| {
             let endpoint_address = event["from_address"]
                 .as_str()
                 .unwrap_or_default()
@@ -64,11 +65,35 @@ pub(crate) fn decode_starknet_packet_sent_events(
                 decode_byte_array(data, &mut cursor).ok_or_else(|| UNEXPECTED_END.to_string())?;
             let packet = decode_lz_packet_v1(&format!("0x{}", hex::encode(&encoded_packet)))
                 .map_err(|error| error.to_string())?;
+            let block_hash = receipt
+                .get("block_hash")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Missing Starknet receipt block_hash".to_string())?
+                .to_string();
+            let block_number = receipt
+                .get("block_number")
+                .and_then(numeric_response)
+                .and_then(|number| number.parse::<i64>().ok())
+                .ok_or_else(|| "Missing Starknet receipt block_number".to_string())?;
+            let transaction_hash = receipt
+                .get("transaction_hash")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Missing Starknet receipt transaction_hash".to_string())?
+                .to_string();
+            let event_index = u64::try_from(event_index)
+                .map_err(|_| "Starknet event index exceeds u64".to_string())?;
             Ok(StarknetPacketSentEvent {
                 endpoint_address,
                 send_library,
                 packet,
                 options: format!("0x{}", hex::encode(options)),
+                source_evidence: pillar_core::StarknetSourceEvidence {
+                    block_hash,
+                    block_number,
+                    transaction_hash,
+                    event_index,
+                    event: event.clone(),
+                },
             })
         })
         .collect()
@@ -101,6 +126,7 @@ pub(crate) fn starknet_packet_to_lz_sent_event(
     event: StarknetPacketSentEvent,
     chain_name_by_eid: &HashMap<u32, String>,
 ) -> Result<SourceEventConversion, AppCoreError> {
+    let source_evidence = event.source_evidence.clone();
     let packet = event.packet;
     let src_chain_name = match chain_name_by_eid.get(&packet.src_eid).cloned() {
         Some(name) => name,
@@ -144,7 +170,7 @@ pub(crate) fn starknet_packet_to_lz_sent_event(
         message: packet.message,
         tx_hash: src_tx_hash.to_string(),
         extra,
-        source_evidence: None,
+        source_evidence: Some(pillar_core::SourceEvidence::Starknet(source_evidence)),
         read_block_pins: Vec::new(),
     }))
 }
@@ -195,6 +221,32 @@ fn parse_felt_bytes(value: &Value) -> Option<[u8; 32]> {
     padded.extend(std::iter::repeat_n('0', 64 - value.len()));
     padded.push_str(value);
     hex::decode(padded).ok()?.try_into().ok()
+}
+
+// Compare validated hex felts numerically without address-normalization semantics.
+pub(crate) fn normalize_starknet_felt_hash(value: &str) -> Option<String> {
+    let digits = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+        .unwrap_or(value);
+    if digits.is_empty()
+        || digits.len() > 64
+        || !digits.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return None;
+    }
+    let normalized = digits.trim_start_matches('0');
+    Some(
+        format!(
+            "0x{}",
+            if normalized.is_empty() {
+                "0"
+            } else {
+                normalized
+            }
+        )
+        .to_ascii_lowercase(),
+    )
 }
 
 pub(crate) fn normalize_starknet_address(address: &str) -> String {

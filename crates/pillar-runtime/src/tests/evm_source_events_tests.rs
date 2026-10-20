@@ -120,7 +120,11 @@ async fn evm_source_events_match_gasolina() {
                     event.tx_hash,
                     theirs["onChainEvent"]["txHash"].as_str().unwrap()
                 );
-                let evidence = event.source_evidence.as_ref().unwrap();
+                let Some(pillar_core::SourceEvidence::Evm(evidence)) =
+                    event.source_evidence.as_ref()
+                else {
+                    panic!("{name}: EVM source evidence");
+                };
                 assert_eq!(
                     evidence.block_hash,
                     theirs["onChainEvent"]["blockHash"].as_str().unwrap()

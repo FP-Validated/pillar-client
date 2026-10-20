@@ -881,7 +881,7 @@ where
             },
             message: packet.message,
             tx_hash: src_tx_hash.to_string(),
-            source_evidence: Some(source_evidence),
+            source_evidence: Some(pillar_core::SourceEvidence::Evm(source_evidence)),
             read_block_pins: Vec::new(),
             extra,
         }))
@@ -1142,14 +1142,35 @@ where
                         "Starknet transaction receipt",
                     )
                     .await?;
-                let succeeded =
-                    receipt.get("execution_status").and_then(Value::as_str) == Some("SUCCEEDED");
-                if !succeeded {
+                let execution_status = receipt.get("execution_status").and_then(Value::as_str);
+                if execution_status != Some("SUCCEEDED") {
                     return Err(AppCoreError::Internal(format!(
                         "Transaction failed for tx {src_tx_hash}"
                     )));
                 }
-                // `endpoint/starknet/index.ts:214-216`.
+                let accepted = matches!(
+                    receipt.get("finality_status").and_then(Value::as_str),
+                    Some("ACCEPTED_ON_L2" | "ACCEPTED_ON_L1")
+                );
+                if !accepted {
+                    return Err(AppCoreError::Internal(format!(
+                        "Transaction is not accepted for tx {src_tx_hash}"
+                    )));
+                }
+                let receipt_tx_hash = receipt
+                    .get("transaction_hash")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| AppCoreError::Internal("Missing Starknet receipt transaction_hash".to_string()))?;
+                if crate::layerzero_runtime::source_events_starknet::normalize_starknet_felt_hash(receipt_tx_hash)
+                    .is_none_or(|receipt_hash| {
+                        crate::layerzero_runtime::source_events_starknet::normalize_starknet_felt_hash(src_tx_hash)
+                            .is_none_or(|requested_hash| receipt_hash != requested_hash)
+                    })
+                {
+                    return Err(AppCoreError::Internal(
+                        "Starknet receipt transaction hash does not match request".to_string(),
+                    ));
+                }
                 if receipt
                     .get("block_hash")
                     .and_then(Value::as_str)
@@ -1158,6 +1179,16 @@ where
                     return Err(AppCoreError::Internal(format!(
                         "Block hash not yet populated for tx {src_tx_hash}"
                     )));
+                }
+                if receipt
+                    .get("block_number")
+                    .and_then(numeric_response)
+                    .and_then(|number| number.parse::<i64>().ok())
+                    .is_none()
+                {
+                    return Err(AppCoreError::Internal(
+                        "Missing Starknet receipt block_number".to_string(),
+                    ));
                 }
                 let events = decode_starknet_packet_sent_events(
                     &receipt,
@@ -1845,7 +1876,10 @@ where
                 sent_event
                     .source_evidence
                     .as_ref()
-                    .map(|evidence| evidence.block_number)
+                    .and_then(|evidence| match evidence {
+                        pillar_core::SourceEvidence::Evm(evidence) => Some(evidence.block_number),
+                        pillar_core::SourceEvidence::Starknet(_) => None,
+                    })
             })
             .ok_or_else(|| AppCoreError::Internal("Invalid receipt block number".to_string()))?;
         let mut from_block = center.checked_sub(half).ok_or_else(|| {

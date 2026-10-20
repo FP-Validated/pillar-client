@@ -251,6 +251,14 @@ where
         return Ok(());
     }
     if src_chain_name == "starknet" {
+        let source_evidence = match sent_event.source_evidence.as_ref() {
+            Some(pillar_core::SourceEvidence::Starknet(evidence)) => evidence.clone(),
+            _ => {
+                return Err(AppCoreError::Internal(
+                    "Missing Starknet source evidence".to_string(),
+                ))
+            }
+        };
         let quorum = required_provider_quorum(provider_config, src_chain_name)?;
         let plan = plan_dispatch(&self.rank_tracker, src_chain_name, quorum)
         .await?;
@@ -259,6 +267,7 @@ where
             let (url, headers) = provider_uri_parts(uri);
             let transport = self.transport.clone();
             let tx_hash = sent_event.tx_hash.clone();
+            let evidence = source_evidence.clone();
             let required_confirmations = block_confirmation;
             requests.push(async move {
                 if !delay.is_zero() {
@@ -269,6 +278,7 @@ where
                     url,
                     headers,
                     &tx_hash,
+                    &evidence,
                     required_confirmations,
                 )
                 .await;
@@ -350,11 +360,14 @@ where
             )),
         };
     }
-    if sent_event.source_evidence.is_none() {
-        return Err(AppCoreError::Internal(
-            "Missing source evidence for EVM readiness".to_string(),
-        ));
-    }
+    let source_evidence = match sent_event.source_evidence.as_ref() {
+        Some(pillar_core::SourceEvidence::Evm(evidence)) => evidence.clone(),
+        _ => {
+            return Err(AppCoreError::Internal(
+                "Missing EVM source evidence for readiness".to_string(),
+            ))
+        }
+    };
     let quorum = required_provider_quorum(provider_config, src_chain_name)?;
     let plan = plan_dispatch(&self.rank_tracker, src_chain_name, quorum)
     .await?;
@@ -363,7 +376,7 @@ where
         let (url, headers) = provider_uri_parts(uri);
         let transport = self.transport.clone();
         let tx_hash = sent_event.tx_hash.clone();
-        let source_evidence = sent_event.source_evidence.clone();
+        let source_evidence = source_evidence.clone();
         requests.push(async move {
             if !delay.is_zero() {
                 tokio::time::sleep(delay).await;
@@ -373,7 +386,7 @@ where
                 url,
                 headers,
                 &tx_hash,
-                source_evidence.as_ref(),
+                Some(&source_evidence),
                 block_confirmation,
                 matches!(src_chain_name.as_str(), "polygon" | "tron"),
             )
@@ -661,6 +674,7 @@ async fn observe_starknet_block_confirmations<T>(
     url: String,
     headers: HashMap<String, String>,
     tx_hash: &str,
+    source_evidence: &pillar_core::StarknetSourceEvidence,
     required_confirmations: i64,
 ) -> Result<BlockConfirmationObservation, RpcError>
 where
@@ -677,6 +691,17 @@ where
             "jsonrpc": "2.0",
         }),
     );
+    let canonical_block_transport = transport.clone();
+    let canonical_block = canonical_block_transport.post_json_scoped(
+        url.clone(),
+        headers.clone(),
+        json!({
+            "method": "starknet_getBlockWithTxHashes",
+            "params": [{"block_number": source_evidence.block_number}],
+            "id": 1,
+            "jsonrpc": "2.0",
+        }),
+    );
     let current = transport.post_json_scoped(
         url,
         headers,
@@ -687,37 +712,108 @@ where
             "jsonrpc": "2.0",
         }),
     );
-    let (receipt_response, current_response) = tokio::join!(receipt, current);
+    let (receipt_response, current_response, canonical_response) =
+        tokio::join!(receipt, current, canonical_block);
     let receipt_response = readiness_response(receipt_response)?;
-    let receipt_block = match receipt_response.get("result") {
-        None | Some(Value::Null) => None,
-        Some(result) => match result.get("block_hash").and_then(Value::as_str) {
-            None => None,
-            Some(hash) => {
-                let number = result
-                    .get("block_number")
-                    .and_then(numeric_response)
-                    .and_then(|value| value.parse::<i64>().ok())
-                    .ok_or_else(|| {
-                        RpcError::Remote("Malformed Starknet receipt block_number".to_string())
-                    })?;
-                Some((hash.to_string(), number))
-            }
-        },
-    };
-    let current_response = readiness_response(current_response)?;
-    let current_block = current_response
+    let Some(receipt) = receipt_response
         .get("result")
-        .and_then(numeric_response)
-        .and_then(|value| value.parse::<i64>().ok())
-        .ok_or_else(|| RpcError::Remote("Malformed Starknet block number".to_string()))?;
-    let (Some((receipt_hash, receipt_number)), current_number) = (receipt_block, current_block)
+        .filter(|value| !value.is_null())
     else {
         return Ok(BlockConfirmationObservation {
             validity: BlockConfirmationValidity::Missing,
             current_confirmations: None,
         });
     };
+    let source_changed = |reason: &str| BlockConfirmationObservation {
+        validity: BlockConfirmationValidity::SourceChanged(reason.to_string()),
+        current_confirmations: None,
+    };
+    let execution_status = receipt
+        .get("execution_status")
+        .and_then(Value::as_str)
+        .filter(|status| matches!(*status, "SUCCEEDED" | "REVERTED"))
+        .ok_or_else(|| RpcError::Remote("Malformed Starknet execution_status".to_string()))?;
+    let finality_status = receipt
+        .get("finality_status")
+        .and_then(Value::as_str)
+        .filter(|status| matches!(*status, "ACCEPTED_ON_L2" | "ACCEPTED_ON_L1" | "RECEIVED"))
+        .ok_or_else(|| RpcError::Remote("Malformed Starknet finality_status".to_string()))?;
+    if execution_status != "SUCCEEDED" || finality_status == "RECEIVED" {
+        return Ok(source_changed(
+            "Starknet receipt is reverted or not accepted",
+        ));
+    }
+    if receipt
+        .get("transaction_hash")
+        .and_then(Value::as_str)
+        .and_then(super::source_events_starknet::normalize_starknet_felt_hash)
+        .is_none_or(|hash| {
+            super::source_events_starknet::normalize_starknet_felt_hash(
+                &source_evidence.transaction_hash,
+            )
+            .is_none_or(|source_hash| hash != source_hash)
+                || super::source_events_starknet::normalize_starknet_felt_hash(tx_hash)
+                    .is_none_or(|requested_hash| hash != requested_hash)
+        })
+    {
+        return Ok(source_changed("Starknet transaction hash changed"));
+    }
+    let receipt_hash = receipt
+        .get("block_hash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| RpcError::Remote("Missing Starknet receipt block_hash".to_string()))?;
+    let receipt_number = receipt
+        .get("block_number")
+        .and_then(numeric_response)
+        .and_then(|value| value.parse::<i64>().ok())
+        .ok_or_else(|| RpcError::Remote("Malformed Starknet receipt block_number".to_string()))?;
+    if super::source_events_starknet::normalize_starknet_felt_hash(receipt_hash).is_none_or(
+        |hash| {
+            super::source_events_starknet::normalize_starknet_felt_hash(&source_evidence.block_hash)
+                .is_none_or(|source_hash| hash != source_hash)
+        },
+    ) || receipt_number != source_evidence.block_number
+    {
+        return Ok(source_changed("Starknet receipt placement changed"));
+    }
+    let events = receipt.get("events").and_then(Value::as_array);
+    let selected_event = events.and_then(|events| events.get(source_evidence.event_index as usize));
+    if selected_event != Some(&source_evidence.event) {
+        return Ok(source_changed(
+            "Starknet selected event contents or placement changed",
+        ));
+    }
+    let canonical_response = readiness_response(canonical_response)?;
+    let canonical = canonical_response
+        .get("result")
+        .ok_or_else(|| RpcError::Remote("Missing canonical Starknet block".to_string()))?;
+    let canonical_hash = canonical
+        .get("block_hash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| RpcError::Remote("Missing canonical Starknet block hash".to_string()))?;
+    let canonical_number = canonical
+        .get("block_number")
+        .and_then(numeric_response)
+        .and_then(|value| value.parse::<i64>().ok())
+        .ok_or_else(|| RpcError::Remote("Malformed canonical Starknet block number".to_string()))?;
+    if canonical_number != source_evidence.block_number
+        || super::source_events_starknet::normalize_starknet_felt_hash(canonical_hash).is_none_or(
+            |hash| {
+                super::source_events_starknet::normalize_starknet_felt_hash(
+                    &source_evidence.block_hash,
+                )
+                .is_none_or(|source_hash| hash != source_hash)
+            },
+        )
+    {
+        return Ok(source_changed("Starknet block is no longer canonical"));
+    }
+    let current_response = readiness_response(current_response)?;
+    let current_number = current_response
+        .get("result")
+        .and_then(numeric_response)
+        .and_then(|value| value.parse::<i64>().ok())
+        .ok_or_else(|| RpcError::Remote("Malformed Starknet block number".to_string()))?;
     let (Some(current_confirmations), Some(required_block)) = (
         current_number.checked_sub(receipt_number),
         receipt_number.checked_add(required_confirmations),
@@ -735,12 +831,12 @@ where
     }
     let validity = if current_number >= required_block {
         BlockConfirmationValidity::Sufficient {
-            receipt_block_hash: receipt_hash,
+            receipt_block_hash: receipt_hash.to_string(),
             receipt_block_number: receipt_number,
         }
     } else {
         BlockConfirmationValidity::Insufficient {
-            receipt_block_hash: receipt_hash,
+            receipt_block_hash: receipt_hash.to_string(),
             receipt_block_number: receipt_number,
         }
     };
