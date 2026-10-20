@@ -17,6 +17,7 @@ the Prometheus metric names.
 - M-08 / L-01: preserve TON's existing trace-root destination policy principal, reject malformed principal addresses and unrelated lookup traces, and bind every trace node's normalized 32-byte transaction hash into quorum. A hash is read as hex only when it is exactly 64 hex digits, so standard-base64 hashes that happen to begin with `0x` still resolve. The audit's proposed destination-to-source substitution is not applied: the recorded external-in trace root receives the originating wallet. Resolved transaction hashes use escaped debug logging.
 - L-02: pass the quorum-resolved effective Aptos receive version into payload-signed validation for V2-to-V301 routing without rewriting the resolved source version.
 - L-03: fail startup/config conversion for every non-null `walletRestrictions`, including `{}`. Omitted and null restrictions remain unrestricted; no restriction policy is implemented.
+- Update `quinn-proto` to 0.11.19, `rustls` to 0.23.46, `rustls-webpki` to 0.103.16 and `webpki-roots`/`webpki-root-certs` to 1.0.10 for RUSTSEC-2026-0338 to 0342, 0346 to 0349 and 0381 to 0383. Lockfile only; the `deny.toml` license exceptions follow the new root-certificate versions.
 
 ### Upgrade / Breaking
 

@@ -27,8 +27,8 @@ allow = [
 ]
 confidence-threshold = 0.93
 exceptions = [
-    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-root-certs@1.0.8" },
-    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots@1.0.8" },
+    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-root-certs@1.0.10" },
+    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots@1.0.10" },
 ]
 
 [licenses.private]
