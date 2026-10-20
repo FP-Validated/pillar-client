@@ -259,6 +259,8 @@ pub enum ConfigError {
     Io(String),
     #[error("{0}")]
     Json(String),
+    #[error("Wallet restrictions are not supported")]
+    UnsupportedWalletRestrictions,
     #[error("No walletDefinition found in {0}")]
     NoWalletDefinition(&'static str),
     #[error("No mnemonic definition found in {0}")]
@@ -695,11 +697,7 @@ pub fn wallet_definitions_from_env_map(
     let raw = required(vars, LZ_WALLETS)?;
     let wallets = serde_json::from_str::<Vec<WalletDefinition>>(raw)
         .map_err(|error| ConfigError::Json(json_error_without_input(&error)))?;
-    if wallets.is_empty() {
-        Err(ConfigError::NoWalletDefinition(LZ_WALLETS))
-    } else {
-        Ok(wallets)
-    }
+    validate_wallet_definitions(wallets, LZ_WALLETS)
 }
 
 pub fn wallet_definitions_from_file_path_env_map(
@@ -709,11 +707,25 @@ pub fn wallet_definitions_from_file_path_env_map(
     let raw = fs::read_to_string(path).map_err(|error| ConfigError::Io(error.to_string()))?;
     let wallets = serde_json::from_str::<Vec<WalletDefinition>>(&raw)
         .map_err(|error| ConfigError::Json(json_error_without_input(&error)))?;
+    validate_wallet_definitions(wallets, LZ_WALLETS_FILE_PATH)
+}
+
+fn validate_wallet_definitions(
+    wallets: Vec<WalletDefinition>,
+    source: &'static str,
+) -> Result<Vec<WalletDefinition>, ConfigError> {
     if wallets.is_empty() {
-        Err(ConfigError::NoWalletDefinition(LZ_WALLETS_FILE_PATH))
-    } else {
-        Ok(wallets)
+        return Err(ConfigError::NoWalletDefinition(source));
     }
+    if wallets.iter().any(|wallet| {
+        wallet
+            .wallet_restrictions
+            .as_ref()
+            .is_some_and(|value| !value.is_null())
+    }) {
+        return Err(ConfigError::UnsupportedWalletRestrictions);
+    }
+    Ok(wallets)
 }
 
 /// serde_json's errors quote the offending input, which here can be a seed phrase or an RPC

@@ -1,6 +1,124 @@
 use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+static NEXT_WALLET_FILE: AtomicUsize = AtomicUsize::new(0);
+
+struct WalletFile(std::path::PathBuf);
+
+impl WalletFile {
+    fn new(content: &str) -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "pillar-round1-core-wallet-{}-{}.json",
+            std::process::id(),
+            NEXT_WALLET_FILE.fetch_add(1, Ordering::Relaxed),
+        ));
+        std::fs::write(&path, content).unwrap();
+        Self(path)
+    }
+}
+
+impl Drop for WalletFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+fn wallet(restrictions: Option<Value>) -> String {
+    let mut entry = json!({
+        "name": "round1-wallet-EVM",
+        "walletSetName": "round1-set",
+        "byChainType": { "EVM": { "secretName": "round1-secret" } }
+    });
+    if let Some(restrictions) = restrictions {
+        entry["walletRestrictions"] = restrictions;
+    }
+    json!([entry]).to_string()
+}
+
+fn signer_vars(wallets: String) -> HashMap<String, String> {
+    HashMap::from([
+        (SIGNER_TYPE.to_string(), "MNEMONIC".to_string()),
+        (pillar_config::LZ_WALLETS.to_string(), wallets),
+    ])
+}
+
+#[test]
+fn round1_core_rejects_non_null_wallet_restrictions_before_signer_startup() {
+    for (label, restrictions) in [
+        ("empty-object", json!({})),
+        ("non-empty", json!({ "chains": ["ethereum"] })),
+    ] {
+        let result = runtime_signer_config_from_env_map(
+            &signer_vars(wallet(Some(restrictions))),
+            &["ethereum".to_string()],
+            &HashMap::from([("ethereum".to_string(), "EVM".to_string())]),
+        );
+        let observation = result
+            .as_ref()
+            .map(|config| json!({ "startup": "accepted", "wallet_count": config.wallet_definitions.len() }))
+            .unwrap_or_else(|error| json!({ "startup": "rejected", "error": error }));
+        round1_artifact(&format!("wallet-restrictions-{label}"), observation);
+        assert!(
+            result.is_err(),
+            "walletRestrictions must not be silently ignored"
+        );
+    }
+}
+
+#[test]
+fn round1_core_accepts_omitted_and_null_wallet_restrictions() {
+    for (label, wallets) in [
+        ("omitted", wallet(None)),
+        ("null", wallet(Some(Value::Null))),
+    ] {
+        let config = runtime_signer_config_from_env_map(
+            &signer_vars(wallets),
+            &["ethereum".to_string()],
+            &HashMap::from([("ethereum".to_string(), "EVM".to_string())]),
+        )
+        .expect("omitted and null walletRestrictions are compatible");
+        assert_eq!(config.wallet_definitions.len(), 1);
+        assert_eq!(config.wallet_definitions[0].name, "round1-wallet-EVM");
+        assert!(config.wallet_definitions[0]
+            .by_chain_type
+            .contains_key(&ChainType::Evm));
+        assert_eq!(
+            config.wallets_by_chain_name["ethereum"][0].wallet_name,
+            "round1-wallet-EVM"
+        );
+        round1_artifact(
+            &format!("wallet-restrictions-{label}"),
+            json!({ "startup": "accepted", "wallet_count": 1 }),
+        );
+    }
+}
+
+#[test]
+fn round1_core_rejects_non_null_wallet_restrictions_from_file_startup() {
+    let file = WalletFile::new(&wallet(Some(json!({}))));
+    let vars = HashMap::from([
+        (SIGNER_TYPE.to_string(), "LOCAL_MNEMONIC".to_string()),
+        (
+            LZ_WALLETS_FILE_PATH.to_string(),
+            file.0.to_string_lossy().to_string(),
+        ),
+        (
+            pillar_config::LZ_WALLET_MNEMONIC_MAPPING.to_string(),
+            r#"{"round1-wallet-EVM":{"mnemonic":"test test test test test test test test test test test junk","path":"m/44'/60'/0'/0/0"}}"#.to_string(),
+        ),
+    ]);
+    let result = runtime_signer_config_from_env_map(
+        &vars,
+        &["ethereum".to_string()],
+        &HashMap::from([("ethereum".to_string(), "EVM".to_string())]),
+    );
+    let observation = result
+        .as_ref()
+        .map(|config| json!({ "startup": "accepted", "wallet_count": config.wallet_definitions.len() }))
+        .unwrap_or_else(|error| json!({ "startup": "rejected", "error": error }));
+    round1_artifact("wallet-restrictions-file", observation);
+    assert!(result.is_err(), "file walletRestrictions must be rejected");
+}
 #[derive(Clone)]
 struct CountingResolver(Arc<AtomicUsize>);
 

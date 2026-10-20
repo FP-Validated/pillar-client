@@ -201,6 +201,13 @@ pub fn signer_wallet_definitions_from_config(
     wallet_definitions
         .iter()
         .map(|wallet| {
+            if wallet
+                .wallet_restrictions
+                .as_ref()
+                .is_some_and(|value| !value.is_null())
+            {
+                return Err("walletRestrictions are not supported".to_string());
+            }
             let by_chain_type = wallet
                 .by_chain_type
                 .iter()
