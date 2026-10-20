@@ -764,6 +764,7 @@ impl RuntimeValidationChecks for ParityChecks {
         sent_event: &LzSentEvent,
         _verifier_address: Option<&str>,
         dst_chain_name: &str,
+        _effective_receive_version: Option<&str>,
     ) -> Result<(), AppCoreError> {
         if self.already_signed {
             // The production refusal, so the HTTP comparison covers its text.

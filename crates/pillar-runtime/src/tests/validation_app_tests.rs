@@ -87,7 +87,7 @@ async fn runtime_app_validator_matches_core_checks_and_delegates_external_checks
         .unwrap();
     validator.validate_expiration("bsc", 604900).await.unwrap();
     validator
-        .validate_payload_signed(&sent_event, Some("0xdvn"), "bsc")
+        .validate_payload_signed(&sent_event, Some("0xdvn"), "bsc", None)
         .await
         .unwrap();
     validator

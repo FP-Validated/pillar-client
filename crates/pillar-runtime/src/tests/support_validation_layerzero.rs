@@ -45,6 +45,7 @@ impl RuntimeValidationChecks for FixedValidationChecks {
         _sent_event: &LzSentEvent,
         verifier_address: Option<&str>,
         dst_chain_name: &str,
+        _effective_receive_version: Option<&str>,
     ) -> Result<(), AppCoreError> {
         self.calls.lock().unwrap().push(format!(
             "payload:{}:{dst_chain_name}",

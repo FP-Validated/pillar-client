@@ -43,9 +43,15 @@ where
         sent_event: &LzSentEvent,
         verifier_address: Option<&str>,
         dst_chain_name: &str,
+        effective_receive_version: Option<&str>,
     ) -> Result<(), AppCoreError> {
-        self.validate_payload_not_signed_with_quorum(sent_event, verifier_address, dst_chain_name)
-            .await
+        self.validate_payload_not_signed_with_quorum(
+            sent_event,
+            verifier_address,
+            dst_chain_name,
+            effective_receive_version,
+        )
+        .await
     }
 
     async fn validate_extra_context(

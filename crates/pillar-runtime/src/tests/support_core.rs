@@ -74,6 +74,7 @@ impl AppValidator for NoopValidator {
         _sent_event: &LzSentEvent,
         _verifier_address: Option<&str>,
         _dst_chain_name: &str,
+        _effective_receive_version: Option<&str>,
     ) -> Result<(), AppCoreError> {
         Ok(())
     }

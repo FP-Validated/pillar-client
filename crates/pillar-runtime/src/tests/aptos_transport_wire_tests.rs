@@ -353,7 +353,7 @@ async fn run_production_move_validation(
     .expect("production validator config");
     let event = configured_event(chain, version, src_eid, dst_eid, sender, receiver);
     checks
-        .validate_payload_not_signed(&event, Some(&format!("0x{}", "33".repeat(32))), chain)
+        .validate_payload_not_signed(&event, Some(&format!("0x{}", "33".repeat(32))), chain, None)
         .await
         .unwrap_or_else(|error| panic!("production {chain} {version} validator failed: {error}"));
     // Fewer Pillar requests than upstream's capture must fail, not leave accept() waiting.

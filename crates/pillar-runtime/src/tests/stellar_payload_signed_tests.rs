@@ -133,7 +133,7 @@ async fn run(
         "the replayed packet is the one the fixture encoded"
     );
     let outcome = checks
-        .validate_payload_not_signed(&event, inputs["dvn"].as_str(), "stellar")
+        .validate_payload_not_signed(&event, inputs["dvn"].as_str(), "stellar", None)
         .await;
     let seen = seen.lock().unwrap().clone();
     (outcome, seen)

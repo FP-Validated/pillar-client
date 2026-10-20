@@ -49,6 +49,7 @@ impl AppValidator for PassingValidator {
         _: &LzSentEvent,
         _: Option<&str>,
         _: &str,
+        _: Option<&str>,
     ) -> Result<(), AppCoreError> {
         Ok(())
     }

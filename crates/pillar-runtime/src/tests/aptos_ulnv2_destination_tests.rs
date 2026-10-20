@@ -41,6 +41,7 @@ struct A3Transport {
     receipt: Arc<Value>,
     receive_msglib: Arc<Value>,
     views: Arc<Mutex<Vec<Value>>>,
+    verification_state: u8,
 }
 
 #[async_trait]
@@ -54,19 +55,29 @@ impl JsonRpcTransport for A3Transport {
         if body["method"] == "eth_getTransactionReceipt" {
             return Ok(json!({"jsonrpc": "2.0", "id": 1, "result": (*self.receipt).clone()}));
         }
-        if url.ends_with("/view")
-            && body["function"]
-                .as_str()
-                .is_some_and(|function| function.ends_with("::endpoint_view::get_receive_msglib"))
-        {
+        if url.ends_with("/view") {
+            let function = body["function"].as_str().unwrap_or_default().to_string();
             self.views.lock().unwrap().push(body);
-            return Ok((*self.receive_msglib).clone());
+            return match function.rsplit("::").next().unwrap_or_default() {
+                "get_receive_msglib" => Ok((*self.receive_msglib).clone()),
+                "get_config" => Ok(json!([
+                    "0x00000000000000020001589dedbd617e0cbcb916a9223f4d1300c294236b00000000"
+                ])),
+                "get_verification_confirmations" => Ok(json!(["0"])),
+                "verifiable" => Ok(json!([self.verification_state])),
+                "inbound_nonce" => Ok(json!(["0"])),
+                _ => Err(format!("unrecorded view {url} {function}")),
+            };
         }
         Err(format!("unrecorded request {url} {body}"))
     }
 
     async fn get_json(&self, url: String, _: HashMap<String, String>) -> Result<Value, String> {
-        Err(format!("unrecorded GET {url}"))
+        if url.contains("/accounts/") && url.contains("::channel::Channels") {
+            Err("Provider returned HTTP 404 Not Found".to_string())
+        } else {
+            Err(format!("unrecorded GET {url}"))
+        }
     }
 }
 
@@ -110,6 +121,7 @@ async fn aptos_receive_routing_matches_upstream_get_uln_receive_details() {
             receipt: Arc::new(Value::Null),
             receive_msglib: Arc::new(row["answer"].clone()),
             views: views.clone(),
+            verification_state: 0,
         };
         let checks = runtime_rpc_validation_checks_from_evm_config(
             &ProviderSnapshotHandle::from_getter(&getter),
@@ -203,9 +215,15 @@ impl<T: JsonRpcTransport> RuntimeValidationChecks for A3Checks<T> {
         sent_event: &LzSentEvent,
         verifier_address: Option<&str>,
         dst_chain_name: &str,
+        effective_receive_version: Option<&str>,
     ) -> Result<(), AppCoreError> {
         self.real
-            .validate_payload_not_signed(sent_event, verifier_address, dst_chain_name)
+            .validate_payload_not_signed(
+                sent_event,
+                verifier_address,
+                dst_chain_name,
+                effective_receive_version,
+            )
             .await
     }
 
@@ -296,6 +314,7 @@ struct A3Outcome {
     body: Value,
     signer_calls: usize,
     receive_msglib_reads: usize,
+    observed_views: Vec<Value>,
 }
 
 /// The production service for one row, answered with `receive_msglib` for the routing view.
@@ -303,6 +322,16 @@ async fn sign_through_http(
     row: &Value,
     receive_msglib: Value,
     skip_v_id: Option<bool>,
+    mutate: impl FnOnce(&mut Value),
+) -> A3Outcome {
+    sign_through_http_with_verification_state(row, receive_msglib, skip_v_id, 0, mutate).await
+}
+
+async fn sign_through_http_with_verification_state(
+    row: &Value,
+    receive_msglib: Value,
+    skip_v_id: Option<bool>,
+    verification_state: u8,
     mutate: impl FnOnce(&mut Value),
 ) -> A3Outcome {
     let environment = row["environment"].as_str().unwrap();
@@ -315,6 +344,7 @@ async fn sign_through_http(
         receipt: Arc::new(uln_v2_receipt(environment, row)),
         receive_msglib: Arc::new(receive_msglib),
         views: views.clone(),
+        verification_state,
     };
     let real = runtime_rpc_validation_checks_from_evm_config(
         &snapshot,
@@ -420,12 +450,21 @@ async fn sign_through_http(
             .unwrap(),
     )
     .unwrap();
-    let receive_msglib_reads = views.lock().unwrap().len();
+    let observed_views = views.lock().unwrap().clone();
+    let receive_msglib_reads = observed_views
+        .iter()
+        .filter(|view| {
+            view["function"]
+                .as_str()
+                .is_some_and(|function| function.ends_with("::endpoint_view::get_receive_msglib"))
+        })
+        .count();
     A3Outcome {
         status,
         body,
         signer_calls: signer_calls.load(std::sync::atomic::Ordering::SeqCst),
         receive_msglib_reads,
+        observed_views,
     }
 }
 
@@ -564,5 +603,46 @@ async fn a3_is_fail_closed_outside_its_identity() {
             (0, 0),
             "{field}={value}"
         );
+    }
+}
+#[tokio::test]
+async fn round1_v2_source_routed_to_aptos_v301_reads_v301_signed_state_before_signing() {
+    let row = fixture()["payloads"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["name"] == "mainnet skipVId")
+        .unwrap()
+        .clone();
+
+    for (verification_state, expected_status, expected_signer_calls) in [(0, 200, 1), (2, 400, 0)] {
+        let outcome = sign_through_http_with_verification_state(
+            &row,
+            json!(["2", 0]),
+            None,
+            verification_state,
+            |_| {},
+        )
+        .await;
+        let view_functions = outcome
+            .observed_views
+            .iter()
+            .filter_map(|view| view["function"].as_str())
+            .collect::<Vec<_>>();
+        round1_artifact(
+            &format!("aptos-v301-routed-state-{verification_state}"),
+            json!({
+                "status": outcome.status,
+                "signer_calls": outcome.signer_calls,
+                "view_functions": view_functions,
+            }),
+        );
+
+        assert_eq!(
+            outcome.status, expected_status,
+            "state {verification_state}: {}",
+            outcome.body
+        );
+        assert_eq!(outcome.signer_calls, expected_signer_calls);
     }
 }

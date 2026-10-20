@@ -39,6 +39,7 @@ pub trait RuntimeValidationChecks: Send + Sync + 'static {
         sent_event: &LzSentEvent,
         verifier_address: Option<&str>,
         dst_chain_name: &str,
+        effective_receive_version: Option<&str>,
     ) -> Result<(), AppCoreError>;
 
     async fn validate_extra_context(
@@ -147,9 +148,15 @@ where
         sent_event: &LzSentEvent,
         verifier_address: Option<&str>,
         dst_chain_name: &str,
+        effective_receive_version: Option<&str>,
     ) -> Result<(), AppCoreError> {
         self.checks
-            .validate_payload_not_signed(sent_event, verifier_address, dst_chain_name)
+            .validate_payload_not_signed(
+                sent_event,
+                verifier_address,
+                dst_chain_name,
+                effective_receive_version,
+            )
             .await
     }
 

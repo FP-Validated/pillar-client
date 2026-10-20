@@ -222,6 +222,7 @@ async fn payload_signed_family_table_covers_every_destination_the_dispatch_reach
                 &family_sent_event(row),
                 Some(row.verifier),
                 row.chain_name,
+                None,
             )
             .await;
         let calls = recorder.calls.lock().unwrap().clone();
@@ -333,6 +334,7 @@ async fn payload_signed_reads_never_let_failed_providers_form_a_majority() {
                 &family_sent_event(row),
                 Some(row.verifier),
                 row.chain_name,
+                None,
             )
             .await
             .expect_err("two providers that never answered cannot clear a payload for signing");

@@ -1542,7 +1542,7 @@ async fn aptos_validator_normalizes_short_receiver_at_move_adapter_boundary() {
         event.lz_message_id.uln_send_version = Value::from("V301");
         event.message = format!("0x{}", "c0ffee".repeat(11));
         checks
-            .validate_payload_not_signed(&event, Some(DVN), "aptos")
+            .validate_payload_not_signed(&event, Some(DVN), "aptos", None)
             .await
             .unwrap();
 

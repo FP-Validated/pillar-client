@@ -29,6 +29,7 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_payload() {
             &payload_signed_sent_event(),
             Some("0x3333333333333333333333333333333333333333"),
             "bsc",
+            None,
         )
         .await
         .unwrap();
@@ -70,6 +71,7 @@ async fn runtime_rpc_validation_checks_rejects_hash_lookup_signed_payload() {
             &payload_signed_sent_event(),
             Some("0x3333333333333333333333333333333333333333"),
             "bsc",
+            None,
         )
         .await
         .unwrap_err();
@@ -97,6 +99,7 @@ async fn runtime_rpc_validation_checks_rejects_verifiable_verified_payload() {
             &payload_signed_sent_event(),
             Some("0x3333333333333333333333333333333333333333"),
             "bsc",
+            None,
         )
         .await
         .unwrap_err();
@@ -139,6 +142,7 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_starknet_payload() {
             &event,
             Some("0x3333333333333333333333333333333333333333"),
             "starknet",
+            None,
         )
         .await
         .unwrap();
@@ -186,6 +190,7 @@ async fn runtime_rpc_validation_checks_rejects_signed_starknet_payload() {
             &event,
             Some("0x3333333333333333333333333333333333333333"),
             "starknet",
+            None,
         )
         .await
         .unwrap_err();
@@ -231,7 +236,7 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_move_payloads() {
         event.lz_message_id.pathway_id.dst_chain_name = chain_name.to_string();
 
         checks
-            .validate_payload_not_signed(&event, Some("0xdvn"), chain_name)
+            .validate_payload_not_signed(&event, Some("0xdvn"), chain_name, None)
             .await
             .unwrap();
         let calls = calls.lock().unwrap();
@@ -284,7 +289,7 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_initia_payload() {
     event.lz_message_id.pathway_id.dst_chain_name = "initia".to_string();
 
     checks
-        .validate_payload_not_signed(&event, Some("0x3333"), "initia")
+        .validate_payload_not_signed(&event, Some("0x3333"), "initia", None)
         .await
         .unwrap();
     let calls = calls.lock().unwrap();
@@ -348,7 +353,7 @@ async fn runtime_rpc_validation_checks_rejects_confirmed_move_payload() {
     event.lz_message_id.pathway_id.dst_chain_name = "movement".to_string();
 
     let error = checks
-        .validate_payload_not_signed(&event, Some("0xdvn"), "movement")
+        .validate_payload_not_signed(&event, Some("0xdvn"), "movement", None)
         .await
         .unwrap_err();
     assert!(matches!(error, AppCoreError::BadRequest(_)));
@@ -380,7 +385,7 @@ async fn runtime_rpc_validation_checks_never_falls_back_to_evm_for_native_payloa
         event.lz_message_id.pathway_id.dst_chain_name = chain_name.to_string();
 
         let error = checks
-            .validate_payload_not_signed(&event, Some("0x3333"), chain_name)
+            .validate_payload_not_signed(&event, Some("0x3333"), chain_name, None)
             .await
             .unwrap_err();
         assert!(
@@ -421,7 +426,7 @@ async fn runtime_rpc_validation_checks_never_falls_back_to_evm_for_unconfigured_
         event.lz_message_id.pathway_id.dst_chain_name = chain_name.to_string();
 
         let error = checks
-            .validate_payload_not_signed(&event, Some("0x3333"), chain_name)
+            .validate_payload_not_signed(&event, Some("0x3333"), chain_name, None)
             .await
             .unwrap_err();
         assert!(
@@ -461,7 +466,7 @@ async fn runtime_rpc_validation_checks_never_falls_back_to_evm_for_unconfigured_
     event.lz_message_id.pathway_id.dst_chain_name = "ton".to_string();
 
     let error = checks
-        .validate_payload_not_signed(&event, Some("0x3333"), "ton")
+        .validate_payload_not_signed(&event, Some("0x3333"), "ton", None)
         .await
         .unwrap_err();
     assert!(
@@ -485,6 +490,7 @@ async fn runtime_rpc_validation_checks_skips_legacy_payload_without_guid() {
             &sent_event,
             Some("0x3333333333333333333333333333333333333333"),
             "bsc",
+            None,
         )
         .await
         .unwrap();
@@ -877,6 +883,7 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_solana_payload() {
             &payload_signed_solana_sent_event(),
             Some("4gnov6q1KFcjtwBjepBmQtuf5R4ho4XVkrytY8hk4CTF"),
             "solana",
+            None,
         )
         .await
         .unwrap();
@@ -907,6 +914,7 @@ async fn runtime_rpc_validation_checks_rejects_already_signed_solana_payload() {
             &payload_signed_solana_sent_event(),
             Some("4gnov6q1KFcjtwBjepBmQtuf5R4ho4XVkrytY8hk4CTF"),
             "solana",
+            None,
         )
         .await
         .unwrap_err();
@@ -935,6 +943,7 @@ async fn runtime_rpc_validation_checks_accepts_already_delivered_solana_payload(
             &payload_signed_solana_sent_event(),
             Some("4gnov6q1KFcjtwBjepBmQtuf5R4ho4XVkrytY8hk4CTF"),
             "solana",
+            None,
         )
         .await
         .unwrap_err();
@@ -1576,6 +1585,7 @@ async fn no_non_evm_chain_falls_through_to_the_evm_payload_check() {
                 &event,
                 Some("0x3333333333333333333333333333333333333333"),
                 chain_name,
+                None,
             )
             .await;
 

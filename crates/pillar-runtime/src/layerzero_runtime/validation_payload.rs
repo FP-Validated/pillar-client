@@ -9,30 +9,17 @@ where
         sent_event: &LzSentEvent,
         verifier_address: Option<&str>,
         dst_chain_name: &str,
+        effective_receive_version: Option<&str>,
     ) -> Result<(), AppCoreError> {
         crate::provider_health::rpc_scope(
             &sent_event.lz_message_id.pathway_id.dst_chain_name,
             async {
-                // No guid means a ULN V1 message, and the chain-native already-signed
-                // read is a V2 construct: there is no V2 payload to ask about, so there
-                // is nothing being skipped. This is a protocol distinction, NOT a check
-                // being dropped - a security review read it as fail-open. The two tests
-                // that pin it are `..._skips_legacy_payload_without_guid` and
-                // `..._skips_ton_payload_without_guid`, whose own assertion message says
-                // "V1 messages are skipped".
-                //
-                // Contrast the Stellar arm below, which refuses. That is a different
-                // condition - a V2 pathway whose check is genuinely unavailable - and it
-                // correctly fails closed.
+                // Legacy V1 packets have no V2 payload to query.
                 if !sent_event.extra.contains_key("guid") {
                     return Ok(());
                 }
                 if is_chain_native_payload_signed_destination(dst_chain_name) {
-                    // Without an address the question "has this DVN already signed?" has no
-                    // subject, so skip the caller-selected duplicate query rather than refuse
-                    // the request. Upstream gates the same call at apps/gasolina/src/app/app.ts:494.
-                    // The EVM arm below is different: its receive-library resolution needs no
-                    // address, so it remains unconditional.
+                    // The native duplicate query needs a DVN address; EVM resolution does not.
                     let Some(verifier_address) = verifier_address else {
                         return Ok(());
                     };
@@ -41,6 +28,7 @@ where
                             sent_event,
                             verifier_address,
                             dst_chain_name,
+                            effective_receive_version,
                         )
                         .await;
                 }
@@ -307,6 +295,7 @@ where
         sent_event: &LzSentEvent,
         verifier_address: &str,
         dst_chain_name: &str,
+        effective_receive_version: Option<&str>,
     ) -> Result<(), AppCoreError> {
         if dst_chain_name == "solana" {
             return self
@@ -323,6 +312,7 @@ where
                     sent_event,
                     verifier_address,
                     dst_chain_name,
+                    effective_receive_version,
                 )
                 .await;
         }
@@ -387,8 +377,10 @@ where
         sent_event: &LzSentEvent,
         verifier_address: &str,
         dst_chain_name: &str,
+        effective_receive_version: Option<&str>,
     ) -> Result<(), AppCoreError> {
-        let uln_version = uln_version_value(&sent_event.lz_message_id)
+        let uln_version = effective_receive_version
+            .or_else(|| uln_version_value(&sent_event.lz_message_id))
             .ok_or_else(|| AppCoreError::Internal("ulnSendVersion must be a string".to_string()))?;
         if uln_version == "V301" && dst_chain_name == "aptos" {
             return self

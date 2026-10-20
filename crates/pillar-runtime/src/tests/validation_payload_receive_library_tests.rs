@@ -37,6 +37,7 @@ async fn payload_signed_reads_the_receive_library_the_endpoint_reports() {
             &payload_signed_sent_event(),
             Some("0x3333333333333333333333333333333333333333"),
             "bsc",
+            None,
         )
         .await
         .expect_err("the DVN has already attested on the library the OApp uses");
@@ -82,6 +83,7 @@ async fn payload_signed_trusts_a_default_library_without_revalidating_it() {
             &payload_signed_sent_event(),
             Some("0x3333333333333333333333333333333333333333"),
             "bsc",
+            None,
         )
         .await
         .unwrap();
@@ -120,6 +122,7 @@ async fn payload_signed_refuses_an_unrecognised_receive_library() {
             &payload_signed_sent_event(),
             Some("0x3333333333333333333333333333333333333333"),
             "bsc",
+            None,
         )
         .await
         .expect_err("an unvalidatable library must not be signed over");
@@ -162,7 +165,7 @@ async fn payload_signed_refuses_an_unrecognised_receive_library_without_a_dvn_ad
     );
 
     let error = checks
-        .validate_payload_not_signed(&payload_signed_sent_event(), None, "bsc")
+        .validate_payload_not_signed(&payload_signed_sent_event(), None, "bsc", None)
         .await
         .expect_err("omitting dvnAddress must not buy a pass on the library check");
     assert!(matches!(error, AppCoreError::BadRequest(_)), "{error}");
@@ -201,7 +204,7 @@ async fn payload_signed_skips_only_the_duplicate_query_without_a_dvn_address() {
     );
 
     checks
-        .validate_payload_not_signed(&payload_signed_sent_event(), None, "bsc")
+        .validate_payload_not_signed(&payload_signed_sent_event(), None, "bsc", None)
         .await
         .expect("a supported library with no duplicate query to run is not a refusal");
 
@@ -240,6 +243,7 @@ async fn payload_signed_refuses_a_library_the_endpoint_calls_invalid() {
             &payload_signed_sent_event(),
             Some("0x3333333333333333333333333333333333333333"),
             "bsc",
+            None,
         )
         .await
         .expect_err("the endpoint rejected the override, so it cannot be trusted");
@@ -286,6 +290,7 @@ async fn payload_signed_resolves_a_v1_endpoint_destination_on_chain() {
             &event,
             Some("0x3333333333333333333333333333333333333333"),
             "bsc",
+            None,
         )
         .await
         .expect_err("the DVN has already attested on the resolved library");
@@ -366,6 +371,7 @@ async fn payload_signed_requires_providers_to_agree_on_the_receive_library() {
             &payload_signed_sent_event(),
             Some("0x3333333333333333333333333333333333333333"),
             "bsc",
+            None,
         )
         .await
         .expect_err("providers disagreeing on the library must not reach quorum");
@@ -424,6 +430,7 @@ async fn payload_signed_accepts_the_bytes32_receiver_the_resolver_produces() {
             &event,
             Some("0x3333333333333333333333333333333333333333"),
             "bsc",
+            None,
         )
         .await
         .expect("a bytes32 receiver is what the resolver hands over");
@@ -477,6 +484,7 @@ async fn payload_signed_refuses_a_receiver_that_is_not_a_padded_evm_address() {
             &event,
             Some("0x3333333333333333333333333333333333333333"),
             "bsc",
+            None,
         )
         .await
         .expect_err("truncating this would attest for a different OApp");
@@ -499,7 +507,7 @@ async fn payload_signed_skips_move_validation_without_a_dvn_address() {
     event.lz_message_id.pathway_id.dst_chain_name = "aptos".to_string();
 
     checks
-        .validate_payload_not_signed(&event, None, "aptos")
+        .validate_payload_not_signed(&event, None, "aptos", None)
         .await
         .expect("a Move V2 payload without a verifier address is not a refusal");
 
@@ -527,7 +535,7 @@ async fn payload_signed_queries_move_validation_with_a_dvn_address() {
     event.lz_message_id.pathway_id.dst_chain_name = "aptos".to_string();
 
     checks
-        .validate_payload_not_signed(&event, Some("0xdvn"), "aptos")
+        .validate_payload_not_signed(&event, Some("0xdvn"), "aptos", None)
         .await
         .expect("an unsigned Move V2 payload must pass validation");
 

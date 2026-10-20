@@ -133,7 +133,7 @@ async fn move_v302_verifiable_enum_matches_upstream_value_by_value() {
     for value in 0..=4 {
         let (checks, calls) = move_checks("aptos", json!([value]), json!(["1"]), 2);
         let result = checks
-            .validate_payload_not_signed(&v302_event("aptos"), Some(DVN), "aptos")
+            .validate_payload_not_signed(&v302_event("aptos"), Some(DVN), "aptos", None)
             .await;
         assert_eq!(result.is_err(), value == 2, "state {value}: {result:?}");
         let library = calls
@@ -178,7 +178,7 @@ async fn move_v302_invalid_verifiable_values_fail_the_two_provider_quorum() {
     ] {
         let (checks, _) = move_checks("aptos", state.clone(), json!(["0"]), 2);
         let err = checks
-            .validate_payload_not_signed(&v302_event("aptos"), Some(DVN), "aptos")
+            .validate_payload_not_signed(&v302_event("aptos"), Some(DVN), "aptos", None)
             .await
             .unwrap_err();
         assert!(
@@ -193,7 +193,7 @@ async fn move_v302_confirmation_decode_matches_upstream_empty_and_invalid_behavi
     // Upstream `length > 0 && Number(x[0]) >= required`: an empty vector is unsigned.
     let (checks, _) = move_checks("movement", json!([0]), json!([]), 2);
     assert!(checks
-        .validate_payload_not_signed(&v302_event("movement"), Some(DVN), "movement")
+        .validate_payload_not_signed(&v302_event("movement"), Some(DVN), "movement", None)
         .await
         .is_ok());
     for confirmations in [
@@ -204,7 +204,7 @@ async fn move_v302_confirmation_decode_matches_upstream_empty_and_invalid_behavi
     ] {
         let (checks, _) = move_checks("movement", json!([0]), confirmations.clone(), 2);
         let err = checks
-            .validate_payload_not_signed(&v302_event("movement"), Some(DVN), "movement")
+            .validate_payload_not_signed(&v302_event("movement"), Some(DVN), "movement", None)
             .await
             .unwrap_err();
         assert!(
@@ -214,7 +214,7 @@ async fn move_v302_confirmation_decode_matches_upstream_empty_and_invalid_behavi
     }
     let (checks, calls) = move_checks("movement", json!([0]), json!(["2"]), 2);
     let err = checks
-        .validate_payload_not_signed(&v302_event("movement"), Some(DVN), "movement")
+        .validate_payload_not_signed(&v302_event("movement"), Some(DVN), "movement", None)
         .await
         .unwrap_err();
     assert!(
@@ -244,7 +244,7 @@ async fn move_v302_empty_confirmations_do_not_sign_even_when_zero_are_required()
         let (checks, _) = move_checks("movement", json!([state]), json!([]), 0);
         assert!(
             checks
-                .validate_payload_not_signed(&v302_event("movement"), Some(DVN), "movement")
+                .validate_payload_not_signed(&v302_event("movement"), Some(DVN), "movement", None)
                 .await
                 .is_ok(),
             "state {state}"
@@ -252,7 +252,7 @@ async fn move_v302_empty_confirmations_do_not_sign_even_when_zero_are_required()
     }
     let (checks, _) = move_checks("movement", json!([2]), json!([]), 0);
     assert!(checks
-        .validate_payload_not_signed(&v302_event("movement"), Some(DVN), "movement")
+        .validate_payload_not_signed(&v302_event("movement"), Some(DVN), "movement", None)
         .await
         .is_err());
 }
@@ -268,7 +268,7 @@ async fn move_v302_pads_only_the_receive_library_lookup_receiver() {
             .extra
             .insert("receiver".to_string(), Value::from(receiver));
         checks
-            .validate_payload_not_signed(&event, Some(DVN), "aptos")
+            .validate_payload_not_signed(&event, Some(DVN), "aptos", None)
             .await
             .unwrap();
 

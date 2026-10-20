@@ -377,6 +377,7 @@ pub trait AppValidator: Send + Sync + 'static {
         sent_event: &LzSentEvent,
         verifier_address: Option<&str>,
         dst_chain_name: &str,
+        effective_receive_version: Option<&str>,
     ) -> Result<(), AppCoreError>;
 
     async fn validate_extra_context(
@@ -706,14 +707,21 @@ impl PillarApp {
         // over the requested pathway; a V3-family library takes its own builder
         // and every other answer keeps V2's (TS 1.2.66: `app.ts:254-279`).
         let resolver_started_at = Instant::now();
+        let mut quorum_receive_version = None;
         let routed_version = if request.lz_message_id.uln_send_version == "V2" {
             match self
                 .validator
                 .uln_receive_version(&request.lz_message_id)
                 .await
             {
-                Ok(version) if version == "V301" || version == "V302" => Some(version),
-                Ok(_) => None,
+                Ok(version) => {
+                    quorum_receive_version = Some(version.clone());
+                    if version == "V301" || version == "V302" {
+                        Some(version)
+                    } else {
+                        None
+                    }
+                }
                 Err(error) => {
                     self.stage_observer
                         .observe_stage(
@@ -872,6 +880,7 @@ impl PillarApp {
                         .dvn_address()
                         .filter(|address| !address.is_empty()),
                     dst_chain_name,
+                    quorum_receive_version.as_deref(),
                 ),
             )?;
             self.validator
@@ -1658,6 +1667,7 @@ mod tests {
             _sent_event: &LzSentEvent,
             _verifier_address: Option<&str>,
             _dst_chain_name: &str,
+            _effective_receive_version: Option<&str>,
         ) -> Result<(), AppCoreError> {
             Ok(())
         }
@@ -1715,6 +1725,7 @@ mod tests {
             _sent_event: &LzSentEvent,
             _verifier_address: Option<&str>,
             _dst_chain_name: &str,
+            _effective_receive_version: Option<&str>,
         ) -> Result<(), AppCoreError> {
             Ok(())
         }
@@ -2121,6 +2132,7 @@ mod tests {
             _sent_event: &LzSentEvent,
             _verifier_address: Option<&str>,
             _dst_chain_name: &str,
+            _effective_receive_version: Option<&str>,
         ) -> Result<(), AppCoreError> {
             self.observe().await;
             Ok(())
@@ -2225,6 +2237,7 @@ mod tests {
                 _sent_event: &LzSentEvent,
                 _verifier_address: Option<&str>,
                 _dst_chain_name: &str,
+                _effective_receive_version: Option<&str>,
             ) -> Result<(), AppCoreError> {
                 self.issued.fetch_add(1, Ordering::SeqCst);
                 tokio::time::sleep(Duration::from_millis(50)).await;
