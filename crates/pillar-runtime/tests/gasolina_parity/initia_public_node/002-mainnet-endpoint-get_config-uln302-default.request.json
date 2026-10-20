@@ -1,0 +1,10 @@
+{
+ "method": "POST",
+ "url": "https://rest.initia.xyz/initia/move/v1/accounts/0x81d2b534893db8745ab2b0c092ec5f88d554d54825f98fd9e8c83f9b113ee77e/modules/endpoint/view_functions/get_config",
+ "headers": {
+  "content-type": "application/json"
+ },
+ "body": "{\"type_args\":[],\"args\":[\"q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s=\",\"WqtqoodJ3Qc8JsRwPhTrfondaiWrwuHw6Y3ln4IDoBI=\",\"lXUAAA==\",\"AwAAAA==\"]}",
+ "utc": "2026-10-20T23:43:52Z",
+ "status": 200
+}

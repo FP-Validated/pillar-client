@@ -1,0 +1,10 @@
+{
+ "method": "POST",
+ "url": "https://rest.initia.xyz/initia/move/v1/accounts/0x5aab6aa28749dd073c26c4703e14eb7e89dd6a25abc2e1f0e98de59f8203a012/modules/msglib/view_functions/get_verification_confirmations",
+ "headers": {
+  "content-type": "application/json"
+ },
+ "body": "{\"type_args\":[],\"args\":[\"ICIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIi\",\"IBERERERERERERERERERERERERERERERERERERERERER\",\"MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM=\"]}",
+ "utc": "2026-10-20T23:43:52Z",
+ "status": 200
+}

@@ -13,6 +13,8 @@ const APTOS_RECEIVER: &str = "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e5
 const MOVEMENT_RECEIVER: &str =
     "0x2222222222222222222222222222222222222222222222222222222222222222";
 const DVN: &str = "0x3333333333333333333333333333333333333333333333333333333333333333";
+const INITIA_RECEIVER: &str = "0x4444444444444444444444444444444444444444444444444444444444444444";
+const INITIA_ULN_302: &str = "0x5aab6aa28749dd073c26c4703e14eb7e89dd6a25abc2e1f0e98de59f8203a012";
 const SEND_ULN_302: &str = "0xbB2Ea70C9E858123480642Cf96acbcCE1372dCe1";
 const EXPIRATION: i64 = 1_760_000_000;
 
@@ -93,6 +95,19 @@ impl E2eTransport {
                 method => Err(format!("unexpected source RPC method: {method}")),
             };
         }
+        if let Some((provider_url, path)) = url.split_once("/initia/move/v1/accounts/") {
+            return match path.rsplit('/').next().unwrap_or_default() {
+                "get_effective_receive_library" => self
+                    .receive_libraries
+                    .get(provider_url)
+                    .cloned()
+                    .unwrap_or_else(|| Err("missing provider answer".to_string())),
+                "get_config" => Ok(self.config.clone()),
+                "verifiable" => Ok(self.verifiable.clone()),
+                "get_verification_confirmations" => Ok(self.confirmations.clone()),
+                other => Err(format!("unexpected Initia view {other}: {body}")),
+            };
+        }
         if url.ends_with("/view") {
             let function = body["function"].as_str().unwrap_or_default();
             if function.ends_with("::endpoint::get_effective_receive_library") {
@@ -136,6 +151,15 @@ impl JsonRpcTransport for E2eTransport {
 
     async fn get_json(&self, url: String, _: HashMap<String, String>) -> Result<Value, String> {
         self.calls.lock().unwrap().push((url.clone(), Value::Null));
+        if url.ends_with("/cosmos/base/tendermint/v1beta1/blocks/latest")
+            && self
+                .destination_urls
+                .iter()
+                .any(|base| url.starts_with(base.as_str()))
+        {
+            // RFC 3339 for EXPIRATION - 600, the instant the Aptos ledger answer reports.
+            return Ok(json!({"block": {"header": {"time": "2025-10-09T08:43:20.000000000Z"}}}));
+        }
         if self.destination_urls.contains(&url) {
             Ok(
                 json!({ "ledger_timestamp": (EXPIRATION - 600).to_string().parse::<i64>().unwrap() * 1_000_000 }),
@@ -161,15 +185,42 @@ fn recorded_move_config(chain: &str) -> Value {
     serde_json::from_str(&text).unwrap()
 }
 
+fn recorded_initia_view(exchange: &str) -> Value {
+    let text = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/gasolina_parity/initia_public_node")
+            .join(format!("{exchange}.response.body")),
+    )
+    .unwrap();
+    serde_json::from_str(&text).unwrap()
+}
+
 async fn run_resolve_and_sign(
     chain: &str,
     state: u8,
     receive_libraries: Vec<Result<Value, String>>,
 ) -> (StatusCode, Value, usize, Vec<Value>) {
-    let (destination_eid, receiver) = if chain == "aptos" {
-        (30_108, APTOS_RECEIVER)
-    } else {
-        (30_325, MOVEMENT_RECEIVER)
+    run_with_views(
+        chain,
+        recorded_move_config(chain),
+        json!([state]),
+        json!(["0"]),
+        receive_libraries,
+    )
+    .await
+}
+
+async fn run_with_views(
+    chain: &str,
+    config: Value,
+    verifiable: Value,
+    confirmations: Value,
+    receive_libraries: Vec<Result<Value, String>>,
+) -> (StatusCode, Value, usize, Vec<Value>) {
+    let (destination_eid, receiver) = match chain {
+        "aptos" => (30_108, APTOS_RECEIVER),
+        "initia" => (30_326, INITIA_RECEIVER),
+        _ => (30_325, MOVEMENT_RECEIVER),
     };
     let message = "0xdeadbeef";
     let packet = pillar_layerzero::encode_lz_packet_v1(&pillar_layerzero::LzPacketV1 {
@@ -186,7 +237,10 @@ async fn run_resolve_and_sign(
     let names = vec![SOURCE.to_string(), chain.to_string()];
     let source_url = "https://ethereum-rpc.example".to_string();
     let destination_urls: Vec<String> = (0..receive_libraries.len())
-        .map(|index| format!("https://{chain}-rpc-{index}.example/v1"))
+        .map(|index| match chain {
+            "initia" => format!("https://initia-rpc-{index}.example"),
+            _ => format!("https://{chain}-rpc-{index}.example/v1"),
+        })
         .collect();
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([
@@ -224,9 +278,9 @@ async fn run_resolve_and_sign(
         destination_urls,
         receipt,
         receive_libraries: library_by_url,
-        verifiable: json!([state]),
-        confirmations: json!(["0"]),
-        config: recorded_move_config(chain),
+        verifiable,
+        confirmations,
+        config,
     };
     let snapshot = ProviderSnapshotHandle::from_getter(&getter);
     let evm = runtime_evm_layerzero_config("mainnet", &names).unwrap();
@@ -303,8 +357,18 @@ async fn run_resolve_and_sign(
         .lock()
         .unwrap()
         .iter()
-        .filter(|(url, _)| url.ends_with("/view"))
-        .map(|(_, body)| body.clone())
+        .filter_map(|(url, body)| {
+            if url.ends_with("/view") {
+                return Some(body.clone());
+            }
+            let (_, path) = url.split_once("/initia/move/v1/accounts/")?;
+            let mut body = body.clone();
+            body["function"] = Value::from(
+                path.replace("/modules/", "::")
+                    .replace("/view_functions/", "::"),
+            );
+            Some(body)
+        })
         .collect();
     (status, body, signer_calls.load(Ordering::SeqCst), requests)
 }
@@ -393,4 +457,88 @@ async fn move_v302_receive_library_quorum_failure_and_disagreement_refuse_withou
         assert_eq!(body["body"], reason, "{label}");
         assert_eq!(signatures, 0, "{label}: signer was called");
     }
+}
+
+/// Round 2 M-10: Initia's LegacyView answers a one-value function with the bare value
+/// (`initia_public_node` 002-004, recorded from mainnet), not the array Aptos `/view` returns.
+/// The receive library is a two-value function and arrives as an array, like exchange 001.
+#[tokio::test]
+async fn evm_v302_to_initia_reads_recorded_legacy_view_scalars() {
+    let library = || vec![Ok(json!({"data": format!("[\"{INITIA_ULN_302}\",false]")}))];
+    let config = recorded_initia_view("002-mainnet-endpoint-get_config-uln302-default");
+    let not_verified = recorded_initia_view("003-mainnet-views-uln302-verifiable-synthetic");
+    let no_confirmations =
+        recorded_initia_view("004-mainnet-msglib-get_verification_confirmations-synthetic");
+    assert_eq!(
+        config["data"].as_str().map(|data| &data[..17]),
+        Some("\"000000000000000f")
+    );
+    assert_eq!(not_verified["data"], "3");
+    assert_eq!(no_confirmations["data"], "\"0\"");
+
+    let cases = [
+        (
+            "recorded-not-signed",
+            not_verified.clone(),
+            no_confirmations.clone(),
+            200,
+            1,
+        ),
+        (
+            "verified-state-2",
+            json!({"data": "2"}),
+            no_confirmations.clone(),
+            400,
+            0,
+        ),
+        (
+            "confirmations-at-required-15",
+            not_verified,
+            json!({"data": "\"15\""}),
+            400,
+            0,
+        ),
+    ];
+    let mut observations = Vec::new();
+    for (label, verifiable, confirmations, status, signatures) in cases {
+        let (actual_status, body, actual_signatures, requests) = run_with_views(
+            "initia",
+            config.clone(),
+            verifiable,
+            confirmations,
+            library(),
+        )
+        .await;
+        let functions = requests
+            .iter()
+            .map(|request| request["function"].as_str().unwrap_or_default().to_string())
+            .collect::<Vec<_>>();
+        observations.push(json!({
+            "case": label,
+            "http_status": actual_status.as_u16(),
+            "body": body,
+            "signatures": actual_signatures,
+            "views": functions,
+        }));
+        assert_eq!(actual_status.as_u16(), status, "{label}: {body}");
+        assert_eq!(actual_signatures, signatures, "{label}: {body}");
+        assert_eq!(
+            functions
+                .iter()
+                .map(|f| f.rsplit("::").next().unwrap())
+                .collect::<Vec<_>>(),
+            [
+                "get_effective_receive_library",
+                "get_config",
+                "verifiable",
+                "get_verification_confirmations"
+            ],
+            "{label}: every Initia view must be read and decoded"
+        );
+    }
+    audit_round_artifact(
+        "round2",
+        "m10-initia-legacy-view-scalars",
+        json!({ "cases": observations }),
+    );
 }

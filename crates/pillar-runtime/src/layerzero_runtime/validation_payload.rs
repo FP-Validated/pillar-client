@@ -1067,7 +1067,7 @@ async fn move_view_values<T>(
 where
     T: JsonRpcTransport,
 {
-    let response = if chain_name == "initia" {
+    if chain_name == "initia" {
         let mut function_parts = function.split("::");
         let account = function_parts.next().ok_or(RpcError::Unavailable)?;
         let module = function_parts.next().ok_or(RpcError::Unavailable)?;
@@ -1081,7 +1081,7 @@ where
             .map(|(argument, argument_type)| initia_bcs_argument(argument, argument_type))
             .collect::<Option<Vec<_>>>()
             .ok_or(RpcError::Unavailable)?;
-        transport
+        let response = transport
             .post_json_scoped(
                 format!(
         "{}/initia/move/v1/accounts/{account}/modules/{module}/view_functions/{function_name}",
@@ -1090,7 +1090,8 @@ where
                 headers,
                 json!({"type_args": [], "args": encoded_arguments}),
             )
-            .await?
+            .await?;
+        initia_view_values(&response).ok_or(RpcError::Unavailable)
     } else {
         let encoded_arguments = arguments
             .iter()
@@ -1098,7 +1099,7 @@ where
             .map(|(argument, argument_type)| aptos_view_argument(argument, argument_type))
             .collect::<Option<Vec<_>>>()
             .ok_or(RpcError::Unavailable)?;
-        transport
+        let response = transport
             .post_json_scoped(
                 format!("{}/view", base_url.trim_end_matches('/')),
                 headers,
@@ -1108,9 +1109,9 @@ where
                     "arguments": encoded_arguments,
                 }),
             )
-            .await?
-    };
-    move_view_result_values(&response).ok_or(RpcError::Unavailable)
+            .await?;
+        response.as_array().cloned().ok_or(RpcError::Unavailable)
+    }
 }
 
 async fn move_view_numeric<T>(
@@ -1141,17 +1142,15 @@ where
         .ok_or(RpcError::Unavailable)
 }
 
-fn move_view_result_values(response: &Value) -> Option<Vec<Value>> {
-    let decoded = response
-        .get("data")
-        .and_then(Value::as_str)
-        .and_then(|data| {
-            crate::provider_health::parse_json_with_limits(data.as_bytes(), false).ok()
-        });
-    match decoded {
-        Some(Value::Array(values)) => Some(values),
-        Some(_) => None,
-        None => response.as_array().cloned(),
+/// LegacyView answers `{"data": "<json>"}`, and the JSON is the bare value for a function
+/// with one return and an array for a tuple. Upstream's Initia provider wraps every
+/// non-array the same way (`multiprovider/src/initia.ts:412-415`); each caller then checks
+/// the element's type, as it does for Aptos.
+fn initia_view_values(response: &Value) -> Option<Vec<Value>> {
+    let data = response.get("data")?.as_str()?;
+    match crate::provider_health::parse_json_with_limits(data.as_bytes(), false).ok()? {
+        Value::Array(values) => Some(values),
+        value => Some(vec![value]),
     }
 }
 

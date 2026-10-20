@@ -273,10 +273,10 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_initia_payload() {
         RecordingTransport {
             calls: calls.clone(),
             responses: Arc::new(Mutex::new(vec![
-                Ok(json!({"data": "[\"0x0000000000000003\"]"})),
-                Ok(json!({"data": "[\"0x0000000000000002\"]"})),
-                Ok(json!({"data": "[0]"})),
-                Ok(json!({"data": "[0]"})),
+                Ok(json!({"data": "[\"0x0000000000000003\",false]"})),
+                Ok(json!({"data": "\"0000000000000002\""})),
+                Ok(json!({"data": "0"})),
+                Ok(json!({"data": "\"0\""})),
             ])),
         },
     )
