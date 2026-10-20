@@ -600,33 +600,113 @@ where
 }
 
 fn parse_rfc3339_seconds(timestamp: &str) -> Option<i64> {
-    let (date, time) = timestamp.split_once('T')?;
-    let mut date_parts = date.split('-');
-    let year: i64 = date_parts.next()?.parse().ok()?;
-    let month: i64 = date_parts.next()?.parse().ok()?;
-    let day: i64 = date_parts.next()?.parse().ok()?;
-    let time = time.trim_end_matches('Z');
-    let time = time.split_once('+').map(|(time, _)| time).unwrap_or(time);
-    let mut time_parts = time.split(':');
-    let hour: i64 = time_parts.next()?.parse().ok()?;
-    let minute: i64 = time_parts.next()?.parse().ok()?;
-    let second_part = time_parts.next()?;
-    let (second_part, fraction) = second_part
-        .split_once('.')
-        .map_or((second_part, ""), |(second, fraction)| (second, fraction));
-    let second: i64 = second_part.parse().ok()?;
-    if !fraction.chars().all(|character| character.is_ascii_digit()) {
+    let (date, time_and_zone) = timestamp.split_once('T')?;
+    if date.len() != 10
+        || date.as_bytes().get(4) != Some(&b'-')
+        || date.as_bytes().get(7) != Some(&b'-')
+        || !date
+            .bytes()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit())
+    {
         return None;
     }
-    let has_fraction = fraction.chars().any(|character| character != '0');
-    let (year, month) = if month <= 2 {
-        (year - 1, month + 12)
-    } else {
-        (year, month)
+    let year = date.get(..4)?.parse::<i64>().ok()?;
+    let month = date.get(5..7)?.parse::<i64>().ok()?;
+    let day = date.get(8..10)?.parse::<i64>().ok()?;
+    if !(1..=12).contains(&month) {
+        return None;
+    }
+    let leap_year = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let month_days = match month {
+        2 if leap_year => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
     };
-    let days = 365 * year + year / 4 - year / 100 + year / 400 + (153 * (month - 3) + 2) / 5 + day
-        - 719469;
-    Some(days * 86_400 + hour * 3_600 + minute * 60 + second + i64::from(has_fraction))
+    if !(1..=month_days).contains(&day) {
+        return None;
+    }
+
+    let (time, offset_seconds) = if let Some(time) = time_and_zone.strip_suffix(['Z', 'z']) {
+        (time, 0i64)
+    } else {
+        let offset_index = time_and_zone.rfind(['+', '-'])?;
+        let (time, offset) = time_and_zone.split_at(offset_index);
+        if offset.len() != 6
+            || offset.as_bytes().get(3) != Some(&b':')
+            || !offset
+                .bytes()
+                .enumerate()
+                .all(|(index, byte)| matches!(index, 0 | 3) || byte.is_ascii_digit())
+        {
+            return None;
+        }
+        let hours = offset.get(1..3)?.parse::<i64>().ok()?;
+        let minutes = offset.get(4..6)?.parse::<i64>().ok()?;
+        if hours > 23 || minutes > 59 {
+            return None;
+        }
+        let magnitude = hours
+            .checked_mul(3600)?
+            .checked_add(minutes.checked_mul(60)?)?;
+        let sign = if offset.starts_with('+') { 1 } else { -1 };
+        (time, sign * magnitude)
+    };
+    let (clock, fraction) = time
+        .split_once('.')
+        .map_or((time, None), |(clock, fraction)| (clock, Some(fraction)));
+    if clock.len() != 8
+        || clock.as_bytes().get(2) != Some(&b':')
+        || clock.as_bytes().get(5) != Some(&b':')
+        || !clock
+            .bytes()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 2 | 5) || byte.is_ascii_digit())
+    {
+        return None;
+    }
+    let hour = clock.get(..2)?.parse::<i64>().ok()?;
+    let minute = clock.get(3..5)?.parse::<i64>().ok()?;
+    let second = clock.get(6..8)?.parse::<i64>().ok()?;
+    if hour > 23 || minute > 59 || second > 59 {
+        return None;
+    }
+    let fraction = fraction.unwrap_or("");
+    if time.contains('.')
+        && (fraction.is_empty() || !fraction.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        return None;
+    }
+    let has_fraction = fraction.bytes().any(|byte| byte != b'0');
+
+    let adjusted_year = year - i64::from(month <= 2);
+    let adjusted_month = month + if month <= 2 { 9 } else { -3 };
+    let era = adjusted_year.div_euclid(400);
+    let year_of_era = adjusted_year - era * 400;
+    let day_of_year = (153 * adjusted_month + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+    let local_seconds = days
+        .checked_mul(86_400)?
+        .checked_add(hour * 3_600 + minute * 60 + second)?;
+    let utc_seconds = local_seconds.checked_sub(offset_seconds)?;
+    utc_seconds.checked_add(i64::from(has_fraction))
+}
+
+fn ceil_micros_to_seconds(micros: i64) -> Option<i64> {
+    if micros < 0 {
+        return None;
+    }
+    micros
+        .checked_add(999_999)
+        .map(|rounded| rounded / 1_000_000)
+}
+
+fn parse_move_micros(value: &Value) -> Option<i64> {
+    value
+        .as_i64()
+        .or_else(|| value.as_str()?.parse::<i64>().ok())
 }
 
 pub(crate) async fn observe_move_block_time<T>(
@@ -650,16 +730,9 @@ where
     }
     let micros = response
         .get("ledger_timestamp")
-        .and_then(Value::as_i64)
-        .or_else(|| {
-            response
-                .get("ledger_timestamp")
-                .and_then(Value::as_str)?
-                .parse()
-                .ok()
-        })
+        .and_then(parse_move_micros)
         .ok_or(RpcError::Unavailable)?;
-    Ok((micros + 999_999) / 1_000_000)
+    ceil_micros_to_seconds(micros).ok_or(RpcError::Unavailable)
 }
 
 #[cfg(test)]
@@ -1150,5 +1223,32 @@ mod tests {
             calls.lock().unwrap()[0].0,
             "https://initia.example/cosmos/base/tendermint/v1beta1/blocks/latest"
         );
+    }
+
+    #[test]
+    fn initia_timestamp_parser_rejects_invalid_calendar_and_overflow_ranges() {
+        assert!(parse_rfc3339_seconds("2024-02-29T23:59:59.000Z").is_some());
+        assert!(parse_rfc3339_seconds("2023-02-29T23:59:59Z").is_none());
+        assert!(parse_rfc3339_seconds("2024-13-01T00:00:00Z").is_none());
+        assert!(parse_rfc3339_seconds("2024-01-01T00:00:60Z").is_none());
+        assert!(parse_rfc3339_seconds("9223372036854775807-01-01T00:00:00Z").is_none());
+        assert!(parse_rfc3339_seconds("-9223372036854775808-01-01T00:00:00Z").is_none());
+    }
+
+    #[tokio::test]
+    async fn aptos_timestamp_ceiling_rejects_i64_overflow_as_nonvote() {
+        let (transport, _) = transport(vec![Ok(json!({
+            "ledger_timestamp": i64::MAX
+        }))]);
+        assert!(matches!(
+            observe_move_block_time(
+                transport,
+                "aptos",
+                "https://aptos.example/".to_string(),
+                HashMap::new(),
+            )
+            .await,
+            Err(RpcError::Unavailable)
+        ));
     }
 }

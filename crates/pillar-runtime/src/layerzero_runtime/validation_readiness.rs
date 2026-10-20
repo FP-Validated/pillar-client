@@ -526,7 +526,19 @@ where
     let current = current.ok_or_else(|| {
         RpcError::Remote("TON masterchain info has no valid latest seqno".to_string())
     })?;
-    let confirmations = (current - tx_seqno).max(0);
+    if current < 0 {
+        return Ok(BlockConfirmationObservation {
+            validity: BlockConfirmationValidity::InvalidRange,
+            current_confirmations: None,
+        });
+    }
+    let Some(confirmations) = current.checked_sub(tx_seqno) else {
+        return Ok(BlockConfirmationObservation {
+            validity: BlockConfirmationValidity::InvalidRange,
+            current_confirmations: None,
+        });
+    };
+    let confirmations = confirmations.max(0);
     let validity = if confirmations >= required_confirmations {
         BlockConfirmationValidity::Sufficient {
             receipt_block_hash: tx_seqno.to_string(),
