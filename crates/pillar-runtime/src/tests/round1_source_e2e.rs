@@ -391,6 +391,41 @@ async fn resolve_recorded_ton(tx_hash: &str, trace: Value) -> Result<LzSentEvent
     .await
 }
 
+#[test]
+fn round1_ton_recorded_trace_preserves_wallet_root_and_binds_nested_event() {
+    let response = recorded_ton_events();
+    let tree = crate::layerzero_runtime::ton_transaction_trace_tree(&response).unwrap();
+    let config =
+        runtime_evm_layerzero_config("mainnet", &["ton".to_string(), "arbitrum".to_string()])
+            .unwrap();
+    let resolver = config.packet_sent_resolver_config;
+    let events = crate::layerzero_runtime::decode_ton_packet_sent_events(
+        &tree,
+        &resolver.trusted_ton_packet_emitters_by_chain_name["ton"],
+        &resolver.chain_name_by_eid,
+    );
+    let root = tree.pointer("/transaction/in_msg").unwrap();
+    let event_count = events.len();
+    let event_tx_hash = events
+        .first()
+        .map(|event| event.tx_hash.as_str())
+        .unwrap_or_default();
+    let event_destination = events
+        .first()
+        .map(|event| event.endpoint_address.as_str())
+        .unwrap_or_default();
+    record(
+        "ton-recorded-wallet-root",
+        json!({"events": event_count, "root": root, "event_destination": event_destination, "event_tx_hash": event_tx_hash}),
+    );
+    assert_eq!(event_count, 1);
+    // The recorded root is an external-in to the wallet; the PacketSent is the nested
+    // controller-bound message, so wallet and event destination are distinct identities.
+    assert_eq!(root["source"], Value::Null);
+    assert_ne!(root["destination"], event_destination);
+    assert!(!event_tx_hash.is_empty());
+}
+
 #[tokio::test]
 async fn round1_ton_hex_and_base64url_request_hashes_resolve_same_recorded_trace() {
     let tree =
@@ -671,6 +706,128 @@ async fn round1_ton_confirmation_arithmetic_rejects_negative_head_and_clamps_beh
     );
     assert!(negative.is_err());
     behind.unwrap();
+}
+
+#[tokio::test]
+async fn round1_ton_malformed_root_wallet_fails_before_policy_request() {
+    let mut trace = recorded_ton_events();
+    let root_hash = trace
+        .pointer("/events/0/trace/tx_hash")
+        .and_then(Value::as_str)
+        .unwrap()
+        .to_string();
+    let transaction_hash = trace["events"][0]["transactions"][&root_hash]["hash"]
+        .as_str()
+        .unwrap();
+    let hash_bytes =
+        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, transaction_hash)
+            .unwrap();
+    let requested_tx_hash = format!("0x{}", hex::encode(hash_bytes));
+    trace["events"][0]["transactions"]
+        .as_object_mut()
+        .unwrap()
+        .get_mut(&root_hash)
+        .unwrap()["in_msg"]["destination"] = json!("0x1234");
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "ton".to_string(),
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri(
+                    "https://ton.example/v2?v3-endpoint=https://ton.example/v3".to_string(),
+                )],
+                1,
+            ),
+        )]),
+        Some(&["ton".to_string()]),
+    )
+    .unwrap();
+    let calls: RecordedJsonCalls = Arc::new(Mutex::new(Vec::new()));
+    let checks = RuntimeRpcValidationChecks::from_getter(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        RecordingTransport {
+            calls: calls.clone(),
+            responses: Arc::new(Mutex::new(vec![Ok(trace), Ok(Value::Bool(true))])),
+        },
+    )
+    .with_extra_context(RuntimeExtraContextConfig {
+        request_url: Some("https://policy.example/extra".to_string()),
+        request_auth_token: None,
+        aws_lambda_name: None,
+    });
+    let mut sent_event = readiness_sent_event();
+    sent_event.lz_message_id.pathway_id.src_chain_name = "ton".to_string();
+    sent_event.tx_hash = requested_tx_hash;
+    let result = checks
+        .validate_extra_context_request(
+            &sent_event,
+            &SigningContext::Message {
+                expiration: 0,
+                skip_v_id: None,
+                dvn_address: None,
+                block_confirmation: 0,
+            },
+        )
+        .await;
+    let recorded = calls.lock().unwrap().clone();
+    record(
+        "ton-invalid-wallet-policy-order",
+        json!({"result": format!("{result:?}"), "calls": recorded}),
+    );
+    assert!(result.is_err());
+    assert_eq!(calls.lock().unwrap().len(), 1);
+}
+#[tokio::test]
+async fn round1_ton_policy_cannot_switch_to_a_trace_for_another_transaction() {
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "ton".to_string(),
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri(
+                    "https://ton.example/v2?v3-endpoint=https://ton.example/v3".to_string(),
+                )],
+                1,
+            ),
+        )]),
+        Some(&["ton".to_string()]),
+    )
+    .unwrap();
+    let calls: RecordedJsonCalls = Arc::new(Mutex::new(Vec::new()));
+    let checks = RuntimeRpcValidationChecks::from_getter(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        RecordingTransport {
+            calls: calls.clone(),
+            responses: Arc::new(Mutex::new(vec![
+                Ok(recorded_ton_events()),
+                Ok(Value::Bool(true)),
+            ])),
+        },
+    )
+    .with_extra_context(RuntimeExtraContextConfig {
+        request_url: Some("https://policy.example/extra".to_string()),
+        request_auth_token: None,
+        aws_lambda_name: None,
+    });
+    let mut sent_event = readiness_sent_event();
+    sent_event.lz_message_id.pathway_id.src_chain_name = "ton".to_string();
+    sent_event.tx_hash = format!("0x{}", "11".repeat(32));
+    let result = checks
+        .validate_extra_context_request(
+            &sent_event,
+            &SigningContext::Message {
+                expiration: 0,
+                skip_v_id: None,
+                dvn_address: None,
+                block_confirmation: 0,
+            },
+        )
+        .await;
+    let recorded = calls.lock().unwrap().clone();
+    record(
+        "ton-policy-transaction-binding",
+        json!({"result": format!("{result:?}"), "calls": recorded}),
+    );
+    assert!(result.is_err());
+    assert_eq!(calls.lock().unwrap().len(), 1);
 }
 
 #[test]

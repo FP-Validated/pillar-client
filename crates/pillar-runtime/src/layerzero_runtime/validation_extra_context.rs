@@ -498,30 +498,57 @@ async fn observe_ton_transaction_from<T>(
 where
     T: JsonRpcTransport,
 {
-    // Same sink-side refusal as `move_tx_url`: the core refuses a `srcTxHash`
-    // with a path metacharacter, and this splice cannot rely on that alone.
-    let tx_hash = encode_path_segment(tx_hash)
+    if !ton_request_hash_valid(tx_hash) {
+        return Err(AppCoreError::BadRequest(
+            "srcTxHash must encode a 32-byte TON transaction hash".to_string(),
+        ));
+    }
+    let encoded_tx_hash = encode_path_segment(tx_hash)
         .ok_or_else(|| AppCoreError::Internal("Unusable TON transaction hash".to_string()))?;
-    let response = fetch_ton_transaction_trace(&transport, &endpoint, &headers, &tx_hash)
+    let response = fetch_ton_transaction_trace(&transport, &endpoint, &headers, &encoded_tx_hash)
         .await
         .map_err(AppCoreError::from)?
         .ok_or_else(|| AppCoreError::Internal("Missing TON transaction trace".to_string()))?;
-    let destination = response
-        .pointer("/transaction/in_msg/destination")
-        .and_then(Value::as_str)
-        .filter(|destination| !destination.is_empty())
+    if !ton_trace_contains_hash(&response, tx_hash) {
+        return Err(AppCoreError::Internal(
+            "TON transaction trace does not contain requested transaction".to_string(),
+        ));
+    }
+    let root_message = response
+        .pointer("/transaction/in_msg")
+        .filter(|message| !message.is_null())
         .ok_or_else(|| AppCoreError::Internal("Missing TON transaction sender".to_string()))?;
-    let from = if let Some(hex) = destination.strip_prefix("0x") {
-        format!("0x{}", hex.to_ascii_lowercase())
-    } else {
-        let address = destination
-            .parse::<ton_core::types::TonAddress>()
-            .map_err(|error| AppCoreError::Internal(format!("Invalid TON sender: {error}")))?;
-        format!("0x{}", hex::encode(address.hash))
-    };
-    // Upstream `RpcSdk.getFromAddress` quorums the same trace projection as source
-    // resolution (`multiprovider/src/ton.ts:29-39`).
+    // Policy identifies the trace-root destination, not the nested controller.
+    let principal = root_message
+        .get("destination")
+        .and_then(Value::as_str)
+        .filter(|address| !address.is_empty())
+        .ok_or_else(|| AppCoreError::Internal("Missing TON transaction sender".to_string()))?;
+    let from = ton_principal_address(principal)?;
     let fingerprint = ton_trace_quorum_fingerprint(&response)
         .ok_or_else(|| AppCoreError::Internal("Unreadable TON transaction trace".to_string()))?;
     Ok(TransactionFromObservation { fingerprint, from })
+}
+
+fn ton_principal_address(value: &str) -> Result<String, AppCoreError> {
+    if let Some(hex) = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+    {
+        if hex.len() != 64 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(AppCoreError::Internal(
+                "Invalid TON principal address".to_string(),
+            ));
+        }
+        let bytes = hex::decode(hex).map_err(|error| {
+            AppCoreError::Internal(format!("Invalid TON principal address: {error}"))
+        })?;
+        return Ok(format!("0x{}", hex::encode(bytes)));
+    }
+    let address = value
+        .parse::<ton_core::types::TonAddress>()
+        .map_err(|error| {
+            AppCoreError::Internal(format!("Invalid TON principal address: {error}"))
+        })?;
+    Ok(format!("0x{}", hex::encode(address.hash)))
 }

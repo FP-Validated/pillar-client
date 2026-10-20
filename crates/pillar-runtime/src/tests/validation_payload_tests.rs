@@ -1306,13 +1306,19 @@ async fn runtime_rpc_validation_checks_resolves_ton_transaction_from_address() {
 
     assert_eq!(
         checks
-            .source_transaction_from_address("ton", "0xtx")
+            .source_transaction_from_address("ton", &format!("0x{}", "ab".repeat(32)))
             .await
             .unwrap(),
         format!("0x{}", "11".repeat(32))
     );
     let calls = calls.lock().unwrap();
-    assert_eq!(calls[0].0, "https://ton-v3.example/events?tx_hash=0xtx");
+    assert_eq!(
+        calls[0].0,
+        format!(
+            "https://ton-v3.example/events?tx_hash=0x{}",
+            "ab".repeat(32)
+        )
+    );
     assert_eq!(calls[0].1["X-API-Key"], "secret");
     assert_eq!(calls[0].2, json!({"method": "GET"}));
 }
@@ -1367,7 +1373,7 @@ async fn ton_sender_extra_context_uses_projection_quorum_for_seqno_disagreement(
 
     assert_eq!(
         checks
-            .source_transaction_from_address("ton", "0xtx")
+            .source_transaction_from_address("ton", &format!("0x{}", "ab".repeat(32)))
             .await
             .unwrap(),
         format!("0x{}", "11".repeat(32))
@@ -1427,7 +1433,7 @@ async fn ton_sender_extra_context_excludes_missing_in_msg_provider_vote() {
     );
 
     let error = checks
-        .source_transaction_from_address("ton", "0xtx")
+        .source_transaction_from_address("ton", &format!("0x{}", "ab".repeat(32)))
         .await
         .expect_err("missing in_msg loses its vote, leaving no two-provider quorum");
     assert!(
