@@ -529,3 +529,67 @@ Verification results for final code commit `b7ecb00`:
 - No configuration or HTTP contract changes; upgrading from 2.6.1 needs no operator action.
 
 Evidence: fmt/clippy/test/PostgreSQL/integrity/MSRV output and image run records in `.full-review-20261009/evidence/round6-integration`, round-by-round reviewer reports and red/green output · 2026-10-09 23:48 KST. Hosted CI row: result for run `37946961465` · 2026-10-10 00:08 KST. 2.6.1 release section: local fmt/clippy/test/MSRV runs on the release tree · 2026-10-10 00:24 KST. 2.6.2 section: `.full-review-20261009/evidence/sui-page-errors/{red-final,green-final,ws-tests}.txt` and hosted CI run `37956704504` · 2026-10-10 01:17 KST
+
+## 17. Round 1 remediation — 2026-10-20 (local)
+
+Baseline: `2f9305f0bd1644769169b50941ff5b72bab4be26`. This is an uncommitted
+local implementation, not a published release or a production rollout. The
+eleven response items are covered; M-08 corrects the report's principal
+interpretation rather than applying its proposed field substitution.
+
+| ID | Implementation | Exercised evidence |
+| --- | --- | --- |
+| M-01 | Pre-allocation JSON cost limits (131,072 structural units; 524,288 for TON), one shared 131,072-unit budget for Sui/IotaL1 event pages kept across pagination, bounded ingress admission, estimated retained-candidate pool, streaming fingerprints and one representative per fingerprint; embedded Initia JSON and Canton OAuth use the same parse-cost checks | Real Reqwest broad-object response rejection, a 512-transaction TON trace resolving over loopback HTTP, IOTA and Sui pagination stopping at the third of 21 loopback pages, quota release/cancellation, cross-target parser E2E and negative control; standalone Initia resolver RSS comparison |
+| M-02 | Checked Move timestamp/calendar arithmetic and TON head/seqno ranges | `source_events_move` overflow/calendar cases and `round1_ton_confirmation_arithmetic_rejects_negative_head_and_clamps_behind_head` |
+| M-03 | Bounded numeric/signature input, linear decimal parsing, committee verification before expensive shape parsing, streaming canonical Keccak input | Canton boundary cases and the upstream sequencer transcript replay |
+| M-04 | Trusted Solana program filter before data copying/Base58 decoding | Recorded packet plus synthetic one-million-character unrelated instruction; bounded child process still resolves nonce 3826 |
+| M-05 | Bidirectional READ/version gate, 257-marker cap, exact command binding and deduplication | Both protocol mismatches and excess markers before source resolution; conflicting/extra/invalid markers before validation RPC; real CLI returns 400 with zero receipt RPCs |
+| M-06 | Shared semantic Solana projection, with a trusted-program filter for source resolution and strict consumed-field checks | Original snapshot fails with two distinct successful fingerprints; fixed resolver agrees across two entities with different fees/logs/compute/index metadata |
+| M-07 | Starknet evidence captures receipt/block/selected event and readiness rechecks canonical identity and status | Stable L2-to-L1 progression accepted; reorg, changed event, event placement and reverted execution refused; malformed observations remain non-votes |
+| M-08 | Existing trace-root destination principal retained; address parsing and lookup-trace binding fail closed | Recorded wallet root and nested PacketSent remain valid; malformed principal or a trace for another transaction never reaches the policy |
+| L-01 | Normalized 32-byte TON transaction hash included for every node, including null-message nodes; key/hash agreement and duplicate-alias checks; hex only for exactly 64 hex digits | Hash mutation, malformed hash, mismatched map key, nested request identity, hex/base64/base64url cases and base64 hashes beginning with `0x`/`0X`; resolved hashes logged with debug escaping |
+| L-02 | Effective receive version reaches Aptos V301 payload-signed validation; source `V2` remains unchanged | Public signing path: unsigned V301 state returns 200 with one signer call; already-signed state returns 400 with zero signer calls |
+| L-03 | Non-null `walletRestrictions` rejected in env/file loading and runtime conversion | `{}` and nonempty values refused, omitted/null configurations accepted; actual CLI with restrictions exits before listening |
+
+### Verification and provenance
+
+| Check | Observed result |
+| --- | --- |
+| `cargo +1.98.1 fmt --all --check` | Passed |
+| `cargo +1.98.1 clippy --workspace --all-targets --locked -- -D warnings` | Passed |
+| `cargo +1.98.1 test --workspace --locked` | 1,112 top-level tests passed, zero failed, 15 ignored; three isolated child harness runs also passed |
+| `cargo +1.94.1 check --workspace --all-targets --locked` | Passed |
+| Actual `pillar` process with synthetic local mnemonic and loopback RPC | `GET /` 200 `HEALTHY`; both READ/version mismatches and 258 markers return 400 envelopes before any `eth_getTransactionReceipt`; graceful process exit and mock listener closure observed |
+| Parser admission negative control | Temporarily bypassing fair parser admission makes target B time out while A occupies the four shared slots; E2E fails. Exact source restored, E2E/fmt/clippy pass again |
+| Standalone Initia resolver, 1,500,304-byte outer response / 150,000 embedded objects | Maximum RSS before: 129,073,152 bytes; after: 21,381,120 bytes. Normal recorded packet resolves in both runs |
+| Independent read-only reviews | Source/core and resource reviewers rechecked their findings; no blocking issue remained |
+
+The RSS result is one macOS `/usr/bin/time -l` run per variant, not an OOM stress
+test or a process-wide bound. Before-run metadata mistakenly counted escaping
+inside `attribute_data_json_bytes`; its original output is retained. The decoded
+inner JSON is 1,200,001 bytes, and the comparison artifact records that correction.
+The Solana cost input is synthetic, not an on-chain attack transaction. No live
+RPC/KMS, container image, cluster, PostgreSQL audit integration or production
+capacity test was run for this task. The fifteen opt-in tests remain ignored.
+The macOS test linker emitted the pre-existing compact-unwind `__eh_frame` size
+warning; clippy's Rust diagnostics passed with warnings denied.
+
+Raw evidence and reproducible sources are retained under
+`local/reports/round1-remediation-20261020/` (gitignored), including
+`workspace-tests-final-receipt.json`, `msrv-final-receipt.json`,
+`clippy-restored.log`, `fmt-check-final.log`, `cli-smoke-final.json`,
+`nested-json-comparison.json`, original-snapshot failures and per-run E2E JSON.
+The directory also preserves the negative-control output, not only green runs.
+No commit, push, image publication or deployment was performed.
+
+### Remaining operating constraints
+
+`SECURITY.md` defines the new cost limits and their compatibility tradeoffs.
+The 64 MiB candidate pool is estimated, not a hard RSS ceiling; typed READ data,
+consumer-owned values and SDK buffers are outside it. Several slow targets can
+exhaust the shared slots, Lambda admission is three active plus two waiting per
+target, and background probes can be deferred. Memory pressure can refuse an
+additional agreeing vote if growing its lowest-index representative reservation
+would exceed the pool. Starknet `PRE_CONFIRMED` is refused; selected event JSON
+must still match exactly. M-08's corrected policy interpretation should be
+included in the audit-team response rather than described as a sender-field fix.

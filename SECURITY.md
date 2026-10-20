@@ -162,6 +162,92 @@ The following are deployment-side controls the software cannot enforce for you:
   Reth answers both ways as required; on public mainnet Reth endpoints the
   unknown hash returns `block not found: canonical hash ...`.
 
+## RPC and signing-input cost limits
+
+RPC response bytes are untrusted even when a provider belongs to the configured
+quorum. Limits apply together; a response below the wire cap is not necessarily
+accepted.
+
+| Boundary | Limit |
+| --- | --- |
+| One HTTP JSON/text response, including embedded JSON | 4 MiB |
+| Sui/IotaL1 event pagination | 16 MiB cumulative serialized bytes, 1,024 events and 131,072 structural units across all pages; individual pages also obey response limits |
+| JSON pre-allocation scan | 131,072 structural parse-cost units; 524,288 for TON responses. A cost estimate, not an exact element/heap-byte count |
+| JSON container nesting | 128 normally; 512 for TON responses |
+| Retained JSON quorum candidate | 8 MiB estimated per representative, 64 MiB estimated shared pool |
+| Transport buffering/parsing | Four shared active slots; at most three per foreground target and one for background |
+| Configured parser waiting | Eight shared registrations plus quiet-lane reservations (at most eight plus the fixed lane count); two queued per lane; two-second admission wait |
+| Calls without execution resources | Four shared active slots, at most eight waiting registrations |
+| Canton numeric input | 1,024 bytes before trimming/conversion; decimal parsing is linear |
+| Canton committee response | At most 64 signatures, at most 130 hex characters each; configured quorum cannot exceed 64 |
+| READ command / caller resolutions | At most 256 requests plus an optional compute marker; at most 257 caller timestamp markers |
+
+The structural limits come from recorded provider responses and the deployment's
+memory budget. The largest recorded non-TON response (a Solana `jsonParsed`
+transaction) costs 2,150 units and an EVM receipt about 43 per log, so 131,072
+leaves roughly 60x headroom (about 3,000 logs). A recorded 19-transaction mainnet
+TON LayerZero trace costs 10,055; filled to the 512-transaction trace-preflight cap
+it costs about 443k at 4.1 MB, inside the 4 MiB wire limit, hence 524,288 for TON.
+Measured on a debug build (macOS `/usr/bin/time -l`, single process): a payload of
+single-key objects just under each limit raised peak RSS by about 19 MB (general)
+and 80 MB (TON), and the worst admissible mix (three TON parses plus one general
+parse, held to arrive together) peaked at 286 MB against a 38 MB idle baseline.
+The mainnet pod requests 512 MiB and is limited to 2 GiB. Payloads one unit over
+either limit are refused before allocation.
+
+The transport holds a parser permit while downloading/buffering a body; Lambda
+holds it through the invocation. Moving the permit after download would leave
+those buffers outside the shared bound. This deliberately trades concurrency for
+bounded work: one target cannot consume all four slots, but several slow targets
+can exhaust them. HTTP/Lambda extra-context shares the `extra_context` target:
+three active plus two queued operations. Local capacity or drain failures remain
+admission outcomes, not failed provider votes. Background RPC admission is capped
+at three to fit one background parser slot and two waiters; foreground saturation
+can still defer probes and reduce health freshness.
+
+Quorum retains one JSON representative per fingerprint and streams fingerprints
+instead of storing a second full JSON string. The pool is an estimate, **not a
+hard allocator or process RSS ceiling**. Returned consumer values, typed READ data,
+SDK/network buffers and signer state are outside it. Embedded Initia event/view
+JSON obeys the same byte/structural/depth checks but is decoded synchronously in
+its existing transaction pipeline, without a separate parser permit. Sui/IotaL1
+event pages are parsed one at a time but their events are kept until the last
+page, outside the parser permit, so the kept events share one response's
+131,072-unit structural budget; pagination stops at the page that crosses it.
+On the same debug build, a provider serving 21 pages each just under the
+per-response limit peaked at 427 MB for one request and 1.6 GB for four before
+this budget, and 73 MB, 152 MB and 173 MB for one, four and eight requests after
+it. Pagination and retained-value limits are independent: an aggregate below
+16 MiB can still exceed the retained-value estimate. Complex but otherwise valid
+provider responses can therefore lose their vote; verify representative
+workloads before upgrading.
+
+READ context is accepted only for `ReadV1002`, and vice versa. Each caller
+timestamp resolution must match an actual command marker; extra, conflicting or
+out-of-range resolutions are refused before readiness RPC. Identical resolutions
+do not repeat RPC work. Message confirmations cannot be replaced by a caller's
+READ marker list.
+
+Starknet readiness binds the accepted source receipt to the selected event and
+canonical block. `ACCEPTED_ON_L2` and `ACCEPTED_ON_L1` are accepted; L1-only
+finality is not enabled by this change. Missing/malformed status fields do not
+vote. `PRE_CONFIRMED` is not accepted, and selected event JSON must remain exactly
+equal: harmless alternate felt spellings inside that event can still cause a
+fail-closed refusal.
+
+TON policy uses the trace root's `in_msg.destination`, not a nested controller
+and not an unconditional `in_msg.source` substitution. The recorded external-in
+root is the wallet transaction. Every trace node, including null-message nodes,
+must carry a valid 32-byte hash; map keys and node hashes must agree. Exactly 64
+hex digits (with or without `0x`) are read as hex; anything else is decoded as
+base64 or base64url, because standard base64 of a hash can itself begin with `0x`
+(about one hash in 2,048). Representations compare by decoded bytes, and
+the requested transaction must occur somewhere in the trace. Extra-context
+lookup repeats that binding before evaluating a strictly parsed principal.
+
+Any non-null `walletRestrictions` is refused at startup and signer conversion.
+Omission or null means **no wallet restriction**, not an implemented allowlist.
+
 ## Durable signing audit (default disabled)
 
 `PILLAR_AUDIT_ENABLED=false` is the default. Enabling it preserves synchronous
@@ -259,8 +345,8 @@ unverified.
 
 ### Admission accounting and bounded waiting
 
-The three budget metric labels are `sign`, `rpc`, and `kms`; metric labels do not carry
-chain/URI/key values. `pillar_admission_started_total` equals all terminal
+The budget metric labels are `sign`, `rpc`, `kms` and `parser`; metric labels do not
+carry chain/URI/key values. `pillar_admission_started_total` equals all terminal
 `pillar_admission_total{outcome}` plus `pillar_admission_active` and
 `pillar_admission_waiting` in a coherent snapshot. Started external work abandoned
 by a caller, a losing hedge or shutdown is `outcome_unknown`, not cancellation.
@@ -288,6 +374,14 @@ because the input cannot be represented, because a dependency is unavailable, or
 because it is HTTP-framework behaviour of Express and Node that this service does
 not reproduce:
 
+- The response-cost and READ-context limits above reject work upstream may accept.
+  Canton verifies the committee before expensive shape parsing; malformed input
+  can consequently fail at a different validation stage. Solana source quorum
+  ignores unrelated program/parser metadata while binding slot, fee payer,
+  `meta.err`, trusted instruction data and the consumed block timestamp.
+  TON transaction identity and Starknet canonical source binding are stricter
+  than the reference. Unsupported wallet restrictions fail startup rather than
+  being silently ignored.
 - Authentication is available and on by default; the mainnet deployment turns it
   off (`PILLAR_API_AUTH_ENABLED=false`, ingress allowlist), where no route differs.
 - A `srcTxHash` outside `[0-9a-zA-Z_-]{1,128}` (optional `0x`) is a 400 just before

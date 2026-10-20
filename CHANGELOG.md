@@ -4,6 +4,27 @@ All notable changes to this project are documented here. This project follows
 semantic versioning for the HTTP surface, the environment-variable contract and
 the Prometheus metric names.
 
+## Unreleased
+
+### Security
+
+- Round 1 M-01: bound RPC JSON structural cost before allocation, including Canton OAuth and embedded Initia event/view JSON; limit transport buffering/parsing admission and retained JSON quorum candidates. Fingerprints stream into SHA-256, duplicate votes retain one representative, and cancellation releases reservations. The structural limit is 131,072 units, or 524,288 for TON so a 512-transaction trace inside the 4 MiB wire limit still resolves. Sui/IotaL1 event pages kept until the last page share one 131,072-unit budget, and pagination stops at the page that crosses it. These are cost limits and accounting estimates, not a hard process RSS limit; see `SECURITY.md`.
+- M-02: reject overflowing or negative Move ledger timestamps, invalid Initia calendar fields and negative/overflowing TON confirmation ranges without panicking.
+- M-03: bound Canton BigInt input strings to 1,024 bytes, parse decimal input linearly, cap signatures at 64 with at most 130 hex characters each, and verify the committee before expensive response-shape parsing. Canonical committee JSON is hashed without cloning the response or recursively building full JSON strings.
+- M-04 / M-06: filter trusted Solana programs before copying or Base58-decoding instruction data. Source quorum compares the consumed projection, not provider-specific fees, logs or parser metadata; normal `jsonParsed` instructions without raw data remain skippable.
+- M-05: require `ReadV1002` and READ context in both directions before resolution. Cap caller timestamp markers at 257, bind them to the command, reject malformed/conflicting/extra resolutions before validation RPC, and deduplicate identical work.
+- M-07: preserve Starknet source evidence and recheck transaction/block identity, selected event placement/content, execution/finality and canonical block hash before signing. Accepted L2-to-L1 finality progression remains valid; felt hash spelling is normalized for identity comparisons.
+- M-08 / L-01: preserve TON's existing trace-root destination policy principal, reject malformed principal addresses and unrelated lookup traces, and bind every trace node's normalized 32-byte transaction hash into quorum. A hash is read as hex only when it is exactly 64 hex digits, so standard-base64 hashes that happen to begin with `0x` still resolve. The audit's proposed destination-to-source substitution is not applied: the recorded external-in trace root receives the originating wallet. Resolved transaction hashes use escaped debug logging.
+- L-02: pass the quorum-resolved effective Aptos receive version into payload-signed validation for V2-to-V301 routing without rewriting the resolved source version.
+- L-03: fail startup/config conversion for every non-null `walletRestrictions`, including `{}`. Omitted and null restrictions remain unrestricted; no restriction policy is implemented.
+
+### Upgrade / Breaking
+
+- Rust consumers must supply the effective receive version argument to `AppValidator::validate_payload_signed` / `RuntimeValidationChecks::validate_payload_signed`, implement the READ preflight contract, construct `SourceEvidence::Evm` or `SourceEvidence::Starknet`, and provide the new `ExecutionResources::parser` budget. No compatibility aliases are retained.
+- Source-evidence encoding changes validation audit hashes; do not compare those hashes byte-for-byte with earlier versions. HTTP `{statusCode, body}` envelopes are unchanged.
+- Admission metrics include `budget="parser"` in the existing metric families. Background RPC concurrency is capped at three so its work fits one parser slot and two queued registrations.
+- Check the independent response-cost limits in `SECURITY.md` against provider workloads before rollout. Lambda extra-context work now shares parser admission: three active and two queued operations per target. Only remove `walletRestrictions` after explicitly accepting that this client does not enforce it.
+
 ## 2.6.2 - 2026-10-10
 
 ### Security
