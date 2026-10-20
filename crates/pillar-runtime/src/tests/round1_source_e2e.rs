@@ -182,6 +182,13 @@ async fn round1_solana_source_resolver_quorums_only_consumed_projection() {
     );
     assert_eq!(result.unwrap().lz_message_id.nonce, 3826);
 }
+fn recorded_ton_events() -> Value {
+    serde_json::from_str(include_str!(
+        "../../tests/gasolina_parity/source_replay/ton-v3-events.response.json"
+    ))
+    .unwrap()
+}
+
 async fn resolve_starknet_fixture_event(receipt: Value) -> LzSentEvent {
     let fixture: Value = serde_json::from_str(include_str!(
         "../../tests/gasolina_parity/starknet_source_events.json"
@@ -333,6 +340,194 @@ async fn round1_starknet_readiness_binds_resolved_event_to_current_canonical_rec
     assert!(revert_result.is_err());
 }
 
+async fn resolve_recorded_ton(tx_hash: &str, trace: Value) -> Result<LzSentEvent, AppCoreError> {
+    let upstream: Value = serde_json::from_str(include_str!(
+        "../../tests/gasolina_parity/source_replay/upstream-stage3-events.json"
+    ))
+    .unwrap();
+    let event = &upstream["events"]["ton"]["event"];
+    let pathway = &event["pathway"];
+    let request = LzMessageId {
+        pathway_id: PathwayId {
+            src_chain_name: "ton".to_string(),
+            dst_chain_name: "arbitrum".to_string(),
+            extra: ["srcEid", "dstEid", "sender", "receiver"]
+                .into_iter()
+                .map(|key| (key.to_string(), pathway[key].clone()))
+                .collect(),
+        },
+        nonce: event["nonce"].as_u64().unwrap(),
+        uln_send_version: event["ulnSendVersion"].clone(),
+    };
+    let config =
+        runtime_evm_layerzero_config("mainnet", &["ton".to_string(), "arbitrum".to_string()])
+            .unwrap();
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "ton".to_string(),
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri(
+                    "https://ton.example/v2?v3-endpoint=https://ton.example/v3".to_string(),
+                )],
+                1,
+            ),
+        )]),
+        Some(&["ton".to_string()]),
+    )
+    .unwrap();
+    EvmPacketSentResolver::new(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        RecordingTransport {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            responses: Arc::new(Mutex::new(vec![
+                Ok(trace.clone()),
+                Ok(trace.clone()),
+                Ok(trace),
+            ])),
+        },
+        config.packet_sent_resolver_config,
+    )
+    .get_lz_sent_event(tx_hash, &request)
+    .await
+}
+
+#[tokio::test]
+async fn round1_ton_hex_and_base64url_request_hashes_resolve_same_recorded_trace() {
+    let tree =
+        crate::layerzero_runtime::ton_transaction_trace_tree(&recorded_ton_events()).unwrap();
+    let provider_hash = tree
+        .pointer("/transaction/hash")
+        .and_then(Value::as_str)
+        .unwrap();
+    let hash_bytes =
+        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, provider_hash).unwrap();
+    let hex_hash = format!("0x{}", hex::encode(&hash_bytes));
+    let base64url_hash = base64::Engine::encode(
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+        &hash_bytes,
+    );
+    let hex_event = resolve_recorded_ton(&hex_hash, recorded_ton_events())
+        .await
+        .unwrap();
+    let base64url_event = resolve_recorded_ton(&base64url_hash, recorded_ton_events())
+        .await
+        .unwrap();
+    let raw_hex_event =
+        resolve_recorded_ton(hex_hash.strip_prefix("0x").unwrap(), recorded_ton_events()).await;
+    record(
+        "ton-request-hash-encodings",
+        json!({
+            "provider_standard_base64": provider_hash,
+            "hex_request": hex_hash,
+            "base64url_request": base64url_hash,
+            "hex_event_tx_hash": hex_event.tx_hash,
+            "base64url_event_tx_hash": base64url_event.tx_hash,
+            "hex_message": hex_event.message,
+            "base64url_message": base64url_event.message,
+            "raw_hex_resolution": format!("{raw_hex_event:?}")
+        }),
+    );
+    assert_eq!(hex_event.message, base64url_event.message);
+    assert_eq!(hex_event.lz_message_id, base64url_event.lz_message_id);
+    assert_eq!(
+        hex_event.lz_message_id,
+        raw_hex_event.unwrap().lz_message_id
+    );
+}
+
+#[tokio::test]
+async fn round1_ton_request_hash_may_identify_a_nested_trace_transaction_only() {
+    let trace =
+        crate::layerzero_runtime::ton_transaction_trace_tree(&recorded_ton_events()).unwrap();
+    let config =
+        runtime_evm_layerzero_config("mainnet", &["ton".to_string(), "arbitrum".to_string()])
+            .unwrap();
+    let event = crate::layerzero_runtime::decode_ton_packet_sent_events(
+        &trace,
+        &config
+            .packet_sent_resolver_config
+            .trusted_ton_packet_emitters_by_chain_name["ton"],
+        &config.packet_sent_resolver_config.chain_name_by_eid,
+    )
+    .into_iter()
+    .next()
+    .unwrap();
+    let hash_bytes =
+        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &event.tx_hash).unwrap();
+    let request_hash = format!("0x{}", hex::encode(hash_bytes));
+    let root_hash = trace
+        .pointer("/transaction/hash")
+        .and_then(Value::as_str)
+        .unwrap();
+    record(
+        "ton-nested-request-hash",
+        json!({"request_hash": request_hash, "root_hash": root_hash}),
+    );
+    assert_ne!(request_hash, root_hash);
+    let resolved = resolve_recorded_ton(&request_hash, recorded_ton_events())
+        .await
+        .unwrap();
+    assert_eq!(resolved.tx_hash, event.tx_hash);
+
+    let missing_hash = format!("0x{}", "ff".repeat(32));
+    let result = resolve_recorded_ton(&missing_hash, recorded_ton_events()).await;
+    record(
+        "ton-unseen-request-hash",
+        json!({"request_hash": missing_hash, "result": format!("{result:?}")}),
+    );
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn round1_ton_base64_hashes_with_hex_like_prefixes_resolve() {
+    use base64::Engine;
+    // Standard base64 of a 32-byte hash starts with "0x" for 0xd3 0x1_ and "0X" for 0xd1 0x7_.
+    let root_bytes = [[0xd3, 0x10].as_slice(), &[0x5a; 30]].concat();
+    let child_bytes = [[0xd1, 0x70].as_slice(), &[0xa5; 30]].concat();
+    let root_hash = base64::engine::general_purpose::STANDARD.encode(&root_bytes);
+    let child_hash = base64::engine::general_purpose::STANDARD.encode(&child_bytes);
+    assert!(root_hash.starts_with("0x") && child_hash.starts_with("0X"));
+
+    let mut response = recorded_ton_events();
+    let event = &mut response["events"][0];
+    let old_root = event["trace"]["tx_hash"].as_str().unwrap().to_string();
+    let old_child = event["trace"]["children"][0]["tx_hash"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    for (old, new) in [(&old_root, &root_hash), (&old_child, &child_hash)] {
+        let transactions = event["transactions"].as_object_mut().unwrap();
+        let mut transaction = transactions.remove(old.as_str()).unwrap();
+        transaction["hash"] = json!(new);
+        transactions.insert(new.clone(), transaction);
+    }
+    event["trace"]["tx_hash"] = json!(root_hash);
+    event["trace"]["children"][0]["tx_hash"] = json!(child_hash);
+
+    let hex_request = format!("0x{}", hex::encode(&root_bytes));
+    let base64url_request = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&root_bytes);
+    assert!(base64url_request.starts_with("0x"));
+    let hex_result = resolve_recorded_ton(&hex_request, response.clone()).await;
+    let base64url_result = resolve_recorded_ton(&base64url_request, response).await;
+    record(
+        "ton-hex-like-base64-hashes",
+        json!({
+            "root_hash": root_hash,
+            "child_hash": child_hash,
+            "hex_request": hex_request,
+            "base64url_request": base64url_request,
+            "hex_result": format!("{:?}", hex_result.as_ref().map(|event| &event.lz_message_id)),
+            "base64url_result": format!("{:?}", base64url_result.as_ref().map(|event| &event.lz_message_id)),
+        }),
+    );
+    let hex_event =
+        hex_result.expect("a trace with hex-like base64 hashes resolves by hex request");
+    let base64url_event =
+        base64url_result.expect("a base64url request that starts with 0x is a hash, not hex");
+    assert_eq!(hex_event.lz_message_id, base64url_event.lz_message_id);
+    assert_eq!(hex_event.message, base64url_event.message);
+}
+
 async fn resolve_solana_with_untrusted_large_instruction() -> Result<LzSentEvent, AppCoreError> {
     let mut response: Value = serde_json::from_str(include_str!(
         "../../tests/gasolina_parity/source_replay/solana-getTransaction-jsonParsed.response.json"
@@ -476,4 +671,88 @@ async fn round1_ton_confirmation_arithmetic_rejects_negative_head_and_clamps_beh
     );
     assert!(negative.is_err());
     behind.unwrap();
+}
+
+#[test]
+fn round1_ton_trace_quorum_binds_every_message_node_hash() {
+    let response = recorded_ton_events();
+    let tree = crate::layerzero_runtime::ton_transaction_trace_tree(&response).unwrap();
+    let before = crate::layerzero_runtime::ton_trace_quorum_fingerprint(&tree).unwrap();
+    let mut changed = tree.clone();
+    // A non-root node hash is part of the trace's identity and must not be hidden by a
+    // quorum projection that only sees PacketSent candidates.
+    let root_child = changed.pointer_mut("/children/0/transaction");
+    if let Some(transaction) = root_child {
+        transaction["hash"] = json!("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
+    }
+    let after = crate::layerzero_runtime::ton_trace_quorum_fingerprint(&changed).unwrap();
+    record(
+        "ton-nested-node-hash-quorum",
+        json!({"before": before, "after": after}),
+    );
+    assert_ne!(before, after);
+}
+
+#[test]
+fn round1_ton_trace_rejects_map_key_hash_disagreement() {
+    let mut response = recorded_ton_events();
+    let root_hash = response
+        .pointer("/events/0/trace/tx_hash")
+        .and_then(Value::as_str)
+        .unwrap()
+        .to_string();
+    let transactions = response["events"][0]["transactions"]
+        .as_object_mut()
+        .unwrap();
+    transactions.get_mut(&root_hash).unwrap()["hash"] =
+        json!("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
+    let observed = crate::layerzero_runtime::ton_transaction_trace_tree(&response);
+    record(
+        "ton-mapkey-hash-binding",
+        json!({"root_trace_hash": root_hash, "tree": format!("{observed:?}")}),
+    );
+    assert!(observed.is_none());
+}
+
+#[test]
+fn round1_ton_null_message_node_hash_is_in_quorum_projection() {
+    let mut tree = json!({
+        "transaction": {"hash": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", "in_msg": null},
+        "children": []
+    });
+    let before = crate::layerzero_runtime::ton_trace_quorum_fingerprint(&tree).unwrap();
+    tree["transaction"]["hash"] = json!("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=");
+    let after = crate::layerzero_runtime::ton_trace_quorum_fingerprint(&tree).unwrap();
+    record(
+        "ton-null-message-node-hash",
+        json!({"before": before, "after": after}),
+    );
+    assert_ne!(before, after);
+}
+
+#[test]
+fn round1_ton_trace_rejects_malformed_provider_hashes() {
+    for malformed in [
+        "tx0",
+        "0x1234",
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\u{001b}",
+    ] {
+        let mut response = recorded_ton_events();
+        let root_hash = response
+            .pointer("/events/0/trace/tx_hash")
+            .and_then(Value::as_str)
+            .unwrap()
+            .to_string();
+        response["events"][0]["transactions"]
+            .as_object_mut()
+            .unwrap()
+            .get_mut(&root_hash)
+            .unwrap()["hash"] = json!(malformed);
+        let accepted = crate::layerzero_runtime::ton_transaction_trace_tree(&response).is_some();
+        record(
+            "ton-malformed-provider-hash",
+            json!({"malformed": malformed, "accepted": accepted}),
+        );
+        assert!(!accepted);
+    }
 }

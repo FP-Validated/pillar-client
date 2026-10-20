@@ -1,5 +1,6 @@
 use super::*;
 use crate::provider_health::drop_json_value_safely;
+use base64::Engine;
 use std::collections::{HashMap, HashSet};
 #[cfg(test)]
 use ton_core::cell::BoC;
@@ -102,21 +103,20 @@ fn ton_trace_preflight<'a>(
                     return None;
                 }
                 let transaction = if let Some(transactions) = transactions {
-                    let hash = node.get("tx_hash")?.as_str()?;
-                    if !seen_hashes.insert(hash) {
+                    let key = node.get("tx_hash")?.as_str()?;
+                    let key_hash = ton_hash_bytes(key)?;
+                    let transaction = transactions.get(key)?;
+                    let tx_hash = transaction.get("hash")?.as_str()?;
+                    if ton_hash_bytes(tx_hash)? != key_hash {
                         return None;
                     }
-                    transactions.get(hash)?
+                    transaction
                 } else {
                     node.get("transaction")?
                 };
-                if transactions.is_none() {
-                    if let Some(hash) = transaction.get("hash") {
-                        let hash = hash.as_str()?;
-                        if !seen_hashes.insert(hash) {
-                            return None;
-                        }
-                    }
+                let hash = ton_hash_bytes(transaction.get("hash")?.as_str()?)?;
+                if !seen_hashes.insert(hash) {
+                    return None;
                 }
                 account_ton_transaction(transaction, &mut projected_bytes)?;
                 pending.push(Work::Build(transaction, children.len()));
@@ -131,6 +131,50 @@ fn ton_trace_preflight<'a>(
         }
     }
     Some(plan)
+}
+
+fn ton_hash_bytes(value: &str) -> Option<[u8; 32]> {
+    // Standard base64 of a hash can itself start with "0x", so hex needs exactly 64 digits.
+    let digits = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+        .unwrap_or(value);
+    let decoded = if digits.len() == 64 && digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        hex::decode(digits).ok()?
+    } else {
+        base64::engine::general_purpose::STANDARD
+            .decode(value)
+            .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(value))
+            .or_else(|_| base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(value))
+            .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(value))
+            .ok()?
+    };
+    decoded.try_into().ok()
+}
+
+pub(crate) fn ton_request_hash_valid(value: &str) -> bool {
+    ton_hash_bytes(value).is_some()
+}
+
+pub(crate) fn ton_trace_contains_hash(tree: &Value, requested_hash: &str) -> bool {
+    let Some(requested) = ton_hash_bytes(requested_hash) else {
+        return false;
+    };
+    let mut pending = vec![tree];
+    while let Some(node) = pending.pop() {
+        if node
+            .pointer("/transaction/hash")
+            .and_then(Value::as_str)
+            .and_then(ton_hash_bytes)
+            == Some(requested)
+        {
+            return true;
+        }
+        if let Some(children) = node.get("children").and_then(Value::as_array) {
+            pending.extend(children);
+        }
+    }
+    false
 }
 
 fn account_ton_transaction(transaction: &Value, projected_bytes: &mut usize) -> Option<()> {
@@ -235,17 +279,15 @@ pub(crate) async fn fetch_ton_transaction_trace<T: JsonRpcTransport>(
     observation
 }
 
-/// Upstream `tonTransactionTraceMessagesQuorumFn` (`multiprovider/src/ton.ts:40-54`):
-/// each node's `in_msg`, pre-order, projected to address, block seqno, body, bounced,
-/// emitter, hash, subtopic and topic and folded through `hashFields`, so providers
-/// agree on the messages and not on unrelated trace metadata. Missing `in_msg` and
-/// malformed projections return `None` and therefore cost that provider its vote;
-/// explicit `in_msg: null` is skipped, as upstream's `message !== null` does.
+/// Bind every trace transaction hash, including `in_msg: null` nodes, so aliases cannot disappear from quorum identity.
 pub(crate) fn ton_trace_quorum_fingerprint(tree: &Value) -> Option<String> {
     let mut digests = Vec::new();
+    use sha2::Digest;
     let mut stack = vec![tree];
     while let Some(node) = stack.pop() {
         let transaction = node.get("transaction")?;
+        let transaction_hash = ton_hash_bytes(transaction.get("hash")?.as_str()?)?;
+        digests.push(hex::encode(sha2::Sha256::digest(transaction_hash)));
         match transaction.get("in_msg") {
             None => return None,
             Some(Value::Null) => {}
@@ -671,6 +713,7 @@ mod tests {
         let body = base64::engine::general_purpose::STANDARD.encode(repeated_ref_dag_boc());
         let tree = serde_json::json!({
             "transaction": {
+                "hash": format!("{:064x}", 1),
                 "in_msg": { "message_content": { "body": body } }
             },
             "children": []
@@ -695,6 +738,7 @@ mod tests {
         let body = BoC::new(proof).to_base64(true).unwrap();
         let tree = serde_json::json!({
             "transaction": {
+                "hash": format!("{:064x}", 2),
                 "in_msg": {
                     "opcode": "1",
                     "message_content": { "body": body }
@@ -883,8 +927,8 @@ mod tests {
         );
     }
 
-    /// The recorded trace and variants of it, each fingerprinted by upstream's own
-    /// `tonTransactionTraceMessagesQuorumFn` (`source_replay/ton-trace-quorum.json`).
+    /// The recorded trace and variants of it, compared by consumed identity behavior.
+    /// Upstream omits the transaction hash; the local fingerprint intentionally binds it.
     #[test]
     fn trace_quorum_fingerprint_matches_upstream_for_every_variant() {
         let upstream: Value = serde_json::from_str(include_str!(
@@ -1071,24 +1115,53 @@ mod tests {
             names, upstream_names,
             "every variant has exactly one upstream result"
         );
+        let baseline = ton_trace_quorum_fingerprint(&recorded).unwrap();
+        let mut bounced_identity: Option<String> = None;
         for (name, change) in variants {
             let mut trace = recorded.clone();
             change(&mut trace);
             let expected = &upstream_variants[name];
             let actual = ton_trace_quorum_fingerprint(&trace);
-            match (expected["fingerprint"].as_str(), expected["error"].as_str()) {
-                (Some(fingerprint), None) => assert_eq!(
-                    actual.as_deref(),
-                    Some(fingerprint),
-                    "{name}: upstream {expected}"
-                ),
-                (None, Some(error)) => assert!(
+            if expected["error"].is_string() {
+                assert!(
                     actual.is_none(),
-                    "{name}: upstream refuses with {error}, got {actual:?}"
-                ),
-                _ => panic!(
-                    "{name}: upstream result is neither a fingerprint nor an error: {expected}"
-                ),
+                    "{name}: malformed quorum evidence must be rejected"
+                );
+            } else {
+                let fingerprint =
+                    actual.unwrap_or_else(|| panic!("{name}: valid quorum evidence was rejected"));
+                match name {
+                    "recorded"
+                    | "metadataOnly"
+                    | "seqnoAsNumber"
+                    | "seqnoStringVsNumber"
+                    | "opcodeDecimal" => {
+                        assert_eq!(
+                            fingerprint, baseline,
+                            "{name}: identity should be invariant"
+                        )
+                    }
+                    "bouncedNull" | "bouncedTrue" => {
+                        assert_ne!(
+                            fingerprint, baseline,
+                            "{name}: consumed bounced identity changed"
+                        );
+                        if let Some(previous) = &bounced_identity {
+                            assert_eq!(
+                                fingerprint.as_str(),
+                                previous.as_str(),
+                                "{name}: equivalent bounced values differ"
+                            );
+                        } else {
+                            bounced_identity = Some(fingerprint);
+                        }
+                    }
+                    "seqnoChanged" | "nullInMsg" | "sourceChanged" | "destinationChanged"
+                    | "hashChanged" | "opcodeNull" | "childDropped" => {
+                        assert_ne!(fingerprint, baseline, "{name}: consumed identity changed")
+                    }
+                    _ => panic!("{name}: missing identity expectation"),
+                }
             }
         }
     }

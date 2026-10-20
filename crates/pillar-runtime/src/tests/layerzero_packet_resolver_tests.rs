@@ -1272,7 +1272,7 @@ async fn ton_quorum_failure_records_a_provider_request_error() {
         uln_send_version: Value::from("V302"),
     };
     resolver
-        .get_lz_sent_event("0xtx", &request)
+        .get_lz_sent_event(&format!("0x{}", "11".repeat(32)), &request)
         .await
         .expect_err("every provider failed, so quorum cannot be met");
 

@@ -845,7 +845,7 @@ impl PillarApp {
             src_chain = %src_chain_name,
             dst_chain = %dst_chain_name,
             nonce,
-            tx_hash = %sent_event.tx_hash,
+            tx_hash = ?sent_event.tx_hash,
             duration_ms = resolver_started_at.elapsed().as_millis(),
             "sent event resolved"
         );

@@ -85,7 +85,7 @@ mod source_events_ton;
 pub(crate) use source_events_ton::ton_transaction_trace_tree;
 pub(crate) use source_events_ton::{
     decode_ton_packet_sent_events, fetch_ton_transaction_trace, normalize_ton_address,
-    ton_trace_quorum_fingerprint,
+    ton_request_hash_valid, ton_trace_contains_hash, ton_trace_quorum_fingerprint,
 };
 mod packet_resolver;
 #[cfg(test)]

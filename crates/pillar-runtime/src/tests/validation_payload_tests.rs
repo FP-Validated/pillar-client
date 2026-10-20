@@ -1289,10 +1289,11 @@ async fn runtime_rpc_validation_checks_resolves_ton_transaction_from_address() {
             calls: calls.clone(),
             responses: Arc::new(Mutex::new(vec![Ok(json!({
                 "transaction": {
+                    "hash": format!("0x{}", "ab".repeat(32)),
                     "mc_block_seqno": 42,
                     "in_msg": {
                         "destination": format!("0:{}", "11".repeat(32)),
-                        "hash": "tx-hash",
+                        "hash": "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
                         "message_content": {
                             "body": pillar_layerzero::ton_boc_to_base64(&ton_core::cell::TonCell::empty().clone()).unwrap()
                         }
@@ -1340,11 +1341,12 @@ async fn ton_sender_extra_context_uses_projection_quorum_for_seqno_disagreement(
     let trace = |seqno| {
         json!({
             "transaction": {
+                "hash": format!("0x{}", "ab".repeat(32)),
                 "mc_block_seqno": seqno,
                 "in_msg": {
                     "destination": format!("0:{}", "11".repeat(32)),
                     "source": "0:2222222222222222222222222222222222222222222222222222222222222222",
-                    "hash": "tx-hash",
+                    "hash": "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
                     "message_content": { "body": body }
                 }
             },
@@ -1396,18 +1398,19 @@ async fn ton_sender_extra_context_excludes_missing_in_msg_provider_vote() {
     let trace = |seqno, missing_child| {
         let mut value = json!({
             "transaction": {
+                "hash": format!("0x{}", "ab".repeat(32)),
                 "mc_block_seqno": seqno,
                 "in_msg": {
                     "destination": format!("0:{}", "11".repeat(32)),
                     "source": "0:2222222222222222222222222222222222222222222222222222222222222222",
-                    "hash": "tx-hash",
+                    "hash": "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
                     "message_content": { "body": body }
                 }
             },
             "children": []
         });
         if missing_child {
-            value["children"] = json!([{ "transaction": {}, "children": [] }]);
+            value["children"] = json!([{ "transaction": { "hash": format!("0x{}", "dd".repeat(32)) }, "children": [] }]);
         }
         value
     };

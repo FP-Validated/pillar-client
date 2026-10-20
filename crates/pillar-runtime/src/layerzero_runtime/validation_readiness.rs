@@ -1030,32 +1030,47 @@ mod ton_tests {
     /// toncenter v3 `/events`: an external message lands at seqno 100 and the
     /// PacketSent emission happens three hops later, at seqno 105.
     fn packet_sent_five_blocks_after_root() -> Value {
-        let transaction = |hash: &str, seqno: i64, lt: &str| json!({"hash": hash, "lt": lt, "mc_block_seqno": seqno, "in_msg": {"hash": format!("{hash}-in")}});
+        const ROOT: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        const ENDPOINT: &str = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
+        const CHANNEL: &str = "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=";
+        const PACKET_SENT: &str = "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM=";
+        const REFUND: &str = "BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ=";
+        let transaction = |hash: &str, seqno: i64, lt: &str| {
+            json!({
+                "hash": hash,
+                "lt": lt,
+                "mc_block_seqno": seqno,
+                "in_msg": null,
+            })
+        };
+        let mut transactions = serde_json::Map::new();
+        transactions.insert(ROOT.to_string(), transaction(ROOT, 100, "1000"));
+        transactions.insert(ENDPOINT.to_string(), transaction(ENDPOINT, 102, "1001"));
+        transactions.insert(CHANNEL.to_string(), transaction(CHANNEL, 104, "1002"));
+        transactions.insert(
+            PACKET_SENT.to_string(),
+            transaction(PACKET_SENT, 105, "1003"),
+        );
+        transactions.insert(REFUND.to_string(), transaction(REFUND, 101, "1004"));
         json!({"events": [{
-            "trace": {"tx_hash": "root", "children": [
-                {"tx_hash": "endpoint", "children": [
-                    {"tx_hash": "channel", "children": [
-                        {"tx_hash": "packet-sent", "children": []}
+            "trace": {"tx_hash": ROOT, "children": [
+                {"tx_hash": ENDPOINT, "children": [
+                    {"tx_hash": CHANNEL, "children": [
+                        {"tx_hash": PACKET_SENT, "children": []}
                     ]}
                 ]},
-                {"tx_hash": "refund", "children": []}
+                {"tx_hash": REFUND, "children": []}
             ]},
-            "transactions": {
-                "root": transaction("root", 100, "1000"),
-                "endpoint": transaction("endpoint", 102, "1001"),
-                "channel": transaction("channel", 104, "1002"),
-                "packet-sent": transaction("packet-sent", 105, "1003"),
-                "refund": transaction("refund", 101, "1004"),
-            }
+            "transactions": transactions
         }]})
     }
 
     #[tokio::test]
     async fn ton_masterchain_seqno_confirmations_are_quorum_ready() {
         let observation = observe(
-            json!({"transaction": {"hash": "tx", "mc_block_seqno": 100}, "children": []}),
+            json!({"transaction": {"hash": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", "mc_block_seqno": 100}, "children": []}),
             105,
-            "tx",
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
         )
         .await;
         assert!(matches!(
@@ -1067,7 +1082,12 @@ mod ton_tests {
 
     #[tokio::test]
     async fn ton_confirmations_count_from_the_packet_sent_transaction_not_the_trace_root() {
-        let observation = observe(packet_sent_five_blocks_after_root(), 105, "packet-sent").await;
+        let observation = observe(
+            packet_sent_five_blocks_after_root(),
+            105,
+            "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM=",
+        )
+        .await;
         assert!(matches!(
             observation.validity,
             BlockConfirmationValidity::Insufficient {
@@ -1077,7 +1097,12 @@ mod ton_tests {
         ));
         assert_eq!(observation.current_confirmations, Some(0));
 
-        let observation = observe(packet_sent_five_blocks_after_root(), 110, "packet-sent").await;
+        let observation = observe(
+            packet_sent_five_blocks_after_root(),
+            110,
+            "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM=",
+        )
+        .await;
         assert!(matches!(
             observation.validity,
             BlockConfirmationValidity::Sufficient {
@@ -1089,7 +1114,12 @@ mod ton_tests {
 
     #[tokio::test]
     async fn ton_confirmations_fail_closed_when_the_trace_lacks_the_transaction() {
-        let observation = observe(packet_sent_five_blocks_after_root(), 200, "elsewhere").await;
+        let observation = observe(
+            packet_sent_five_blocks_after_root(),
+            200,
+            "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU=",
+        )
+        .await;
         assert!(matches!(
             observation.validity,
             BlockConfirmationValidity::Missing

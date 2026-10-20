@@ -888,6 +888,11 @@ where
     }
 
     async fn get_ton_transaction_trace(&self, src_tx_hash: &str) -> Result<Value, AppCoreError> {
+        if !ton_request_hash_valid(src_tx_hash) {
+            return Err(AppCoreError::BadRequest(
+                "srcTxHash must encode a 32-byte TON transaction hash".to_string(),
+            ));
+        }
         crate::provider_health::rpc_scope("ton", async { let snapshot = self.providers.load();
     let provider_config = snapshot.provider_config("ton")?;
     let quorum = required_provider_quorum(provider_config, "ton")?;
@@ -913,7 +918,11 @@ where
                 fetch_ton_transaction_trace(&transport, &endpoint, &headers, &encoded_tx_hash).await;
             (
                 index,
-                observation.map(|tree| tree.and_then(|tree| ton_trace_quorum_fingerprint(&tree).map(|fingerprint| (fingerprint, tree)))),
+                observation.map(|tree| tree.and_then(|tree| {
+                    ton_trace_contains_hash(&tree, src_tx_hash)
+                        .then(|| ton_trace_quorum_fingerprint(&tree).map(|fingerprint| (fingerprint, tree)))
+                        .flatten()
+                })),
             )
         });
     }
