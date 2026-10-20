@@ -635,14 +635,10 @@ where
         // Upstream's extractor keeps only the endpoint program's events and
         // returns null for none, which is `Transaction not found` too
         // (`common-solana/src/events.ts:58-91`).
-        let endpoint_events = decode_solana_packet_sent_events(transaction)
-            .into_iter()
-            .filter(|event| {
-                self.config
-                    .trusted_solana_endpoint_program_ids
-                    .contains(&event.endpoint_program_id)
-            })
-            .collect::<Vec<_>>();
+        let endpoint_events = decode_solana_packet_sent_events(
+            transaction,
+            &self.config.trusted_solana_endpoint_program_ids,
+        );
         if endpoint_events.is_empty() {
             return Err(AppCoreError::Internal("Transaction not found".to_string()));
         }
@@ -2131,7 +2127,10 @@ struct SolanaPacketSentEvent {
     options: Vec<u8>,
 }
 
-fn decode_solana_packet_sent_events(transaction: &Value) -> Vec<SolanaPacketSentEvent> {
+fn decode_solana_packet_sent_events(
+    transaction: &Value,
+    trusted_endpoint_program_ids: &HashSet<String>,
+) -> Vec<SolanaPacketSentEvent> {
     transaction
         .pointer("/meta/innerInstructions")
         .and_then(Value::as_array)
@@ -2139,6 +2138,12 @@ fn decode_solana_packet_sent_events(transaction: &Value) -> Vec<SolanaPacketSent
         .flatten()
         .filter_map(|group| group.get("instructions").and_then(Value::as_array))
         .flatten()
+        .filter(|instruction| {
+            instruction
+                .get("programId")
+                .and_then(Value::as_str)
+                .is_some_and(|program_id| trusted_endpoint_program_ids.contains(program_id))
+        })
         .filter_map(decode_solana_packet_sent_event_instruction)
         .collect()
 }
