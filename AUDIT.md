@@ -530,11 +530,13 @@ Verification results for final code commit `b7ecb00`:
 
 Evidence: fmt/clippy/test/PostgreSQL/integrity/MSRV output and image run records in `.full-review-20261009/evidence/round6-integration`, round-by-round reviewer reports and red/green output · 2026-10-09 23:48 KST. Hosted CI row: result for run `37946961465` · 2026-10-10 00:08 KST. 2.6.1 release section: local fmt/clippy/test/MSRV runs on the release tree · 2026-10-10 00:24 KST. 2.6.2 section: `.full-review-20261009/evidence/sui-page-errors/{red-final,green-final,ws-tests}.txt` and hosted CI run `37956704504` · 2026-10-10 01:17 KST
 
-## 17. Round 1 remediation — 2026-10-20 (local)
+## 17. Round 1 remediation — 2026-10-20
 
-Baseline: `2f9305f0bd1644769169b50941ff5b72bab4be26`. This is an uncommitted
-local implementation, not a published release or a production rollout. The
-eleven response items are covered; M-08 corrects the report's principal
+Baseline: `2f9305f0bd1644769169b50941ff5b72bab4be26`. One commit per finding,
+`f30bb38`..`5a593e1`, then documentation `0cec86c`, on `main`; not a tagged release
+or a production rollout. The per-finding response, with commit links and the
+rationale wherever a recommendation was not followed, is
+[round1-response.md](audit/round1-response.md). M-08 corrects the report's principal
 interpretation rather than applying its proposed field substitution.
 
 | ID | Implementation | Exercised evidence |
@@ -557,7 +559,7 @@ interpretation rather than applying its proposed field substitution.
 | --- | --- |
 | `cargo +1.98.1 fmt --all --check` | Passed |
 | `cargo +1.98.1 clippy --workspace --all-targets --locked -- -D warnings` | Passed |
-| `cargo +1.98.1 test --workspace --locked` | 1,112 top-level tests passed, zero failed, 15 ignored; three isolated child harness runs also passed |
+| `cargo +1.98.1 test --workspace --locked` | 1,118 passed, zero failed, 15 ignored at `5a593e1` (`test result:` totals, including three child harness runs); every intermediate commit was also formatted and passed clippy and the workspace suite |
 | `cargo +1.94.1 check --workspace --all-targets --locked` | Passed |
 | Actual `pillar` process with synthetic local mnemonic and loopback RPC | `GET /` 200 `HEALTHY`; both READ/version mismatches and 258 markers return 400 envelopes before any `eth_getTransactionReceipt`; graceful process exit and mock listener closure observed |
 | Parser admission negative control | Temporarily bypassing fair parser admission makes target B time out while A occupies the four shared slots; E2E fails. Exact source restored, E2E/fmt/clippy pass again |
@@ -580,7 +582,8 @@ Raw evidence and reproducible sources are retained under
 `clippy-restored.log`, `fmt-check-final.log`, `cli-smoke-final.json`,
 `nested-json-comparison.json`, original-snapshot failures and per-run E2E JSON.
 The directory also preserves the negative-control output, not only green runs.
-No commit, push, image publication or deployment was performed.
+The change was then split into one commit per finding and pushed to `main`; no
+image was published and nothing was deployed.
 
 ### Remaining operating constraints
 
@@ -591,5 +594,4 @@ exhaust the shared slots, Lambda admission is three active plus two waiting per
 target, and background probes can be deferred. Memory pressure can refuse an
 additional agreeing vote if growing its lowest-index representative reservation
 would exceed the pool. Starknet `PRE_CONFIRMED` is refused; selected event JSON
-must still match exactly. M-08's corrected policy interpretation should be
-included in the audit-team response rather than described as a sender-field fix.
+must still match exactly.
