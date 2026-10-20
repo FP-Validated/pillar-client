@@ -29,9 +29,12 @@ pub(super) fn health_error_response(error: RpcError) -> Result<Value, RpcError> 
     }
 }
 
+/// Longest provider response string the health report retains, counted after redaction.
+pub(crate) const MAX_HEALTH_RESPONSE_TEXT_BYTES: usize = 64 * 1024;
+
 fn redact_response_urls(value: Value) -> Value {
     match value {
-        Value::String(value) => Value::String(redact_urls_in_text(&value)),
+        Value::String(value) => Value::String(bounded_report_text(redact_urls_in_text(&value))),
         Value::Array(values) => {
             Value::Array(values.into_iter().map(redact_response_urls).collect())
         }
@@ -64,11 +67,35 @@ fn redact_urls_in_text(input: &str) -> String {
     output
 }
 
+/// The first `http://` or `https://`. Each call reads only up to the URL it returns and
+/// the caller resumes after that URL, so a whole string is scanned once.
 fn find_url_start(value: &str) -> Option<usize> {
-    ["https://", "http://"]
-        .into_iter()
-        .filter_map(|scheme| value.find(scheme))
-        .min()
+    let mut from = 0;
+    while let Some(offset) = value[from..].find("http") {
+        let start = from + offset;
+        let rest = &value.as_bytes()[start + 4..];
+        if rest.starts_with(b"://") || rest.starts_with(b"s://") {
+            return Some(start);
+        }
+        from = start + 4;
+    }
+    None
+}
+
+/// Truncates only redacted text: cutting first could split a URL before its `@` and
+/// publish part of the userinfo.
+fn bounded_report_text(mut text: String) -> String {
+    if text.len() <= MAX_HEALTH_RESPONSE_TEXT_BYTES {
+        return text;
+    }
+    let mut cut = MAX_HEALTH_RESPONSE_TEXT_BYTES;
+    while !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let dropped = text.len() - cut;
+    text.truncate(cut);
+    text.push_str(&format!("…[truncated {dropped} bytes]"));
+    text
 }
 
 pub(crate) fn numeric_response(response: &Value) -> Option<String> {

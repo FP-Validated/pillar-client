@@ -36,9 +36,13 @@ type RecordedJsonCall = (String, HashMap<String, String>, Value);
 type RecordedJsonCalls = Arc<Mutex<Vec<RecordedJsonCall>>>;
 
 fn round1_artifact(name: &str, value: Value) {
+    audit_round_artifact("round1", name, value);
+}
+
+fn audit_round_artifact(round: &str, name: &str, value: Value) {
     static RUN: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
         format!(
-            "round1-{}-{}",
+            "{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -51,7 +55,7 @@ fn round1_artifact(name: &str, value: Value) {
         .unwrap_or_else(|| {
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../local/e2e-runs")
         });
-    let directory = root.join(&*RUN);
+    let directory = root.join(format!("{round}-{}", *RUN));
     std::fs::create_dir_all(&directory).unwrap();
     let path = directory.join(format!("{name}.json"));
     std::fs::write(&path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
@@ -65,6 +69,7 @@ mod round1_memory_budget_e2e;
 mod round1_parser_admission_e2e;
 mod round1_resource_e2e;
 mod round1_source_e2e;
+mod round2_health_e2e;
 mod stellar_payload_signed_tests;
 mod stellar_provenance_tests;
 mod support_app;
