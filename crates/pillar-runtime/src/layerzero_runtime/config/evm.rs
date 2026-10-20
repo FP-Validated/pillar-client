@@ -489,9 +489,8 @@ where
     }
     if chain_names.iter().any(|chain_name| chain_name == "canton") {
         // Upstream reads `CANTON_CLIENT_SECRET` when the `rpc` URI carries no `client-secret`.
-        checks = checks.with_canton_ledger_auth(super::super::CantonLedgerAuth::for_environment(
+        checks = checks.with_canton_ledger_auth(super::super::CantonLedgerAuth::from_process_env(
             environment,
-            std::env::var("CANTON_CLIENT_SECRET").ok(),
         ));
     }
     Ok(checks)

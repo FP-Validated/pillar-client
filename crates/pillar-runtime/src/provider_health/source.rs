@@ -14,6 +14,7 @@ pub struct RpcProviderHealthSource<T> {
     pub(super) now_unix_ms: Arc<dyn Fn() -> u64 + Send + Sync>,
     pub(super) chain_type_by_chain_name: HashMap<String, String>,
     execution: Option<Arc<pillar_core::execution::ExecutionResources>>,
+    pub(super) canton_ledger_auth: crate::layerzero_runtime::CantonLedgerAuth,
     observations: Arc<tokio::sync::Mutex<HealthObservations>>,
 }
 
@@ -41,6 +42,7 @@ where
             now_unix_ms: Arc::new(now_unix_ms),
             chain_type_by_chain_name,
             execution: None,
+            canton_ledger_auth: Default::default(),
             observations: Arc::new(tokio::sync::Mutex::new(HealthObservations::default())),
         }
     }
@@ -59,6 +61,7 @@ where
             now_unix_ms: Arc::new(now_unix_ms),
             chain_type_by_chain_name,
             execution: None,
+            canton_ledger_auth: Default::default(),
             observations: Arc::new(tokio::sync::Mutex::new(HealthObservations::default())),
         }
     }
@@ -71,6 +74,15 @@ where
         resources: Arc<pillar_core::execution::ExecutionResources>,
     ) -> Self {
         self.execution = Some(resources);
+        self
+    }
+    /// The ledger reads' authentication: a Canton probe is the same authenticated read
+    /// dispatch would make, or its health would describe an endpoint nobody calls.
+    pub(crate) fn with_canton_ledger_auth(
+        mut self,
+        auth: crate::layerzero_runtime::CantonLedgerAuth,
+    ) -> Self {
+        self.canton_ledger_auth = auth;
         self
     }
     pub async fn get_provider_health_report(&self) -> Result<ProviderHealthReport, RpcError> {
@@ -110,6 +122,7 @@ where
                         "TON" => self.probe_ton_provider_health(config).await,
                         "INITIA" => self.probe_initia_provider_health(config).await,
                         "TRON" => self.probe_tron_provider_health(chain_name, config).await,
+                        "CANTON" => self.probe_canton_provider_health(config).await,
                         _ => Ok(non_evm_provider_health_entries(chain_name, config)),
                     }
                 })
@@ -201,18 +214,14 @@ pub(crate) fn provider_health_snapshot_from_report(
 
 /// Fallback for a chain type with no probe of its own.
 ///
-/// Unreachable for every chain in the static table: `chain_type_for_provider_health`
-/// defaults an unknown chain name to `"EVM"` before the dispatch, and every chain
-/// type the table actually contains - EVM, APTOS, SOLANA, SUI, IOTAMOVE,
-/// STARKNET, STELLAR, TON, INITIA, TRON - has an explicit arm. It exists because
-/// the dispatch is on a `&str` and must be exhaustive.
+/// `chain_type_for_provider_health` defaults an unknown chain name to `"EVM"`, and
+/// `no_non_evm_chain_falls_through_to_the_unregistered_health_probe` holds every non-EVM
+/// chain of the static table to its own arm. It exists because the dispatch is on a `&str`.
 ///
 /// It fails closed by construction: `normalize_provider_health_entry` sets
 /// `healthy` from whether the response parses as a number, and this response is
 /// not numeric, so a chain that ever did reach here reports unhealthy rather than
-/// inventing health for endpoints nobody probed. The message used to read "is not
-/// wired in Rust runtime yet", which described a porting roadmap rather than the
-/// state, in a branch no chain reaches.
+/// inventing health for endpoints nobody probed.
 pub(crate) fn non_evm_provider_health_entries(
     chain_name: &str,
     config: &pillar_config::ProviderConfig,

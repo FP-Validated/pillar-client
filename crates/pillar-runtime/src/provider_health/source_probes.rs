@@ -202,6 +202,42 @@ where
 
         collect_health_probes(probes).await
     }
+
+    /// `RpcCantonSdk.getProviderHealth`: each `rpc` entry's ledger-end offset
+    /// (`rpc-sdk/src/canton/index.ts:328-336`). The sequencer entry is not ranked, as upstream.
+    pub(super) async fn probe_canton_provider_health(
+        &self,
+        config: &pillar_config::ProviderConfig,
+    ) -> Result<Vec<ProviderHealthEntry>, RpcError> {
+        collect_health_probes(
+            config
+                .uris
+                .iter()
+                .map(|uri| {
+                    let transport = self.transport.clone();
+                    let auth = self.canton_ledger_auth.clone();
+                    let entry_uri = rank_key_url("canton", uri);
+                    async move {
+                        let started_at = Instant::now();
+                        let response = match crate::layerzero_runtime::canton_ledger_end_offset(
+                            &transport, &entry_uri, &auth,
+                        )
+                        .await
+                        {
+                            Ok(offset) => offset,
+                            Err(error) => health_error_response(error)?,
+                        };
+                        Ok(normalize_provider_health_entry(
+                            entry_uri,
+                            response,
+                            Some(started_at.elapsed().as_millis() as u64),
+                        ))
+                    }
+                })
+                .collect::<Vec<_>>(),
+        )
+        .await
+    }
 }
 
 async fn collect_health_probes<I, F>(probes: I) -> Result<Vec<ProviderHealthEntry>, RpcError>

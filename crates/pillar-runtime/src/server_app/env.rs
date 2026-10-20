@@ -58,6 +58,11 @@ where
             transport,
             now_unix_ms,
             chain_type_by_chain_name,
+        )
+        .with_canton_ledger_auth(
+            crate::layerzero_runtime::CantonLedgerAuth::from_process_env(
+                runtime_config.environment.as_deref().unwrap_or_default(),
+            ),
         );
         let now = provider_health_source.now_unix_ms();
         let provider_health_cache =

@@ -320,6 +320,11 @@ impl CantonLedgerAuth {
         }
     }
 
+    /// The inputs the runtime has always used: `LZ_ENV` and `CANTON_CLIENT_SECRET`.
+    pub(crate) fn from_process_env(environment: &str) -> Self {
+        Self::for_environment(environment, std::env::var("CANTON_CLIENT_SECRET").ok())
+    }
+
     pub(crate) fn token_provider<T: JsonRpcTransport>(
         &self,
         entry_uri: &str,
@@ -366,9 +371,9 @@ impl CantonLedgerAuth {
     }
 }
 
-/// `basePath + "/v2/updates/update-by-id"`. Stricter than upstream: a base URL that still
-/// carries a query or fragment would move the path out of the URL path, so it is refused.
-fn canton_update_by_id_url(json_api_url: &str) -> Result<String, AppCoreError> {
+/// `basePath + path`. Stricter than upstream: a base URL that still carries a query or
+/// fragment would move the path out of the URL path, so it is refused.
+fn canton_ledger_url(json_api_url: &str, path: &str) -> Result<String, AppCoreError> {
     let url = reqwest::Url::parse(json_api_url)
         .map_err(|_| AppCoreError::Internal("Invalid URL".to_string()))?;
     if url.query().is_some() || url.fragment().is_some() {
@@ -376,7 +381,35 @@ fn canton_update_by_id_url(json_api_url: &str) -> Result<String, AppCoreError> {
             "Canton JSON Ledger API URL must not keep a query or fragment".to_string(),
         ));
     }
-    Ok(format!("{json_api_url}/v2/updates/update-by-id"))
+    Ok(format!("{json_api_url}{path}"))
+}
+
+/// `getLedgerEndOffset` (`common-canton` 1.2.66 `client/canton-client.ts:994-997`, `GET
+/// /v2/state/ledger-end`), the read upstream's Canton multiprovider ranks each `rpc` entry
+/// by (`multiprovider/src/canton.ts:105-109`). Authenticated exactly as the sender read is.
+pub(crate) async fn canton_ledger_end_offset<T: JsonRpcTransport>(
+    transport: &T,
+    entry_uri: &str,
+    auth: &CantonLedgerAuth,
+) -> Result<Value, RpcError> {
+    let uri = parse_canton_chain_uri(entry_uri).map_err(RpcError::Remote)?;
+    let url = canton_ledger_url(&uri.json_api_url, "/v2/state/ledger-end")?;
+    let tokens = auth.token_provider(entry_uri, &uri, transport)?;
+    let token = Zeroizing::new(tokens.get_token().await?);
+    let mut headers = HashMap::new();
+    if !token.is_empty() {
+        headers.insert(
+            "Authorization".to_string(),
+            format!("Bearer {}", token.as_str()),
+        );
+    }
+    let response = transport.get_json_scoped(url, headers).await?;
+    match response.get("offset") {
+        Some(offset @ Value::Number(_)) => Ok(offset.clone()),
+        _ => Err(RpcError::Remote(
+            "Canton ledger-end response has no numeric offset".to_string(),
+        )),
+    }
 }
 
 /// `GetUpdateByIdRequestToJSON` of `{ updateId, updateFormat: #buildUpdateFormat([party]) }`.
@@ -593,7 +626,7 @@ where
                 let raw = provider_uri_parts(entry).0;
                 let uri = parse_canton_chain_uri(&raw).map_err(AppCoreError::Internal)?;
                 targets.push((
-                    canton_update_by_id_url(&uri.json_api_url)?,
+                    canton_ledger_url(&uri.json_api_url, "/v2/updates/update-by-id")?,
                     tokens(&raw, &uri)?,
                 ));
             }

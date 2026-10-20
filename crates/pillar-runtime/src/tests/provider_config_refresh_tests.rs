@@ -1030,3 +1030,6 @@ async fn a_health_probe_straddling_a_refresh_does_not_rank_the_replaced_endpoint
         crate::provider_health::ProviderRank::Normal
     );
 }
+
+#[path = "round2_canton_health_e2e.rs"]
+mod round2_canton_health_e2e;

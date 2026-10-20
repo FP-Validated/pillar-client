@@ -163,6 +163,11 @@ async fn a_failing_probe_excludes_the_provider_from_dispatch_for_every_family() 
             "TRON",
             format!("https://rpc.example/jsonrpc?tron-api-key={SECRET}&tron-web-url=https%3A%2F%2Fweb.example"),
         ),
+        (
+            "canton",
+            "CANTON",
+            format!("https://ledger.example/?admin-api=admin:5002&act-as=P1::1220&wallet-url=https://wallet.example&token-url=https://idp.example/token&client-id=pillar&client-secret={SECRET}"),
+        ),
     ] {
         let uri = ProviderUri::Uri(raw_uri.clone());
         let getter = StaticProviderConfig::new(
@@ -204,6 +209,46 @@ async fn a_failing_probe_excludes_the_provider_from_dispatch_for_every_family() 
             error.to_string().contains("Not enough healthy providers"),
             "{chain_name}: {error}"
         );
+    }
+}
+
+/// The health-probe counterpart of the four `no_non_evm_chain_falls_through_to_*` dispatch
+/// tests: every non-EVM chain of the static table reaches a probe of its own. Canton fell
+/// through here, so a working ledger was reported unhealthy and excluded from dispatch.
+#[tokio::test]
+async fn no_non_evm_chain_falls_through_to_the_unregistered_health_probe() {
+    for chain_name in &super::validation_timestamp_tests::non_evm_chain_roster() {
+        let getter = StaticProviderConfig::new(
+            indexmap::IndexMap::from([(
+                chain_name.clone(),
+                ProviderConfig::with_distinct_entities(
+                    vec![ProviderUri::Uri(format!(
+                        "https://{chain_name}-rpc.example/?admin-api=admin:5002&act-as=P1::1220&wallet-url=https://wallet.example"
+                    ))],
+                    1,
+                ),
+            )]),
+            Some(std::slice::from_ref(chain_name)),
+        )
+        .unwrap();
+        let source = RpcProviderHealthSource::from_getter_with_chain_types(
+            &getter,
+            AlwaysFailingTransport,
+            || 0,
+            pillar_config::static_chain_type_by_chain_name(std::slice::from_ref(chain_name))
+                .unwrap(),
+        );
+        let report = source.get_provider_health_report().await.unwrap();
+        for entry in &report[chain_name.as_str()].providers {
+            assert!(
+                !entry
+                    .response
+                    .to_string()
+                    .contains("No provider health probe is registered"),
+                "{chain_name} has no health probe of its own: {}",
+                entry.response
+            );
+        }
     }
 }
 
