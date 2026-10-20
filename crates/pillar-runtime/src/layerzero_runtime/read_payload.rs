@@ -73,7 +73,7 @@ where
         match marker {
             ReadTimeMarker::BlockNumber { block_number } => {
                 if block_number == 0 {
-                    Err(AppCoreError::Internal(
+                    Err(AppCoreError::BadRequest(
                         "Malformed command: Block number cannot be zero!".to_string(),
                     ))
                 } else {

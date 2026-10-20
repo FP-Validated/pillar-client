@@ -68,6 +68,34 @@ fn official_vectors_read_cmd_codec_v1_request_and_compute_layout_matches_sha_pin
     );
 }
 
+/// `ReadCmdCodecV1.sol` reverts with `InvalidVersion` for each of these bytes; changing only
+/// the version keeps every other field of the official layout decodable.
+#[test]
+fn official_vectors_read_cmd_codec_v1_refuses_every_other_version() {
+    let command_hex = official_vector_hex("read_cmd_codec_v1_request_compute.hex");
+    let compute_version_at = command_hex.len() - 78;
+    assert_eq!(
+        &command_hex[compute_version_at..compute_version_at + 8],
+        "01000102"
+    );
+    for (field, at, width) in [
+        ("command", 2, 4),
+        ("request", 14, 2),
+        ("compute", compute_version_at, 2),
+    ] {
+        for version in [0u16, 2, 0xff] {
+            let mut mutated = command_hex.clone();
+            mutated.replace_range(at..at + width, &format!("{version:0width$x}"));
+            let error = decode_evm_read_command(&mutated).unwrap_err();
+            assert!(
+                matches!(&error, AppCoreError::BadRequest(message)
+                    if message == &format!("Unsupported READ {field} version: {version}")),
+                "{field} version {version}: {error:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn official_vectors_receive_uln_verify_call_data_matches_sha_pinned_source() {
     let proof = EvmUlnProof {

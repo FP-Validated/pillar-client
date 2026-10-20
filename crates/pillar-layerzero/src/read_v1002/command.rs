@@ -6,10 +6,25 @@ use crate::types::{
     ReadTimeMarker,
 };
 
+// `ReadCmdCodecV1.sol` (lz-evm-messagelib-v2 3.0.168, `uln/libs`) reverts on any other
+// value; the layout below is only defined for these.
+const CMD_VERSION: u16 = 1;
+const REQUEST_VERSION: u8 = 1;
+const COMPUTE_VERSION: u8 = 1;
+
+fn malformed(message: impl Into<String>) -> AppCoreError {
+    AppCoreError::BadRequest(message.into())
+}
+
 pub fn decode_evm_read_command(cmd: &str) -> Result<EvmReadCommand, AppCoreError> {
-    let bytes = decode_hex_bytes(cmd)?;
+    let bytes = decode_hex_bytes(cmd).map_err(|error| malformed(error.to_string()))?;
     let mut cursor = ReadCursor::new(&bytes);
     let global_version = cursor.read_u16()?;
+    if global_version != CMD_VERSION {
+        return Err(malformed(format!(
+            "Unsupported READ command version: {global_version}"
+        )));
+    }
     let app_command_label = cursor.read_hex(2)?;
     let request_count = cursor.read_u16()?;
     if request_count > MAX_READ_REQUESTS {
@@ -27,9 +42,7 @@ pub fn decode_evm_read_command(cmd: &str) -> Result<EvmReadCommand, AppCoreError
         None
     };
     if cursor.remaining() != 0 {
-        return Err(AppCoreError::Internal(
-            "Trailing bytes in read command".to_string(),
-        ));
+        return Err(malformed("Trailing bytes in read command"));
     }
     Ok(EvmReadCommand {
         global_version,
@@ -70,9 +83,7 @@ pub fn extract_evm_read_resolved_time_markers(
             ReadTimeMarker::BlockNumber { block_number: 0 }
         )
     }) {
-        return Err(AppCoreError::Internal(
-            "Malformed command: Block number cannot be zero!".to_string(),
-        ));
+        return Err(malformed("Malformed command: Block number cannot be zero!"));
     }
     Ok(markers)
 }
@@ -88,11 +99,16 @@ fn push_unique_read_marker(
 
 fn decode_evm_read_request(cursor: &mut ReadCursor<'_>) -> Result<EvmReadRequest, AppCoreError> {
     let request_start = cursor.position();
-    let _request_version = cursor.read_u8()?;
+    let request_version = cursor.read_u8()?;
+    if request_version != REQUEST_VERSION {
+        return Err(malformed(format!(
+            "Unsupported READ request version: {request_version}"
+        )));
+    }
     let _app_request_label = cursor.read_hex(2)?;
     let resolver_type = cursor.read_u16()?;
     if resolver_type != 1 {
-        return Err(AppCoreError::Internal(format!(
+        return Err(malformed(format!(
             "Unsupported resolver type: {resolver_type}"
         )));
     }
@@ -101,9 +117,7 @@ fn decode_evm_read_request(cursor: &mut ReadCursor<'_>) -> Result<EvmReadRequest
     let (target_eid, marker, block_confirmation, to) = decode_evm_read_base(cursor)?;
     let consumed = cursor.position() - body_start;
     if request_size < consumed {
-        return Err(AppCoreError::Internal(
-            "Read request size is shorter than EVM base".to_string(),
-        ));
+        return Err(malformed("Read request size is shorter than EVM base"));
     }
     let calldata = cursor.read_hex(request_size - consumed)?;
     let request = format!(
@@ -121,10 +135,15 @@ fn decode_evm_read_request(cursor: &mut ReadCursor<'_>) -> Result<EvmReadRequest
 }
 
 fn decode_evm_read_compute(cursor: &mut ReadCursor<'_>) -> Result<EvmReadCompute, AppCoreError> {
-    let _compute_version = cursor.read_u8()?;
+    let compute_version = cursor.read_u8()?;
+    if compute_version != COMPUTE_VERSION {
+        return Err(malformed(format!(
+            "Unsupported READ compute version: {compute_version}"
+        )));
+    }
     let compute_type = cursor.read_u16()?;
     if compute_type != 1 {
-        return Err(AppCoreError::Internal(format!(
+        return Err(malformed(format!(
             "Unsupported compute type: {compute_type}"
         )));
     }
@@ -132,11 +151,7 @@ fn decode_evm_read_compute(cursor: &mut ReadCursor<'_>) -> Result<EvmReadCompute
         0 => EvmReadComputeSetting::OnlyMap,
         1 => EvmReadComputeSetting::OnlyReduce,
         2 => EvmReadComputeSetting::MapReduce,
-        value => {
-            return Err(AppCoreError::Internal(format!(
-                "Unsupported compute setting: {value}"
-            )))
-        }
+        value => return Err(malformed(format!("Unsupported compute setting: {value}"))),
     };
     let (target_eid, marker, block_confirmation, to) = decode_evm_read_base(cursor)?;
     Ok(EvmReadCompute {
@@ -160,7 +175,7 @@ fn decode_evm_read_base(
             block_number: cursor.read_u64()?,
         },
         value => {
-            return Err(AppCoreError::Internal(format!(
+            return Err(malformed(format!(
                 "Unsupported timestamp block flag: {value}"
             )))
         }
@@ -195,23 +210,23 @@ impl<'a> ReadCursor<'a> {
 
     fn read_u16(&mut self) -> Result<u16, AppCoreError> {
         let bytes = self.read_bytes(2)?;
-        Ok(u16::from_be_bytes(bytes.try_into().map_err(|_| {
-            AppCoreError::Internal("invalid u16".to_string())
-        })?))
+        Ok(u16::from_be_bytes(
+            bytes.try_into().map_err(|_| malformed("invalid u16"))?,
+        ))
     }
 
     fn read_u32(&mut self) -> Result<u32, AppCoreError> {
         let bytes = self.read_bytes(4)?;
-        Ok(u32::from_be_bytes(bytes.try_into().map_err(|_| {
-            AppCoreError::Internal("invalid u32".to_string())
-        })?))
+        Ok(u32::from_be_bytes(
+            bytes.try_into().map_err(|_| malformed("invalid u32"))?,
+        ))
     }
 
     fn read_u64(&mut self) -> Result<u64, AppCoreError> {
         let bytes = self.read_bytes(8)?;
-        Ok(u64::from_be_bytes(bytes.try_into().map_err(|_| {
-            AppCoreError::Internal("invalid u64".to_string())
-        })?))
+        Ok(u64::from_be_bytes(
+            bytes.try_into().map_err(|_| malformed("invalid u64"))?,
+        ))
     }
 
     fn read_hex(&mut self, len: usize) -> Result<String, AppCoreError> {
@@ -222,11 +237,9 @@ impl<'a> ReadCursor<'a> {
         let end = self
             .offset
             .checked_add(len)
-            .ok_or_else(|| AppCoreError::Internal("read cursor overflow".to_string()))?;
+            .ok_or_else(|| malformed("read cursor overflow"))?;
         if end > self.bytes.len() {
-            return Err(AppCoreError::Internal(
-                "read command ended unexpectedly".to_string(),
-            ));
+            return Err(malformed("read command ended unexpectedly"));
         }
         let out = &self.bytes[self.offset..end];
         self.offset = end;

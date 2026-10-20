@@ -746,3 +746,5 @@ async fn durable_process_worker() {
 }
 #[path = "read_data_http_e2e.rs"]
 mod read_data_http_e2e;
+#[path = "round2_read_version_e2e.rs"]
+mod round2_read_version_e2e;
