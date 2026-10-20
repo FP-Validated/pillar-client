@@ -27,6 +27,9 @@ pub(crate) const CANTON_STATIC_VE3_CONTRACTS: [&str; 6] = [
 ];
 const CANTON_ENDPOINT_V2: &str = CANTON_STATIC_VE3_CONTRACTS[0];
 const PACKET_SENT_EVENT_NAME: &str = "EndpointV2_PacketSentEvent";
+const MAX_CANTON_SIGNATURES: usize = 64;
+const MAX_CANTON_SIGNATURE_HEX_BYTES: usize = 130;
+const MAX_JS_BIGINT_INPUT_BYTES: usize = 1024;
 const ERROR_TEXT_MAX_LENGTH: usize = 500;
 
 /// The `sequencer` provider entry turned into the two clients upstream builds from it.
@@ -176,6 +179,13 @@ fn parse_canton_sequencer_uri(uri: &str) -> Result<(String, Option<Committee>), 
                      got: {quorum}"
                 ));
             }
+            if count > MAX_CANTON_SIGNATURES as f64 {
+                return Err(format!(
+                    "Canton sequencer provider URI sequencer-quorum={} exceeds maximum supported quorum {}",
+                    pillar_core::js_number_f64(count),
+                    MAX_CANTON_SIGNATURES
+                ));
+            }
             if count > public_keys.len() as f64 {
                 return Err(format!(
                     "Canton sequencer provider URI sequencer-quorum={} exceeds committee size {}",
@@ -245,6 +255,8 @@ impl CantonSequencer {
             .map_err(fetch_error)?;
         let raw = parse_body("POST", status, &text).await?;
         let unexpected = || AppCoreError::Internal("Unexpected sequencer response".to_string());
+        let signatures = signatures(&raw).ok_or_else(unexpected)?;
+        self.verify("contract", &request, &raw, &signatures)?;
         let answer = if let Some(message) = error_response(&raw) {
             SequencerAnswer::Error(message)
         } else if raw.get("value").is_some() && hex_string(raw.get("stateRoot")) {
@@ -252,8 +264,6 @@ impl CantonSequencer {
         } else {
             return Err(unexpected());
         };
-        let signatures = signatures(&raw).ok_or_else(unexpected)?;
-        self.verify("contract", request, &raw, &signatures)?;
         Ok(answer)
     }
 
@@ -295,9 +305,8 @@ impl CantonSequencer {
         .await
     }
 
-    /// `SequencerScanClient.#get`: the response is shape-checked against the error schema
-    /// and then `shape`, and only then verified over
-    /// `{ type: 'scan', request: <query>, response: <body without signatures> }`.
+    /// `SequencerScanClient.#get`: the signature envelope is verified before chain-specific
+    /// shape work such as BigInt conversion over provider-controlled fields.
     async fn scan<T: JsonRpcTransport, R>(
         &self,
         transport: &T,
@@ -314,13 +323,6 @@ impl CantonSequencer {
             .await
             .map_err(fetch_error)?;
         let raw = parse_body("GET", status, &text).await?;
-        let answer = match error_response(&raw) {
-            Some(message) => SequencerAnswer::Error(message),
-            None => match signatures(&raw).and(shape(&raw)) {
-                Some(value) => SequencerAnswer::Ok(value),
-                None => return Err(unexpected_scan()),
-            },
-        };
         let signatures = signatures(&raw).ok_or_else(unexpected_scan)?;
         let request = Value::Object(
             query
@@ -328,7 +330,13 @@ impl CantonSequencer {
                 .map(|(key, value)| ((*key).to_string(), Value::from(*value)))
                 .collect(),
         );
-        self.verify("scan", request, &raw, &signatures)?;
+        self.verify("scan", &request, &raw, &signatures)?;
+        let answer = match error_response(&raw) {
+            Some(message) => SequencerAnswer::Error(message),
+            None => shape(&raw)
+                .map(SequencerAnswer::Ok)
+                .ok_or_else(unexpected_scan)?,
+        };
         Ok(answer)
     }
 
@@ -337,21 +345,18 @@ impl CantonSequencer {
     fn verify(
         &self,
         signature_type: &str,
-        request: Value,
+        request: &Value,
         raw: &Value,
         signatures: &[String],
     ) -> Result<(), AppCoreError> {
         let Some(committee) = &self.committee else {
             return Ok(());
         };
-        let mut response = raw.as_object().cloned().unwrap_or_default();
-        response.remove("signatures");
-        let body = serialize_json(&json!({
-            "type": signature_type,
-            "request": request,
-            "response": Value::Object(response),
-        }));
-        let digest: [u8; 32] = Keccak256::digest(body.as_bytes()).into();
+        let mut hasher = Keccak256::new();
+        write_committee_payload(signature_type, request, raw, &mut |bytes| {
+            hasher.update(bytes);
+        });
+        let digest: [u8; 32] = hasher.finalize().into();
         let mut verified = HashSet::new();
         let mut last_error = None;
         for signature in signatures {
@@ -416,26 +421,29 @@ async fn parse_body(method: &str, status: u16, text: &str) -> Result<Value, AppC
 
 /// The error branch of the response union, which is tried first.
 fn error_response(raw: &Value) -> Option<String> {
-    (raw.get("error") == Some(&Value::Bool(true))
-        && hex_string(raw.get("stateRoot"))
-        && signatures(raw).is_some())
-    .then(|| {
-        raw.get("message")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-    })
-    .flatten()
+    (raw.get("error") == Some(&Value::Bool(true)) && hex_string(raw.get("stateRoot")))
+        .then(|| {
+            raw.get("message")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .flatten()
 }
 
 /// `z.array(hexStringSchema)`, decoded to its canonical lowercase `0x` form.
 fn signatures(raw: &Value) -> Option<Vec<String>> {
-    raw.get("signatures")?
-        .as_array()?
+    let signatures = raw.get("signatures")?.as_array()?;
+    if signatures.len() > MAX_CANTON_SIGNATURES {
+        return None;
+    }
+    signatures
         .iter()
         .map(|signature| {
-            hex_string(Some(signature))
-                .then(|| signature.as_str().map(canonical_hex))
-                .flatten()
+            let text = signature.as_str()?;
+            let digits = text.strip_prefix("0x").unwrap_or(text);
+            (digits.len() <= MAX_CANTON_SIGNATURE_HEX_BYTES
+                && digits.bytes().all(|byte| byte.is_ascii_hexdigit()))
+            .then(|| canonical_hex(text))
         })
         .collect()
 }
@@ -450,8 +458,15 @@ fn hex_string(value: Option<&Value>) -> bool {
 }
 
 fn canonical_hex(value: &str) -> String {
-    let lowered = value.to_lowercase();
-    format!("0x{}", lowered.strip_prefix("0x").unwrap_or(&lowered))
+    let digits = value.strip_prefix("0x").unwrap_or(value);
+    let mut canonical = String::with_capacity(digits.len() + 2);
+    canonical.push_str("0x");
+    canonical.extend(
+        digits
+            .bytes()
+            .map(|byte| (byte as char).to_ascii_lowercase()),
+    );
+    canonical
 }
 
 /// `scanRequestRecordSchema`, keeping the committed `timestamp`.
@@ -482,43 +497,111 @@ fn big_uint(value: &Value) -> Option<JsBigInt> {
     (!parsed.negative || parsed.is_zero()).then_some(parsed)
 }
 
-/// `JSON.stringify` with every object's keys sorted, as `serializeJson` writes the
-/// bytes the committee signs (`ver-transport/src/serialize.ts`).
-pub(crate) fn serialize_json(value: &Value) -> String {
+fn write_committee_payload(
+    signature_type: &str,
+    request: &Value,
+    response: &Value,
+    output: &mut impl FnMut(&[u8]),
+) {
+    output(b"{\"request\":");
+    write_json(request, output);
+    output(b",\"response\":");
+    if response.is_object() {
+        write_object(response, Some("signatures"), output);
+    } else {
+        output(b"{}");
+    }
+    output(b",\"type\":");
+    write_json_string(signature_type, output);
+    output(b"}");
+}
+
+fn write_json(value: &Value, output: &mut impl FnMut(&[u8])) {
     match value {
-        Value::Object(map) => {
-            let mut entries: Vec<(&String, &Value)> = map.iter().collect();
-            entries.sort_by(|(a, _), (b, _)| a.encode_utf16().cmp(b.encode_utf16()));
-            // JavaScript enumerates array-index keys first, in numeric order.
-            entries.sort_by_key(|(key, _)| array_index(key).map_or((1, 0), |index| (0, index)));
-            let members: Vec<String> = entries
-                .into_iter()
-                .map(|(key, item)| {
-                    format!(
-                        "{}:{}",
-                        serde_json::to_string(key).expect("key serializes"),
-                        serialize_json(item)
-                    )
-                })
-                .collect();
-            format!("{{{}}}", members.join(","))
+        Value::Object(_) => write_object(value, None, output),
+        Value::Array(items) => {
+            output(b"[");
+            for (index, item) in items.iter().enumerate() {
+                if index != 0 {
+                    output(b",");
+                }
+                write_json(item, output);
+            }
+            output(b"]");
         }
-        Value::Array(items) => format!(
-            "[{}]",
-            items
-                .iter()
-                .map(serialize_json)
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
-        Value::Number(number) => pillar_core::js_number(number),
-        other => serde_json::to_string(other).expect("JSON value serializes"),
+        Value::Number(number) => output(pillar_core::js_number(number).as_bytes()),
+        Value::String(text) => write_json_string(text, output),
+        Value::Null => output(b"null"),
+        Value::Bool(true) => output(b"true"),
+        Value::Bool(false) => output(b"false"),
     }
 }
 
+fn write_object(value: &Value, excluded_key: Option<&str>, output: &mut impl FnMut(&[u8])) {
+    let Some(map) = value.as_object() else {
+        write_json(value, output);
+        return;
+    };
+    let mut entries: Vec<(&str, &Value)> = map
+        .iter()
+        .filter(|(key, _)| excluded_key != Some(key.as_str()))
+        .map(|(key, value)| (key.as_str(), value))
+        .collect();
+    entries.sort_by(
+        |(left, _), (right, _)| match (array_index(left), array_index(right)) {
+            (Some(left), Some(right)) => left.cmp(&right),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => left.encode_utf16().cmp(right.encode_utf16()),
+        },
+    );
+    output(b"{");
+    for (index, (key, item)) in entries.into_iter().enumerate() {
+        if index != 0 {
+            output(b",");
+        }
+        write_json_string(key, output);
+        output(b":");
+        write_json(item, output);
+    }
+    output(b"}");
+}
+
+fn write_json_string(text: &str, output: &mut impl FnMut(&[u8])) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    output(b"\"");
+    for character in text.chars() {
+        match character {
+            '"' => output(b"\\\""),
+            '\\' => output(b"\\\\"),
+            '\u{08}' => output(b"\\b"),
+            '\u{0c}' => output(b"\\f"),
+            '\n' => output(b"\\n"),
+            '\r' => output(b"\\r"),
+            '\t' => output(b"\\t"),
+            character if character <= '\u{1f}' => {
+                let value = character as u8;
+                output(b"\\u00");
+                output(&[HEX[(value >> 4) as usize], HEX[(value & 0x0f) as usize]]);
+            }
+            character => {
+                let mut buffer = [0; 4];
+                output(character.encode_utf8(&mut buffer).as_bytes());
+            }
+        }
+    }
+    output(b"\"");
+}
+
 fn array_index(key: &str) -> Option<u32> {
+    if key.is_empty() || (key.len() > 1 && key.starts_with('0')) {
+        return None;
+    }
+    if !key.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
     let index = key.parse::<u32>().ok()?;
-    (index != u32::MAX && index.to_string() == key).then_some(index)
+    (index != u32::MAX).then_some(index)
 }
 
 /// `ver-encoding-utils` `hexToBytes`.
@@ -767,6 +850,27 @@ fn js_value_to_string(value: &Value) -> String {
         Value::String(text) => text.clone(),
     }
 }
+fn js_value_to_string_size(value: &Value, limit: usize) -> Option<usize> {
+    match value {
+        Value::Null => Some(4),
+        Value::Bool(flag) => Some(if *flag { 4 } else { 5 }),
+        Value::Number(number) => Some(pillar_core::js_number(number).len()),
+        Value::String(text) => Some(text.len()),
+        Value::Object(_) => Some("[object Object]".len()),
+        Value::Array(items) => {
+            let mut size = items.len().saturating_sub(1);
+            for item in items {
+                if !item.is_null() {
+                    size = size.checked_add(js_value_to_string_size(item, limit)?)?;
+                }
+                if size > limit {
+                    return None;
+                }
+            }
+            Some(size)
+        }
+    }
+}
 
 /// A JavaScript `BigInt`: sign and decimal magnitude without leading zeros.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -779,6 +883,9 @@ impl JsBigInt {
     /// `BigInt(string)`: trimmed; empty is zero; `0x`/`0o`/`0b` unsigned; otherwise an
     /// optionally signed decimal integer.
     fn parse(text: &str) -> Option<Self> {
+        if text.len() > MAX_JS_BIGINT_INPUT_BYTES {
+            return None;
+        }
         let trimmed = js_trim(text);
         match trimmed.get(..2) {
             Some("0x" | "0X") => return Self::parse_radix(&trimmed[2..], 16),
@@ -787,22 +894,35 @@ impl JsBigInt {
             _ => {}
         }
         if trimmed.is_empty() {
-            return Self::parse_radix("0", 10);
+            return Some(Self {
+                negative: false,
+                digits: "0".to_string(),
+            });
         }
         let negative = trimmed.starts_with('-');
-        let mut value = Self::parse_radix(trimmed.strip_prefix(['+', '-']).unwrap_or(trimmed), 10)?;
-        value.negative = negative && !value.is_zero();
-        Some(value)
+        let digits = trimmed.strip_prefix(['+', '-']).unwrap_or(trimmed);
+        if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        let digits = digits.trim_start_matches('0');
+        Some(Self {
+            negative: negative && !digits.is_empty(),
+            digits: if digits.is_empty() {
+                "0".to_string()
+            } else {
+                digits.to_string()
+            },
+        })
     }
 
     fn parse_radix(digits: &str, radix: u32) -> Option<Self> {
-        if digits.is_empty() {
+        if digits.is_empty() || digits.len() > MAX_JS_BIGINT_INPUT_BYTES {
             return None;
         }
-        // Little-endian base-10^9 limbs.
+        // The byte bound limits other radices, whose conversion uses base-10^9 limbs.
         let mut limbs: Vec<u64> = vec![0];
-        for character in digits.chars() {
-            let mut carry = u64::from(character.to_digit(radix)?);
+        for byte in digits.bytes() {
+            let mut carry = u64::from((byte as char).to_digit(radix)?);
             for limb in &mut limbs {
                 let value = *limb * u64::from(radix) + carry;
                 *limb = value % 1_000_000_000;
@@ -872,10 +992,18 @@ fn js_value_to_bigint(value: &Value) -> Result<JsBigInt, String> {
         Value::Bool(flag) => Ok(JsBigInt::parse(if *flag { "1" } else { "0" }).expect("digit")),
         Value::Number(number) => js_f64_to_bigint(number.as_f64().unwrap_or(f64::NAN)),
         Value::String(text) => {
+            if text.len() > MAX_JS_BIGINT_INPUT_BYTES {
+                return Err("Cannot convert oversized value to a BigInt".to_string());
+            }
             JsBigInt::parse(text).ok_or_else(|| format!("Cannot convert {text} to a BigInt"))
         }
         Value::Null => Err("Cannot convert null to a BigInt".to_string()),
         Value::Array(_) | Value::Object(_) => {
+            if js_value_to_string_size(value, MAX_JS_BIGINT_INPUT_BYTES)
+                .is_none_or(|size| size > MAX_JS_BIGINT_INPUT_BYTES)
+            {
+                return Err("Cannot convert oversized value to a BigInt".to_string());
+            }
             let text = js_value_to_string(value);
             JsBigInt::parse(&text).ok_or_else(|| format!("Cannot convert {text} to a BigInt"))
         }
@@ -1268,6 +1396,16 @@ mod tests {
         assert!(JsBigInt::parse("-0x1").is_none());
         assert!(JsBigInt::parse("1e3").is_none());
         assert!(JsBigInt::parse("-5").unwrap().negative);
+    }
+    #[test]
+    fn round1_bigint_and_signature_shapes_are_bounded_before_work() {
+        assert!(JsBigInt::parse(&"9".repeat(100_000)).is_none());
+        assert!(JsBigInt::parse("  +12345678901234567890  ").is_some());
+        assert!(JsBigInt::parse(" 0Xabcdef ").is_some());
+        let too_many = json!({
+            "signatures": (0..257).map(|_| format!("0x{}", "11".repeat(65))).collect::<Vec<_>>()
+        });
+        assert!(signatures(&too_many).is_none());
     }
     #[tokio::test]
     async fn round1_canton_text_parser_rejects_broad_small_json() {
