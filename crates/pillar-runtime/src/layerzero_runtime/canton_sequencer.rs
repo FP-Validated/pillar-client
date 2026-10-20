@@ -243,7 +243,7 @@ impl CantonSequencer {
             .post_text_scoped(self.vapp_url.to_string(), headers, request.clone())
             .await
             .map_err(fetch_error)?;
-        let raw = parse_body("POST", status, &text)?;
+        let raw = parse_body("POST", status, &text).await?;
         let unexpected = || AppCoreError::Internal("Unexpected sequencer response".to_string());
         let answer = if let Some(message) = error_response(&raw) {
             SequencerAnswer::Error(message)
@@ -313,7 +313,7 @@ impl CantonSequencer {
             .get_text_scoped(url.to_string(), self.headers.clone())
             .await
             .map_err(fetch_error)?;
-        let raw = parse_body("GET", status, &text)?;
+        let raw = parse_body("GET", status, &text).await?;
         let answer = match error_response(&raw) {
             Some(message) => SequencerAnswer::Error(message),
             None => match signatures(&raw).and(shape(&raw)) {
@@ -392,18 +392,26 @@ fn fetch_error(error: RpcError) -> AppCoreError {
 }
 
 /// `HttpClient.fetch`: any status, a body that must be JSON.
-fn parse_body(method: &str, status: u16, text: &str) -> Result<Value, AppCoreError> {
-    serde_json::from_str(text).map_err(|_| {
-        let mut units = 0;
-        let prefix: String = text
-            .chars()
-            .take_while(|character| {
-                units += character.len_utf16();
-                units <= ERROR_TEXT_MAX_LENGTH
-            })
-            .collect();
-        AppCoreError::Internal(format!("HTTP {method} failed with {status}: {prefix}"))
-    })
+async fn parse_body(method: &str, status: u16, text: &str) -> Result<Value, AppCoreError> {
+    match crate::provider_health::parse_bounded_json(text.as_bytes(), false).await {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            if let Some(error) = crate::provider_health::json_parser_local_error(&error) {
+                return Err(error.into());
+            }
+            let mut units = 0;
+            let prefix: String = text
+                .chars()
+                .take_while(|character| {
+                    units += character.len_utf16();
+                    units <= ERROR_TEXT_MAX_LENGTH
+                })
+                .collect();
+            Err(AppCoreError::Internal(format!(
+                "HTTP {method} failed with {status}: {prefix}"
+            )))
+        }
+    }
 }
 
 /// The error branch of the response union, which is tried first.
@@ -1260,5 +1268,16 @@ mod tests {
         assert!(JsBigInt::parse("-0x1").is_none());
         assert!(JsBigInt::parse("1e3").is_none());
         assert!(JsBigInt::parse("-5").unwrap().negative);
+    }
+    #[tokio::test]
+    async fn round1_canton_text_parser_rejects_broad_small_json() {
+        let body = format!(
+            "[{}]",
+            std::iter::repeat_n(r#"{"k":null}"#, 200_000)
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        assert!(body.len() < 4 * 1024 * 1024);
+        assert!(parse_body("GET", 200, &body).await.is_err());
     }
 }

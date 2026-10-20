@@ -66,7 +66,8 @@ fn resources(chains: Vec<String>, cap: usize) -> Arc<ExecutionResources> {
     Arc::new(ExecutionResources {
         signing: FairBudget::new(lanes.clone(), limits).unwrap(),
         rpc,
-        kms: FairBudget::new(lanes, limits).unwrap(),
+        kms: FairBudget::new(lanes.clone(), limits).unwrap(),
+        parser: FairBudget::new(lanes, limits).unwrap(),
     })
 }
 fn artifact(name: &str, value: Value) {

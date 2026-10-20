@@ -391,7 +391,8 @@ async fn drain_grace_closes_all_budgets_and_keeps_started_external_work_unknown(
     let resources = Arc::new(ExecutionResources {
         signing: FairBudget::new(lanes.clone(), limits).unwrap(),
         rpc: FairBudget::new(lanes.clone(), limits).unwrap(),
-        kms: FairBudget::new(lanes, limits).unwrap(),
+        kms: FairBudget::new(lanes.clone(), limits).unwrap(),
+        parser: FairBudget::new(lanes, limits).unwrap(),
     });
     let mut first = resources
         .rpc

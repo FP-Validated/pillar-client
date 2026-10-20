@@ -277,6 +277,7 @@ impl PillarMetrics {
                 ("sign", &resources.signing),
                 ("rpc", &resources.rpc),
                 ("kms", &resources.kms),
+                ("parser", &resources.parser),
             ] {
                 let totals = budget.totals();
                 lines.push(format!(

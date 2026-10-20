@@ -35,8 +35,34 @@ use std::sync::{Arc, Mutex};
 type RecordedJsonCall = (String, HashMap<String, String>, Value);
 type RecordedJsonCalls = Arc<Mutex<Vec<RecordedJsonCall>>>;
 
+fn round1_artifact(name: &str, value: Value) {
+    static RUN: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+        format!(
+            "round1-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        )
+    });
+    let root = std::env::var_os("PILLAR_E2E_ARTIFACT_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../local/e2e-runs")
+        });
+    let directory = root.join(&*RUN);
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join(format!("{name}.json"));
+    std::fs::write(&path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+    println!("artifact: {}", path.display());
+}
+
 mod canton_ledger_tests;
 mod canton_sequencer_tests;
+mod round1_memory_budget_e2e;
+mod round1_parser_admission_e2e;
+mod round1_resource_e2e;
 mod stellar_payload_signed_tests;
 mod stellar_provenance_tests;
 mod support_app;

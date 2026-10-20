@@ -123,6 +123,26 @@ pub(crate) fn parse_solana_transaction_from_observation(
     Ok(TransactionFromObservation { fingerprint, from })
 }
 
+pub(crate) fn canonical_json_fingerprint<T: serde::Serialize + ?Sized>(
+    value: &T,
+) -> Result<String, AppCoreError> {
+    use sha2::Digest;
+    struct HashWriter(sha2::Sha256);
+    impl std::io::Write for HashWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.update(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut writer = HashWriter(sha2::Sha256::new());
+    serde_json::to_writer(&mut writer, value)
+        .map_err(|error| AppCoreError::Internal(error.to_string()))?;
+    Ok(hex::encode(writer.0.finalize()))
+}
+
 pub(crate) fn parse_transaction_from_observation(
     response: &Value,
 ) -> Result<TransactionFromObservation, AppCoreError> {

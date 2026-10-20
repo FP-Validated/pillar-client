@@ -269,6 +269,7 @@ impl ShutdownSignal {
             resources.signing.close();
             resources.rpc.close();
             resources.kms.close();
+            resources.parser.close();
         }
     }
     pub fn trigger(&self) {

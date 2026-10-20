@@ -231,13 +231,13 @@ where
         let body = Zeroizing::new(form.query().unwrap_or_default().to_string());
         let (status, text) = self
             .transport
-            .post_form(
+            .post_form_scoped(
                 self.config.token_url.clone(),
                 HashMap::new(),
                 body.to_string(),
             )
             .await
-            .map_err(AppCoreError::Internal)?;
+            .map_err(AppCoreError::from)?;
         if !(200..300).contains(&status) {
             let reason = reqwest::StatusCode::from_u16(status)
                 .ok()
@@ -252,9 +252,17 @@ where
                 "Client credentials token request failed: {status} {reason}{suffix}"
             )));
         }
-        let response: Value = serde_json::from_str(&text).map_err(|_| {
-            AppCoreError::Internal("Client credentials token response is not JSON".into())
-        })?;
+        let response = crate::provider_health::parse_bounded_json(text.as_bytes(), false)
+            .await
+            .map_err(|error| {
+                crate::provider_health::json_parser_local_error(&error)
+                    .map(AppCoreError::from)
+                    .unwrap_or_else(|| {
+                        AppCoreError::Internal(
+                            "Client credentials token response is not JSON".into(),
+                        )
+                    })
+            })?;
         // Stricter: upstream would send the ledger request without a token.
         let token = response
             .get("access_token")

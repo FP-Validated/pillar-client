@@ -122,6 +122,7 @@ fn resources() -> Arc<ExecutionResources> {
         .unwrap(),
         rpc: FairBudget::new(lanes(), limits).unwrap(),
         kms: FairBudget::new(lanes(), limits).unwrap(),
+        parser: FairBudget::new(lanes(), limits).unwrap(),
     })
 }
 

@@ -224,7 +224,10 @@ fn initia_event_matches(event: &Value, endpoint: &str) -> Option<Result<Value, S
         return None;
     }
     let data = values("data").next()?;
-    Some(serde_json::from_str(data).map_err(|error| format!("Invalid JSON in event data: {error}")))
+    Some(
+        crate::provider_health::parse_json_with_limits(data.as_bytes(), false)
+            .map_err(|error| format!("Invalid JSON in event data: {error}")),
+    )
 }
 
 /// Upstream's `getMatchingEventsInTransaction` over the event token of `token_version`:

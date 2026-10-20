@@ -1153,9 +1153,14 @@ fn move_view_result_values(response: &Value) -> Option<Vec<Value>> {
     let decoded = response
         .get("data")
         .and_then(Value::as_str)
-        .and_then(|data| serde_json::from_str::<Value>(data).ok());
-    let response = decoded.as_ref().unwrap_or(response);
-    response.as_array().cloned()
+        .and_then(|data| {
+            crate::provider_health::parse_json_with_limits(data.as_bytes(), false).ok()
+        });
+    match decoded {
+        Some(Value::Array(values)) => Some(values),
+        Some(_) => None,
+        None => response.as_array().cloned(),
+    }
 }
 
 fn initia_bcs_argument(value: &str, argument_type: &str) -> Option<String> {

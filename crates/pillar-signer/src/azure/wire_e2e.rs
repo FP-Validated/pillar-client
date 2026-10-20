@@ -437,6 +437,7 @@ async fn completion_reservation_obeys_kms_queue_before_writeahead() {
         signing: budget(),
         rpc: budget(),
         kms: budget(),
+        parser: budget(),
     });
     let mut holder = resources
         .kms

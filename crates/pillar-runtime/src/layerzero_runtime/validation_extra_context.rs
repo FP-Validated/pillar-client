@@ -282,12 +282,21 @@ where
                 AppCoreError::Internal(format!("Missing {chain_name} transaction sender"))
             })?
     };
-    let fingerprint = serde_json::to_string(&json!({
-        "hash": transaction.get("hash").or_else(|| transaction.get("txhash")),
-        "sender": from,
-        "events": transaction.get("events").or_else(|| transaction.get("logs")),
-    }))
-    .map_err(|error| AppCoreError::Internal(error.to_string()))?;
+    #[derive(serde::Serialize)]
+    struct MoveFingerprint<'a> {
+        hash: Option<&'a Value>,
+        sender: &'a str,
+        events: Option<&'a Value>,
+    }
+    let fingerprint = crate::provider_health::canonical_json_fingerprint(&MoveFingerprint {
+        hash: transaction
+            .get("hash")
+            .or_else(|| transaction.get("txhash")),
+        sender: &from,
+        events: transaction
+            .get("events")
+            .or_else(|| transaction.get("logs")),
+    })?;
     Ok(TransactionFromObservation { fingerprint, from })
 }
 
@@ -355,14 +364,21 @@ where
         .filter(|from| !from.is_empty())
         .ok_or_else(|| AppCoreError::Internal(format!("Missing {chain_name} transaction sender")))?
         .to_string();
-    let fingerprint = serde_json::to_string(&json!({
-        "digest": result.get("digest"),
-        "sender": from,
-        "checkpoint": result.get("checkpoint"),
-        "status": result.pointer("/effects/status/status"),
-        "transaction": result.pointer("/transaction/data/transaction"),
-    }))
-    .map_err(|error| AppCoreError::Internal(error.to_string()))?;
+    #[derive(serde::Serialize)]
+    struct SuiFingerprint<'a> {
+        digest: Option<&'a Value>,
+        sender: &'a str,
+        checkpoint: Option<&'a Value>,
+        status: Option<&'a Value>,
+        transaction: Option<&'a Value>,
+    }
+    let fingerprint = crate::provider_health::canonical_json_fingerprint(&SuiFingerprint {
+        digest: result.get("digest"),
+        sender: &from,
+        checkpoint: result.get("checkpoint"),
+        status: result.pointer("/effects/status/status"),
+        transaction: result.pointer("/transaction/data/transaction"),
+    })?;
     Ok(TransactionFromObservation { fingerprint, from })
 }
 
@@ -458,12 +474,18 @@ where
             AppCoreError::Internal("Missing Stellar transaction envelopeXdr".to_string())
         })?;
     let from = stellar_transaction_source_from_envelope_xdr(envelope_xdr)?;
-    let fingerprint = serde_json::to_string(&json!({
-        "status": status,
-        "ledger": result.get("ledger"),
-        "envelopeXdr": envelope_xdr,
-    }))
-    .map_err(|error| AppCoreError::Internal(error.to_string()))?;
+    #[derive(serde::Serialize)]
+    struct StellarFingerprint<'a> {
+        status: &'a str,
+        ledger: Option<&'a Value>,
+        #[serde(rename = "envelopeXdr")]
+        envelope_xdr: &'a str,
+    }
+    let fingerprint = crate::provider_health::canonical_json_fingerprint(&StellarFingerprint {
+        status,
+        ledger: result.get("ledger"),
+        envelope_xdr,
+    })?;
     Ok(TransactionFromObservation { fingerprint, from })
 }
 

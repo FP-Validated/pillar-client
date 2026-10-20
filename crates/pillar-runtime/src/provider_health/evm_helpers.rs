@@ -178,7 +178,7 @@ impl EvmTransactionReceipt {
 }
 
 pub(crate) fn evm_receipt_fingerprint(receipt: &EvmTransactionReceipt) -> Result<String, String> {
-    serde_json::to_string(receipt).map_err(|error| error.to_string())
+    super::canonical_json_fingerprint(receipt).map_err(|error| error.to_string())
 }
 
 pub(crate) fn normalize_address_map(map: HashMap<String, String>) -> HashMap<String, String> {

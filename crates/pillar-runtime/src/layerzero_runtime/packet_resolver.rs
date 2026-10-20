@@ -200,11 +200,22 @@ where
         }
         let mut accumulator = ExactQuorumAccumulator::new(quorum, 0..provider_config.uris.len());
         while let Some((index, response)) = requests.next().await {
-            let observation = provider_response(response).map(|response| {
+            let observation = provider_response(response).and_then(|response| {
                 response
-                    .and_then(|value| serde_json::to_string(&value).ok().map(|key| (key, value)))
+                    .map(|value| {
+                        crate::provider_health::canonical_json_fingerprint(&value)
+                            .map(|fingerprint| (fingerprint, value))
+                            .map_err(|error| RpcError::Remote(error.to_string()))
+                    })
+                    .transpose()
             });
-            accumulator.record_result(index, observation)?;
+            match observation {
+                Ok(Some((fingerprint, value))) => {
+                    accumulator.record_json_result(index, fingerprint, value)?;
+                }
+                Ok(None) => accumulator.record_result(index, Ok(None))?,
+                Err(error) => accumulator.record_result(index, Err(error))?,
+            }
             if let Some(value) = accumulator.unambiguous_result() {
                 return Ok(value);
             }
@@ -244,11 +255,22 @@ where
         }
         let mut accumulator = ExactQuorumAccumulator::new(quorum, 0..provider_config.uris.len());
         while let Some((index, response)) = requests.next().await {
-            let observation = provider_response(response).map(|response| {
+            let observation = provider_response(response).and_then(|response| {
                 response
-                    .and_then(|value| serde_json::to_string(&value).ok().map(|key| (key, value)))
+                    .map(|value| {
+                        crate::provider_health::canonical_json_fingerprint(&value)
+                            .map(|fingerprint| (fingerprint, value))
+                            .map_err(|error| RpcError::Remote(error.to_string()))
+                    })
+                    .transpose()
             });
-            accumulator.record_result(index, observation)?;
+            match observation {
+                Ok(Some((fingerprint, value))) => {
+                    accumulator.record_json_result(index, fingerprint, value)?;
+                }
+                Ok(None) => accumulator.record_result(index, Ok(None))?,
+                Err(error) => accumulator.record_result(index, Err(error))?,
+            }
             if let Some(value) = accumulator.unambiguous_result() {
                 return Ok(value);
             }
@@ -491,7 +513,8 @@ where
             let quorum = required_provider_quorum(provider_config, chain_name)?;
             let method = body.get("method").and_then(Value::as_str);
             let receipt_expected_tx_hash = (method == Some("eth_getTransactionReceipt"))
-                .then(|| body.pointer("/params/0").and_then(Value::as_str)).flatten();
+                .then(|| body.pointer("/params/0").and_then(Value::as_str))
+                .flatten();
             let stellar_transaction = chain_name == "stellar" && method == Some("getTransaction");
             let mut requests = FuturesUnordered::new();
             for (index, uri) in provider_config.uris.iter().enumerate() {
@@ -528,24 +551,30 @@ where
                                         Ok((fingerprint, value))
                                     })
                             } else if stellar_transaction {
-                                let fields = json!({
-                                    "status": result.get("status"),
-                                    "ledger": result.get("ledger"),
-                                    "envelopeXdr": result.get("envelopeXdr"),
-                                    "contractEventsXdr": result.pointer("/events/contractEventsXdr"),
-                                });
-                                serde_json::to_string(&fields)
+                                let fields = (
+                                    result.get("status"),
+                                    result.get("ledger"),
+                                    result.get("envelopeXdr"),
+                                    result.pointer("/events/contractEventsXdr"),
+                                );
+                                crate::provider_health::canonical_json_fingerprint(&fields)
                                     .map(|fingerprint| (fingerprint, result))
                                     .map_err(|error| RpcError::Remote(error.to_string()))
                             } else {
-                                serde_json::to_string(&result)
+                                crate::provider_health::canonical_json_fingerprint(&result)
                                     .map(|fingerprint| (fingerprint, result))
                                     .map_err(|error| RpcError::Remote(error.to_string()))
                             }
                         })
                         .transpose()
                 });
-                accumulator.record_result(index, observation)?;
+                match observation {
+                    Ok(Some((fingerprint, value))) => {
+                        accumulator.record_json_result(index, fingerprint, value)?;
+                    }
+                    Ok(None) => accumulator.record_result(index, Ok(None))?,
+                    Err(error) => accumulator.record_result(index, Err(error))?,
+                }
                 if let Some(result) = accumulator.unambiguous_result() {
                     return Ok(result);
                 }
@@ -868,7 +897,13 @@ where
     }
     let mut accumulator = ExactQuorumAccumulator::new(quorum, dispatched);
     while let Some((index, observation)) = requests.next().await {
-        accumulator.record_result(index, observation)?;
+        match observation {
+            Ok(Some((fingerprint, value))) => {
+                accumulator.record_json_result(index, fingerprint, value)?;
+            }
+            Ok(None) => accumulator.record_result(index, Ok(None))?,
+            Err(error) => accumulator.record_result(index, Err(error))?,
+        }
         if let Some(value) = accumulator.unambiguous_result() {
             return Ok(value);
         }
@@ -1467,11 +1502,22 @@ where
         }
         let mut accumulator = ExactQuorumAccumulator::new(quorum, 0..provider_config.uris.len());
         while let Some((index, response)) = requests.next().await {
-            let observation = provider_response(response).map(|response| {
+            let observation = provider_response(response).and_then(|response| {
                 response
-                    .and_then(|value| serde_json::to_string(&value).ok().map(|key| (key, value)))
+                    .map(|value| {
+                        crate::provider_health::canonical_json_fingerprint(&value)
+                            .map(|fingerprint| (fingerprint, value))
+                            .map_err(|error| RpcError::Remote(error.to_string()))
+                    })
+                    .transpose()
             });
-            accumulator.record_result(index, observation)?;
+            match observation {
+                Ok(Some((fingerprint, value))) => {
+                    accumulator.record_json_result(index, fingerprint, value)?;
+                }
+                Ok(None) => accumulator.record_result(index, Ok(None))?,
+                Err(error) => accumulator.record_result(index, Err(error))?,
+            }
             if let Some(value) = accumulator.unambiguous_result() {
                 return Ok(value);
             }

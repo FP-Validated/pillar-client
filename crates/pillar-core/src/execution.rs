@@ -544,6 +544,7 @@ pub struct ExecutionResources {
     pub signing: FairBudget,
     pub rpc: FairBudget,
     pub kms: FairBudget,
+    pub parser: FairBudget,
 }
 #[derive(Clone)]
 pub struct RequestContext {

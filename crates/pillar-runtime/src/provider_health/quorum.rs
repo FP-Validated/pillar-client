@@ -4,8 +4,141 @@ use pillar_config::provider_validation::{
     canonical_strategy_key, is_strategy_satisfiable, is_trivial_strategy,
     min_providers_for_strategy, order_providers_for_quorum, voter_entities, OrderableProvider,
 };
-use std::collections::{BTreeMap, BTreeSet};
-use std::future::Future;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    future::Future,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, LazyLock,
+    },
+};
+
+const MAX_JSON_QUORUM_CANDIDATE_BYTES: usize = 64 * 1024 * 1024;
+const MAX_JSON_RETAINED_VALUE_BYTES: usize = 8 * 1024 * 1024;
+static JSON_QUORUM_BUDGET: LazyLock<JsonQuorumBudget> =
+    LazyLock::new(|| JsonQuorumBudget::new(MAX_JSON_QUORUM_CANDIDATE_BYTES));
+
+#[derive(Clone)]
+pub(crate) struct JsonQuorumBudget {
+    limit: usize,
+    used: Arc<AtomicUsize>,
+}
+
+impl JsonQuorumBudget {
+    pub(crate) fn new(limit: usize) -> Self {
+        Self {
+            limit,
+            used: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn used(&self) -> usize {
+        self.used.load(Ordering::Acquire)
+    }
+
+    fn reserve(&self, bytes: usize) -> Option<JsonMemoryLease> {
+        let mut current = self.used.load(Ordering::Acquire);
+        loop {
+            let next = current.checked_add(bytes)?;
+            if next > self.limit {
+                return None;
+            }
+            match self.used.compare_exchange_weak(
+                current,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    return Some(JsonMemoryLease {
+                        bytes,
+                        used: self.used.clone(),
+                    });
+                }
+                Err(observed) => current = observed,
+            }
+        }
+    }
+    fn grow(&self, lease: &mut JsonMemoryLease, bytes: usize) -> bool {
+        if !Arc::ptr_eq(&self.used, &lease.used) {
+            return false;
+        }
+        if bytes <= lease.bytes {
+            return true;
+        }
+        let delta = bytes - lease.bytes;
+        let mut current = self.used.load(Ordering::Acquire);
+        loop {
+            let Some(next) = current.checked_add(delta) else {
+                return false;
+            };
+            if next > self.limit {
+                return false;
+            }
+            match self.used.compare_exchange_weak(
+                current,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    lease.bytes = bytes;
+                    return true;
+                }
+                Err(observed) => current = observed,
+            }
+        }
+    }
+}
+
+struct JsonMemoryLease {
+    bytes: usize,
+    used: Arc<AtomicUsize>,
+}
+
+impl Drop for JsonMemoryLease {
+    fn drop(&mut self) {
+        self.used.fetch_sub(self.bytes, Ordering::AcqRel);
+    }
+}
+
+fn estimate_json_retained_bytes(value: &Value, fingerprint_bytes: usize) -> Option<usize> {
+    let mut total = fingerprint_bytes.checked_add(128)?;
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        total = total.checked_add(128)?;
+        match value {
+            Value::Array(values) => {
+                total = total.checked_add(
+                    values
+                        .capacity()
+                        .checked_mul(std::mem::size_of::<Value>())?,
+                )?;
+                pending.extend(values);
+            }
+            Value::Object(values) => {
+                total = total.checked_add(values.len().checked_mul(128)?)?;
+                for (key, child) in values {
+                    total = total.checked_add(key.capacity())?;
+                    pending.push(child);
+                }
+            }
+            Value::String(text) => total = total.checked_add(text.capacity())?,
+            Value::Null | Value::Bool(_) | Value::Number(_) => {}
+        }
+        if total > MAX_JSON_RETAINED_VALUE_BYTES {
+            return None;
+        }
+    }
+    Some(total)
+}
+
+struct QuorumCandidate<T> {
+    indices: BTreeSet<usize>,
+    value: T,
+    lease: Option<JsonMemoryLease>,
+}
 
 /// What a set of agreeing providers must amount to: the chain's resolved strategy over the
 /// distinct `(category, entity)` pairs those providers vote as. Two URIs of one entity are
@@ -32,22 +165,17 @@ impl<'a> QuorumRule<'a> {
     }
 }
 
-/// Exact-agreement quorum over one dispatched provider set. A response is accepted only
-/// when its voters meet the rule and no other response - recorded or still pending - could
-/// also meet it; otherwise the set is ambiguous and the call fails closed.
+/// Exact-agreement quorum over one dispatched provider set. One retained value is kept per
+/// fingerprint, so agreeing URLs do not retain redundant copies.
 pub(crate) struct ExactQuorumAccumulator<'a, T> {
     rule: QuorumRule<'a>,
     pending: BTreeSet<usize>,
     error_count: usize,
     deferred: Option<pillar_core::execution::BudgetError>,
-    voters: BTreeMap<String, BTreeSet<usize>>,
-    successful: BTreeMap<usize, (String, T)>,
+    voters: BTreeMap<String, QuorumCandidate<T>>,
 }
 
-impl<'a, T> ExactQuorumAccumulator<'a, T>
-where
-    T: Clone,
-{
+impl<'a, T> ExactQuorumAccumulator<'a, T> {
     /// `dispatched` names the provider indices whose answers will be recorded.
     pub(crate) fn new(rule: QuorumRule<'a>, dispatched: impl IntoIterator<Item = usize>) -> Self {
         Self {
@@ -56,26 +184,43 @@ where
             error_count: 0,
             deferred: None,
             voters: BTreeMap::new(),
-            successful: BTreeMap::new(),
         }
     }
 
     pub(crate) fn record(&mut self, index: usize, observation: Option<(String, T)>) {
         self.pending.remove(&index);
         match observation {
-            Some((fingerprint, value)) => {
-                self.voters
-                    .entry(fingerprint.clone())
-                    .or_default()
-                    .insert(index);
-                self.successful.insert(index, (fingerprint, value));
-            }
+            Some((fingerprint, value)) => match self.voters.entry(fingerprint) {
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert(QuorumCandidate {
+                        indices: BTreeSet::from([index]),
+                        value,
+                        lease: None,
+                    });
+                }
+                std::collections::btree_map::Entry::Occupied(mut entry) => {
+                    let candidate = entry.get_mut();
+                    if candidate
+                        .indices
+                        .first()
+                        .is_some_and(|first| index < *first)
+                    {
+                        candidate.value = value;
+                    }
+                    candidate.indices.insert(index);
+                }
+            },
             None => self.error_count += 1,
         }
     }
+
     pub(crate) fn successful_voter_count(&self) -> usize {
-        self.successful.len()
+        self.voters
+            .values()
+            .map(|candidate| candidate.indices.len())
+            .sum()
     }
+
     pub(crate) fn record_result(
         &mut self,
         index: usize,
@@ -99,12 +244,12 @@ where
     fn candidates(&self) -> Vec<&String> {
         self.voters
             .iter()
-            .filter(|(_, indices)| self.rule.is_met_by(*indices))
+            .filter(|(_, candidate)| self.rule.is_met_by(&candidate.indices))
             .map(|(fingerprint, _)| fingerprint)
             .collect()
     }
 
-    pub(crate) fn unambiguous_result(&self) -> Option<T> {
+    pub(crate) fn unambiguous_result(&mut self) -> Option<T> {
         let candidates = self.candidates();
         let [candidate] = candidates.as_slice() else {
             return None;
@@ -112,20 +257,23 @@ where
         // A response not seen yet could still meet the rule from pending providers alone,
         // or join one already recorded.
         if self.rule.is_met_by(&self.pending)
-            || self.voters.iter().any(|(fingerprint, indices)| {
+            || self.voters.iter().any(|(fingerprint, vote)| {
                 fingerprint != *candidate
-                    && self.rule.is_met_by(indices.iter().chain(&self.pending))
+                    && self
+                        .rule
+                        .is_met_by(vote.indices.iter().chain(&self.pending))
             })
         {
             return None;
         }
-        self.successful
-            .values()
-            .find(|(fingerprint, _)| fingerprint == *candidate)
-            .map(|(_, value)| value.clone())
+        let fingerprint = (*candidate).clone();
+        drop(candidates);
+        self.voters
+            .remove(&fingerprint)
+            .map(|candidate| candidate.value)
     }
 
-    pub(crate) fn finish(self, context: &str) -> Result<T, AppCoreError> {
+    pub(crate) fn finish(mut self, context: &str) -> Result<T, AppCoreError> {
         let incomplete = || {
             AppCoreError::Internal(format!(
                 "No {context} quorum: response set is ambiguous or incomplete; {} distinct successful responses, {} errors",
@@ -142,12 +290,93 @@ where
             }
             return Err(incomplete());
         };
-        let candidate = (*candidate).clone();
-        let error = incomplete();
-        self.successful
-            .into_values()
-            .find_map(|(fingerprint, value)| (fingerprint == candidate).then_some(value))
-            .ok_or(error)
+        let fingerprint = (*candidate).clone();
+        drop(candidates);
+        Ok(self
+            .voters
+            .remove(&fingerprint)
+            .expect("quorum candidate selected from this map")
+            .value)
+    }
+}
+
+impl<'a> ExactQuorumAccumulator<'a, Value> {
+    pub(crate) fn record_json_result(
+        &mut self,
+        index: usize,
+        fingerprint: String,
+        value: Value,
+    ) -> Result<bool, AppCoreError> {
+        self.record_json_result_with_budget(index, fingerprint, value, &JSON_QUORUM_BUDGET)
+    }
+
+    pub(crate) fn record_json_result_with_budget(
+        &mut self,
+        index: usize,
+        fingerprint: String,
+        value: Value,
+        budget: &JsonQuorumBudget,
+    ) -> Result<bool, AppCoreError> {
+        let replacing = self
+            .voters
+            .get(&fingerprint)
+            .is_none_or(|candidate| candidate.indices.first().is_none_or(|first| index < *first));
+        let Some(bytes) = estimate_json_retained_bytes(&value, fingerprint.len()) else {
+            self.record_result(
+                index,
+                Err(RpcError::Remote(
+                    "Provider JSON response exceeds retained value limit".to_string(),
+                )),
+            )?;
+            return Ok(false);
+        };
+        if !replacing {
+            self.record(index, Some((fingerprint, value)));
+            return Ok(true);
+        }
+        let covered = self
+            .voters
+            .get(&fingerprint)
+            .and_then(|candidate| candidate.lease.as_ref())
+            .is_some_and(|lease| Arc::ptr_eq(&budget.used, &lease.used) && bytes <= lease.bytes);
+        if covered {
+            self.record(index, Some((fingerprint, value)));
+            return Ok(true);
+        }
+        let grew = self
+            .voters
+            .get_mut(&fingerprint)
+            .and_then(|candidate| candidate.lease.as_mut())
+            .is_some_and(|lease| budget.grow(lease, bytes));
+        if grew {
+            self.record(index, Some((fingerprint, value)));
+            return Ok(true);
+        }
+        let has_lease = self
+            .voters
+            .get(&fingerprint)
+            .is_some_and(|candidate| candidate.lease.is_some());
+        if has_lease {
+            self.record_result(
+                index,
+                Err(RpcError::Admission(
+                    pillar_core::execution::BudgetError::Overloaded,
+                )),
+            )?;
+            return Ok(false);
+        }
+        let Some(lease) = budget.reserve(bytes) else {
+            self.record_result(
+                index,
+                Err(RpcError::Admission(
+                    pillar_core::execution::BudgetError::Overloaded,
+                )),
+            )?;
+            return Ok(false);
+        };
+        self.record(index, Some((fingerprint.clone(), value)));
+        self.voters.get_mut(&fingerprint).unwrap().lease = Some(lease);
+        Ok(true)
     }
 }
 

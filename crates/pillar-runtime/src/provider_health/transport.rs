@@ -1,8 +1,22 @@
 use super::*;
-use std::future::Future;
+use std::{future::Future, sync::LazyLock};
 
 const MAX_JSON_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_PAGINATED_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
+// Non-TON responses: ~60x the largest recorded one (Solana 2,150), ~3,000 EVM logs.
+const MAX_JSON_PARSE_NODES: usize = 128 * 1024;
+// A 512-transaction TON trace (the preflight node cap) costs ~443k within the wire limit.
+const MAX_TON_JSON_PARSE_NODES: usize = 512 * 1024;
+const MAX_JSON_STRING_BYTES: usize = MAX_JSON_RESPONSE_BYTES;
+const MAX_JSON_NESTING: usize = 512;
+const MAX_CONCURRENT_JSON_PARSERS: usize = 4;
+const MAX_WAITING_JSON_PARSERS: usize = 8;
+const JSON_PARSER_OVERLOADED: &str = "Provider JSON parser capacity exhausted";
+const JSON_PARSER_CLOSED: &str = "Provider JSON parser is draining";
+const JSON_PARSER_UNKNOWN_LANE: &str = "Provider JSON parser lane is not configured";
+static JSON_PARSE_WAITERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static JSON_PARSE_SLOTS: LazyLock<std::sync::Arc<tokio::sync::Semaphore>> =
+    LazyLock::new(|| std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_JSON_PARSERS)));
 #[derive(Clone, Debug)]
 pub enum RpcError {
     Admission(pillar_core::execution::BudgetError),
@@ -110,6 +124,15 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
             "form POST is not supported by this transport: {url}"
         ))
     }
+    async fn post_form_scoped(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+        body: String,
+    ) -> Result<(u16, String), RpcError> {
+        let target = rpc_target_for_call()?;
+        limited_rpc(&target, self.post_form(url, headers, body)).await
+    }
 
     async fn post_json_on(
         &self,
@@ -150,11 +173,12 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
             let mut cursor = Value::Null;
             let mut events = Vec::new();
             let mut response_bytes = 0usize;
+            let mut structural_units = 0usize;
             for page in 0..21 {
                 page_body["params"][1] = cursor.clone();
                 page_body["params"][2] = Value::from(50);
                 page_body["params"][3] = Value::Bool(false);
-                let response = limited_rpc(
+                let mut response = limited_rpc(
                     &target,
                     self.post_json(url.clone(), headers.clone(), page_body.clone()),
                 )
@@ -166,7 +190,10 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
                 if let Some(error) = response.get("error") {
                     return Err(RpcError::Remote(error.to_string()));
                 }
-                let Some(items) = response.pointer("/result/data").and_then(Value::as_array) else {
+                let Some(items) = response
+                    .pointer_mut("/result/data")
+                    .and_then(Value::as_array_mut)
+                else {
                     return Ok(response);
                 };
                 if let Some(expected) = body
@@ -179,7 +206,13 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
                         return Err(RpcError::Remote("IOTA transaction digest mismatch".into()));
                     }
                 }
-                events.extend(items.iter().cloned());
+                structural_units = accumulate_paginated_structural_cost(structural_units, items)
+                    .ok_or_else(|| {
+                        RpcError::Remote(format!(
+                            "IOTA transaction events exceed {MAX_JSON_PARSE_NODES} structural parse-cost units"
+                        ))
+                    })?;
+                events.append(items);
                 if events.len() > 1024 {
                     return Err(RpcError::Remote(
                         "IOTA transaction exceeds 1024 events".into(),
@@ -232,11 +265,12 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
                 let mut nodes = Vec::new();
                 let mut after: Option<String> = None;
                 let mut response_bytes = 0usize;
+                let mut structural_units = 0usize;
                 for page in 0..21 {
                     let (_, page_query) = super::sui_graphql::request(&body, after.as_deref())
                         .ok_or(RpcError::Unavailable)?;
                     query = page_query;
-                    let response = limited_rpc(
+                    let mut response = limited_rpc(
                         &target,
                         self.post_json(url.clone(), headers.clone(), query.clone()),
                     )
@@ -266,12 +300,21 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
                         }
                     }
                     let Some(page_nodes) = response
-                        .pointer("/data/transaction/effects/events/nodes")
-                        .and_then(Value::as_array)
+                        .pointer_mut("/data/transaction/effects/events/nodes")
+                        .and_then(Value::as_array_mut)
                     else {
                         return Ok(super::sui_graphql::response(&method, response));
                     };
-                    nodes.extend(page_nodes.iter().cloned());
+                    let Some(units) =
+                        accumulate_paginated_structural_cost(structural_units, page_nodes)
+                    else {
+                        return Ok(super::sui_graphql::response(
+                            &method,
+                            json!({"errors":[{"message":format!("Sui transaction events exceed {MAX_JSON_PARSE_NODES} structural parse-cost units")}]}),
+                        ));
+                    };
+                    structural_units = units;
+                    nodes.append(page_nodes);
                     if nodes.len() > 1024 {
                         return Ok(super::sui_graphql::response(
                             &method,
@@ -406,17 +449,23 @@ async fn limited_rpc<T, F: Future<Output = Result<T, String>>>(
         } else {
             DEFAULT_RPC_TIMEOUT
         };
-    let result = within_deadline(maximum, future).await;
+    let result = super::rpc_context::rpc_scope(chain, within_deadline(maximum, future)).await;
     if let Some(permit) = &mut permit {
         permit.finish(match &result {
             Ok(Ok(_)) => Outcome::Success,
-            Ok(Err(_)) => Outcome::Error,
+            Ok(Err(error)) => match json_parser_local_error(error) {
+                Some(RpcError::Admission(pillar_core::execution::BudgetError::Closed)) => {
+                    Outcome::Shutdown
+                }
+                Some(RpcError::Admission(_)) => Outcome::Overloaded,
+                _ => Outcome::Error,
+            },
             Err(_) => Outcome::TimedOut,
         });
     }
     result
         .map_err(|_| RpcError::Remote("provider response timed out".into()))?
-        .map_err(RpcError::Remote)
+        .map_err(|error| json_parser_local_error(&error).unwrap_or(RpcError::Remote(error)))
 }
 
 #[async_trait]
@@ -452,31 +501,37 @@ impl AwsSdkLambdaInvokeClient {
 #[async_trait]
 impl AwsLambdaInvokeClient for AwsSdkLambdaInvokeClient {
     async fn invoke_json(&self, function_name: &str, payload: Value) -> Result<Value, String> {
-        let payload = serde_json::to_vec(&payload)
-            .map_err(|error| format!("Invalid Lambda payload: {error}"))?;
-        let response = self
-            .client
-            .invoke()
-            .function_name(function_name)
-            .payload(aws_sdk_lambda::primitives::Blob::new(payload))
-            .send()
-            .await
-            .map_err(|error| error.to_string())?;
-        if response.function_error().is_some() {
-            return Err("Lambda invocation reported a function error".to_string());
+        let mut permit = acquire_json_parse_slot().await?;
+        let result = async {
+            let payload = serde_json::to_vec(&payload)
+                .map_err(|error| format!("Invalid Lambda payload: {error}"))?;
+            let response = self
+                .client
+                .invoke()
+                .function_name(function_name)
+                .payload(aws_sdk_lambda::primitives::Blob::new(payload))
+                .send()
+                .await
+                .map_err(|error| error.to_string())?;
+            if response.function_error().is_some() {
+                return Err("Lambda invocation reported a function error".to_string());
+            }
+            if !(200..300).contains(&response.status_code()) {
+                return Err("Lambda invocation returned a non-success status".to_string());
+            }
+            let Some(payload) = response.payload else {
+                return Ok(Value::Null);
+            };
+            if payload.as_ref().len() > MAX_JSON_RESPONSE_BYTES {
+                return Err(format!(
+                    "Lambda JSON response exceeds {MAX_JSON_RESPONSE_BYTES} byte limit"
+                ));
+            }
+            parse_json_with_limits(payload.as_ref(), false)
         }
-        if !(200..300).contains(&response.status_code()) {
-            return Err("Lambda invocation returned a non-success status".to_string());
-        }
-        let Some(payload) = response.payload else {
-            return Ok(Value::Null);
-        };
-        if payload.as_ref().len() > MAX_JSON_RESPONSE_BYTES {
-            return Err(format!(
-                "Lambda JSON response exceeds {MAX_JSON_RESPONSE_BYTES} byte limit"
-            ));
-        }
-        serde_json::from_slice(payload.as_ref()).map_err(|error| error.to_string())
+        .await;
+        permit.finish(&result);
+        result
     }
 }
 
@@ -607,59 +662,55 @@ pub(crate) fn is_http_not_found(error: &RpcError) -> bool {
 /// undici's message for a request that never got a response (`TypeError: fetch failed`).
 pub(crate) const FETCH_FAILED: &str = "fetch failed";
 
-/// `await response.text()`: the body decoded as UTF-8 with replacement and a leading BOM
-/// dropped, under the same byte ceiling as a JSON response.
 async fn bounded_text_response(response: reqwest::Response) -> Result<(u16, String), String> {
-    let status = response.status().as_u16();
-    if response
-        .content_length()
-        .is_some_and(|length| length > MAX_JSON_RESPONSE_BYTES as u64)
-    {
-        return Err(format!(
-            "Provider JSON response exceeds {MAX_JSON_RESPONSE_BYTES} byte limit"
-        ));
+    let mut permit = acquire_json_parse_slot().await?;
+    let result = async {
+        let status = response.status().as_u16();
+        let bytes = bounded_response_bytes(response).await?;
+        let text = String::from_utf8_lossy(&bytes);
+        Ok((
+            status,
+            text.strip_prefix('\u{feff}').unwrap_or(&text).to_string(),
+        ))
     }
-    let mut bytes = Vec::new();
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|_| "terminated".to_string())?;
-        extend_bounded_json(&mut bytes, &chunk)?;
-    }
-    let text = String::from_utf8_lossy(&bytes);
-    Ok((
-        status,
-        text.strip_prefix('\u{feff}').unwrap_or(&text).to_string(),
-    ))
+    .await;
+    permit.finish(&result);
+    result
 }
 
 async fn bounded_json_response(response: reqwest::Response) -> Result<Value, String> {
-    let status = response.status();
-    if !status.is_success() {
-        return Err(format!("Provider returned HTTP {status}"));
+    let mut permit = acquire_json_parse_slot().await?;
+    let result = async {
+        let status = response.status();
+        if !status.is_success() {
+            return Err(format!("Provider returned HTTP {status}"));
+        }
+        let bytes = bounded_response_bytes(response).await?;
+        parse_json_with_limits(&bytes, false)
     }
-    if response
-        .content_length()
-        .is_some_and(|length| length > MAX_JSON_RESPONSE_BYTES as u64)
-    {
-        return Err(format!(
-            "Provider JSON response exceeds {MAX_JSON_RESPONSE_BYTES} byte limit"
-        ));
-    }
-    let mut bytes = Vec::new();
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|error| error.without_url().to_string())?;
-        extend_bounded_json(&mut bytes, &chunk)?;
-    }
-    serde_json::from_slice(&bytes).map_err(|error| error.to_string())
+    .await;
+    permit.finish(&result);
+    result
 }
-const MAX_TON_JSON_DEPTH: usize = 512;
+
+const MAX_TON_JSON_DEPTH: usize = MAX_JSON_NESTING;
 
 async fn bounded_ton_json_response(response: reqwest::Response) -> Result<Value, String> {
-    let status = response.status();
-    if !status.is_success() {
-        return Err(format!("Provider returned HTTP {status}"));
+    let mut permit = acquire_json_parse_slot().await?;
+    let result = async {
+        let status = response.status();
+        if !status.is_success() {
+            return Err(format!("Provider returned HTTP {status}"));
+        }
+        let bytes = bounded_response_bytes(response).await?;
+        parse_json_with_limits(&bytes, true)
     }
+    .await;
+    permit.finish(&result);
+    result
+}
+
+async fn bounded_response_bytes(response: reqwest::Response) -> Result<Vec<u8>, String> {
     if response
         .content_length()
         .is_some_and(|length| length > MAX_JSON_RESPONSE_BYTES as u64)
@@ -674,9 +725,140 @@ async fn bounded_ton_json_response(response: reqwest::Response) -> Result<Value,
         let chunk = chunk.map_err(|error| error.without_url().to_string())?;
         extend_bounded_json(&mut bytes, &chunk)?;
     }
-    ensure_json_depth(&bytes, MAX_TON_JSON_DEPTH)?;
+    Ok(bytes)
+}
 
-    let mut deserializer = serde_json::Deserializer::from_slice(&bytes);
+pub(crate) fn json_parser_local_error(error: &str) -> Option<RpcError> {
+    use pillar_core::execution::BudgetError;
+    match error {
+        JSON_PARSER_OVERLOADED => Some(RpcError::Admission(BudgetError::Overloaded)),
+        JSON_PARSER_CLOSED => Some(RpcError::Admission(BudgetError::Closed)),
+        JSON_PARSER_UNKNOWN_LANE => Some(RpcError::Configuration(
+            "JSON parser target lane is not configured",
+        )),
+        "RPC target provenance is missing" => {
+            Some(RpcError::Configuration("RPC target provenance is missing"))
+        }
+        _ => None,
+    }
+}
+
+struct JsonParseWaiter;
+
+impl Drop for JsonParseWaiter {
+    fn drop(&mut self) {
+        JSON_PARSE_WAITERS.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    }
+}
+
+struct JsonParsePermit {
+    budget: Option<pillar_core::execution::BudgetPermit>,
+    _global: tokio::sync::OwnedSemaphorePermit,
+}
+
+impl JsonParsePermit {
+    fn finish<T>(&mut self, result: &Result<T, String>) {
+        if let Some(budget) = &mut self.budget {
+            budget.finish(if result.is_ok() {
+                pillar_core::execution::Outcome::Success
+            } else {
+                pillar_core::execution::Outcome::Error
+            });
+        }
+    }
+}
+
+async fn acquire_json_parse_slot() -> Result<JsonParsePermit, String> {
+    use pillar_core::execution::{current, BudgetError};
+    let context = current();
+    if let Some(resources) = context
+        .as_ref()
+        .and_then(|context| context.resources.as_ref())
+    {
+        let lane = match context
+            .as_ref()
+            .and_then(|context| context.source_chain.as_deref())
+        {
+            Some(source) if source != "background" => super::rpc_context::rpc_target()
+                .ok_or_else(|| "RPC target provenance is missing".to_string())?,
+            _ => Arc::from("background"),
+        };
+        let mut permit = resources
+            .parser
+            .acquire_for(&lane, Some(&lane))
+            .await
+            .map_err(|error| match error {
+                BudgetError::Deadline | BudgetError::WaitExpired | BudgetError::Overloaded => {
+                    JSON_PARSER_OVERLOADED.to_string()
+                }
+                BudgetError::Closed => JSON_PARSER_CLOSED.to_string(),
+                BudgetError::UnknownLane => JSON_PARSER_UNKNOWN_LANE.to_string(),
+            })?;
+        let permit_global = match pillar_core::execution::within_deadline(
+            std::time::Duration::from_secs(2),
+            JSON_PARSE_SLOTS.clone().acquire_owned(),
+        )
+        .await
+        {
+            Ok(Ok(permit)) => permit,
+            _ => {
+                permit.finish(pillar_core::execution::Outcome::Overloaded);
+                return Err(JSON_PARSER_OVERLOADED.to_string());
+            }
+        };
+        return Ok(JsonParsePermit {
+            budget: Some(permit),
+            _global: permit_global,
+        });
+    }
+    let permit = if let Ok(permit) = JSON_PARSE_SLOTS.clone().try_acquire_owned() {
+        permit
+    } else {
+        JSON_PARSE_WAITERS
+            .fetch_update(
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+                |waiting| (waiting < MAX_WAITING_JSON_PARSERS).then_some(waiting + 1),
+            )
+            .map_err(|_| JSON_PARSER_OVERLOADED.to_string())?;
+        let _waiter = JsonParseWaiter;
+        pillar_core::execution::within_deadline(
+            DEFAULT_RPC_TIMEOUT,
+            JSON_PARSE_SLOTS.clone().acquire_owned(),
+        )
+        .await
+        .map_err(|_| JSON_PARSER_OVERLOADED.to_string())?
+        .map_err(|_| JSON_PARSER_OVERLOADED.to_string())?
+    };
+    Ok(JsonParsePermit {
+        budget: None,
+        _global: permit,
+    })
+}
+
+pub(crate) async fn parse_bounded_json(bytes: &[u8], ton: bool) -> Result<Value, String> {
+    let mut permit = acquire_json_parse_slot().await?;
+    let result = parse_json_with_limits(bytes, ton);
+    permit.finish(&result);
+    result
+}
+
+pub(crate) fn parse_json_with_limits(bytes: &[u8], ton: bool) -> Result<Value, String> {
+    if bytes.len() > MAX_JSON_RESPONSE_BYTES {
+        return Err(format!(
+            "Provider JSON response exceeds {MAX_JSON_RESPONSE_BYTES} byte limit"
+        ));
+    }
+    let (depth_limit, node_limit) = if ton {
+        (MAX_TON_JSON_DEPTH, MAX_TON_JSON_PARSE_NODES)
+    } else {
+        (128, MAX_JSON_PARSE_NODES)
+    };
+    ensure_json_parse_budget(bytes, depth_limit, node_limit)?;
+    if !ton {
+        return serde_json::from_slice(bytes).map_err(|error| error.to_string());
+    }
+    let mut deserializer = serde_json::Deserializer::from_slice(bytes);
     deserializer.disable_recursion_limit();
     let guarded = serde_stacker::Deserializer::new(&mut deserializer);
     let value =
@@ -688,31 +870,67 @@ async fn bounded_ton_json_response(response: reqwest::Response) -> Result<Value,
     Ok(value)
 }
 
-fn ensure_json_depth(bytes: &[u8], limit: usize) -> Result<(), String> {
+fn ensure_json_parse_budget(
+    bytes: &[u8],
+    depth_limit: usize,
+    node_limit: usize,
+) -> Result<(), String> {
     let mut depth = 0usize;
+    let mut nodes = 0usize;
+    let mut string_bytes = 0usize;
     let mut in_string = false;
     let mut escaped = false;
+    let mut in_scalar = false;
     for &byte in bytes {
         if in_string {
+            string_bytes = string_bytes.saturating_add(1);
+            if string_bytes > MAX_JSON_STRING_BYTES {
+                return Err(format!(
+                    "Provider JSON exceeds {MAX_JSON_STRING_BYTES} string byte limit"
+                ));
+            }
             if escaped {
                 escaped = false;
-            } else if byte == 92 {
+            } else if byte == b'\\' {
                 escaped = true;
             } else if byte == b'"' {
                 in_string = false;
             }
             continue;
         }
+        if in_scalar {
+            if !matches!(
+                byte,
+                b' ' | b'\n' | b'\r' | b'\t' | b'{' | b'[' | b'}' | b']' | b',' | b':' | b'"'
+            ) {
+                continue;
+            }
+            in_scalar = false;
+        }
         match byte {
-            b'"' => in_string = true,
+            b'"' => {
+                in_string = true;
+                nodes = nodes.saturating_add(1);
+            }
             b'{' | b'[' => {
-                depth += 1;
-                if depth > limit {
-                    return Err(format!("Provider TON JSON exceeds {limit} nesting limit"));
+                depth = depth.saturating_add(1);
+                if depth > depth_limit {
+                    return Err(format!("Provider JSON exceeds {depth_limit} nesting limit"));
                 }
+                nodes = nodes.saturating_add(1);
             }
             b'}' | b']' => depth = depth.saturating_sub(1),
+            b',' | b':' => nodes = nodes.saturating_add(1),
+            b't' | b'f' | b'n' | b'-' | b'0'..=b'9' => {
+                in_scalar = true;
+                nodes = nodes.saturating_add(1);
+            }
             _ => {}
+        }
+        if nodes > node_limit {
+            return Err(format!(
+                "Provider JSON exceeds {node_limit} structural parse-cost limit"
+            ));
         }
     }
     Ok(())
@@ -742,8 +960,50 @@ pub(crate) fn drop_json_value_safely(value: Value) {
 
 fn accumulate_paginated_response_bytes(total: usize, response: &Value) -> Option<usize> {
     total
-        .checked_add(response.to_string().len())
+        .checked_add(serialized_json_bytes(response)?)
         .filter(|bytes| *bytes <= MAX_PAGINATED_RESPONSE_BYTES)
+}
+
+// Accumulated pages outlive their parser permit, so together they get one response's budget.
+fn accumulate_paginated_structural_cost(total: usize, items: &[Value]) -> Option<usize> {
+    let mut total = total;
+    let mut pending = items.iter().collect::<Vec<_>>();
+    while let Some(value) = pending.pop() {
+        let cost = match value {
+            Value::Array(values) => {
+                pending.extend(values);
+                values.len().max(1)
+            }
+            Value::Object(values) => {
+                pending.extend(values.values());
+                values.len().checked_mul(3)?.max(1)
+            }
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => 1,
+        };
+        total = total
+            .checked_add(cost)
+            .filter(|units| *units <= MAX_JSON_PARSE_NODES)?;
+    }
+    Some(total)
+}
+
+fn serialized_json_bytes(value: &Value) -> Option<usize> {
+    struct Counter(usize);
+    impl std::io::Write for Counter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 = self
+                .0
+                .checked_add(bytes.len())
+                .ok_or_else(|| std::io::Error::other("serialized size overflow"))?;
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut counter = Counter(0);
+    serde_json::to_writer(&mut counter, value).ok()?;
+    Some(counter.0)
 }
 fn extend_bounded_json(buffer: &mut Vec<u8>, chunk: &[u8]) -> Result<(), String> {
     if buffer
@@ -777,6 +1037,22 @@ mod tests {
         let total = accumulate_paginated_response_bytes(0, &response).unwrap();
         assert!(total < MAX_PAGINATED_RESPONSE_BYTES);
         assert!(accumulate_paginated_response_bytes(total, &response).is_none());
+    }
+    #[tokio::test]
+    async fn bounded_value_parser_rejects_structural_cost_before_value_construction() {
+        let broad = format!(
+            "[{}]",
+            std::iter::repeat_n(r#"{"k":null}"#, 200_000)
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        assert!(broad.len() < MAX_JSON_RESPONSE_BYTES);
+        assert!(parse_bounded_json(broad.as_bytes(), false).await.is_err());
+        assert!(
+            parse_bounded_json(br#"{"events":[{"trace":{"tx_hash":"source"}}]}"#, true)
+                .await
+                .is_ok()
+        );
     }
     #[derive(Clone, Default)]
     struct IotaPageTransport(std::sync::Arc<std::sync::atomic::AtomicUsize>);

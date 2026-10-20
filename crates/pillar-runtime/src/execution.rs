@@ -24,6 +24,19 @@ impl RuntimeControls {
                 "PILLAR_KMS_KEY_CONCURRENCY=1: one lane can occupy the whole key, so same-key headroom for other lanes is impossible"
             );
         }
+        let parser = FairBudget::with_lane_resource_limit(
+            rpc_lanes.clone(),
+            execution::BudgetLimits {
+                active: 4,
+                per_lane: 3,
+                waiting: 8,
+                per_lane_waiting: 2,
+                wait: std::time::Duration::from_secs(2),
+            },
+            4,
+            3,
+        )?;
+        parser.cap_lane("background", 1)?;
         let resources = Arc::new(ExecutionResources {
             signing: FairBudget::new(chains.to_vec(), limits.signing)?,
             rpc: FairBudget::new(rpc_lanes, limits.rpc)?,
@@ -33,10 +46,12 @@ impl RuntimeControls {
                 limits.kms_key_concurrency,
                 limits.kms_lane_key_concurrency,
             )?,
+            parser,
         });
+        // Background RPCs must fit one parser slot and two queued registrations.
         resources
             .rpc
-            .cap_lane("background", (limits.rpc.per_lane / 2).max(1))?;
+            .cap_lane("background", (limits.rpc.per_lane / 2).clamp(1, 3))?;
         resources
             .kms
             .cap_lane("background", (limits.kms.per_lane / 2).max(1))?;
