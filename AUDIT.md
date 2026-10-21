@@ -724,8 +724,18 @@ a production rollout; those require separate provenance and operational receipts
   `/signer-info?chainName=ethereum` returned 200. Version is `v2.7.1`; the Ethereum
   address and public key exactly match the pre-rollout observation:
   `0x06bb41FE76F41429f55aC8C355ac8669769A1ba1`.
-  The captured new-pod logs contain no ERROR-level lines. These GET-only production
-  checks do not establish a live KMS signing transaction.
+  The captured new-pod logs contain no ERROR-level lines.
+- One signing request, sent on 2026-10-21 to one production Pod over a Pod-level
+  port-forward, exercised the live KMS path on this digest. The packet was a real
+  Ethereum→BSC `V302` packet (`0xf0940f45…f30cf30c`, nonce 1435). It was finalized
+  and still `Verifying`, and this DVN is not in its receiver's ULN config. The
+  answer was HTTP 200 with one signature. It recovers to
+  `0x06bb41FE76F41429f55aC8C355ac8669769A1ba1` over a digest rebuilt independently
+  from chain data: vId 102, `ReceiveUln302`, 15 confirmations, EIP-191. All four
+  sign stages recorded `ok`. Because this DVN is not configured for that receiver,
+  the attestation cannot count toward the packet's verification. Signature bytes
+  were not retained. A delivered Ethereum→Base packet sent first was refused with
+  `Payload already signed` before the sign stage.
 - No configuration other than the image changed.
 - Rollback is a narrow revert of `ef46438` followed by the same Deployment-only
   sync. The prior image digest is
