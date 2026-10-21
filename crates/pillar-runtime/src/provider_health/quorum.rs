@@ -381,7 +381,7 @@ impl<'a> ExactQuorumAccumulator<'a, Value> {
 }
 
 pub(crate) async fn resolve_provider_quorum<T, F>(
-    mut requests: FuturesUnordered<F>,
+    requests: FuturesUnordered<F>,
     total: usize,
     quorum: QuorumRule<'_>,
     context: &str,
@@ -390,7 +390,20 @@ where
     T: Clone,
     F: Future<Output = (usize, Result<Option<(String, T)>, RpcError>)>,
 {
-    let mut accumulator = ExactQuorumAccumulator::new(quorum, 0..total);
+    resolve_provider_quorum_for_indices(requests, 0..total, quorum, context).await
+}
+
+pub(crate) async fn resolve_provider_quorum_for_indices<T, F>(
+    mut requests: FuturesUnordered<F>,
+    indices: impl IntoIterator<Item = usize>,
+    quorum: QuorumRule<'_>,
+    context: &str,
+) -> Result<T, AppCoreError>
+where
+    T: Clone,
+    F: Future<Output = (usize, Result<Option<(String, T)>, RpcError>)>,
+{
+    let mut accumulator = ExactQuorumAccumulator::new(quorum, indices);
     while let Some((index, observation)) = requests.next().await {
         accumulator.record_result(index, observation)?;
         if let Some(result) = accumulator.unambiguous_result() {
@@ -495,9 +508,22 @@ pub(crate) async fn plan_dispatch<'a>(
     chain_name: &str,
     quorum: QuorumRule<'a>,
 ) -> Result<Vec<DispatchEntry<'a>>, AppCoreError> {
+    let total = quorum.config().uris.len();
+    plan_dispatch_for_indices(tracker, chain_name, quorum, 0..total).await
+}
+
+/// [`plan_dispatch`] over the providers able to serve this call; the rest are never asked.
+pub(crate) async fn plan_dispatch_for_indices<'a>(
+    tracker: &ProviderRankTracker,
+    chain_name: &str,
+    quorum: QuorumRule<'a>,
+    eligible_indices: impl IntoIterator<Item = usize>,
+) -> Result<Vec<DispatchEntry<'a>>, AppCoreError> {
     let config = quorum.config();
-    let mut ranked = Vec::with_capacity(config.uris.len());
-    for (index, uri) in config.uris.iter().enumerate() {
+    let eligible_indices = eligible_indices.into_iter().collect::<Vec<_>>();
+    let mut ranked = Vec::with_capacity(eligible_indices.len());
+    for index in eligible_indices {
+        let uri = &config.uris[index];
         let url = rank_key_url(chain_name, uri);
         let rank = tracker.rank_of(chain_name, &url).await;
         ranked.push((index, rank));

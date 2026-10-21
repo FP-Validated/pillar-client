@@ -1,5 +1,54 @@
 use super::*;
 
+pub(crate) struct TonV3DispatchEntry {
+    pub(crate) index: usize,
+    pub(crate) endpoint: String,
+    pub(crate) headers: HashMap<String, String>,
+    pub(crate) delay: std::time::Duration,
+}
+
+/// The TON providers with a `v3-endpoint`, planned for dispatch. A provider without one
+/// cannot observe a v3 read, so it must not vote, count toward quorum or delay the rest.
+pub(crate) async fn plan_ton_v3_dispatch(
+    tracker: &ProviderRankTracker,
+    quorum: QuorumRule<'_>,
+) -> Result<Vec<TonV3DispatchEntry>, AppCoreError> {
+    let config = quorum.config();
+    let mut capable = Vec::new();
+    let mut parts_by_index = Vec::with_capacity(config.uris.len());
+    for (index, uri) in config.uris.iter().enumerate() {
+        let parts =
+            ton_v3_provider_uri_parts(uri).map(|(endpoint, _, headers)| (endpoint, headers));
+        if parts.is_some() {
+            capable.push(index);
+        }
+        parts_by_index.push(parts);
+    }
+    if !quorum.is_met_by(&capable) {
+        return Err(AppCoreError::Internal(format!(
+            "TON provider pool needs quorum {} but only {} of {} configured providers have a parseable v3-endpoint",
+            quorum.describe(),
+            capable.len(),
+            config.uris.len()
+        )));
+    }
+    let plan = plan_dispatch_for_indices(tracker, "ton", quorum, capable).await?;
+    Ok(plan
+        .into_iter()
+        .map(|DispatchEntry { index, delay, .. }| {
+            let (endpoint, headers) = parts_by_index[index]
+                .take()
+                .expect("eligible TON v3 provider");
+            TonV3DispatchEntry {
+                index,
+                endpoint,
+                headers,
+                delay,
+            }
+        })
+        .collect())
+}
+
 pub(crate) fn ton_v2_provider_uri_parts(
     uri: &ProviderUri,
 ) -> (String, String, HashMap<String, String>) {

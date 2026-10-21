@@ -20,6 +20,55 @@ where
             .map(|elapsed| elapsed.as_secs() as i64)
             .map_err(|error| AppCoreError::Internal(error.to_string()));
     }
+    if dst_chain_name == "ton" {
+        let provider_config = snapshot.provider_config(dst_chain_name)?;
+        let quorum = required_provider_quorum(provider_config, dst_chain_name)?;
+        let plan = crate::provider_health::plan_ton_v3_dispatch(&self.rank_tracker, quorum).await?;
+        let indices = plan.iter().map(|entry| entry.index).collect::<Vec<_>>();
+        let requests = FuturesUnordered::new();
+        for crate::provider_health::TonV3DispatchEntry {
+            index,
+            endpoint,
+            headers,
+            delay,
+        } in plan
+        {
+            let transport = self.transport.clone();
+            requests.push(async move {
+                if !delay.is_zero() {
+                    tokio::time::sleep(delay).await;
+                }
+                let timestamp =
+                    provider_response(observe_ton_block_time(transport, endpoint, headers).await);
+                let observation =
+                    timestamp.map(|timestamp| (timestamp_validity(timestamp, valid_range), timestamp));
+                (
+                    index,
+                    observation.map(|observation| Some((format!("{:?}", observation.0), observation))),
+                )
+            });
+        }
+        let context = "block timestamp for chain ton";
+        let (agreed_validity, timestamp) =
+            crate::provider_health::resolve_provider_quorum_for_indices(
+                requests, indices, quorum, context,
+            )
+            .await
+                .map_err(|error| match error {
+                    AppCoreError::Admission(_) => error,
+                    _ => AppCoreError::Internal(
+                        "No block timestamp quorum for chain ton".to_string(),
+                    ),
+                })?;
+        if agreed_validity == TimestampValidity::Missing {
+            return Err(AppCoreError::Internal(
+                "No block timestamp quorum for chain ton".to_string(),
+            ));
+        }
+        return timestamp.ok_or_else(|| {
+            AppCoreError::Internal("No block timestamp value for chain ton".to_string())
+        });
+    }
     let dispatch = snapshot
         .dispatch(&self.rank_tracker, dst_chain_name)
         .await?;
@@ -58,38 +107,6 @@ where
             AppCoreError::Internal(format!(
                 "No block timestamp value for chain {dst_chain_name}"
             ))
-        });
-    }
-    if dst_chain_name == "ton" {
-        let requests = FuturesUnordered::new();
-        for DispatchEntry { index, uri, delay } in plan {
-            let transport = self.transport.clone();
-            let parts = ton_v3_provider_uri_parts(uri);
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
-                let timestamp = match parts {
-                    Some((endpoint, _, headers)) => {
-                        provider_response(observe_ton_block_time(transport, endpoint, headers).await)
-                    }
-                    None => Ok(None),
-                };
-                let observation = timestamp.map(|timestamp| (timestamp_validity(timestamp, valid_range), timestamp));
-                (index, observation.map(|observation| Some((format!("{:?}", observation.0), observation))))
-            });
-        }
-        let context = "block timestamp for chain ton".to_string();
-        let (agreed_validity, timestamp) =
-            resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
-                .await.map_err(|error| match error { AppCoreError::Admission(_) => error, _ => AppCoreError::Internal("No block timestamp quorum for chain ton".to_string()) })?;
-        if agreed_validity == TimestampValidity::Missing {
-            return Err(AppCoreError::Internal(
-                "No block timestamp quorum for chain ton".to_string(),
-            ));
-        }
-        return timestamp.ok_or_else(|| {
-            AppCoreError::Internal("No block timestamp value for chain ton".to_string())
         });
     }
     if matches!(dst_chain_name, "aptos" | "initia" | "movement") {

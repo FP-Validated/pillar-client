@@ -53,35 +53,52 @@ where
         let agreed_seqno = sent_event
             .extra
             .get("blockNumber")
-            .and_then(|value| value.as_i64().or_else(|| value.as_str()?.parse().ok()));
+            .and_then(|value| value.as_i64().or_else(|| value.as_str()?.parse().ok()))
+            .ok_or_else(|| {
+                AppCoreError::Internal(format!(
+                    "Transaction trace or masterchain info not found for {}",
+                    sent_event.tx_hash
+                ))
+            })?;
         let quorum = required_provider_quorum(provider_config, src_chain_name)?;
-        let plan = plan_dispatch(&self.rank_tracker, src_chain_name, quorum).await?;
+        let plan = crate::provider_health::plan_ton_v3_dispatch(&self.rank_tracker, quorum).await?;
+        let indices = plan.iter().map(|entry| entry.index).collect::<Vec<_>>();
         let requests = FuturesUnordered::new();
-        for DispatchEntry { index, uri, delay } in plan {
+        for crate::provider_health::TonV3DispatchEntry {
+            index,
+            endpoint,
+            headers,
+            delay,
+        } in plan
+        {
             let transport = self.transport.clone();
-            let seqno = agreed_seqno;
             let required = block_confirmation;
-            let parts = ton_v3_provider_uri_parts(uri);
             requests.push(async move {
                 if !delay.is_zero() {
                     tokio::time::sleep(delay).await;
                 }
-                let observation = match (parts, seqno) {
-                    (Some((endpoint, _, headers)), Some(seqno)) => {
-                        observe_ton_block_confirmations(transport, endpoint, headers, seqno, required).await
-                    }
-                    _ => Ok(BlockConfirmationObservation {
-                        validity: BlockConfirmationValidity::Missing,
-                        current_confirmations: None,
+                let observation = observe_ton_block_confirmations(
+                    transport,
+                    endpoint,
+                    headers,
+                    agreed_seqno,
+                    required,
+                )
+                .await;
+                (
+                    index,
+                    observation.map(|observation| {
+                        Some((format!("{:?}", observation.validity), observation))
                     }),
-                };
-                (index, observation.map(|observation| Some((format!("{:?}", observation.validity), observation))))
+                )
             });
         }
         let context = "block confirmation for chain ton".to_string();
         let observation =
-            resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
-                .await?;
+            crate::provider_health::resolve_provider_quorum_for_indices(
+                requests, indices, quorum, &context,
+            )
+            .await?;
         return match observation.validity {
             BlockConfirmationValidity::Sufficient { .. } => Ok(()),
             BlockConfirmationValidity::Insufficient { .. } => {

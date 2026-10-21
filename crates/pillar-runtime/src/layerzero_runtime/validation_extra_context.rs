@@ -136,6 +136,44 @@ where
         }
         crate::provider_health::rpc_scope(src_chain_name, async {
             let snapshot = self.providers.load();
+            if src_chain_name == "ton" {
+                let provider_config = snapshot.provider_config(src_chain_name)?;
+                let quorum = required_provider_quorum(provider_config, src_chain_name)?;
+                let plan = crate::provider_health::plan_ton_v3_dispatch(&self.rank_tracker, quorum)
+                    .await?;
+                let indices = plan.iter().map(|entry| entry.index).collect::<Vec<_>>();
+                let requests = FuturesUnordered::new();
+                for crate::provider_health::TonV3DispatchEntry {
+                    index,
+                    endpoint,
+                    headers,
+                    delay,
+                } in plan
+                {
+                    let transport = self.transport.clone();
+                    let tx_hash = tx_hash.to_string();
+                    requests.push(async move {
+                        if !delay.is_zero() {
+                            tokio::time::sleep(delay).await;
+                        }
+                        let observation = provider_response(
+                            observe_ton_transaction_from(transport, endpoint, headers, &tx_hash)
+                                .await,
+                        );
+                        let observation = observation.map(|observation| {
+                            observation
+                                .map(|observation| (observation.fingerprint.clone(), observation))
+                        });
+                        (index, observation)
+                    });
+                }
+                let context = "transaction-from for chain ton";
+                let observation = crate::provider_health::resolve_provider_quorum_for_indices(
+                    requests, indices, quorum, context,
+                )
+                .await?;
+                return Ok(observation.from);
+            }
             let dispatch = snapshot
                 .dispatch(&self.rank_tracker, src_chain_name)
                 .await?;
@@ -204,15 +242,6 @@ where
                                     .await,
                             )
                         }
-                        "ton" => match ton_v3_provider_uri_parts(uri) {
-                            Some((endpoint, _, headers)) => provider_response(
-                                observe_ton_transaction_from(
-                                    transport, endpoint, headers, &tx_hash,
-                                )
-                                .await,
-                            ),
-                            None => Ok(None),
-                        },
                         _ => {
                             let (url, headers) = provider_uri_parts(uri);
                             provider_response(
