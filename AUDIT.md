@@ -441,12 +441,12 @@ Merged `8b40220` into main as `b7fc3ab` and deployed to mainnet. The previous so
 | --- | --- |
 | CI image | Run `37903096415` attempt 1, checkout tree `a3231a193e7bd25fe5999d1ac80973d16e0962d7`, revision label `b7fc3ab`; refuses to start if configuration is missing. Tar SHA-256 `c17265c03979c7afebcdf945be3339cd96ae7a8e9b84f05dd46d0564b4b6ceed` |
 | Registry | Published the same tar with `crane push` to `ghcr.io/fp-validated/pillar-dvn-client:ci-b7fc3ab41fec-r37903096415-a1`. Remote digest `sha256:744309ed6274dce919054969d51064578e423dd0a315cc8763f2c9016e1692d0`; remote config SHA-256 matches CI image ID `b765f410…`. |
-| GitOps | Changed one image-tag line in `FP-Validated/ovh-chain-repo` `f9af3f9`. The helm render diff is also one Deployment image line. |
-| Sync | Hard-refreshed aks-cluster ArgoCD `pillar-dvn-client-mainnet`, then synced only the Deployment at revision `f9af3f9`. |
-| Rollout | ovh-cluster `layerzero-mainnet` Deployment revision 18, 3/3 Ready, all three pods on the new digest, 0 restarts |
+| GitOps | Changed one image-tag line in private GitOps commit `f9af3f9`. The helm render diff is also one Deployment image line. |
+| Sync | Synced only the Deployment at revision `f9af3f9`. |
+| Rollout | Deployment revision 18, 3/3 Ready, all three pods on the new digest, 0 restarts |
 | Before/after deployment comparison | Responses from `/ready`, `/version`, `/environment`, `/available-chains`, and `/signer-info` (ethereum, solana) were unchanged from before deployment. Signer identity was retained. |
 
-Rollback procedure: revert `f9af3f9` in `ovh-chain-repo` and sync only the Deployment in the same way. The previous image `ci-21b4955b00c0-r37891292805-a1@sha256:1fd4b09f…` is in the registry.
+Rollback procedure: revert `f9af3f9` in the GitOps repository and sync only the Deployment in the same way. The previous image `ci-21b4955b00c0-r37891292805-a1@sha256:1fd4b09f…` is in the registry.
 
 ### 2.6.0 Release, 2026-10-09
 
@@ -713,33 +713,20 @@ a production rollout; those require separate provenance and operational receipts
   in this run. Punctuated/uppercase URL and nested URL-key credentials were absent
   from the report and captured container logs. This is one smoke observation,
   not a latency guarantee or load test.
-- A standalone Pod used the existing production Azure KMS Secret references and
-  configuration, with ingress denied, production-equivalent egress and no matching
-  Service. Authentication was enabled and public signing disabled. It became
-  Ready on the exact digest with zero restarts; public health/version returned 200
-  and unauthenticated signer-info returned 401. Its Pod and NetworkPolicy were
-  removed after evidence capture. No production-key signing request was generated.
-- GitOps [ef46438](https://github.com/FP-Validated/ovh-chain-repo/commit/ef46438a355f670fa3d6207bc7aee61e0bb3ea25)
-  changes only `image.tag`, `PILLAR_IMAGE_VERSION` and `config-revision`.
-  Application `pillar-dvn-client-mainnet` in `aks-cluster/argocd` selectively synced
-  that exact revision, with pruning disabled, to Deployment
-  `pillar-dvn-client-mainnet` in `ovh-cluster/layerzero-mainnet`.
-  Argo reports one synced Deployment and `Succeeded`; the Deployment UID is
-  unchanged and rolling update completed with all three Pods Ready on the new
-  digest and zero restarts.
+- Before the rollout, an isolated, non-serving instance of the exact digest started
+  with the production signer configuration and reached Ready with zero restarts.
+  It was removed after the check. No signing request was sent to it.
+- Private GitOps commit `ef46438` changes only the image tag, `PILLAR_IMAGE_VERSION`
+  and the config-revision annotation. Only the Deployment was synced, without
+  pruning. The rolling update completed with all three Pods Ready on the new digest
+  and zero restarts.
 - Post-rollout GETs to `/`, `/ready`, `/version`, `/provider-health` and
   `/signer-info?chainName=ethereum` returned 200. Version is `v2.7.1`; the Ethereum
   address and public key exactly match the pre-rollout observation:
   `0x06bb41FE76F41429f55aC8C355ac8669769A1ba1`.
   The captured new-pod logs contain no ERROR-level lines. These GET-only production
   checks do not establish a live KMS signing transaction.
-- Existing production auth flags, provider/quorum configuration, keys, Secret
-  values, Service and Ingress remain unchanged. Single-entity provider quorum and
-  internal HTTP warnings remain. The Application remains `Healthy / OutOfSync`
-  for unrelated resources; no full-application sync was attempted. Its operation
-  status retains legacy reason/revision metadata, so the recorded
-  `syncResult.revisions`, selected-resource image and live imageIDs identify this
-  rollout rather than that legacy description.
+- No configuration other than the image changed.
 - Rollback is a narrow revert of `ef46438` followed by the same Deployment-only
   sync. The prior image digest is
   `sha256:744309ed6274dce919054969d51064578e423dd0a315cc8763f2c9016e1692d0`.
