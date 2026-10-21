@@ -4,6 +4,22 @@ All notable changes to this project are documented here. This project follows
 semantic versioning for the HTTP surface, the environment-variable contract and
 the Prometheus metric names.
 
+## Unreleased
+
+### Security
+
+- Round 3 M-12: Aptos, Movement and Initia source reads reach quorum on the fields the resolver consumes — `hash`/`txhash`, `version`, `type`, `success` and `events` for transactions, `block_height` and `block_hash` for blocks — and keep only those fields. Honest nodes on different releases (`txn_limits_request`) or with the table-info indexer (`write_table_item.data`) answered the same transaction with different JSON, so a two-provider quorum refused every such source. Initia event attributes keep only `key` and `value`: the LCD's per-attribute `index` flag follows each node's own `index-events` setting, and it split both the source read and the extra-context sender read. A provider that disagrees on any consumed field still splits the quorum.
+- Round 3 M-13: TON source readiness, TON destination timestamps and TON extra-context sender reads dispatch only providers with a `v3-endpoint`. A provider without one used to vote `Missing` in readiness without being asked, so a pool with as many v2-only entities as the quorum refused every TON source, and v2-only providers ranked first delayed the others by the 2 s stall timeout. A missing agreed packet seqno now fails before any RPC.
+- Round 3 M-14: `/provider-health/report` returns the full report of the health round behind `/provider-health` and shares its cache and refresh. It used to probe every provider inside the request, and only cached a completed round, so a caller disconnecting mid-request restarted the fan-out on every reconnect. The newest round wins when the refresh and rank loops overlap. The health cache also no longer probes inside a caller when nothing is servable: it waits for a refresh task it owns. A REMOTE provider configuration publishes a new generation on every 60 s refresh, so this path was reached once a minute, by the public `/provider-health` too.
+- Round 3 L-04: the Aptos/Movement and Initia indexer and TronWeb probes, which signing never reads, are reported as diagnostic entries and no longer decide a chain's health or `/ready`. Every primary entry must still be healthy. An Initia indexer request refused by JSON parser admission no longer fails the health round for every chain.
+- Same class as M-12, outside the reported findings: the EVM ULNv2 refresh's `eth_getLogs`, Starknet source receipts and IOTA source events now reach quorum on the fields the resolver reads. `arb1.arbitrum.io` answers log `blockTimestamp` as `0x0` where other Arbitrum providers give the block time, so a two-provider quorum refused the reorg search on Arbitrum. Starknet providers move a block from `ACCEPTED_ON_L2` to `ACCEPTED_ON_L1` at different moments and both pass alike, so only acceptance is agreed; spec-dependent `execution_resources` and `actual_fee` are no longer compared. IOTA events keep `type` and `parsedJson`, dropping `bcs`, `bcsEncoding`, `timestampMs` and cursors. A provider that disagrees on a read field still splits the quorum.
+
+### Upgrade / Breaking
+
+- `/provider-health/report` provider entries gain `"diagnostic": true` on auxiliary probes; the field is omitted otherwise. The route answers 500 `provider health report is unavailable for the current provider generation` until a health round has succeeded for the serving configuration, and like `/provider-health` may serve a round up to 120 s old while refreshes fail.
+- A TON pool whose `v3-endpoint` entities cannot meet the quorum strategy is refused before RPC with `TON provider pool needs quorum … parseable v3-endpoint` for readiness, timestamps and extra context. Previously readiness failed with a quorum or not-found error after dialling every provider.
+- Rust consumers constructing `ProviderHealthEntry` must set `diagnostic`.
+
 ## 2.7.1 - 2026-10-21
 
 ### Security

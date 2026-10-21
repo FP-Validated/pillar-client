@@ -742,3 +742,47 @@ a production rollout; those require separate provenance and operational receipts
   `sha256:744309ed6274dce919054969d51064578e423dd0a315cc8763f2c9016e1692d0`.
   Operational receipts and original logs remain in the completion evidence directory.
 
+## 20. Round 3 remediation — 2026-10-22
+
+The report's baseline is `3f39fbad972794e5a9c598ea46a310334a4a4415` (2.6.2); all four
+findings were still present on `main` at `201430d`. The work branches from `201430d`
+with one commit per finding, `12c2d87`..`76eb188`, then `dd02252` for the same class as
+M-12 outside the reported findings, then documentation. It is not
+released. The per-finding response, including why M-14 reuses the existing refresh
+rather than adding a coordinator, is [round3-response.md](audit/round3-response.md).
+
+| ID | Implementation | Exercised evidence |
+| --- | --- | --- |
+| M-12 | Aptos-family transaction and block reads agree on, and keep, only the consumed fields; Initia event attributes keep only `key` and `value`, dropping the node-local `index` flag | Two providers at quorum 2 on different node releases or indexer settings resolve the archived V301 send and a ULNv2 send; two Initia providers with different `index-events` agree on the source event and the sender; a different event, attribute value, `success`, `version` or `hash` still refuses |
+| M-13 | TON readiness, timestamps and extra context plan, count and dial only `v3-endpoint` providers; too few v3 entities fail before RPC | v2-only providers ranked first add no delay and are never dialled; one v3 provider, or two v3 URIs of one entity, are refused with zero RPC |
+| M-14 | `/provider-health/report` returns the retained report of the health round; the newest round wins; the health cache never probes inside a caller, so abandoning a request cannot cancel a round | Five abandoned requests within the TTL probe nothing, past it share one round that is then served; three abandoned reads with an empty cache or a new generation cause one round; an older round cannot overwrite a newer one; a pinned `/ready` still probes its own generation |
+| L-04 | Indexer and TronWeb probe entries are `diagnostic` and outside chain health; an Initia indexer admission refusal no longer fails the round | Aptos and Tron stay healthy with the auxiliary endpoint at 503; an Aptos-only roster stays `Ready`; a primary outage still fails |
+| Same class as M-12 | The EVM ULNv2 refresh's `eth_getLogs`, Starknet source receipts and IOTA source events agree on the fields the resolver reads; Starknet agrees on acceptance rather than on L1 versus L2 | Two providers at quorum 2 refresh a reorged ULNv2 send with log `blockTimestamp` `0x0`, absent or real (as `arb1.arbitrum.io` and other Arbitrum providers answer on mainnet); resolve a Starknet send with one receipt `ACCEPTED_ON_L1` in another spec shape; resolve an IOTA send across `bcs` encodings; a different log `data`/`logIndex`/`blockHash`, execution status, non-accepted finality, event, `type` or `parsedJson` still refuses |
+
+### Verification
+
+| Check | Observed result |
+| --- | --- |
+| `cargo +1.98.1 fmt --all --check` | Passed |
+| `cargo +1.98.1 clippy --workspace --all-targets --locked -- -D warnings` | Passed, on each of the four commits |
+| `cargo +1.98.1 test --workspace --locked` | 1,157 passed, zero failed, 15 ignored (`test result:` totals) on the final tree |
+| `RUSTFLAGS="-D warnings" cargo +1.94.1 check --workspace --all-targets --locked` | Passed |
+| `round3_` tests per commit | 3, 10, 12 and 17 passed at the four commits; the two Initia M-12 tests from the re-review add 2 on the final tree |
+| Fix-reverted runs | Each finding's new tests fail with only its production change restored to the parent; the tests that must hold either way still pass. Restoring the inline cache refresh, removing the M-14 ordering guard, dropping the pin carry or removing the Initia attribute normalization each fails its test |
+
+The first regression tests were written before the fixes and failed on `201430d`; the
+ones added later fail with their fix reverted. Implementation was delegated per finding;
+every line was reviewed and partly rewritten before commit.
+An independent read-only review then found three defects, fixed in the same commits:
+the cache still probed inside a caller whenever a REMOTE configuration refresh bumped the
+generation (every 60 s), the Initia indexer probe could fail the whole round on
+admission, and moving the refresh to a task dropped the `/ready` generation pin, which
+the existing readiness test caught. The tests drive handler and cache futures, not a TCP
+socket; hyper's disconnect behaviour was confirmed from its 1.10.1 source. A later
+re-review found that Initia event attributes still split the quorum on the node-local
+`index` flag, in the source read and in the sender read; the attribute normalization in
+the M-12 row fixes both. A review of every other whole-answer quorum read then measured
+the same divergence live on Arbitrum `eth_getLogs`; that row and Starknet and IOTA were
+changed alike. Sui already compared only `type` and `parsedJson`. Aptos account
+resources and table items still compare their small whole answers. TON v3 dispatch still
+ranks by the v2 probe. No image was built and nothing was deployed.

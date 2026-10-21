@@ -361,7 +361,7 @@ Implementation and response tests: `crates/pillar-runtime/src/layerzero_runtime/
 | `GET` | `/available-chains` | public | Chain names this instance serves. Fixed for the process lifetime; a refresh changes only the URIs and quorums behind them. |
 | `GET` | `/environment` | public | Configured LayerZero environment. |
 | `GET` | `/provider-health` | public | Per-chain boolean health. |
-| `GET` | `/provider-health/report` | **bearer**, or public with `PILLAR_API_AUTH_ENABLED=false` | Per-provider detail with a check timestamp. |
+| `GET` | `/provider-health/report` | **bearer**, or public with `PILLAR_API_AUTH_ENABLED=false` | Per-provider detail with a check timestamp. It is the full result of the health round behind `/provider-health` and shares its cache and refresh, so a report request starts no probe round of its own. Indexer and TronWeb entries carry `"diagnostic": true` and do not affect chain health. |
 | `GET` | `/metrics` | **bearer**, or public with `PILLAR_API_AUTH_ENABLED=false` | Prometheus text format. |
 | `GET` | `/version` | public | Configured image version. |
 
