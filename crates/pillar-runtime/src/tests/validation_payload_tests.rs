@@ -221,7 +221,7 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_move_payloads() {
                     Ok(json!([
                         "0x4444444444444444444444444444444444444444444444444444444444444444"
                     ])),
-                    Ok(json!(["0x0000000000000002"])),
+                    Ok(json!(["0x0000000000000002000000000000"])),
                     Ok(json!([0])),
                     Ok(json!([1])),
                 ])),
@@ -274,7 +274,7 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_initia_payload() {
             calls: calls.clone(),
             responses: Arc::new(Mutex::new(vec![
                 Ok(json!({"data": "[\"0x0000000000000003\",false]"})),
-                Ok(json!({"data": "\"0000000000000002\""})),
+                Ok(json!({"data": "\"0000000000000002000000000000\""})),
                 Ok(json!({"data": "0"})),
                 Ok(json!({"data": "\"0\""})),
             ])),
@@ -337,7 +337,7 @@ async fn runtime_rpc_validation_checks_rejects_confirmed_move_payload() {
                 Ok(json!([
                     "0x4444444444444444444444444444444444444444444444444444444444444444"
                 ])),
-                Ok(json!(["0x0000000000000002"])),
+                Ok(json!(["0x0000000000000002000000000000"])),
                 Ok(json!([0])),
                 Ok(json!([2])),
                 Ok(json!([2])),

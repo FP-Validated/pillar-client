@@ -525,7 +525,7 @@ async fn payload_signed_queries_move_validation_with_a_dvn_address() {
     let checks = aptos_payload_checks(
         vec![
             Ok(json!([format!("0x{}", "44".repeat(32)), false])),
-            Ok(json!(["0x0000000000000002"])),
+            Ok(json!(["0x0000000000000002000000000000"])),
             Ok(json!([0])),
             Ok(json!([1])),
         ],

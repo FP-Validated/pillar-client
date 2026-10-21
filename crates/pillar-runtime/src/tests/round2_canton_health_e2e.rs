@@ -5,14 +5,13 @@ use tower::ServiceExt;
 
 const LEDGER: &str = "https://ledger.example";
 const TOKEN_URL: &str = "https://idp.example/token";
-const OAUTH: &str =
-    "&token-url=https://idp.example/token&client-id=pillar&client-secret=not-a-secret";
-
+const OAUTH: &str = "&token-url=https://idp.example/token&client-id=pillar";
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Ledger {
     Healthy,
     EndOffsetUnavailable,
     TokenRefused,
+    TokenOnlyOnce,
     OffsetNotNumeric,
 }
 
@@ -65,7 +64,9 @@ impl JsonRpcTransport for CantonWire {
                 Err("Provider returned HTTP 503 Service Unavailable".to_string())
             }
             Ledger::OffsetNotNumeric => Ok(json!({"offset": "42"})),
-            Ledger::Healthy | Ledger::TokenRefused => Ok(json!({"offset": 42})),
+            Ledger::Healthy | Ledger::TokenRefused | Ledger::TokenOnlyOnce => {
+                Ok(json!({"offset": 42}))
+            }
         }
     }
 
@@ -75,10 +76,19 @@ impl JsonRpcTransport for CantonWire {
         _: HashMap<String, String>,
         _: String,
     ) -> Result<(u16, String), String> {
-        self.calls.lock().unwrap().push(format!("FORM {url}"));
+        let mut calls = self.calls.lock().unwrap();
+        let form_count = calls
+            .iter()
+            .filter(|call| call.starts_with("FORM "))
+            .count();
+        calls.push(format!("FORM {url}"));
+        drop(calls);
         assert_eq!(url, TOKEN_URL);
         Ok(match self.ledger {
             Ledger::TokenRefused => (401, r#"{"error":"invalid_client"}"#.to_string()),
+            Ledger::TokenOnlyOnce if form_count > 0 => {
+                (503, r#"{"error":"temporarily_unavailable"}"#.to_string())
+            }
             _ => (
                 200,
                 r#"{"access_token":"tok-1","token_type":"Bearer","expires_in":3600}"#.to_string(),
@@ -157,11 +167,19 @@ async fn canton_only(ledger: Ledger, oauth: &str) -> Outcome {
             r#"{"wallet-a-CANTON":{"mnemonic":"test test test test test test test test test test test junk","path":"m/44'/60'/0'/0/0"}}"#.to_string(),
         ),
     ]);
+    if !oauth.is_empty() {
+        vars.insert(
+            "CANTON_CLIENT_SECRET".to_string(),
+            "not-a-secret".to_string(),
+        );
+    }
+    let canton_ledger_auth = CantonLedgerAuth::from_env_map("mainnet", &vars);
     let rank_tracker = Arc::new(ProviderRankTracker::new());
     let app = RuntimeServerApp::from_env_map_with_core_dependencies(
         vars,
         wire.clone(),
         || 1,
+        canton_ledger_auth.clone(),
         core_dependencies(),
         pillar_config::static_chain_type_by_chain_name(&chains).unwrap(),
         RuntimeMode::Development,
@@ -190,7 +208,7 @@ async fn canton_only(ledger: Ledger, oauth: &str) -> Outcome {
         .as_u16();
     // The sender read shares the tracker the startup probe seeded.
     let sender = RuntimeRpcValidationChecks::from_getter(&snapshot, wire.clone())
-        .with_canton_ledger_auth(CantonLedgerAuth::for_environment("mainnet", None))
+        .with_canton_ledger_auth(canton_ledger_auth)
         .with_rank_tracker(rank_tracker)
         .source_transaction_from_address("canton", "1220abcd")
         .await
@@ -211,6 +229,7 @@ async fn round2_m08_canton_ledger_is_probed_and_fails_closed() {
     let mut observations = Vec::new();
     for (label, ledger, oauth) in [
         ("healthy", Ledger::Healthy, OAUTH),
+        ("health-token-cache-shared", Ledger::TokenOnlyOnce, OAUTH),
         ("ledger-end-503", Ledger::EndOffsetUnavailable, OAUTH),
         ("token-401", Ledger::TokenRefused, OAUTH),
         ("offset-not-numeric", Ledger::OffsetNotNumeric, OAUTH),
@@ -236,7 +255,7 @@ async fn round2_m08_canton_ledger_is_probed_and_fails_closed() {
             !outcome.report.to_string().contains("not-a-secret"),
             "{label}"
         );
-        if label == "healthy" {
+        if matches!(label, "healthy" | "health-token-cache-shared") {
             assert_eq!(outcome.http_ready, 200, "{label}");
             assert_eq!(outcome.provider_health, json!({"canton": true}), "{label}");
             assert_eq!(entries[0]["response"], 42, "{label}");
@@ -246,6 +265,17 @@ async fn round2_m08_canton_ledger_is_probed_and_fails_closed() {
                 .calls
                 .iter()
                 .any(|call| call == &format!("GET {LEDGER}/v2/state/ledger-end")));
+            if label == "health-token-cache-shared" {
+                assert_eq!(
+                    outcome
+                        .calls
+                        .iter()
+                        .filter(|call| call.starts_with("FORM "))
+                        .count(),
+                    1,
+                    "{label}: health and sender must share the token cache"
+                );
+            }
         } else {
             assert_eq!(outcome.http_ready, 503, "{label}");
             assert_eq!(outcome.provider_health, json!({"canton": false}), "{label}");

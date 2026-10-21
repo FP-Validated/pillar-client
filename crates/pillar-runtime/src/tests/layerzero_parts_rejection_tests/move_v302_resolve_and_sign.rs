@@ -3,6 +3,7 @@ use axum::{
     body::{to_bytes, Body},
     http::{Request, StatusCode},
 };
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tower::ServiceExt;
 
@@ -13,7 +14,7 @@ const APTOS_RECEIVER: &str = "0xf22bede237a07e121b56d91a491eb7bcdfd1f5907926a9e5
 const MOVEMENT_RECEIVER: &str =
     "0x2222222222222222222222222222222222222222222222222222222222222222";
 const DVN: &str = "0x3333333333333333333333333333333333333333333333333333333333333333";
-const INITIA_RECEIVER: &str = "0x4444444444444444444444444444444444444444444444444444444444444444";
+const INITIA_RECEIVER: &str = "0xdd07f825254ed0d753da2b4af4484921c14cf6edd5b6e8fedf81b1bc07ea15de";
 const INITIA_ULN_302: &str = "0x5aab6aa28749dd073c26c4703e14eb7e89dd6a25abc2e1f0e98de59f8203a012";
 const SEND_ULN_302: &str = "0xbB2Ea70C9E858123480642Cf96acbcCE1372dCe1";
 const EXPIRATION: i64 = 1_760_000_000;
@@ -80,6 +81,8 @@ struct E2eTransport {
     confirmations: Value,
     config: Value,
     receive_libraries: HashMap<String, Result<Value, String>>,
+    initia_args: HashMap<&'static str, Value>,
+    invalid_initia_args: Arc<AtomicUsize>,
 }
 
 impl E2eTransport {
@@ -96,6 +99,12 @@ impl E2eTransport {
             };
         }
         if let Some((provider_url, path)) = url.split_once("/initia/move/v1/accounts/") {
+            let function = path.rsplit('/').next().unwrap_or_default();
+            if body["type_args"] != json!([]) || self.initia_args.get(function) != body.get("args")
+            {
+                self.invalid_initia_args.fetch_add(1, Ordering::SeqCst);
+                return Err(format!("invalid Initia BCS arguments for {function}"));
+            }
             return match path.rsplit('/').next().unwrap_or_default() {
                 "get_effective_receive_library" => self
                     .receive_libraries
@@ -272,6 +281,42 @@ async fn run_with_views(
         .zip(receive_libraries)
         .collect();
     let calls = Arc::new(Mutex::new(Vec::new()));
+    let initia_args = if chain == "initia" {
+        use sha3::{Digest, Keccak256};
+        let receiver =
+            BASE64.encode(hex::decode(INITIA_RECEIVER.trim_start_matches("0x")).unwrap());
+        let source_eid = BASE64.encode(SOURCE_EID.to_le_bytes());
+        let header = &packet[..81];
+        let header_arg = BASE64.encode([&[81u8][..], header].concat());
+        let header_hash = BASE64.encode([&[32u8][..], &Keccak256::digest(header)[..]].concat());
+        let payload_hash =
+            BASE64.encode([&[32u8][..], &Keccak256::digest(&packet[81..])[..]].concat());
+        let dvn = BASE64.encode(hex::decode(DVN.trim_start_matches("0x")).unwrap());
+        let library = BASE64.encode(hex::decode(INITIA_ULN_302.trim_start_matches("0x")).unwrap());
+        HashMap::from([
+            (
+                "get_effective_receive_library",
+                json!([receiver, source_eid]),
+            ),
+            (
+                "get_config",
+                json!([
+                    receiver,
+                    library,
+                    source_eid,
+                    BASE64.encode(3u32.to_le_bytes())
+                ]),
+            ),
+            ("verifiable", json!([header_arg, payload_hash])),
+            (
+                "get_verification_confirmations",
+                json!([header_hash, payload_hash, dvn]),
+            ),
+        ])
+    } else {
+        HashMap::new()
+    };
+    let invalid_initia_args = Arc::new(AtomicUsize::new(0));
     let transport = E2eTransport {
         calls: calls.clone(),
         source_url,
@@ -281,6 +326,8 @@ async fn run_with_views(
         verifiable,
         confirmations,
         config,
+        initia_args,
+        invalid_initia_args: invalid_initia_args.clone(),
     };
     let snapshot = ProviderSnapshotHandle::from_getter(&getter);
     let evm = runtime_evm_layerzero_config("mainnet", &names).unwrap();
@@ -353,6 +400,11 @@ async fn run_with_views(
     let status = response.status();
     let body =
         serde_json::from_slice(&to_bytes(response.into_body(), 1_000_000).await.unwrap()).unwrap();
+    assert_eq!(
+        invalid_initia_args.load(Ordering::SeqCst),
+        0,
+        "Initia refusal must not be caused by invalid BCS request arguments"
+    );
     let requests = calls
         .lock()
         .unwrap()
@@ -419,14 +471,15 @@ async fn move_v302_receive_library_error_and_malformed_value_refuse_without_sign
         ),
         (vec![Ok(json!([42]))], "malformed address"),
     ];
-    for (responses, label) in cases {
+    for (index, (responses, label)) in cases.into_iter().enumerate() {
         let (status, body, signatures, requests) =
             run_resolve_and_sign("aptos", 0, responses).await;
-        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{label}: {body}");
-        assert_eq!(
-            body["body"],
-            "No payload-signed validation for chain aptos quorum: response set is ambiguous or incomplete; 0 distinct successful responses, 1 errors"
+        audit_round_artifact(
+            "round2-completion",
+            &format!("move-receive-library-error-{index}"),
+            json!({"case":label,"http_status":status.as_u16(),"body":body,"signatures":signatures,"views":requests}),
         );
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{label}: {body}");
         assert_eq!(signatures, 0, "{label}: signer was called");
         assert_eq!(
             requests.len(),
@@ -437,35 +490,64 @@ async fn move_v302_receive_library_error_and_malformed_value_refuse_without_sign
 }
 
 #[tokio::test]
-async fn move_v302_receive_library_quorum_failure_and_disagreement_refuse_without_signing() {
+async fn move_v302_receive_library_quorum_requires_matching_observations() {
     let library = |digit: char| Ok(json!([format!("0x{}", digit.to_string().repeat(64))]));
     let cases = [
         (
-            vec![library('4'), Err("Provider returned HTTP 400 Bad Request".to_string())],
+            vec![library('4'), library('4')],
+            "matching providers",
+            StatusCode::OK,
+            1,
+        ),
+        (
+            vec![
+                library('4'),
+                Err("Provider returned HTTP 400 Bad Request".to_string()),
+            ],
             "one provider failed",
-            "No payload-signed validation for chain aptos quorum: response set is ambiguous or incomplete; 1 distinct successful responses, 1 errors",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            0,
         ),
         (
             vec![library('4'), library('5')],
             "providers disagree on library address",
-            "No payload-signed validation for chain aptos quorum: response set is ambiguous or incomplete; 2 distinct successful responses, 0 errors",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            0,
         ),
     ];
-    for (responses, label, reason) in cases {
-        let (status, body, signatures, _) = run_resolve_and_sign("aptos", 0, responses).await;
-        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{label}: {body}");
-        assert_eq!(body["body"], reason, "{label}");
-        assert_eq!(signatures, 0, "{label}: signer was called");
+    for (index, (responses, label, expected_status, expected_signatures)) in
+        cases.into_iter().enumerate()
+    {
+        let (status, body, signatures, requests) =
+            run_resolve_and_sign("aptos", 0, responses).await;
+        audit_round_artifact(
+            "round2-completion",
+            &format!("move-receive-library-quorum-{index}"),
+            json!({"case":label,"http_status":status.as_u16(),"body":body,"signatures":signatures,"views":requests}),
+        );
+        assert_eq!(status, expected_status, "{label}: {body}");
+        assert_eq!(signatures, expected_signatures, "{label}: {body}");
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request["function"].as_str().is_some_and(
+                    |function| function.ends_with("::endpoint::get_effective_receive_library")
+                ))
+                .count(),
+            2,
+            "{label}: both receive-library observations are required"
+        );
     }
 }
 
-/// Round 2 M-10: Initia's LegacyView answers a one-value function with the bare value
-/// (`initia_public_node` 002-004, recorded from mainnet), not the array Aptos `/view` returns.
-/// The receive library is a two-value function and arrives as an array, like exchange 001.
 #[tokio::test]
 async fn evm_v302_to_initia_reads_recorded_legacy_view_scalars() {
-    let library = || vec![Ok(json!({"data": format!("[\"{INITIA_ULN_302}\",false]")}))];
-    let config = recorded_initia_view("002-mainnet-endpoint-get_config-uln302-default");
+    let library = || {
+        vec![Ok(recorded_initia_view(
+            "006-mainnet-endpoint-get_effective_receive_library-registered",
+        ))]
+    };
+    let config = recorded_initia_view("007-mainnet-endpoint-get_config-registered");
     let not_verified = recorded_initia_view("003-mainnet-views-uln302-verifiable-synthetic");
     let no_confirmations =
         recorded_initia_view("004-mainnet-msglib-get_verification_confirmations-synthetic");
@@ -540,5 +622,215 @@ async fn evm_v302_to_initia_reads_recorded_legacy_view_scalars() {
         "round2",
         "m10-initia-legacy-view-scalars",
         json!({ "cases": observations }),
+    );
+}
+
+#[tokio::test]
+async fn initia_view_contract_failures_never_reach_the_signer() {
+    let config = recorded_initia_view("007-mainnet-endpoint-get_config-registered");
+    let state = json!({"data": "3"});
+    let confirmations = json!({"data": "\"0\""});
+    let library =
+        recorded_initia_view("006-mainnet-endpoint-get_effective_receive_library-registered");
+    let encoded: String = serde_json::from_str(config["data"].as_str().unwrap()).unwrap();
+    let bytes = hex::decode(encoded.trim_start_matches("0x")).unwrap();
+    let mut invalid_flags = bytes.clone();
+    *invalid_flags.last_mut().unwrap() = 2;
+    let mut trailing = bytes.clone();
+    trailing.push(0);
+    let cases = [
+        (
+            "missing-data",
+            json!({}),
+            state.clone(),
+            confirmations.clone(),
+            library.clone(),
+        ),
+        (
+            "invalid-json",
+            json!({"data": "{"}),
+            state.clone(),
+            confirmations.clone(),
+            library.clone(),
+        ),
+        (
+            "config-prefix-only",
+            json!({"data": "\"000000000000000f\""}),
+            state.clone(),
+            confirmations.clone(),
+            library.clone(),
+        ),
+        (
+            "config-invalid-boolean",
+            json!({"data": serde_json::to_string(&hex::encode(invalid_flags)).unwrap()}),
+            state.clone(),
+            confirmations.clone(),
+            library.clone(),
+        ),
+        (
+            "config-trailing-bytes",
+            json!({"data": serde_json::to_string(&hex::encode(trailing)).unwrap()}),
+            state.clone(),
+            confirmations.clone(),
+            library.clone(),
+        ),
+        (
+            "state-null",
+            config.clone(),
+            json!({"data": "null"}),
+            confirmations.clone(),
+            library.clone(),
+        ),
+        (
+            "state-boolean",
+            config.clone(),
+            json!({"data": "true"}),
+            confirmations.clone(),
+            library.clone(),
+        ),
+        (
+            "state-out-of-range",
+            config.clone(),
+            json!({"data": "5"}),
+            confirmations.clone(),
+            library.clone(),
+        ),
+        (
+            "scalar-extra-value",
+            config.clone(),
+            json!({"data": "[3,0]"}),
+            confirmations.clone(),
+            library.clone(),
+        ),
+        (
+            "confirmations-empty",
+            config.clone(),
+            state.clone(),
+            json!({"data": "[]"}),
+            library.clone(),
+        ),
+        (
+            "confirmations-boolean",
+            config.clone(),
+            state.clone(),
+            json!({"data": "false"}),
+            library.clone(),
+        ),
+        (
+            "library-missing-flag",
+            config.clone(),
+            state.clone(),
+            confirmations.clone(),
+            json!({"data": format!("[\"{INITIA_ULN_302}\"]")}),
+        ),
+        (
+            "library-invalid-flag",
+            config.clone(),
+            state.clone(),
+            confirmations.clone(),
+            json!({"data": format!("[\"{INITIA_ULN_302}\",0]")}),
+        ),
+        (
+            "library-empty-address",
+            config.clone(),
+            state.clone(),
+            confirmations.clone(),
+            json!({"data": "[\"\",false]"}),
+        ),
+    ];
+    let mut observations = Vec::new();
+    for (label, config, state, confirmations, library) in cases {
+        let (status, body, signatures, requests) =
+            run_with_views("initia", config, state, confirmations, vec![Ok(library)]).await;
+        let expected_view = if label.starts_with("library-") {
+            "get_effective_receive_library"
+        } else if label.starts_with("state-") || label == "scalar-extra-value" {
+            "verifiable"
+        } else if label.starts_with("confirmations-") {
+            "get_verification_confirmations"
+        } else {
+            "get_config"
+        };
+        assert!(
+            requests.iter().any(|request| {
+                request["function"]
+                    .as_str()
+                    .and_then(|function| function.rsplit("::").next())
+                    == Some(expected_view)
+            }),
+            "{label}: failed before the malformed view was called: {requests:?}"
+        );
+        observations.push(json!({
+            "case": label,
+            "http_status": status.as_u16(),
+            "body": body,
+            "signatures": signatures,
+            "views": requests,
+        }));
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{label}: {body}");
+        assert_eq!(
+            signatures, 0,
+            "{label}: malformed provider response reached signer"
+        );
+    }
+    audit_round_artifact(
+        "round2-completion",
+        "initia-contract-refusals",
+        json!({"cases": observations}),
+    );
+}
+
+#[tokio::test]
+async fn initia_provider_quorum_requires_matching_valid_library_observations() {
+    let config = recorded_initia_view("007-mainnet-endpoint-get_config-registered");
+    let library = || {
+        Ok(recorded_initia_view(
+            "006-mainnet-endpoint-get_effective_receive_library-registered",
+        ))
+    };
+    let cases = [
+        (
+            "matching-providers",
+            vec![library(), library()],
+            StatusCode::OK,
+            1,
+        ),
+        (
+            "unavailable-provider",
+            vec![library(), Err("provider unavailable".into())],
+            StatusCode::INTERNAL_SERVER_ERROR,
+            0,
+        ),
+        (
+            "disagreeing-providers",
+            vec![
+                library(),
+                Ok(json!({"data": format!("[\"0x{}\",false]", "55".repeat(32))})),
+            ],
+            StatusCode::INTERNAL_SERVER_ERROR,
+            0,
+        ),
+    ];
+    let mut observations = Vec::new();
+    for (label, libraries, expected_status, expected_signatures) in cases {
+        let (status, body, signatures, requests) = run_with_views(
+            "initia",
+            config.clone(),
+            json!({"data": "3"}),
+            json!({"data": "\"0\""}),
+            libraries,
+        )
+        .await;
+        observations.push(json!({
+            "case": label, "http_status": status.as_u16(), "body": body,
+            "signatures": signatures, "views": requests,
+        }));
+        assert_eq!(status, expected_status, "{label}: {body}");
+        assert_eq!(signatures, expected_signatures, "{label}: {body}");
+    }
+    audit_round_artifact(
+        "round2-completion",
+        "initia-provider-quorum",
+        json!({"cases": observations}),
     );
 }

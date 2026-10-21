@@ -61,7 +61,7 @@ impl JsonRpcTransport for A3Transport {
             return match function.rsplit("::").next().unwrap_or_default() {
                 "get_receive_msglib" => Ok((*self.receive_msglib).clone()),
                 "get_config" => Ok(json!([
-                    "0x00000000000000020001589dedbd617e0cbcb916a9223f4d1300c294236b00000000"
+                    "0x00000000000000020001000000000000000000000000589dedbd617e0cbcb916a9223f4d1300c294236b00000000"
                 ])),
                 "get_verification_confirmations" => Ok(json!(["0"])),
                 "verifiable" => Ok(json!([self.verification_state])),

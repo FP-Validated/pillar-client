@@ -881,7 +881,10 @@ fn evm_address_from_padded_hex(value: &str) -> Option<String> {
 /// Upstream `getAddressInHex("aptos", …)`: 32 bytes, zero-padded, lower-cased.
 fn aptos_address_bytes32(value: &str) -> Option<String> {
     let digits = value.strip_prefix("0x").unwrap_or(value);
-    if digits.len() > 64 || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+    if digits.is_empty()
+        || digits.len() > 64
+        || !digits.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
         return None;
     }
     Some(format!("0x{:0>64}", digits.to_ascii_lowercase()))
@@ -1008,9 +1011,15 @@ where
 fn move_uln_config_confirmations(encoded: &str) -> Option<u64> {
     let bytes = hex::decode(encoded.trim_start_matches("0x")).ok()?;
     let confirmations = bytes.get(..8)?.try_into().ok()?;
-    // Gasolina's pinned `deserializeUlnConfig` uses common-move `extractU64`,
-    // which decodes this contract-owned blob in network byte order. This is not
-    // generic Move BCS integer decoding.
+    let required_count = usize::from(*bytes.get(9)?);
+    let optional_count_at = 10 + required_count * 32;
+    let optional_count = usize::from(*bytes.get(optional_count_at)?);
+    let flags_at = optional_count_at + 1 + optional_count * 32;
+    let flags = bytes.get(flags_at..)?;
+    if flags.len() != 3 || flags.iter().any(|flag| *flag > 1) {
+        return None;
+    }
+    // Move's encoded ULN config uses network byte order, not BCS integer encoding.
     Some(u64::from_be_bytes(confirmations))
 }
 
@@ -1091,7 +1100,7 @@ where
                 json!({"type_args": [], "args": encoded_arguments}),
             )
             .await?;
-        initia_view_values(&response).ok_or(RpcError::Unavailable)
+        initia_view_values(&response, function_name).ok_or(RpcError::Unavailable)
     } else {
         let encoded_arguments = arguments
             .iter()
@@ -1142,16 +1151,19 @@ where
         .ok_or(RpcError::Unavailable)
 }
 
-/// LegacyView answers `{"data": "<json>"}`, and the JSON is the bare value for a function
-/// with one return and an array for a tuple. Upstream's Initia provider wraps every
-/// non-array the same way (`multiprovider/src/initia.ts:412-415`); each caller then checks
-/// the element's type, as it does for Aptos.
-fn initia_view_values(response: &Value) -> Option<Vec<Value>> {
+fn initia_view_values(response: &Value, function: &str) -> Option<Vec<Value>> {
     let data = response.get("data")?.as_str()?;
-    match crate::provider_health::parse_json_with_limits(data.as_bytes(), false).ok()? {
-        Value::Array(values) => Some(values),
-        value => Some(vec![value]),
-    }
+    let values =
+        match crate::provider_health::parse_json_with_limits(data.as_bytes(), false).ok()? {
+            Value::Array(values) => values,
+            value => vec![value],
+        };
+    let valid_arity = if function == "get_effective_receive_library" {
+        values.len() == 2 && values[1].is_boolean()
+    } else {
+        values.len() == 1
+    };
+    valid_arity.then_some(values)
 }
 
 fn initia_bcs_argument(value: &str, argument_type: &str) -> Option<String> {

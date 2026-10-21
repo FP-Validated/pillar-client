@@ -4,6 +4,20 @@ All notable changes to this project are documented here. This project follows
 semantic versioning for the HTTP surface, the environment-variable contract and
 the Prometheus metric names.
 
+## 2.7.1 - 2026-10-21
+
+### Security
+
+- Round 2 M-11 follow-up: recognize HTTP(S) schemes case-insensitively and retain parentheses and apostrophes inside URL userinfo until redaction. Credential-bearing JSON keys are rendered as one redacted, bounded diagnostic string instead of being published unchanged or colliding in a rewritten map. Redaction remains linear and precedes UTF-8-safe truncation.
+- Round 2 M-09 follow-up: refuse READ commands with zero requests, including compute-only commands, with HTTP 400 before READ-target RPC or signing, matching `ReadCmdCodecV1`.
+- Round 2 M-08 follow-up: startup health and Canton sender lookup share one `CantonLedgerAuth` and token cache. `CANTON_CLIENT_SECRET` comes from the same environment map as the rest of the runtime configuration.
+- Round 2 M-10 follow-up: require the Initia receive-library address/bool tuple and exactly one result for scalar views. Validate the complete Move ULN config, including address counts, 32-byte addresses, boolean flags and exact length. Record a registered Initia OApp's actual receive-library and config responses; retain Aptos/Movement array handling.
+
+### Upgrade / Breaking
+
+- A malformed provider response object containing an HTTP(S) URL key becomes a diagnostic string in `/provider-health/report`; other object/array shapes are unchanged. Each diagnostic retains at most a 64 KiB UTF-8 prefix plus its truncation marker, not a 64 KiB whole-report bound.
+- Partial, trailing or malformed Move ULN config responses and invalid Initia return arities are non-votes. No valid RPC schema or operator configuration changes.
+
 ## 2.7.0 - 2026-10-21
 
 ### Security

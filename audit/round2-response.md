@@ -4,17 +4,19 @@
 |---|---|
 | Baseline in the report | `3f39fbad972794e5a9c598ea46a310334a4a4415` (2.6.2) |
 | Branch point | `7736ecb8fd9cee6abd658a223972e58fc0bf341e` (Round 1 remediation on `main`) |
-| Fixes | four commits, one per finding, `4cbef24`..`d256797`, after dependency update `677d676` |
+| Fixes | initial 2.7.0 commits `4cbef24`..`d256797`, after `677d676`; follow-up hardening in `v2.7.1` |
 | Date | 2026-10-21 |
 
-All four findings were reproduced on `main` before any change, against the source and
-with throwaway tests, and each one held. The fixed tree is formatted with
-`cargo +1.98.1 fmt --all`, passes
-`clippy --workspace --all-targets --locked -- -D warnings`, and passes
-`test --workspace --locked` with 1,125 passed, zero failed and 15 ignored.
-`cargo +1.94.1 check` (MSRV), `cargo audit` and `cargo deny check` pass.
-Each new test was run against the pre-fix code with only the fix reverted, and fails
-there.
+The initial 2.7.0 verification reproduced all four findings, then passed fmt,
+clippy with warnings denied, 1,125 workspace tests (15 ignored), MSRV 1.94.1,
+audit and deny. Each original regression failed with its corresponding fix
+reverted. These are historical results, not a claim that 2.7.0 met every boundary.
+
+Adversarial execution of the published 2.7.0 image subsequently found URL
+credential-redaction bypasses and a signed zero-request READ command. The 2.7.1
+follow-up also shares Canton authentication state and strengthens Initia's view
+contracts. Follow-up evidence and verification boundaries are recorded in
+[AUDIT §19](../AUDIT.md#19-round-2-follow-up--2026-10-21).
 
 This report numbers its Canton finding M-08. That is a different finding from Round 1
 M-08 (TON extra-context policy principal, fixed by `8143a9b`); below it is written
@@ -22,17 +24,17 @@ M-08 (TON extra-context policy principal, fixed by `8143a9b`); below it is writt
 
 | Finding | Commit | Outcome |
 |---|---|---|
-| M-11 URL redaction cost | [`4cbef24`](https://github.com/FP-Validated/pillar-client/commit/4cbef248e24dbdb4da55c579d56f9bd36f2c6a99) | Fixed as recommended; long text is truncated rather than replaced |
-| M-09 READ codec versions | [`2a4a20f`](https://github.com/FP-Validated/pillar-client/commit/2a4a20f2108a95e7033d573798a15e5e95327cd7) | Fixed as recommended; one acceptance criterion corrected |
-| M-10 Initia scalar views | [`be506f2`](https://github.com/FP-Validated/pillar-client/commit/be506f25e5f922abc52e6a9d0f429521b3deec18) | Fixed, following upstream rather than a type allow-list |
-| M-08 (Canton) provider health | [`d256797`](https://github.com/FP-Validated/pillar-client/commit/d256797160a79dffef83d3a202ad9a3a2da6849b) | Fixed as recommended; the ledger is probed, the sequencer is not |
+| M-11 URL redaction cost | [`4cbef24`](https://github.com/FP-Validated/pillar-client/commit/4cbef248e24dbdb4da55c579d56f9bd36f2c6a99) | Initial CPU fix; 2.7.1 closes credential-boundary and JSON-key bypasses |
+| M-09 READ codec versions | [`2a4a20f`](https://github.com/FP-Validated/pillar-client/commit/2a4a20f2108a95e7033d573798a15e5e95327cd7) | Version guards; 2.7.1 also refuses zero requests |
+| M-10 Initia scalar views | [`be506f2`](https://github.com/FP-Validated/pillar-client/commit/be506f25e5f922abc52e6a9d0f429521b3deec18) | Chain-specific decoding; 2.7.1 validates arity and the full ULN config |
+| M-08 (Canton) provider health | [`d256797`](https://github.com/FP-Validated/pillar-client/commit/d256797160a79dffef83d3a202ad9a3a2da6849b) | Ledger probe; 2.7.1 shares the authentication instance and token cache |
 | Dependencies | [`677d676`](https://github.com/FP-Validated/pillar-client/commit/677d67606a4c6c2c5a048f3b73a3b09467b5344a) | Not a finding: RUSTSEC fixes that turned the hosted `audit, deny, sbom` job red |
 
 ---
 
 ## M-11: quadratic URL redaction in provider health
 
-**Outcome:** Fixed as recommended. Over-long text is truncated, not replaced.
+**Outcome:** Linear CPU fix in 2.7.0; credential-boundary follow-ups in 2.7.1. Over-long text is truncated, not replaced.
 
 **What we confirmed first.** `find_url_start` searched the whole remainder for both
 `https://` and `http://` on every URL. A string made only of `https://` URLs never
@@ -46,12 +48,14 @@ the same answer also delays startup.
 
 **What changed**
 
-- `find_url_start` looks for the next `http` from the current position and accepts it
-  only when `://` or `s://` follows. The caller resumes after the URL it returns, so
-  each byte is read once. The set of URLs found is the same as before.
-- After redaction, each string in the report is cut to 64 KiB and ends with
-  `…[truncated N bytes]`. Before this, the report could retain up to 4 MiB per
-  provider until the next refresh.
+- `find_url_start` scans forward for HTTP(S) prefixes without rescanning the suffix.
+  Matching is ASCII case-insensitive, and valid userinfo punctuation remains part
+  of the URL until credentials are removed.
+- An object with a URL-bearing key becomes one compact, redacted diagnostic
+  string. This covers nested keys without merging different keys that redact
+  identically. Other objects and arrays preserve their shape.
+- Each diagnostic retains at most a 64 KiB UTF-8 prefix and
+  `…[truncated N bytes]`, after redaction; this is not a whole-report bound.
 
 **Evidence**
 
@@ -61,6 +65,11 @@ the same answer also delays startup.
   and failed.
 - The same test checks that a credential repeated through the payload (userinfo, path
   and query) never appears in the report, and that the retained text is capped.
+- Follow-up cases cover parentheses and apostrophes in userinfo, uppercase schemes
+  and userinfo longer than the retained prefix. `round2_m11_url_keys_are_redacted_without_map_collisions`
+  also covers direct/nested URL keys, an observation marker, two keys that redact
+  identically, and uppercase keys. It failed on a real HTTP response before the
+  key fix and passes afterwards.
 
 **Why we truncate rather than replace with a fixed message.** Redaction finishes
 before truncation, so the retained prefix holds no credential. Truncating the other
@@ -94,13 +103,16 @@ it and buy no extra safety.
   compute type, compute setting or timestamp flag, truncated input, trailing bytes,
   and a zero block number. The client chose these values, so they are not server
   faults.
+- Commands with zero requests, including compute-only commands, are also HTTP 400
+  before READ-target RPC or signing. The published 2.7.0 image had signed
+  `0x000100010000`; the new regression explicitly refuses it.
 
 **Evidence**
 
 - `official_vectors_read_cmd_codec_v1_refuses_every_other_version` changes only the
   version byte of the pinned official vector, to 0, 2 or 0xff, for each of the three
   fields. Every case is refused.
-- `round2_m09_unsupported_read_codec_versions_are_refused_before_read_rpc_and_signing`
+- `round2_m09_read_codec_versions_and_empty_commands_are_guarded_before_rpc_and_signing`
   runs the HTTP route on the production composition. For each field, the answer is
   400. The only RPC is the source `eth_getTransactionReceipt`, and no sign-stage
   observation is recorded.
@@ -115,7 +127,7 @@ any other validation RPC, and the signer.
 
 ## M-10: Initia scalar view responses were refused
 
-**Outcome:** Fixed. We follow upstream's handling rather than an allow-list of types.
+**Outcome:** Chain-specific decoding, per-view arity and consumer type checks, with full Move ULN-config validation in 2.7.1.
 
 **What we confirmed first.** Initia mainnet (`rest.initia.xyz`, recorded 2026-10-20)
 answers the three views this path reads with bare values, not arrays:
@@ -137,9 +149,11 @@ regression.
 - Response handling is split by chain:
   - Initia parses the `data` string and wraps a non-array as one element.
   - Aptos `/view` still requires a top-level array.
-- Each view's caller already checks its element: the receive library must be an
-  address, `get_config` an encoded config, `verifiable` a state from 0 to 4, and
-  confirmations a `u64`. A value of the wrong type is still a non-vote.
+- Initia's receive-library view must contain exactly `[address, bool]`; the scalar
+  views must contain exactly one result. Each consumer validates its value.
+- Move ULN config decoding checks the entire big-endian layout: confirmation
+  prefix, 32-byte required/optional address lists, three boolean flags and exact
+  length. An 8-byte prefix alone, invalid flags or trailing bytes cannot vote.
 
 **Evidence**
 
@@ -161,9 +175,11 @@ view's value is used. A second, chain-wide type list would have to be kept in st
 with every view's return type. It would also diverge from upstream, which accepts any
 non-array and lets the consumer reject it.
 
-**Not recorded.** No OApp registered on Initia mainnet was available for
-`get_effective_receive_library`, which is a two-value view. Its shape is taken from
-the same endpoint module's two-value view, recorded as exchange 001.
+**Registered OApp follow-up.** Exchanges `006` and `007`, recorded on 2026-10-21,
+read a real registered receiver's `[ULN302, false]` result and its complete 78-byte
+config (15 confirmations, two required addresses). E2E requests use that receiver
+and independently checked BCS arguments. State-2 and confirmation-15 refusals are
+controlled inputs, not recordings of a delivered packet; no live signing is claimed.
 
 ## M-08 (Canton): Canton had no provider-health probe
 
@@ -188,8 +204,9 @@ the same endpoint module's two-value view, recorded as exchange 001.
 - A `CANTON` arm calls `GET {jsonApiUrl}/v2/state/ledger-end`
   (`common-canton` 1.2.66 `client/canton-client.ts:994-997`). A numeric `offset`
   means healthy.
-- The probe uses the same `CantonLedgerAuth` (OAuth2 client credentials,
-  `CANTON_CLIENT_SECRET`) and the same URL rules as the ledger sender read.
+- The initial probe used the same auth type but a separate `CantonLedgerAuth`
+  instance from sender lookup. In 2.7.1 both paths share one Arc-backed token
+  cache, with `CANTON_CLIENT_SECRET` captured from the same environment map.
 - The probe's rank key is the dispatch key for the configured URI.
 - Any probe failure marks only that entry unhealthy: missing OAuth configuration, a
   rejected token, an HTTP error, or a non-numeric offset. It cannot fail the rest of
@@ -214,6 +231,15 @@ the same endpoint module's two-value view, recorded as exchange 001.
   Canton, with a credential-bearing URI. It checks that the rank key the probe records
   is the one dispatch looks up.
 - With the `CANTON` arm removed, the roster test and both Canton E2E tests fail.
+- The health/rank test above is not proof of the complete HTTP signing route.
+  The 2.7.1 `round2_canton_http_*` tests use actual TCP HTTP, production runtime
+  assembly, sequencer quorum-2 verification, nonzero source confirmations, ledger
+  sender lookup, policy and the local signer. Normal signing uses one startup
+  OAuth token and produces one signature; startup 401 is health-gated, and a
+  sender-time 401 after a healthy probe produces no signature or policy call.
+  Separating the two auth caches makes the successful-signing regression fail.
+  The sequencer transcript is synthetic parity-derived data, not a live ledger.
+  The rank-key test checks identity, not dispatch-arm coverage.
 
 **Ledger only, not the sequencer.** Upstream's Canton health covers the `rpc` (ledger)
 entries only. Those are also the only entries dispatch ranks and quorums. The single
@@ -230,6 +256,6 @@ The report closes with four invariants. Each is now held by a test:
 | Invariant | Test |
 |---|---|
 | Every supported chain type reaches a real health probe | `no_non_evm_chain_falls_through_to_the_unregistered_health_probe` |
-| An unsupported protocol version is refused before RPC and signing | `round2_m09_unsupported_read_codec_versions_are_refused_before_read_rpc_and_signing` |
+| An unsupported protocol version or zero request count is refused before READ-target RPC and signing | `round2_m09_read_codec_versions_and_empty_commands_are_guarded_before_rpc_and_signing` |
 | A chain's RPC response is read by that chain's contract | `evm_v302_to_initia_reads_recorded_legacy_view_scalars`, with recorded Initia responses |
 | Synchronous work on external input has a bounded cost | `round2_m11_hostile_health_response_is_redacted_within_the_probe_deadline` |

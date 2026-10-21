@@ -311,7 +311,7 @@ impl std::fmt::Debug for CantonLedgerAuth {
 }
 
 impl CantonLedgerAuth {
-    /// `env_client_secret` is `process.env.CANTON_CLIENT_SECRET`.
+    /// `env_client_secret` is the fallback when the provider URI omits its secret.
     pub(crate) fn for_environment(environment: &str, env_client_secret: Option<String>) -> Self {
         Self {
             local: matches!(environment, "localnet" | "sandbox"),
@@ -320,9 +320,9 @@ impl CantonLedgerAuth {
         }
     }
 
-    /// The inputs the runtime has always used: `LZ_ENV` and `CANTON_CLIENT_SECRET`.
-    pub(crate) fn from_process_env(environment: &str) -> Self {
-        Self::for_environment(environment, std::env::var("CANTON_CLIENT_SECRET").ok())
+    /// Reads the same environment map used to assemble runtime configuration.
+    pub(crate) fn from_env_map(environment: &str, vars: &HashMap<String, String>) -> Self {
+        Self::for_environment(environment, vars.get("CANTON_CLIENT_SECRET").cloned())
     }
 
     pub(crate) fn token_provider<T: JsonRpcTransport>(

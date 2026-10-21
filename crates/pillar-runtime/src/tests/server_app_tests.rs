@@ -291,6 +291,7 @@ async fn runtime_server_app_renders_the_metrics_registry_it_was_given() {
         ]),
         transport,
         || 777,
+        crate::layerzero_runtime::CantonLedgerAuth::default(),
         RuntimeCoreAppDependencies {
             hash_call_data_builders: HashMap::from([(
                 "V302".to_string(),

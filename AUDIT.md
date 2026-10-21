@@ -640,3 +640,52 @@ used. The Initia responses are recorded, not live, in the tests.
 - Upgrade from 2.6.x as the CHANGELOG "Upgrade / Breaking" section describes. A
   wallet with a non-null `walletRestrictions` now fails startup, and malformed READ
   commands answer 400 instead of 500.
+
+## 19. Round 2 follow-up — 2026-10-21
+
+Baseline: release `v2.7.0`, source `637921ac0891d15df68dec320e4d9a3a70eb70f7`.
+Executing that published image with a public test mnemonic exposed credentials
+in punctuated/uppercase URLs and accepted the zero-request READ command
+`0x000100010000` with a signature. The initial Round 2 closure language did not
+cover those boundaries. This follow-up is version 2.7.1.
+
+| Area | Follow-up | Exercised evidence |
+| --- | --- | --- |
+| M-11 | Case-insensitive linear HTTP(S) scanning, complete userinfo boundaries, redact-before-truncate; URL-keyed objects become one bounded diagnostic string without map collisions | Real HTTP 4 MiB response, punctuation/case/UTF-8 boundaries, direct/nested/uppercase URL keys and an observation marker; the URL-key regression fails before the fix |
+| M-09 | Zero requests and compute-only commands are refused, in addition to all three version guards | Valid V1 signs; invalid versions, a later invalid request, zero requests and compute-only inputs return 400 after only the source receipt, without READ-target RPC or a sign stage |
+| M-08 | One Canton auth instance/cache, configured from the same environment map, serves health and sender lookup | Actual TCP signing route through production runtime assembly, quorum-2 sequencer verification, nonzero confirmations, ledger sender, policy and local signer; one startup token yields one signature; startup 401 and sender-time 401 fail closed |
+| M-10 | Per-view Initia arity and consumer type checks; full Move ULN-config layout and exact length | Registered Initia receiver exchanges 006/007 return `[ULN302, false]` and a complete 78-byte config; valid scalar flow signs, verified/confirmed payloads and malformed views do not; independent BCS arguments and two-provider agreement are checked |
+
+### Verification checkpoint
+
+| Check | Observed result |
+| --- | --- |
+| Rust 1.98.1 workspace suite | 1,133 passed, zero failed, 15 ignored, summing `test result:` rows including three child harnesses |
+| Final review-only test strengthening | Aptos two-provider positive/refusal controls passed separately after the workspace run; no executable product code changed |
+| `cargo +1.98.1 clippy --workspace --all-targets --locked -- -D warnings` | Passed after final review |
+| `cargo +1.98.1 fmt --all --check` | Passed |
+| `RUSTFLAGS="-D warnings" cargo +1.94.1 check --workspace --all-targets --locked` | Passed |
+| Controlled regressions | Separate Canton caches turn the successful-signing test into HTTP 500; prefix-only Move config decoding turns the malformed-config refusal into HTTP 200; URL keys expose dummy credentials before the key fix |
+| Restoration | Both temporarily changed product files have the exact SHA-256 they had before the controlled regressions |
+| Independent read-only review | Input/redaction and runtime-contract reviews closed their findings; reviewers did not claim to run the tests |
+
+The local macOS debug test linker still emits the previously recorded
+compact-unwind size warning. Rust/clippy diagnostics and the MSRV check pass with
+warnings denied. The fifteen external-input tests remain ignored.
+
+Raw results, failed attempts, successful E2E artifacts, review receipts and
+negative controls are retained in
+`local/reports/round2-completion-20261021/`. The earlier published-image
+counterexamples are in `local/reports/round2-adversarial-review-20261021/`.
+`canton-fixture-generator.mjs` in the completion evidence directory reproduces
+the new synthetic, clock-adjusted sequencer transcript using the existing public
+test seeds and signing contract; it checks signature parity against the original
+fixture. That evidence generator is not distributed in a fresh repository clone.
+The committed static fixtures and default tests are self-contained.
+
+The Canton transcript is not a live ledger observation. Initia exchanges 003/004
+use synthetic packet inputs, and the state-2/confirmation-15 refusals are controlled
+cases, not a recorded delivered packet. No synthetic production-KMS signing
+request was generated. Local source checks do not establish a published image or
+a production rollout; those require separate provenance and operational receipts.
+

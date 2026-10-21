@@ -35,6 +35,7 @@ where
         vars: HashMap<String, String>,
         transport: T,
         now_unix_ms: impl Fn() -> u64 + Send + Sync + 'static,
+        canton_ledger_auth: crate::layerzero_runtime::CantonLedgerAuth,
         dependencies: RuntimeCoreAppDependencies,
         chain_type_by_chain_name: HashMap<String, String>,
         mode: RuntimeMode,
@@ -70,11 +71,7 @@ where
             chain_type_by_chain_name.clone(),
         )
         .with_execution_resources(controls.resources.clone())
-        .with_canton_ledger_auth(
-            crate::layerzero_runtime::CantonLedgerAuth::from_process_env(
-                runtime_config.environment.as_deref().unwrap_or_default(),
-            ),
-        );
+        .with_canton_ledger_auth(canton_ledger_auth);
         let now = provider_health_source.now_unix_ms();
         let provider_health_cache =
             ProviderHealthCache::new(provider_health_source.clone(), move || now());
@@ -258,10 +255,15 @@ where
             metrics.clone(),
         )
         .await?;
+        let canton_ledger_auth = crate::layerzero_runtime::CantonLedgerAuth::from_env_map(
+            runtime_config.environment.as_deref().unwrap_or_default(),
+            &vars,
+        );
         Self::from_env_map_with_core_dependencies(
             vars,
             transport,
             now_unix_ms,
+            canton_ledger_auth,
             dependencies,
             chain_type_by_chain_name,
             RuntimeMode::Development,

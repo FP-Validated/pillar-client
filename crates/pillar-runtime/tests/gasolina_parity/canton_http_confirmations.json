@@ -1,0 +1,115 @@
+{
+  "source": "Synthetic clock-adjusted transcript derived from canton_sequencer.json one-match; all three responses use the original event with requestTimestamp and request-record timestamp fixed to 1700000000000 ms. Signatures use serializeJson({type,request,response}), secp.sign, and privateKeySeeds ve3-committee-1 and ve3-committee-2 from scripts/gasolina-parity/emit-ve3-sequencer.ts.",
+  "exchanges": [
+    {
+      "method": "GET",
+      "url": "https://sequencer.example:8443/scan?type=events&emitter=0xc35194c1ae9936954bea5931c720168c376ede8af156fcc37993a2fbfdc647ac&transactionHash=1220bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb&names=EndpointV2_PacketSentEvent",
+      "headers": {
+        "authorization": "Bearer parity"
+      },
+      "body": null,
+      "status": 200,
+      "response": {
+        "events": [
+          {
+            "requestId": "req-900",
+            "eventIndex": "0",
+            "name": "EndpointV2_PacketSentEvent",
+            "data": {
+              "encodedPayload": "0x01000000000000000700007767c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c400007595000000000000000000000000e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7ababababababababababababababababababababababababababababababababdeadbeef",
+              "options": "0x0003010011010000000000000000000000000000ea60",
+              "sendLibrary": "0xe981afc41dfa5510e4599ab8544c0c4c240220df62eded320ac87abf471301db"
+            },
+            "emitter": "0xc35194c1ae9936954bea5931c720168c376ede8af156fcc37993a2fbfdc647ac",
+            "hash": "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "requestTimestamp": "1700000000000",
+            "requestTransactionHash": "1220aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "commitmentTransactionHash": "1220bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "nonce": "900"
+          }
+        ],
+        "latestNonce": "900",
+        "isLatest": true,
+        "stateRoot": "0x5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e",
+        "signatures": [
+          "0x707965b53246007fb3b13f04452f852c730ff913a4dc1e42b42762060b96de3938eb57fd3930a085e1e0423585e66c5662b1674d23ddfd3cf95e95be55bf0fbd00",
+          "0x09c517d7874d77938859b3d3b3f78ea33f758dc67c64ef7460392ce96e8e8d1766fefcdebcd9a077722d488f76473f3bb1a1092e2ec5bdb1a95b0cd3e568373d01"
+        ]
+      }
+    },
+    {
+      "method": "GET",
+      "url": "https://sequencer.example:8443/scan?type=events&emitter=0xc35194c1ae9936954bea5931c720168c376ede8af156fcc37993a2fbfdc647ac&from=900&to=901",
+      "headers": {
+        "authorization": "Bearer parity"
+      },
+      "body": null,
+      "status": 200,
+      "response": {
+        "events": [
+          {
+            "requestId": "req-900",
+            "eventIndex": "0",
+            "name": "EndpointV2_PacketSentEvent",
+            "data": {
+              "encodedPayload": "0x01000000000000000700007767c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c400007595000000000000000000000000e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7ababababababababababababababababababababababababababababababababdeadbeef",
+              "options": "0x0003010011010000000000000000000000000000ea60",
+              "sendLibrary": "0xe981afc41dfa5510e4599ab8544c0c4c240220df62eded320ac87abf471301db"
+            },
+            "emitter": "0xc35194c1ae9936954bea5931c720168c376ede8af156fcc37993a2fbfdc647ac",
+            "hash": "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "requestTimestamp": "1700000000000",
+            "requestTransactionHash": "1220aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "commitmentTransactionHash": "1220bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "nonce": "900"
+          }
+        ],
+        "latestNonce": "900",
+        "isLatest": true,
+        "stateRoot": "0x5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e",
+        "signatures": [
+          "0x8b548f005eb4092836621d1e77134acaf8a9749041d01471a8e4f2bf4e09d7ee1ea21af80b40ab27bc1a73151ceb587a28b6da0e37bbfa8ee4970dccb6c057fd00",
+          "0xbcb413538fca5fab9d1130a46d7646620a6d5eabf6f5f78368597656f4346fa80220fc6382f3b771ecb2d0c6765c10c3f4ae05ba44f121451bffbd6218ab004800"
+        ]
+      }
+    },
+    {
+      "method": "GET",
+      "url": "https://sequencer.example:8443/scan?type=requests&id=req-900",
+      "headers": {
+        "authorization": "Bearer parity"
+      },
+      "body": null,
+      "status": 200,
+      "response": {
+        "requests": [
+          {
+            "id": "req-900",
+            "commitmentId": "c-1",
+            "transactionHash": "1220aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "timestamp": "1700000000000",
+            "nonce": "900",
+            "blockNumber": "5",
+            "msgValue": "0",
+            "transaction": {
+              "caller": "0x0101010101010101010101010101010101010101010101010101010101010101",
+              "transaction": {
+                "functionSignature": {
+                  "contract": "EndpointV2",
+                  "function": "send"
+                },
+                "address": "0xc35194c1ae9936954bea5931c720168c376ede8af156fcc37993a2fbfdc647ac",
+                "arguments": {}
+              }
+            }
+          }
+        ],
+        "stateRoot": "0x5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e",
+        "signatures": [
+          "0xa52a9467108936a505bdd2fc603367ac83b1664ad6c6913a5456dfd2657e361b486d6d8373172f36862375b9296213c4ee5e412dd610c06f0e6360eab71a736000",
+          "0xfe4627acb7b4e8bd6a93bdf3fe5d02151c6d4bffe660bdbc6a934e204fd2769a34c21a7de06a8f956504de85687b46dbcb329cbf20bd00a2bf46b947c78288af01"
+        ]
+      }
+    }
+  ]
+}

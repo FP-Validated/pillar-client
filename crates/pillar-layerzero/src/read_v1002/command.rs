@@ -32,6 +32,9 @@ pub fn decode_evm_read_command(cmd: &str) -> Result<EvmReadCommand, AppCoreError
             "read request count {request_count} exceeds limit {MAX_READ_REQUESTS}"
         )));
     }
+    if request_count == 0 {
+        return Err(malformed("READ command must contain at least one request"));
+    }
     let mut requests = Vec::with_capacity(request_count as usize);
     for _ in 0..request_count {
         requests.push(decode_evm_read_request(&mut cursor)?);

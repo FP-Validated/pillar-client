@@ -38,6 +38,10 @@ fn redact_response_urls(value: Value) -> Value {
         Value::Array(values) => {
             Value::Array(values.into_iter().map(redact_response_urls).collect())
         }
+        Value::Object(values) if values.keys().any(|key| find_url_start(key).is_some()) => {
+            let serialized = Value::Object(values).to_string();
+            Value::String(bounded_report_text(redact_urls_in_text(&serialized)))
+        }
         Value::Object(values) => Value::Object(
             values
                 .into_iter()
@@ -54,30 +58,41 @@ fn redact_urls_in_text(input: &str) -> String {
     while let Some(start) = find_url_start(remaining) {
         output.push_str(&remaining[..start]);
         let url_tail = &remaining[start..];
+        // Parentheses and apostrophes can be part of userinfo; only trim them at the token tail.
         let end = url_tail
-            .find(|character: char| {
-                character.is_whitespace()
-                    || matches!(character, '"' | '\'' | '<' | '>' | ')' | ']' | '}')
+            .char_indices()
+            .find_map(|(index, character)| {
+                (character.is_whitespace() || matches!(character, '"' | '<' | '>' | '{' | '}'))
+                    .then_some(index)
             })
             .unwrap_or(url_tail.len());
-        output.push_str(&redact_url(&url_tail[..end]));
-        remaining = &url_tail[end..];
+        let token = &url_tail[..end];
+        let url_end = token
+            .char_indices()
+            .rev()
+            .find_map(|(index, character)| {
+                (!matches!(character, ')' | '\'' | ',' | '.' | ';' | '!' | '?'))
+                    .then_some(index + character.len_utf8())
+            })
+            .unwrap_or(0);
+        output.push_str(&redact_url(&token[..url_end]));
+        remaining = &url_tail[url_end..];
     }
     output.push_str(remaining);
     output
 }
 
-/// The first `http://` or `https://`. Each call reads only up to the URL it returns and
-/// the caller resumes after that URL, so a whole string is scanned once.
+/// The first ASCII-case-insensitive `http://` or `https://`, scanning once.
 fn find_url_start(value: &str) -> Option<usize> {
-    let mut from = 0;
-    while let Some(offset) = value[from..].find("http") {
-        let start = from + offset;
-        let rest = &value.as_bytes()[start + 4..];
-        if rest.starts_with(b"://") || rest.starts_with(b"s://") {
+    let bytes = value.as_bytes();
+    for start in 0..bytes.len().saturating_sub(3) {
+        if !bytes[start..start + 4].eq_ignore_ascii_case(b"http") {
+            continue;
+        }
+        let rest = &bytes[start + 4..];
+        if rest.starts_with(b"://") || rest.len() >= 4 && rest[..4].eq_ignore_ascii_case(b"s://") {
             return Some(start);
         }
-        from = start + 4;
     }
     None
 }
@@ -188,5 +203,51 @@ mod tests {
         assert!(!response.contains(secret));
         assert!(!response.contains("user:pass"));
         assert!(response.contains("rpc.example"));
+    }
+
+    #[test]
+    fn embedded_url_redaction_handles_punctuation_case_and_ipv6() {
+        let input = concat!(
+            "failed (https://user:paren)secret@rpc.example/v2/secret?token=secret). ",
+            "quoted https://user:apostrophe-secret'suffix@rpc.example/v2/secret?token=secret, ",
+            "HTTPS://user:upper-secret@rpc.example/v2/secret?token=secret; ",
+            "https://rpc.example/v2/status?region=west, and ",
+            "https://user:ipv6-secret@[2001:db8::1]:8545/v2/secret?token=secret"
+        );
+        let redacted = redact_urls_in_text(input);
+
+        for secret in [
+            "paren",
+            "apostrophe-secret",
+            "upper-secret",
+            "ipv6-secret",
+            "user:",
+        ] {
+            assert!(
+                !redacted.contains(secret),
+                "unredacted {secret}: {redacted}"
+            );
+        }
+        assert!(redacted.contains("(https://<redacted>@rpc.example/<redacted>?<redacted>)."));
+        assert!(redacted.contains("quoted https://<redacted>@rpc.example/<redacted>?<redacted>,"));
+        assert!(redacted.contains("HTTPS://<redacted>@rpc.example/<redacted>?<redacted>;"));
+        assert!(redacted.contains("https://rpc.example/<redacted>?<redacted>, and"));
+        assert!(redacted.contains("https://<redacted>@[2001:db8::1]:8545/<redacted>?<redacted>"));
+    }
+
+    #[test]
+    fn embedded_url_redaction_handles_long_userinfo_before_utf8_truncation() {
+        let secret = "long-userinfo-secret";
+        let userinfo = "가".repeat(MAX_HEALTH_RESPONSE_TEXT_BYTES / 3 + 64);
+        let tail = "끝".repeat(MAX_HEALTH_RESPONSE_TEXT_BYTES / 3 + 64);
+        let input =
+            format!("https://{secret}:{userinfo})tail@rpc.example/v2/secret?token=secret {tail}");
+        let redacted = bounded_report_text(redact_urls_in_text(&input));
+
+        assert!(!redacted.contains(secret));
+        assert!(!redacted.contains('가'));
+        assert!(redacted.starts_with("https://<redacted>@rpc.example/<redacted>?<redacted>"));
+        assert!(redacted.contains("…[truncated "));
+        assert!(redacted.len() <= MAX_HEALTH_RESPONSE_TEXT_BYTES + 64);
     }
 }

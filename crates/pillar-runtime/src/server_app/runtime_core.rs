@@ -48,6 +48,8 @@ where
             metrics.clone(),
         )
         .await?;
+        let canton_ledger_auth =
+            crate::layerzero_runtime::CantonLedgerAuth::from_env_map(&environment, &vars);
         let mut validation_checks = runtime_rpc_validation_checks_from_evm_config(
             &providers,
             transport.clone(),
@@ -55,6 +57,7 @@ where
             &available_chain_names,
         )
         .map_err(|error| error.to_string())?
+        .with_canton_ledger_auth(canton_ledger_auth.clone())
         .with_rank_tracker(rank_tracker.clone())
         .with_extra_context(RuntimeExtraContextConfig::from_runtime_config(
             &runtime_config,
@@ -106,6 +109,7 @@ where
             vars,
             transport,
             now_unix_ms,
+            canton_ledger_auth,
             dependencies,
             chain_type_by_chain_name,
             RuntimeMode::Production,

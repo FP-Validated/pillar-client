@@ -180,8 +180,14 @@ accepted.
 | Calls without execution resources | Four shared active slots, at most eight waiting registrations |
 | Canton numeric input | 1,024 bytes before trimming/conversion; decimal parsing is linear |
 | Canton committee response | At most 64 signatures, at most 130 hex characters each; configured quorum cannot exceed 64 |
-| READ command / caller resolutions | At most 256 requests plus an optional compute marker; at most 257 caller timestamp markers; command, request and compute codec version 1 only |
-| Provider health response text | URL redaction is one linear pass; at most 64 KiB of each redacted string is retained in the report, the rest is replaced by a byte count |
+| READ command / caller resolutions | 1–256 requests plus an optional compute marker; at most 257 caller timestamp markers; command, request and compute codec version 1 only |
+| Provider health response text | Linear, case-insensitive HTTP(S) URL redaction before UTF-8-safe truncation; at most a 64 KiB prefix plus a byte-count marker per diagnostic string |
+
+An object containing an HTTP(S) URL in a key is compact-serialized and redacted as
+one bounded diagnostic string, avoiding both key disclosure and redacted-key
+collisions. Other objects and arrays retain their shape. This is a string bound,
+not a whole-report bound, and URL redaction is not a general secret scrubber:
+non-URL secrets and non-HTTP(S) forms are outside it.
 
 The structural limits come from recorded provider responses and the deployment's
 memory budget. The largest recorded non-TON response (a Solana `jsonParsed`
@@ -387,6 +393,8 @@ not reproduce:
   `Command.decode` (`lz-v2-utilities` 3.0.168) reads every version with the V1
   layout, while the on-chain `ReadCmdCodecV1` reverts with `InvalidVersion`.
   Other malformed READ commands are also a 400 rather than a 500.
+  Zero-request and compute-only commands are also refused before READ-target RPC
+  or signing, as the on-chain codec requires at least one request.
 - Authentication is available and on by default; the mainnet deployment turns it
   off (`PILLAR_API_AUTH_ENABLED=false`, ingress allowlist), where no route differs.
 - A `srcTxHash` outside `[0-9a-zA-Z_-]{1,128}` (optional `0x`) is a 400 just before

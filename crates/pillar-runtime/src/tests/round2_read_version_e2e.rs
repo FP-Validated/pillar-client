@@ -1,5 +1,5 @@
-//! Round 2 M-09: a READ command that is not codec version 1 in its command, request or
-//! compute header is refused over HTTP before any READ-target RPC and before signing.
+//! Round 2 M-09: unsupported READ codec versions and empty commands are refused
+//! before any READ-target RPC or signing; a normal V1 command remains signable.
 use super::*;
 use tower::ServiceExt;
 
@@ -47,7 +47,7 @@ fn with_hex_at(command: &str, at: usize, replacement: &str) -> String {
 }
 
 #[tokio::test]
-async fn round2_m09_unsupported_read_codec_versions_are_refused_before_read_rpc_and_signing() {
+async fn round2_m09_read_codec_versions_and_empty_commands_are_guarded_before_rpc_and_signing() {
     let v1 = evm_read_command_with_block_marker();
     // A V1 map-only compute on bsc at the request's block, so only its version differs.
     let compute = format!(
@@ -58,13 +58,33 @@ async fn round2_m09_unsupported_read_codec_versions_are_refused_before_read_rpc_
         to = "22".repeat(20),
     );
     let with_compute = format!("{v1}{compute}");
-    let compute_at = with_compute.len() - compute.len();
+    let zero_no_compute = format!("{}0000", &v1[..10]);
+    let compute_only = format!("{zero_no_compute}{compute}");
+    let two_requests = evm_read_command_with_repeated_block_markers(2);
+    let second_request_start = v1.len();
     let cases = [
-        ("command", with_hex_at(&v1, 2, "0002")),
-        ("request", with_hex_at(&v1, 14, "02")),
-        ("compute", with_hex_at(&with_compute, compute_at, "02")),
+        (
+            "command",
+            with_hex_at(&v1, 2, "0002"),
+            "unsupported-version",
+        ),
+        ("request", with_hex_at(&v1, 14, "02"), "unsupported-version"),
+        (
+            "request-after-first",
+            with_hex_at(&two_requests, second_request_start, "02"),
+            "unsupported-version",
+        ),
+        (
+            "compute",
+            with_hex_at(&with_compute, with_compute.len() - compute.len(), "02"),
+            "unsupported-version",
+        ),
+        ("zero-count", zero_no_compute, "empty-command"),
+        ("compute-only", compute_only, "empty-command"),
+        ("valid-v1", v1.clone(), "valid"),
     ];
-    for (field, command) in cases {
+    for (field, command, refusal) in cases {
+        let encoded_command = command.strip_prefix("0x").unwrap_or(&command);
         let calls: RecordedJsonCalls = Arc::new(Mutex::new(Vec::new()));
         let transport = ReadVerticalTransport {
             calls: calls.clone(),
@@ -84,7 +104,7 @@ async fn round2_m09_unsupported_read_codec_versions_are_refused_before_read_rpc_
         request.message_hash = format!(
             "0x{}",
             hex::encode(<sha3::Keccak256 as sha3::Digest>::digest(
-                hex::decode(command.strip_prefix("0x").unwrap()).unwrap()
+                hex::decode(encoded_command).unwrap()
             ))
         );
         let response = pillar_api::router(app, "round2-read-version")
@@ -136,25 +156,35 @@ async fn round2_m09_unsupported_read_codec_versions_are_refused_before_read_rpc_
             line.starts_with("pillar_sign_stage_duration_seconds_count")
                 && line.contains("stage=\"sign\"")
         });
-        let expected = format!("Unsupported READ {field} version: 2");
         audit_round_artifact(
             "round2",
-            &format!("m09-read-{field}-version-2"),
+            &format!("m09-read-{field}"),
             json!({
                 "command": command,
                 "http_status": status,
                 "body": body,
                 "request_rpc_calls": request_calls,
                 "sign_stage_observed": signed,
+                "expected_refusal": refusal,
             }),
         );
-        assert_eq!(status, 400, "{field}: {body}");
-        assert_eq!(body["body"], expected, "{field}: {body}");
-        assert_eq!(
-            request_calls,
-            ["ethereum eth_getTransactionReceipt"],
-            "{field}: only the source receipt may be read before the refusal"
-        );
-        assert!(!signed, "{field}: the signer stage ran");
+        if refusal == "valid" {
+            let signatures = body["body"]["signatures"]
+                .as_array()
+                .expect("successful V1 response signatures");
+            assert_eq!(status, 200, "{field}: {body}");
+            assert!(!signatures.is_empty(), "{field}: V1 was not signed");
+            assert!(signed, "{field}: signer stage did not run");
+            assert!(request_calls.contains(&"ethereum eth_getTransactionReceipt".to_string()));
+            assert!(request_calls.iter().any(|call| call.starts_with("bsc ")));
+        } else {
+            assert_eq!(status, 400, "{field}: {body}");
+            assert_eq!(
+                request_calls,
+                ["ethereum eth_getTransactionReceipt"],
+                "{field}: only the source receipt may be read before refusal"
+            );
+            assert!(!signed, "{field}: the signer stage ran");
+        }
     }
 }

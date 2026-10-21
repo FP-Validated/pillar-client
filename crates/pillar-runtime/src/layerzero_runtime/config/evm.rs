@@ -487,11 +487,5 @@ where
             checks = checks.with_ton_payload_contracts(Arc::new(ton_config));
         }
     }
-    if chain_names.iter().any(|chain_name| chain_name == "canton") {
-        // Upstream reads `CANTON_CLIENT_SECRET` when the `rpc` URI carries no `client-secret`.
-        checks = checks.with_canton_ledger_auth(super::super::CantonLedgerAuth::from_process_env(
-            environment,
-        ));
-    }
     Ok(checks)
 }

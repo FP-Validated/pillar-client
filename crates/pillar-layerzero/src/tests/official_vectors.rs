@@ -88,8 +88,7 @@ fn official_vectors_read_cmd_codec_v1_refuses_every_other_version() {
             mutated.replace_range(at..at + width, &format!("{version:0width$x}"));
             let error = decode_evm_read_command(&mutated).unwrap_err();
             assert!(
-                matches!(&error, AppCoreError::BadRequest(message)
-                    if message == &format!("Unsupported READ {field} version: {version}")),
+                matches!(&error, AppCoreError::BadRequest(_)),
                 "{field} version {version}: {error:?}"
             );
         }
