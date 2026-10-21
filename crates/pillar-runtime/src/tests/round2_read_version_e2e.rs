@@ -62,26 +62,31 @@ async fn round2_m09_read_codec_versions_and_empty_commands_are_guarded_before_rp
     let compute_only = format!("{zero_no_compute}{compute}");
     let two_requests = evm_read_command_with_repeated_block_markers(2);
     let second_request_start = v1.len();
+    let empty_command = Some("READ command must contain at least one request");
     let cases = [
         (
             "command",
             with_hex_at(&v1, 2, "0002"),
-            "unsupported-version",
+            Some("Unsupported READ command version: 2"),
         ),
-        ("request", with_hex_at(&v1, 14, "02"), "unsupported-version"),
+        (
+            "request",
+            with_hex_at(&v1, 14, "02"),
+            Some("Unsupported READ request version: 2"),
+        ),
         (
             "request-after-first",
             with_hex_at(&two_requests, second_request_start, "02"),
-            "unsupported-version",
+            Some("Unsupported READ request version: 2"),
         ),
         (
             "compute",
             with_hex_at(&with_compute, with_compute.len() - compute.len(), "02"),
-            "unsupported-version",
+            Some("Unsupported READ compute version: 2"),
         ),
-        ("zero-count", zero_no_compute, "empty-command"),
-        ("compute-only", compute_only, "empty-command"),
-        ("valid-v1", v1.clone(), "valid"),
+        ("zero-count", zero_no_compute, empty_command),
+        ("compute-only", compute_only, empty_command),
+        ("valid-v1", v1.clone(), None),
     ];
     for (field, command, refusal) in cases {
         let encoded_command = command.strip_prefix("0x").unwrap_or(&command);
@@ -168,7 +173,7 @@ async fn round2_m09_read_codec_versions_and_empty_commands_are_guarded_before_rp
                 "expected_refusal": refusal,
             }),
         );
-        if refusal == "valid" {
+        let Some(refusal) = refusal else {
             let signatures = body["body"]["signatures"]
                 .as_array()
                 .expect("successful V1 response signatures");
@@ -177,14 +182,15 @@ async fn round2_m09_read_codec_versions_and_empty_commands_are_guarded_before_rp
             assert!(signed, "{field}: signer stage did not run");
             assert!(request_calls.contains(&"ethereum eth_getTransactionReceipt".to_string()));
             assert!(request_calls.iter().any(|call| call.starts_with("bsc ")));
-        } else {
-            assert_eq!(status, 400, "{field}: {body}");
-            assert_eq!(
-                request_calls,
-                ["ethereum eth_getTransactionReceipt"],
-                "{field}: only the source receipt may be read before refusal"
-            );
-            assert!(!signed, "{field}: the signer stage ran");
-        }
+            continue;
+        };
+        assert_eq!(status, 400, "{field}: {body}");
+        assert_eq!(body["body"], refusal, "{field}: refused for another reason");
+        assert_eq!(
+            request_calls,
+            ["ethereum eth_getTransactionReceipt"],
+            "{field}: only the source receipt may be read before refusal"
+        );
+        assert!(!signed, "{field}: the signer stage ran");
     }
 }
