@@ -595,3 +595,36 @@ target, and background probes can be deferred. Memory pressure can refuse an
 additional agreeing vote if growing its lowest-index representative reservation
 would exceed the pool. Starknet `PRE_CONFIRMED` is refused; selected event JSON
 must still match exactly.
+
+## 18. Round 2 remediation — 2026-10-21
+
+The report's baseline is `3f39fbad972794e5a9c598ea46a310334a4a4415` (2.6.2). The work
+branches from `7736ecb`, the Round 1 remediation. It lands as a dependency update
+`677d676`, then one commit per finding, `4cbef24`..`d256797`, then documentation. The
+per-finding response, with commit links and the rationale wherever a recommendation
+was not followed, is [round2-response.md](audit/round2-response.md). The report's
+M-08 is a Canton provider-health finding, distinct from Round 1 M-08 (TON).
+
+| ID | Implementation | Exercised evidence |
+| --- | --- | --- |
+| M-11 | URL redaction in one linear pass; each redacted string in the health report is cut to 64 KiB afterwards | A 4 MiB `eth_chainId` answer of URL tokens over local HTTP takes 0.36 s and leaks no credential; with the fix reverted the same test runs 1,150 s |
+| M-09 | Command, request and compute codec version must be 1; malformed READ commands are 400 | The pinned official vector, with only a version byte changed, is refused; over HTTP the answer is 400 after the source receipt alone, with no READ-target RPC and no sign stage |
+| M-10 | Initia LegacyView `data` is read as upstream reads it (non-array → one element); Aptos `/view` still requires an array | Recorded Initia mainnet answers sign through the HTTP route; verified state and met confirmations are refused with no signature |
+| M-08 (Canton) | `GET /v2/state/ledger-end` probe with the ledger's own OAuth2 token and rank key; failures stay per entry | Production composition: a working ledger makes a Canton-only roster ready and its sender read succeed; 503, 401, non-numeric offset and missing OAuth fail closed; a roster test, derived from the static table, holds every non-EVM chain to a probe of its own |
+
+### Verification and provenance
+
+| Check | Observed result |
+| --- | --- |
+| `cargo +1.98.1 fmt --all --check` | Passed |
+| `cargo +1.98.1 clippy --workspace --all-targets --locked -- -D warnings` | Passed, on every commit |
+| `cargo +1.98.1 test --workspace --locked` | 1,125 passed, zero failed, 15 ignored (`test result:` totals) |
+| `cargo +1.94.1 check --workspace --all-targets --locked` | Passed |
+| `cargo audit`, `cargo deny check` | Passed after `677d676` |
+| Fix-reverted runs | Each finding's new tests fail with only its fix reverted (M-08: the `CANTON` dispatch arm removed) |
+
+The intermediate commits were checked with fmt and clippy only; the workspace suite and
+the E2E tests ran once, on the final tree, at the operator's request. Raw output, E2E
+artifacts and fix-reverted logs are under
+`local/reports/round2-remediation-20261021/` (gitignored). No live Canton ledger was
+used. The Initia responses are recorded, not live, in the tests.
