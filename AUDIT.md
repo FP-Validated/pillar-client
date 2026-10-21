@@ -677,11 +677,12 @@ Raw results, failed attempts, successful E2E artifacts, review receipts and
 negative controls are retained in
 `local/reports/round2-completion-20261021/`. The earlier published-image
 counterexamples are in `local/reports/round2-adversarial-review-20261021/`.
-`canton-fixture-generator.mjs` in the completion evidence directory reproduces
-the new synthetic, clock-adjusted sequencer transcript using the existing public
-test seeds and signing contract; it checks signature parity against the original
-fixture. That evidence generator is not distributed in a fresh repository clone.
-The committed static fixtures and default tests are self-contained.
+`scripts/generate-canton-http-confirmations.mjs` reproduces the synthetic,
+clock-adjusted sequencer transcript
+`crates/pillar-runtime/tests/synthetic/canton_http_confirmations.json` byte for byte.
+It uses the existing public test seeds and signing contract, and it checks
+signature parity against upstream's `canton_sequencer.json`. The transcript sits
+outside `tests/gasolina_parity/` because it is not upstream output.
 
 The Canton transcript is not a live ledger observation. Initia exchanges 003/004
 use synthetic packet inputs, and the state-2/confirmation-15 refusals are controlled

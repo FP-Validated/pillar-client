@@ -13,7 +13,7 @@ const ETH_RECEIVE_VIEW: &str = "0xcc0de82D7d520d8d5897d23cf961867Bc16Fd346";
 const TOKEN: &str = r#"{"access_token":"tok-1","token_type":"Bearer","expires_in":3600}"#;
 const SHORT_TOKEN: &str = r#"{"access_token":"tok-1","token_type":"Bearer","expires_in":60}"#;
 const CANTON_HTTP_CONFIRMATION_FIXTURE: &str =
-    include_str!("../../tests/gasolina_parity/canton_http_confirmations.json");
+    include_str!("../../tests/synthetic/canton_http_confirmations.json");
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TokenResponse {
