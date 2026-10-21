@@ -628,3 +628,15 @@ the E2E tests ran once, on the final tree, at the operator's request. Raw output
 artifacts and fix-reverted logs are under
 `local/reports/round2-remediation-20261021/` (gitignored). No live Canton ledger was
 used. The Initia responses are recorded, not live, in the tests.
+
+### 2.7.0 Release, 2026-10-21
+
+- Release 2.7.0 contains the Round 1 remediation (`f30bb38`..`7736ecb`), the
+  dependency update `677d676`, and the Round 2 remediation (`4cbef24`..`f7a84ad`).
+  The tag is `v2.7.0`, and the GitHub release is `v2.7.0`.
+- The release commit changes the workspace version from 2.6.2 to 2.7.0, along with
+  the 10 workspace entries in `Cargo.lock`, and names the CHANGELOG section 2.7.0.
+  Executable logic and external dependencies are the same as in `f7a84ad`.
+- Upgrade from 2.6.x as the CHANGELOG "Upgrade / Breaking" section describes. A
+  wallet with a non-null `walletRestrictions` now fails startup, and malformed READ
+  commands answer 400 instead of 500.
