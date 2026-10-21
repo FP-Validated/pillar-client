@@ -124,6 +124,7 @@ mod provider_health_ton_tests;
 mod provider_health_tron_tests;
 mod read_time_marker_resolver_tests;
 mod read_vertical_tests;
+mod round3_aptos_quorum_e2e;
 mod server_app_tests;
 mod signer_config_tests;
 mod signer_kms_config_tests;

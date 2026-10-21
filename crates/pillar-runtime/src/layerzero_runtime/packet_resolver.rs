@@ -14,6 +14,29 @@ fn normalize_move_account_for_resolver(address: &str) -> String {
     format!("0x{value:0>64}")
 }
 
+/// The fields the Move source readers consume; the rest differs between honest node releases.
+fn move_transaction_projection(value: Value) -> Value {
+    project_fields(
+        value,
+        &["hash", "txhash", "version", "type", "success", "events"],
+    )
+}
+
+fn move_block_projection(value: Value) -> Value {
+    project_fields(value, &["block_height", "block_hash"])
+}
+
+fn project_fields(value: Value, keys: &[&str]) -> Value {
+    let Value::Object(mut object) = value else {
+        return value;
+    };
+    Value::Object(
+        keys.iter()
+            .filter_map(|key| object.remove(*key).map(|field| (key.to_string(), field)))
+            .collect(),
+    )
+}
+
 #[derive(Clone)]
 pub struct EvmPacketSentResolver<T> {
     providers: crate::provider_snapshot::ProviderSnapshotHandle,
@@ -250,6 +273,7 @@ where
             let observation = provider_response(response).and_then(|response| {
                 response
                     .map(|value| {
+                        let value = move_transaction_projection(value);
                         crate::provider_health::canonical_json_fingerprint(&value)
                             .map(|fingerprint| (fingerprint, value))
                             .map_err(|error| RpcError::Remote(error.to_string()))
@@ -275,11 +299,12 @@ where
         .await
     }
 
-    /// One Aptos-family REST GET, agreed by the provider quorum on the whole answer.
+    /// One Aptos-family REST GET, agreed by the provider quorum on fields used by its caller.
     async fn get_aptos_json(
         &self,
         chain: &str,
         url_for: impl Fn(&str) -> Option<String>,
+        projection: fn(Value) -> Value,
         context: &str,
     ) -> Result<Value, AppCoreError> {
         let snapshot = self.providers.load();
@@ -305,6 +330,7 @@ where
             let observation = provider_response(response).and_then(|response| {
                 response
                     .map(|value| {
+                        let value = projection(value);
                         crate::provider_health::canonical_json_fingerprint(&value)
                             .map(|fingerprint| (fingerprint, value))
                             .map_err(|error| RpcError::Remote(error.to_string()))
@@ -340,6 +366,7 @@ where
             .get_aptos_json(
                 "aptos",
                 |base| aptos_transaction_by_version_url(base, &version),
+                move_transaction_projection,
                 &format!("Aptos transaction at version {version}"),
             )
             .await?;
@@ -386,6 +413,7 @@ where
                         .get_aptos_json(
                             "aptos",
                             |base| move_block_by_version_url(base, &version),
+                            move_block_projection,
                             &format!("Aptos block at version {version}"),
                         )
                         .await?;
@@ -1645,6 +1673,7 @@ where
             .get_aptos_json(
                 chain,
                 |base| aptos_transaction_by_version_url(base, ledger_version),
+                move_transaction_projection,
                 "Aptos transaction",
             )
             .await?;
@@ -1787,6 +1816,7 @@ where
             .get_aptos_json(
                 chain,
                 |base| aptos_account_resource_url(base, &source.layerzero_account, &resource_type),
+                |value| value,
                 "Aptos adapter params config",
             )
             .await?;

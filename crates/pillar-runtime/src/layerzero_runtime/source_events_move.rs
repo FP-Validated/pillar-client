@@ -396,14 +396,26 @@ pub(crate) fn aptos_ledger_version(src_tx_hash: &str) -> Result<String, AppCoreE
 }
 
 fn unwrap_initia_tx(mut response: Value) -> Value {
-    if let Some(tx_response) = response
+    let mut transaction = match response
         .as_object_mut()
         .and_then(|object| object.remove("tx_response"))
     {
-        tx_response
-    } else {
-        response
+        Some(tx_response) => tx_response,
+        None => response,
+    };
+    // An attribute's `index` flag comes from the node's own `index-events` setting, not
+    // consensus, so honest providers differ on it; readers use only `key` and `value`.
+    if let Some(events) = transaction.get_mut("events").and_then(Value::as_array_mut) {
+        for attributes in events
+            .iter_mut()
+            .filter_map(|event| event.get_mut("attributes")?.as_array_mut())
+        {
+            for attribute in attributes.iter_mut().filter_map(Value::as_object_mut) {
+                attribute.retain(|key, _| key == "key" || key == "value");
+            }
+        }
     }
+    transaction
 }
 
 pub(crate) async fn fetch_move_transaction<T>(
