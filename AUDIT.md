@@ -689,3 +689,58 @@ cases, not a recorded delivered packet. No synthetic production-KMS signing
 request was generated. Local source checks do not establish a published image or
 a production rollout; those require separate provenance and operational receipts.
 
+### Published image and mainnet rollout
+
+- Source `811178d3a9f39be2654e622bd98dd5bf134cfb81` is tagged `v2.7.1`.
+  Main CI [39541443681](https://github.com/FP-Validated/pillar-client/actions/runs/39541443681)
+  and tag CI [39541443922](https://github.com/FP-Validated/pillar-client/actions/runs/39541443922)
+  each passed all six jobs, including supply-chain, container and macOS TON checks.
+- The attested tag-build tar was pushed without rebuilding. Its SHA-256 is
+  `af41ec1ac2363b0d3f8fb3796b0c342c505c71b2dc8b355a1251a24b3ec25ca0`.
+  The original tar, checksum, Sigstore bundle and byte-exact original CI diagnostics
+  archive are attached to the [release](https://github.com/FP-Validated/pillar-client/releases/tag/v2.7.1).
+  GitHub's uploaded tar digest and size match the verified CI artifact.
+- Published image:
+  `ghcr.io/fp-validated/pillar-dvn-client:ci-811178d3a9f3-r39541443922-a1@sha256:d4733afe62e39a73c8eb2e01d2a08ced1f0770e036ae80ce6a6fc79931b7a86c`.
+  The remote config SHA-256 equals CI image ID
+  `65e54190fc5bcfc509a8bd30ac201a4925f805be0f8e5276e93fa8682696212b`;
+  revision, `v2.7.1` label and `linux/amd64` platform match.
+- The actual published digest signed the valid V1 control and refused five invalid
+  READ cases with HTTP 400, no READ-target RPC and no signature. Source-receipt
+  lookup still occurs; this is not a claim of zero total RPC calls.
+  A 4,194,276-byte hostile wire response completed its report request in 0.129 s
+  in this run. Punctuated/uppercase URL and nested URL-key credentials were absent
+  from the report and captured container logs. This is one smoke observation,
+  not a latency guarantee or load test.
+- A standalone Pod used the existing production Azure KMS Secret references and
+  configuration, with ingress denied, production-equivalent egress and no matching
+  Service. Authentication was enabled and public signing disabled. It became
+  Ready on the exact digest with zero restarts; public health/version returned 200
+  and unauthenticated signer-info returned 401. Its Pod and NetworkPolicy were
+  removed after evidence capture. No production-key signing request was generated.
+- GitOps [ef46438](https://github.com/FP-Validated/ovh-chain-repo/commit/ef46438a355f670fa3d6207bc7aee61e0bb3ea25)
+  changes only `image.tag`, `PILLAR_IMAGE_VERSION` and `config-revision`.
+  Application `pillar-dvn-client-mainnet` in `aks-cluster/argocd` selectively synced
+  that exact revision, with pruning disabled, to Deployment
+  `pillar-dvn-client-mainnet` in `ovh-cluster/layerzero-mainnet`.
+  Argo reports one synced Deployment and `Succeeded`; the Deployment UID is
+  unchanged and rolling update completed with all three Pods Ready on the new
+  digest and zero restarts.
+- Post-rollout GETs to `/`, `/ready`, `/version`, `/provider-health` and
+  `/signer-info?chainName=ethereum` returned 200. Version is `v2.7.1`; the Ethereum
+  address and public key exactly match the pre-rollout observation:
+  `0x06bb41FE76F41429f55aC8C355ac8669769A1ba1`.
+  The captured new-pod logs contain no ERROR-level lines. These GET-only production
+  checks do not establish a live KMS signing transaction.
+- Existing production auth flags, provider/quorum configuration, keys, Secret
+  values, Service and Ingress remain unchanged. Single-entity provider quorum and
+  internal HTTP warnings remain. The Application remains `Healthy / OutOfSync`
+  for unrelated resources; no full-application sync was attempted. Its operation
+  status retains legacy reason/revision metadata, so the recorded
+  `syncResult.revisions`, selected-resource image and live imageIDs identify this
+  rollout rather than that legacy description.
+- Rollback is a narrow revert of `ef46438` followed by the same Deployment-only
+  sync. The prior image digest is
+  `sha256:744309ed6274dce919054969d51064578e423dd0a315cc8763f2c9016e1692d0`.
+  Operational receipts and original logs remain in the completion evidence directory.
+
