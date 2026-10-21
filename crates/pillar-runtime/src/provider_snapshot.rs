@@ -198,9 +198,10 @@ impl ProviderSnapshotHandle {
     /// provider set while checking whether the payload was already signed
     /// against another. The pin is a task-local rather than an argument because
     /// the consumers are reached through `pillar-core`'s traits, whose
-    /// signatures are a compatibility surface; nothing on this path spawns, so
-    /// `tokio::join!` and the `FuturesUnordered` fan-outs all poll inside the
-    /// scope.
+    /// signatures are a compatibility surface; nothing on this path spawns
+    /// except a health refresh a caller waits for, which `carry_pin` moves
+    /// into the cache's task, so `tokio::join!` and the `FuturesUnordered`
+    /// fan-outs all poll inside the scope.
     ///
     /// Keyed by handle identity, so a nested scope from a *different* handle -
     /// only tests build more than one - reads its own configuration instead of
@@ -214,6 +215,25 @@ impl ProviderSnapshotHandle {
             snapshot: self.serving(),
         };
         PINNED_SNAPSHOT.scope(pinned, request).await
+    }
+
+    /// Runs `refresh` inside this task's pin of this handle, if there is one, so a
+    /// health refresh spawned on a caller's behalf probes the caller's generation.
+    pub(crate) fn carry_pin(
+        &self,
+        refresh: pillar_core::ProviderHealthRefresh,
+    ) -> pillar_core::ProviderHealthRefresh {
+        let slot = self.slot();
+        match PINNED_SNAPSHOT
+            .try_with(|pinned| (pinned.slot == slot).then(|| pinned.snapshot.clone()))
+            .ok()
+            .flatten()
+        {
+            Some(snapshot) => {
+                Box::pin(PINNED_SNAPSHOT.scope(PinnedSnapshot { slot, snapshot }, refresh))
+            }
+            None => refresh,
+        }
     }
 
     /// Which generation this caller is working from.

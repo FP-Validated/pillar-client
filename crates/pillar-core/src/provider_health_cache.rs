@@ -1,9 +1,10 @@
 use async_trait::async_trait;
 use indexmap::IndexMap;
+use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 #[derive(Default)]
-struct RefreshOwner(parking_lot::Mutex<Option<tokio::task::JoinHandle<()>>>);
+struct RefreshOwner(parking_lot::Mutex<Option<tokio::task::AbortHandle>>);
 impl Drop for RefreshOwner {
     fn drop(&mut self) {
         if let Some(task) = self.0.get_mut().take() {
@@ -22,6 +23,10 @@ pub const PROVIDER_HEALTH_CACHE_STALE_ALLOWANCE_MS: u64 = 105_000;
 pub const PROVIDER_HEALTH_CACHE_STALE_MS: u64 =
     PROVIDER_HEALTH_CACHE_TTL_MS + PROVIDER_HEALTH_CACHE_STALE_ALLOWANCE_MS;
 
+/// A refresh the cache runs on its own task.
+pub type ProviderHealthRefresh =
+    std::pin::Pin<Box<dyn Future<Output = Result<ProviderHealthSnapshot, String>> + Send>>;
+
 #[async_trait]
 pub trait ProviderHealthSource: Send + Sync + 'static {
     async fn get_provider_health(&self) -> Result<ProviderHealthSnapshot, String>;
@@ -36,6 +41,12 @@ pub trait ProviderHealthSource: Send + Sync + 'static {
     /// cache treat those values as expired instead of serving them out.
     /// Sources whose configuration cannot change return a constant.
     fn configuration_generation(&self) -> u64;
+
+    /// Called on the caller's task before a refresh it waits for moves to the cache's
+    /// own task, so task-local context such as a pinned configuration goes with it.
+    fn scope_refresh(&self, refresh: ProviderHealthRefresh) -> ProviderHealthRefresh {
+        refresh
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -107,35 +118,40 @@ where
             }
             if age <= PROVIDER_HEALTH_CACHE_STALE_MS {
                 if let Ok(guard) = self.refresh_lock.clone().try_lock_owned() {
-                    let mut this = self.clone();
-                    this.refresh_owner = None;
-                    let mut context = crate::execution::RequestContext::background();
-                    context.resources =
-                        crate::execution::current().and_then(|context| context.resources);
-                    context.deadline =
-                        Some(tokio::time::Instant::now() + std::time::Duration::from_secs(10));
-                    let task = tokio::spawn(context.scope(async move {
-                        let _ = this.refresh_with_guard(guard).await;
-                    }));
-                    let mut owned = self
-                        .refresh_owner
-                        .as_ref()
-                        .expect("cache refresh owner")
-                        .0
-                        .lock();
-                    if let Some(previous) = owned.replace(task) {
-                        previous.abort();
-                    }
+                    drop(self.spawn_refresh(guard, |refresh| refresh));
                 }
                 return Ok(cached.value);
             }
         }
-        self.refresh().await
+        // Waited on rather than run here, so a caller that goes away cannot cancel the
+        // round and leave the next caller to start another.
+        let guard = self.refresh_lock.clone().lock_owned().await;
+        self.spawn_refresh(guard, |refresh| self.source.scope_refresh(refresh))
+            .await
+            .map_err(|error| format!("provider health refresh task failed: {error}"))?
     }
 
-    async fn refresh(&self) -> Result<ProviderHealthSnapshot, String> {
-        let guard = self.refresh_lock.clone().lock_owned().await;
-        self.refresh_with_guard(guard).await
+    fn spawn_refresh(
+        &self,
+        guard: OwnedMutexGuard<()>,
+        scope: impl FnOnce(ProviderHealthRefresh) -> ProviderHealthRefresh,
+    ) -> tokio::task::JoinHandle<Result<ProviderHealthSnapshot, String>> {
+        let mut this = self.clone();
+        this.refresh_owner = None;
+        let mut context = crate::execution::RequestContext::background();
+        context.resources = crate::execution::current().and_then(|context| context.resources);
+        context.deadline = Some(tokio::time::Instant::now() + std::time::Duration::from_secs(10));
+        let refresh = scope(Box::pin(
+            async move { this.refresh_with_guard(guard).await },
+        ));
+        // Held across the spawn: a task can release the guard to the next caller before
+        // this caller would otherwise record it, and a stale handle would escape the abort.
+        let mut owned = self.refresh_owner.as_ref().map(|owner| owner.0.lock());
+        let task = tokio::spawn(context.scope(refresh));
+        if let Some(owned) = owned.as_mut() {
+            **owned = Some(task.abort_handle());
+        }
+        task
     }
 
     async fn refresh_with_guard(
@@ -753,5 +769,50 @@ mod tests {
             "a seed describing a replaced configuration must not be served"
         );
         assert_eq!(calls.load(Ordering::SeqCst), 1, "it had to be reprobed");
+    }
+
+    struct SlowRefreshableSource {
+        calls: Arc<AtomicUsize>,
+        generation: Arc<AtomicU64>,
+    }
+
+    #[async_trait]
+    impl ProviderHealthSource for SlowRefreshableSource {
+        fn configuration_generation(&self) -> u64 {
+            self.generation.load(Ordering::SeqCst)
+        }
+
+        async fn get_provider_health(&self) -> Result<ProviderHealthSnapshot, String> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            Ok(snapshot(true))
+        }
+    }
+
+    /// Round 3 M-14: with nothing servable - an empty cache, or a configuration refresh
+    /// that bumps the generation every minute in REMOTE mode - callers that give up
+    /// mid-round must not cancel it, or each next caller starts another fan-out.
+    #[tokio::test]
+    async fn abandoned_reads_share_one_owned_refresh_round() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let generation = Arc::new(AtomicU64::new(1));
+        let cache = ProviderHealthCache::new(
+            SlowRefreshableSource {
+                calls: calls.clone(),
+                generation: generation.clone(),
+            },
+            || 0,
+        );
+        let abandon = || tokio::time::timeout(Duration::from_millis(10), cache.read());
+
+        for round in 1..=2 {
+            for _ in 0..3 {
+                assert!(abandon().await.is_err());
+            }
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            assert_eq!(cache.read().await.unwrap(), snapshot(true));
+            assert_eq!(calls.load(Ordering::SeqCst), round);
+            generation.fetch_add(1, Ordering::SeqCst);
+        }
     }
 }

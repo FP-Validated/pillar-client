@@ -10,12 +10,12 @@ use pillar_config::{
 };
 use pillar_core::{
     PillarApiRequestV1, PillarApiRequestV2, PillarApiResponse, ProviderHealthCache,
-    ProviderHealthSnapshot, ProviderHealthSource, PROVIDER_HEALTH_CACHE_TTL_MS,
+    ProviderHealthSnapshot,
 };
 use pillar_metrics::PillarMetrics;
 use serde_json::Value;
 use std::{collections::HashMap, env, sync::Arc};
-use tokio::sync::{Mutex, OwnedMutexGuard};
+use tokio::sync::Mutex;
 
 use crate::config_loader::{
     enforce_runtime_core_signer_production_policy, runtime_provider_config_from_env_map,
@@ -48,7 +48,6 @@ mod runtime_core;
 mod server_trait;
 mod types;
 
-use types::ProviderHealthReportCache;
 pub use types::RuntimeServerApp;
 
 pub(crate) fn filtered_available_chain_names(

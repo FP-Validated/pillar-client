@@ -7,6 +7,14 @@ struct HealthObservations {
     chains: HashMap<String, (u64, bool)>,
 }
 
+struct RetainedProviderHealthReport {
+    generation: u64,
+    started_at_unix_ms: u64,
+    /// Staleness is counted from here, as `ProviderHealthCache` counts it from publication.
+    completed_at_unix_ms: u64,
+    report: Arc<ProviderHealthReport>,
+}
+
 #[derive(Clone)]
 pub struct RpcProviderHealthSource<T> {
     pub(super) providers: crate::provider_snapshot::ProviderSnapshotHandle,
@@ -16,6 +24,7 @@ pub struct RpcProviderHealthSource<T> {
     execution: Option<Arc<pillar_core::execution::ExecutionResources>>,
     pub(super) canton_ledger_auth: crate::layerzero_runtime::CantonLedgerAuth,
     observations: Arc<tokio::sync::Mutex<HealthObservations>>,
+    retained_report: Arc<tokio::sync::Mutex<Option<RetainedProviderHealthReport>>>,
 }
 
 impl<T> RpcProviderHealthSource<T>
@@ -44,6 +53,7 @@ where
             execution: None,
             canton_ledger_auth: Default::default(),
             observations: Arc::new(tokio::sync::Mutex::new(HealthObservations::default())),
+            retained_report: Arc::new(tokio::sync::Mutex::new(None)),
         }
     }
 
@@ -63,6 +73,7 @@ where
             execution: None,
             canton_ledger_auth: Default::default(),
             observations: Arc::new(tokio::sync::Mutex::new(HealthObservations::default())),
+            retained_report: Arc::new(tokio::sync::Mutex::new(None)),
         }
     }
 
@@ -85,6 +96,20 @@ where
         self.canton_ledger_auth = auth;
         self
     }
+    /// The newest successful report, if it describes `generation` and is within the stale
+    /// allowance `/provider-health` also serves.
+    pub(crate) async fn retained_report(
+        &self,
+        generation: u64,
+        now_unix_ms: u64,
+    ) -> Option<Arc<ProviderHealthReport>> {
+        let retained = self.retained_report.lock().await;
+        let retained = retained.as_ref()?;
+        (retained.generation == generation
+            && now_unix_ms.saturating_sub(retained.completed_at_unix_ms)
+                <= pillar_core::PROVIDER_HEALTH_CACHE_STALE_MS)
+            .then(|| retained.report.clone())
+    }
     pub async fn get_provider_health_report(&self) -> Result<ProviderHealthReport, RpcError> {
         use pillar_core::execution::{current, RequestContext};
         let parent = current();
@@ -104,6 +129,7 @@ where
     async fn probe_report(&self) -> Result<ProviderHealthReport, RpcError> {
         let snapshot = self.providers.load();
         let generation = snapshot.generation();
+        let probe_started_at_unix_ms = (self.now_unix_ms)();
         let requests = snapshot
             .provider_configs()
             .iter()
@@ -168,7 +194,7 @@ where
                 ))
             })
             .collect::<Vec<_>>();
-        Ok(futures::stream::iter(requests)
+        let report: ProviderHealthReport = futures::stream::iter(requests)
             .buffered(
                 pillar_core::execution::current()
                     .and_then(|context| context.resources)
@@ -178,7 +204,23 @@ where
             .try_collect::<Vec<_>>()
             .await?
             .into_iter()
-            .collect())
+            .collect();
+        let completed = Arc::new(report.clone());
+        let completed_at_unix_ms = (self.now_unix_ms)();
+        let mut retained = self.retained_report.lock().await;
+        // Overlapping rounds (refresh and rank loops) can finish out of order.
+        if retained.as_ref().is_none_or(|retained| {
+            (generation, probe_started_at_unix_ms)
+                >= (retained.generation, retained.started_at_unix_ms)
+        }) {
+            *retained = Some(RetainedProviderHealthReport {
+                generation,
+                started_at_unix_ms: probe_started_at_unix_ms,
+                completed_at_unix_ms,
+                report: completed,
+            });
+        }
+        Ok(report)
     }
 }
 
@@ -197,6 +239,13 @@ where
             .await
             .map_err(|error| error.to_string())?;
         Ok(provider_health_snapshot_from_report(&report))
+    }
+
+    fn scope_refresh(
+        &self,
+        refresh: pillar_core::ProviderHealthRefresh,
+    ) -> pillar_core::ProviderHealthRefresh {
+        self.providers.carry_pin(refresh)
     }
 }
 
@@ -245,6 +294,7 @@ pub(crate) fn non_evm_provider_health_entries(
 #[cfg(test)]
 mod tests {
     use super::{JsonRpcTransport, RpcProviderHealthSource};
+    use crate::provider_snapshot::ProviderSnapshotHandle;
     use async_trait::async_trait;
     use pillar_config::{ProviderConfig, ProviderConfigGetter, ProviderConfigs};
     use pillar_core::ProviderHealthSource;
@@ -303,5 +353,23 @@ mod tests {
 
         let snapshot = source.get_provider_health().await.unwrap();
         assert!(snapshot["unsupported-chain"]);
+    }
+    #[tokio::test]
+    async fn retained_report_is_unavailable_after_provider_generation_changes() {
+        let providers = ProviderSnapshotHandle::new(ProviderConfigs::new(), Vec::new());
+        let source = RpcProviderHealthSource::from_serving_snapshot(
+            providers.clone(),
+            NoopTransport,
+            || 42,
+            HashMap::new(),
+        );
+        source.get_provider_health_report().await.unwrap();
+        assert!(source.retained_report(0, 42).await.is_some());
+
+        providers.publish(providers.candidate(ProviderConfigs::new()));
+        assert!(source
+            .retained_report(providers.generation(), 42)
+            .await
+            .is_none());
     }
 }

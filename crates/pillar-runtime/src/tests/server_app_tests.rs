@@ -86,10 +86,7 @@ async fn runtime_server_app_provider_health_uses_cache() {
     assert_eq!(calls.lock().unwrap().len(), 1);
 }
 
-/// `/provider-health/report` used to probe every provider of every chain on
-/// every request while `/provider-health` was served from a cache, so an
-/// authenticated caller could aim a fan-out amplifier at the operator's own
-/// fleet and trip the rate limits the signing path shares.
+/// The runtime-owned health refresh populates the report returned by this route.
 #[tokio::test]
 async fn runtime_server_app_provider_health_report_uses_cache() {
     let calls = Arc::new(Mutex::new(Vec::new()));

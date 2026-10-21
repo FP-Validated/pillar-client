@@ -53,8 +53,8 @@ where
         .await?;
         let chain_type_by_chain_name =
             static_chain_type_by_chain_name(&available_chain_names).unwrap_or_default();
-        let provider_health_source = RpcProviderHealthSource::from_getter_with_chain_types(
-            &provider_config,
+        let provider_health_source = RpcProviderHealthSource::from_serving_snapshot(
+            providers.clone(),
             transport,
             now_unix_ms,
             chain_type_by_chain_name,
@@ -86,7 +86,6 @@ where
             provider_health_source,
             signing_app: None,
             startup_report,
-            provider_health_report_cache: ProviderHealthReportCache::new(),
         })
     }
 }

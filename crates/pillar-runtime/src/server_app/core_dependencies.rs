@@ -221,7 +221,6 @@ where
             _remote_provider_config: remote_provider_config,
             signing_app: Some(Arc::new(signing_app)),
             startup_report,
-            provider_health_report_cache: ProviderHealthReportCache::new(),
         })
     }
 
