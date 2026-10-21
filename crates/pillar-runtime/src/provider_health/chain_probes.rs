@@ -120,9 +120,11 @@ where
         Err(error) => health_error_response(error)?,
     };
 
-    Ok(normalize_provider_health_entry(
+    let mut entry = normalize_provider_health_entry(
         report_url,
         response,
         Some(started_at.elapsed().as_millis() as u64),
-    ))
+    );
+    entry.diagnostic = true;
+    Ok(entry)
 }

@@ -153,16 +153,21 @@ where
                     }
                 })
                 .await?;
-                let observed = providers.iter().all(|entry| entry.observed);
+                let primary_count = providers.iter().filter(|entry| !entry.diagnostic).count();
+                let observed = primary_count > 0
+                    && providers
+                        .iter()
+                        .filter(|entry| !entry.diagnostic)
+                        .all(|entry| entry.observed);
                 let mut observations = self.observations.lock().await;
                 if observations.generation != generation {
                     observations.generation = generation;
                     observations.chains.clear();
                 }
-                let measured_healthy = !providers.is_empty()
+                let measured_healthy = primary_count > 0
                     && providers
                         .iter()
-                        .filter(|entry| entry.observed)
+                        .filter(|entry| !entry.diagnostic && entry.observed)
                         .all(|entry| entry.healthy);
                 let healthy = measured_healthy
                     && (observed

@@ -12,6 +12,7 @@ pub fn normalize_provider_health_entry(
         rank_key: url,
         response: redact_response_urls(response),
         latency_ms,
+        diagnostic: false,
         healthy: numeric_response.is_some(),
         observed,
         numeric_response,

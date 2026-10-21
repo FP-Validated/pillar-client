@@ -35,10 +35,16 @@ pub struct ProviderHealthEntry {
     pub response: Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latency_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "is_not_diagnostic")]
+    pub diagnostic: bool,
     pub healthy: bool,
     #[serde(default = "observed_by_default", skip_serializing_if = "is_observed")]
     pub observed: bool,
     pub numeric_response: Option<String>,
+}
+
+fn is_not_diagnostic(value: &bool) -> bool {
+    !value
 }
 
 fn observed_by_default() -> bool {

@@ -103,9 +103,13 @@ where
             request.body,
         )
         .await;
-    let response = match provider_response(graph_ql_response)?
-        .and_then(|response| initia_indexer_block_height_response(&response))
-    {
+    let indexed = match provider_response(graph_ql_response) {
+        Ok(response) => {
+            response.and_then(|response| initia_indexer_block_height_response(&response))
+        }
+        Err(error) => Some(health_error_response(error)?),
+    };
+    let response = match indexed {
         Some(response) => response,
         None => {
             let fallback_url = initia_latest_block_request_url(&request.base_url);
@@ -122,11 +126,13 @@ where
         }
     };
 
-    Ok(normalize_provider_health_entry(
+    let mut entry = normalize_provider_health_entry(
         request.report_url,
         response,
         Some(started_at.elapsed().as_millis() as u64),
-    ))
+    );
+    entry.diagnostic = true;
+    Ok(entry)
 }
 
 pub(crate) fn initia_latest_block_request_url(base_url: &str) -> String {

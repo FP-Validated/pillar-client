@@ -85,6 +85,7 @@ fn provider_health_entry(probe: &ProviderProbe) -> ProviderHealthEntry {
         url: probe.url.to_string(),
         rank_key: probe.url.to_string(),
         observed: true,
+        diagnostic: false,
         response: probe.response.clone(),
         latency_ms: Some(1),
         healthy: numeric_response.is_some(),
