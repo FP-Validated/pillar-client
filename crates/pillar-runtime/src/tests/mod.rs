@@ -90,6 +90,7 @@ use support_validation_layerzero::*;
 mod aptos_transport_wire_tests;
 mod aptos_ulnv2_destination_tests;
 mod chain_binding_parity_tests;
+mod consumed_field_quorum_e2e;
 mod core_app_tests;
 mod evm_catalog_parity_tests;
 mod evm_options_tests;

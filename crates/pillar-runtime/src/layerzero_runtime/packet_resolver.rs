@@ -26,6 +26,83 @@ fn move_block_projection(value: Value) -> Value {
     project_fields(value, &["block_height", "block_hash"])
 }
 
+/// The log fields the ULNv2 refresh reads. Clients differ on the rest: `arb1.arbitrum.io`
+/// answers `blockTimestamp` as `0x0` where other Arbitrum providers give the block time.
+fn evm_logs_projection(value: Value) -> Value {
+    let Value::Array(logs) = value else {
+        return value;
+    };
+    Value::Array(
+        logs.into_iter()
+            .map(|log| {
+                project_fields(
+                    log,
+                    &[
+                        "address",
+                        "topics",
+                        "data",
+                        "blockHash",
+                        "blockNumber",
+                        "logIndex",
+                        "transactionHash",
+                    ],
+                )
+            })
+            .collect(),
+    )
+}
+
+/// The event fields the Sui-family decoder reads; `bcs` encoding and cursors vary by node.
+fn move_events_projection(value: Value) -> Value {
+    let Value::Object(mut object) = value else {
+        return value;
+    };
+    let data = match object.remove("data") {
+        Some(Value::Array(events)) => Value::Array(
+            events
+                .into_iter()
+                .map(|event| project_fields(event, &["type", "parsedJson"]))
+                .collect(),
+        ),
+        Some(other) => other,
+        None => return Value::Object(serde_json::Map::new()),
+    };
+    json!({ "data": data })
+}
+
+fn starknet_receipt_projection(value: Value) -> Value {
+    project_fields(
+        value,
+        &[
+            "execution_status",
+            "finality_status",
+            "transaction_hash",
+            "block_hash",
+            "block_number",
+            "events",
+        ],
+    )
+}
+
+/// Both accepted finality statuses pass the resolver alike, and providers move a block
+/// from L2 to L1 acceptance at different moments, so only acceptance itself is agreed.
+fn starknet_receipt_fingerprint(receipt: &Value) -> Result<String, AppCoreError> {
+    let finality = receipt.get("finality_status");
+    let accepted = matches!(
+        finality.and_then(Value::as_str),
+        Some("ACCEPTED_ON_L2" | "ACCEPTED_ON_L1")
+    );
+    crate::provider_health::canonical_json_fingerprint(&(
+        receipt.get("execution_status"),
+        accepted,
+        (!accepted).then_some(finality).flatten(),
+        receipt.get("transaction_hash"),
+        receipt.get("block_hash"),
+        receipt.get("block_number"),
+        receipt.get("events"),
+    ))
+}
+
 fn project_fields(value: Value, keys: &[&str]) -> Value {
     let Value::Object(mut object) = value else {
         return value;
@@ -591,6 +668,12 @@ where
                 .then(|| body.pointer("/params/0").and_then(Value::as_str))
                 .flatten();
             let stellar_transaction = chain_name == "stellar" && method == Some("getTransaction");
+            let starknet_receipt = method == Some("starknet_getTransactionReceipt");
+            let projection: fn(Value) -> Value = match method {
+                Some("eth_getLogs") => evm_logs_projection,
+                Some(method) if method.ends_with("_queryEvents") => move_events_projection,
+                _ => |value| value,
+            };
             let mut requests = FuturesUnordered::new();
             for (index, uri) in provider_config.uris.iter().enumerate() {
                 let transport = self.transport.clone();
@@ -635,9 +718,15 @@ where
                                 crate::provider_health::canonical_json_fingerprint(&fields)
                                     .map(|fingerprint| (fingerprint, result))
                                     .map_err(|error| RpcError::Remote(error.to_string()))
+                            } else if starknet_receipt {
+                                let value = starknet_receipt_projection(result);
+                                starknet_receipt_fingerprint(&value)
+                                    .map(|fingerprint| (fingerprint, value))
+                                    .map_err(|error| RpcError::Remote(error.to_string()))
                             } else {
-                                crate::provider_health::canonical_json_fingerprint(&result)
-                                    .map(|fingerprint| (fingerprint, result))
+                                let value = projection(result);
+                                crate::provider_health::canonical_json_fingerprint(&value)
+                                    .map(|fingerprint| (fingerprint, value))
                                     .map_err(|error| RpcError::Remote(error.to_string()))
                             }
                         })
