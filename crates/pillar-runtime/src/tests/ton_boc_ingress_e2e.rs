@@ -7,6 +7,9 @@ use base64::Engine;
 const TON_TX: &str = "0xec1bd8457acc170bb32848246d0a203e42d2bd525dbc5593eec73fcff58c7ad8";
 /// An `excesses` transaction in the recorded trace; its body carries no LayerZero event.
 const EXCESSES_TX: &str = "lu7OVgds4QyaKwb4e5YE3jvAhD2jzH3Ry0KWbvJLtbc=";
+/// MerkleProof(MerkleProof(ordinary -> pruned branch, mask 0b010)): a level-0 body TON
+/// accepts and `@ton/core` refuses; pytoniq-core and ton_core 0.3.7 agree on its hash.
+const NESTED_SPARSE_PRUNED_BODY: &str = "te6cckEBBAEAdwAJRgOcbabPbAuhOG9pT3KgrlvYhSHQNNMrvecHNF/OArueOAAJASlGAzuQksw/c9hMQbR+1wEJSlYAr+sbWjJjVTAxuzpVMblbAAgCQQSrzQNISAECEREREREREREREREREREREREREREREREREREREREREREAB+Yx3Ug=";
 
 fn replay_file(name: &str) -> Value {
     let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -177,5 +180,33 @@ fn h01_unreachable_message_chain_from_one_provider_leaves_the_quorum_signing() {
         2,
     ))
     .expect("the two honest providers still reach quorum");
+    assert_eq!(resolved, expected);
+}
+
+/// M-16: a valid pruned branch with a sparse level mask in a message the event does not use
+/// must not cost the trace its quorum. Upstream `@ton/core` refuses this body, so here the
+/// port intentionally attests where the upstream DVN cannot.
+#[tokio::test]
+async fn m16_valid_sparse_pruned_branch_body_keeps_the_trace_quorum() {
+    let honest = replay_file("ton-v3-events.response.json");
+    let expected = resolve_ton_send(
+        vec![
+            ("https://a.example/v3", honest.clone()),
+            ("https://b.example/v3", honest),
+        ],
+        2,
+    )
+    .await
+    .expect("recorded send resolves");
+    let with_proof = trace_with_excesses_body(NESTED_SPARSE_PRUNED_BODY);
+    let resolved = resolve_ton_send(
+        vec![
+            ("https://a.example/v3", with_proof.clone()),
+            ("https://b.example/v3", with_proof),
+        ],
+        2,
+    )
+    .await
+    .expect("both providers agree on a trace holding a valid sparse pruned branch");
     assert_eq!(resolved, expected);
 }

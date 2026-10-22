@@ -11,7 +11,7 @@
 use base64::Engine;
 use pillar_core::AppCoreError;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use ton_core::cell::{BoC, CellBuilder, CellType, TonCell};
+use ton_core::cell::{BoC, CellBuilder, CellType, TonCell, TonHash};
 use ton_core::types::TonAddress;
 
 pub fn builder() -> CellBuilder {
@@ -232,7 +232,7 @@ fn read_boc_uint(bytes: &[u8], cursor: &mut usize, width: usize) -> Option<usize
 /// Serialize a cell to a BOC hex string (with CRC32C, `b5ee9c72` magic) as the
 /// TypeScript `Cell.toBoc().toString('hex')` does.
 pub fn boc_to_hex(cell: &TonCell) -> Result<String, AppCoreError> {
-    BoC::new(cell.clone()).to_hex(true).map_err(map_err)
+    Ok(hex::encode(serialize_boc(cell)?))
 }
 
 /// Serialize a cell to a BOC base64 string, as the TypeScript
@@ -240,7 +240,114 @@ pub fn boc_to_hex(cell: &TonCell) -> Result<String, AppCoreError> {
 /// arguments (`serializeStack`, TS:
 /// `packages/common-ton/src/TonV2Wrapper.ts:44-70`).
 pub fn boc_to_base64(cell: &TonCell) -> Result<String, AppCoreError> {
-    BoC::new(cell.clone()).to_base64(true).map_err(map_err)
+    Ok(base64::engine::general_purpose::STANDARD.encode(serialize_boc(cell)?))
+}
+
+/// `@ton/core` `serializeBoc(root, { idx: false, crc32: true })`, cell order included.
+/// `ton_core` orders shared cells by `HashMap` iteration, so its bytes varied between runs.
+fn serialize_boc(root: &TonCell) -> Result<Vec<u8>, AppCoreError> {
+    // `topologicalSort`: unique cells in breadth-first order, by representation hash.
+    let mut cells: Vec<&TonCell> = Vec::new();
+    let mut id_by_hash: std::collections::HashMap<TonHash, usize> =
+        std::collections::HashMap::new();
+    let mut level = vec![root];
+    while !level.is_empty() {
+        let mut next = Vec::new();
+        for cell in level {
+            let hash = *cell.hash().map_err(map_err)?;
+            if id_by_hash.contains_key(&hash) {
+                continue;
+            }
+            id_by_hash.insert(hash, cells.len());
+            cells.push(cell);
+            next.extend(cell.refs());
+        }
+        level = next;
+    }
+    let refs = cells
+        .iter()
+        .map(|cell| {
+            cell.refs()
+                .iter()
+                .map(|child| Ok(id_by_hash[child.hash().map_err(map_err)?]))
+                .collect::<Result<Vec<usize>, AppCoreError>>()
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    // Postorder over refs last-to-first, from each unvisited cell in breadth-first order;
+    // the serialized order is that postorder reversed.
+    let mut visited = vec![false; cells.len()];
+    let mut postorder = Vec::with_capacity(cells.len());
+    for start in 0..cells.len() {
+        if visited[start] {
+            continue;
+        }
+        visited[start] = true;
+        let mut stack = vec![(start, refs[start].len())];
+        while let Some((id, remaining)) = stack.last_mut() {
+            if *remaining == 0 {
+                postorder.push(*id);
+                stack.pop();
+                continue;
+            }
+            *remaining -= 1;
+            let child = refs[*id][*remaining];
+            if !visited[child] {
+                visited[child] = true;
+                stack.push((child, refs[child].len()));
+            }
+        }
+    }
+    let mut position = vec![0; cells.len()];
+    for (index, &id) in postorder.iter().rev().enumerate() {
+        position[id] = index;
+    }
+
+    let byte_width = |n: usize| (usize::BITS - n.leading_zeros()).div_ceil(8).max(1) as usize;
+    let size_bytes = byte_width(cells.len());
+    let cell_size =
+        |id: usize| 2 + cells[id].data_len_bits().div_ceil(8) + refs[id].len() * size_bytes;
+    let total_cell_size: usize = (0..cells.len()).map(cell_size).sum();
+    let offset_bytes = byte_width(total_cell_size);
+    let mut out = Vec::with_capacity(4 + 2 + 4 * size_bytes + offset_bytes + total_cell_size + 4);
+    let push_uint = |out: &mut Vec<u8>, value: usize, width: usize| {
+        out.extend_from_slice(&value.to_be_bytes()[std::mem::size_of::<usize>() - width..]);
+    };
+    out.extend_from_slice(&[
+        0xb5,
+        0xee,
+        0x9c,
+        0x72,
+        0x40 | size_bytes as u8,
+        offset_bytes as u8,
+    ]);
+    push_uint(&mut out, cells.len(), size_bytes);
+    push_uint(&mut out, 1, size_bytes);
+    push_uint(&mut out, 0, size_bytes);
+    push_uint(&mut out, total_cell_size, offset_bytes);
+    push_uint(&mut out, 0, size_bytes);
+    for &id in postorder.iter().rev() {
+        let cell = cells[id];
+        let bits = cell.data_len_bits();
+        let exotic = if cell.cell_type() == CellType::Ordinary {
+            0
+        } else {
+            8
+        };
+        out.push(refs[id].len() as u8 + exotic + cell.level_mask().mask() * 32);
+        out.push((bits / 8 + bits.div_ceil(8)) as u8);
+        let mut data = cell.parser().read_bits(bits).map_err(map_err)?;
+        if !bits.is_multiple_of(8) {
+            // Completion tag: a 1 bit right after the data, as `bitsToPaddedBuffer` writes.
+            data[bits / 8] |= 0x80 >> (bits % 8);
+        }
+        out.extend_from_slice(&data);
+        for &child in &refs[id] {
+            push_uint(&mut out, position[child], size_bytes);
+        }
+    }
+    let crc = crc::Crc::<u32>::new(&crc::CRC_32_ISCSI).checksum(&out);
+    out.extend_from_slice(&crc.to_le_bytes());
+    Ok(out)
 }
 
 /// Representation hash of a cell as a lowercase hex string (no `0x`), matching
@@ -267,7 +374,7 @@ pub fn state_init_address(
     b.write_ref(data.clone()).map_err(map_err)?;
     b.write_bit(false).map_err(map_err)?;
     let state_init = build(b)?;
-    let hash = state_init.hash().map_err(map_err)?.clone();
+    let hash = *state_init.hash().map_err(map_err)?;
     Ok(TonAddress::new(workchain, hash))
 }
 #[cfg(test)]
@@ -348,6 +455,131 @@ mod tests {
         ];
         let result = catch_unwind(AssertUnwindSafe(|| boc_from_bytes(boc.to_vec())));
         assert!(result.is_ok_and(|cell| cell.is_err()));
+    }
+
+    /// Built with ton_core 0.3.7; pytoniq-core parses it to the same representation hash.
+    const NESTED_SPARSE_PRUNED_BODY: &str = "te6cckEBBAEAdwAJRgOcbabPbAuhOG9pT3KgrlvYhSHQNNMrvecHNF/OArueOAAJASlGAzuQksw/c9hMQbR+1wEJSlYAr+sbWjJjVTAxuzpVMblbAAgCQQSrzQNISAECEREREREREREREREREREREREREREREREREREREREREREAB+Yx3Ug=";
+
+    /// A pruned branch storing one hash and depth per set bit of `mask`, as the TON node does.
+    fn pruned_branch_boc(mask: u8) -> Vec<u8> {
+        let count = mask.count_ones() as u8;
+        let mut data = vec![1, mask];
+        for index in 0..count {
+            data.extend_from_slice(&[0x11 + index; 32]);
+        }
+        for index in 0..count {
+            data.extend_from_slice(&u16::from(7 + index).to_be_bytes());
+        }
+        let mut boc = vec![
+            0xb5,
+            0xee,
+            0x9c,
+            0x72,
+            1,
+            1,
+            1,
+            1,
+            0,
+            data.len() as u8 + 2,
+            0,
+        ];
+        boc.extend_from_slice(&[(mask << 5) | 0x08, data.len() as u8 * 2]);
+        boc.extend(data);
+        boc
+    }
+
+    #[test]
+    fn hashes_pruned_branches_of_every_level_mask_like_an_independent_parser() {
+        // pytoniq-core's representation hashes; it refuses mask 0b110, so that one has none.
+        let independent = [
+            (
+                1,
+                "d9baec4b7133705dc349538ad043e76d5b3152b4b90f25fed0cd601b43619f3b",
+            ),
+            (
+                2,
+                "b73237a06deaa4eb8796c20038e5950419e5c11b35d983fef9e452c48445aaa8",
+            ),
+            (
+                3,
+                "3af442f8ad8b37c3ed7ca688f4729df05e8c77c440bbced95521be1585dc1131",
+            ),
+            (
+                4,
+                "818d3050bfe39a60a0cf55a523bccc19edffd07c113927a3f6ca6ea8b06b517a",
+            ),
+            (
+                5,
+                "3539ab6bf3318a67833b7cb035010c4bf0b5c7aeafc1c9b9e249440eaae73fa2",
+            ),
+            (
+                7,
+                "fd0f1f33b619e688b1dc30737d2d48e74264cde7ad7da33c75e9f468ecbae2a1",
+            ),
+        ];
+        for mask in 1u8..=7 {
+            let cell =
+                boc_from_bytes_with_limits(pruned_branch_boc(mask), MAX_MESSAGE_CELLS, false)
+                    .unwrap_or_else(|error| panic!("mask {mask:#05b}: {error}"));
+            if let Some((_, hash)) = independent.iter().find(|(known, _)| *known == mask) {
+                assert_eq!(repr_hash_hex(&cell).unwrap(), *hash, "mask {mask:#05b}");
+            }
+            assert!(
+                boc_from_bytes_with_limits(pruned_branch_boc(mask), MAX_MESSAGE_CELLS, true)
+                    .is_err(),
+                "mask {mask:#05b}: exotic cells stay refused where the caller requires it"
+            );
+        }
+    }
+
+    #[test]
+    fn parses_a_level_zero_body_holding_a_sparse_pruned_branch() {
+        // MerkleProof(MerkleProof(ordinary -> pruned branch, mask 0b010)): a body TON accepts.
+        let body = base64::engine::general_purpose::STANDARD
+            .decode(NESTED_SPARSE_PRUNED_BODY)
+            .unwrap();
+        let cell = boc_from_bytes_with_limits(body, MAX_MESSAGE_CELLS, false).unwrap();
+        assert_eq!(cell.level_mask().mask(), 0);
+        assert_eq!(
+            repr_hash_hex(&cell).unwrap(),
+            "d56d25bc265ab408feb6359de03d9197fc572ae3eb0e3a49653c29e677bb3383"
+        );
+    }
+
+    #[test]
+    fn serializes_shared_cells_in_ton_core_js_order_on_every_run() {
+        // `@ton/core` 0.63.1 `toBoc({ idx: false, crc32: true })` bytes: a DAG whose shared
+        // cells sit at different depths, and a body holding a Merkle proof and pruned branch.
+        let expected = [
+            "b5ee9c7241010601001a000302010401020202b005030202c003040001e80102a0050002d0c119982f",
+            "b5ee9c7241010501005a000202020104094603608f1a3b91fc10c48c50f5a59f87ac8de53213a0b7cd25bf5515349d90b17be00008022204abcd030428480101111111111111111111111111111111111111111111111111111111111111111100070001e8a54777b4",
+        ];
+        for boc in expected {
+            let cell =
+                boc_from_bytes_with_limits(hex::decode(boc).unwrap(), MAX_MESSAGE_CELLS, false)
+                    .unwrap();
+            for _ in 0..64 {
+                assert_eq!(boc_to_hex(&cell).unwrap(), boc);
+            }
+        }
+    }
+
+    #[test]
+    fn serializes_a_mainnet_cell_ton_core_reordered_as_ton_core_js_does() {
+        let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.push("tests/gasolina_parity/ton_shared_cell_boc.json");
+        let fixture: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let cell = boc_from_base64_with_limits(
+            fixture["input"].as_str().unwrap(),
+            MAX_MESSAGE_CELLS,
+            false,
+        )
+        .unwrap();
+        assert_eq!(repr_hash_hex(&cell).unwrap(), fixture["reprHash"]);
+        for _ in 0..64 {
+            assert_eq!(boc_to_hex(&cell).unwrap(), fixture["tonCoreJs"]);
+        }
     }
 
     #[test]

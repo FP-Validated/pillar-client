@@ -303,9 +303,6 @@ fn ton_message_digest(transaction: &Value, message: &Value) -> Option<String> {
     let body = message.pointer("/message_content/body");
     let bytes =
         base64::Engine::decode(&base64::engine::general_purpose::STANDARD, body?.as_str()?).ok()?;
-    if !boc_checksum_holds(&bytes) {
-        return None;
-    }
     let root = pillar_layerzero::boc_from_bytes_with_limits(
         bytes,
         pillar_layerzero::MAX_MESSAGE_CELLS,
@@ -344,30 +341,6 @@ fn ton_message_digest(transaction: &Value, message: &Value) -> Option<String> {
         .iter()
         .map(String::as_str),
     ))
-}
-
-/// `@ton/core` `Cell.fromBoc` refuses a BOC whose CRC32C flag is set and whose trailing
-/// checksum does not match (`Invalid CRC32C`); `ton_core` does not check it.
-fn boc_checksum_holds(bytes: &[u8]) -> bool {
-    const GENERIC_MAGIC: [u8; 4] = [0xb5, 0xee, 0x9c, 0x72];
-    if bytes.len() < 5 || bytes[..4] != GENERIC_MAGIC || bytes[4] & 0x40 == 0 {
-        return true;
-    }
-    let Some((payload, checksum)) = bytes.split_last_chunk::<4>() else {
-        return false;
-    };
-    let mut crc = !0u32;
-    for byte in payload {
-        crc ^= u32::from(*byte);
-        for _ in 0..8 {
-            crc = if crc & 1 == 1 {
-                (crc >> 1) ^ 0x82f6_3b78
-            } else {
-                crc >> 1
-            };
-        }
-    }
-    !crc == u32::from_le_bytes(*checksum)
 }
 
 /// `String(value ?? 'EMPTY')` for the JSON shapes a TON v3 trace carries.
