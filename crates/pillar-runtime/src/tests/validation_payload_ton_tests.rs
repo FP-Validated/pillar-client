@@ -881,6 +881,53 @@ async fn ton_quorum_drops_provider_with_pruned_branch_storage() {
         .await
         .expect("honest provider reaches quorum after the pruned-cell provider is dropped");
 }
+
+/// H-01: one provider below quorum returns `Uln` storage whose unreachable chain fills the
+/// account cell limit, parsed on a 2 MiB tokio worker. It must lose its vote, not abort.
+#[test]
+fn h01_unreachable_storage_chain_from_one_provider_leaves_the_quorum_signing() {
+    const CHILD: &str = "PILLAR_H01_STORAGE_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        super::ton_boc_ingress_e2e::run_isolated(
+            "tests::validation_payload_ton_tests::h01_unreachable_storage_chain_from_one_provider_leaves_the_quorum_signing",
+            CHILD,
+        );
+        return;
+    }
+    use base64::Engine;
+    let hostile = base64::engine::general_purpose::STANDARD.encode(
+        super::ton_boc_ingress_e2e::unreachable_chain_boc(
+            pillar_layerzero::MAX_ACCOUNT_STATE_CELLS - 1,
+        ),
+    );
+    let honest = || {
+        vec![
+            address_information(EMPTY_CONNECTION),
+            address_information(ULN_STORAGE),
+            committable_view(0),
+        ]
+    };
+    let checks = ton_quorum_checks(
+        vec![
+            (
+                "https://ton-hostile.example",
+                vec![
+                    address_information(EMPTY_CONNECTION),
+                    address_information(&hostile),
+                ],
+            ),
+            ("https://ton-a.example", honest()),
+            ("https://ton-b.example", honest()),
+        ],
+        2,
+    );
+    super::ton_boc_ingress_e2e::on_tokio_worker(async move {
+        checks
+            .validate_payload_not_signed(&ton_sent_event(), Some(CONFIGURED_VERIFIER), "ton", None)
+            .await
+    })
+    .expect("the two honest providers still agree the payload is unsigned");
+}
 /// The mixed case the two buckets exist for: one provider reads the chain and
 /// reports a non-active contract, two others never answer.
 ///

@@ -62,7 +62,7 @@ pub fn boc_from_bytes_with_limits(
     if !boc_header_is_safe(&bytes, max_cells) {
         return Err(map_err("invalid BOC header"));
     }
-    if boc_root_depth(&bytes).is_none_or(|depth| depth > MAX_CELL_DEPTH) {
+    if boc_max_depth(&bytes).is_none_or(|depth| depth > MAX_CELL_DEPTH) {
         return Err(map_err("TON cell depth exceeds protocol limit"));
     }
     catch_unwind(AssertUnwindSafe(|| {
@@ -156,8 +156,9 @@ fn boc_header_is_safe(bytes: &[u8], max_cells: usize) -> bool {
         .checked_add(crc_size)
         .is_some_and(|end| end <= bytes.len())
 }
-// Check wire references before constructing TonCells so a refused deep tree cannot recursively drop.
-fn boc_root_depth(bytes: &[u8]) -> Option<usize> {
+// Bound every declared cell, reachable or not, before constructing TonCells: the parser
+// builds and drops all of them, so one deep unreachable chain would recurse on drop.
+fn boc_max_depth(bytes: &[u8]) -> Option<usize> {
     let flags = *bytes.get(4)?;
     let has_idx = flags & 0x80 != 0;
     let size_bytes = usize::from(flags & 7);
@@ -214,7 +215,7 @@ fn boc_root_depth(bytes: &[u8]) -> Option<usize> {
             depths[index] = depths[index].max(depths[reference].checked_add(1)?);
         }
     }
-    Some(depths[root])
+    depths.into_iter().max()
 }
 fn read_boc_uint(bytes: &[u8], cursor: &mut usize, width: usize) -> Option<usize> {
     let end = cursor.checked_add(width)?;
@@ -368,28 +369,83 @@ mod tests {
     #[test]
     fn refuses_a_chain_that_would_overflow_ton_cell_depth() {
         let boc = make_deep_chain(MAX_CELL_DEPTH + 2);
-        assert_eq!(boc_root_depth(&boc), Some(MAX_CELL_DEPTH + 1));
+        assert_eq!(boc_max_depth(&boc), Some(MAX_CELL_DEPTH + 1));
         assert!(boc_from_bytes_with_limits(boc, MAX_ACCOUNT_STATE_CELLS, true).is_err());
     }
 
     #[test]
-    fn rejects_account_chain_above_limit_in_two_mib_worker() {
+    fn refuses_an_unreachable_chain_deeper_than_ton_cell_depth() {
+        let at_limit = make_unreachable_chain(MAX_CELL_DEPTH + 1);
+        assert_eq!(boc_max_depth(&at_limit), Some(MAX_CELL_DEPTH));
+        assert!(boc_from_bytes_with_limits(at_limit, MAX_MESSAGE_CELLS, true).is_ok());
+        let deeper = make_unreachable_chain(MAX_CELL_DEPTH + 2);
+        assert_eq!(boc_max_depth(&deeper), Some(MAX_CELL_DEPTH + 1));
+        assert!(boc_from_bytes_with_limits(deeper, MAX_MESSAGE_CELLS, false).is_err());
+    }
+
+    #[test]
+    fn rejects_chains_at_the_cell_limits_in_two_mib_worker() {
         const CHILD: &str = "PILLAR_TON_DEEP_CHILD";
         if std::env::var_os(CHILD).is_some() {
-            let boc = make_deep_chain(MAX_ACCOUNT_STATE_CELLS - 1);
-            let worker = std::thread::Builder::new()
-                .stack_size(2 * 1024 * 1024)
-                .spawn(move || boc_from_bytes_with_limits(boc, MAX_ACCOUNT_STATE_CELLS, true))
-                .unwrap();
-            assert!(worker.join().expect("worker must return normally").is_err());
+            let cases = [
+                (
+                    make_deep_chain(MAX_ACCOUNT_STATE_CELLS - 1),
+                    MAX_ACCOUNT_STATE_CELLS,
+                    true,
+                ),
+                (
+                    make_unreachable_chain(MAX_MESSAGE_CELLS - 1),
+                    MAX_MESSAGE_CELLS,
+                    false,
+                ),
+                (
+                    make_unreachable_chain(MAX_ACCOUNT_STATE_CELLS - 1),
+                    MAX_ACCOUNT_STATE_CELLS,
+                    true,
+                ),
+            ];
+            for (boc, max_cells, reject_exotic) in cases {
+                let worker = std::thread::Builder::new()
+                    .stack_size(2 * 1024 * 1024)
+                    .spawn(move || boc_from_bytes_with_limits(boc, max_cells, reject_exotic))
+                    .unwrap();
+                assert!(worker.join().expect("worker must return normally").is_err());
+            }
             return;
         }
-        let status = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "other_non_evm::ton::cell::tests::rejects_account_chain_above_limit_in_two_mib_worker", "--nocapture"])
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "other_non_evm::ton::cell::tests::rejects_chains_at_the_cell_limits_in_two_mib_worker", "--nocapture"])
             .env(CHILD, "1")
-            .status()
+            .output()
             .unwrap();
-        assert!(status.success(), "child test failed: {status}");
+        assert!(
+            output.status.success(),
+            "child test failed: {}",
+            output.status
+        );
+        // An `--exact` filter that matches nothing also exits 0.
+        assert!(String::from_utf8_lossy(&output.stdout).contains("test result: ok. 1 passed;"));
+    }
+
+    /// A chain of `chain_len` cells nothing references, rooted at one more empty cell.
+    fn make_unreachable_chain(chain_len: usize) -> Vec<u8> {
+        let be3 = |n: usize| [(n >> 16) as u8, (n >> 8) as u8, n as u8];
+        let mut boc = vec![0xb5, 0xee, 0x9c, 0x72, 3, 3];
+        boc.extend_from_slice(&be3(chain_len + 1));
+        boc.extend_from_slice(&be3(1));
+        boc.extend_from_slice(&be3(0));
+        boc.extend_from_slice(&be3((chain_len - 1) * 5 + 4));
+        boc.extend_from_slice(&be3(chain_len));
+        for index in 0..chain_len {
+            if index + 1 == chain_len {
+                boc.extend_from_slice(&[0, 0]);
+            } else {
+                boc.extend_from_slice(&[1, 0]);
+                boc.extend_from_slice(&be3(index + 1));
+            }
+        }
+        boc.extend_from_slice(&[0, 0]);
+        boc
     }
 
     fn make_deep_chain(cell_count: usize) -> Vec<u8> {
@@ -507,7 +563,7 @@ mod tests {
         with_hashes.extend_from_slice(leaf.hash().unwrap().as_slice());
         with_hashes.extend_from_slice(&leaf.depth().unwrap().to_be_bytes());
         with_hashes.push(0xcd);
-        assert_eq!(boc_root_depth(&with_hashes), Some(1));
+        assert_eq!(boc_max_depth(&with_hashes), Some(1));
         let parsed = boc_from_bytes(with_hashes).expect("BoC with stored hashes");
         assert_eq!(parsed.hash().unwrap(), root.hash().unwrap());
     }
