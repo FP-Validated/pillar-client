@@ -122,6 +122,13 @@ The following are deployment-side controls the software cannot enforce for you:
   on `doma`, `lineasep` and `zksyncsep` return the EndpointV1 id from `vid()`
   (`crates/pillar-runtime/tests/onchain_provenance/dvn_vid.json`); `scroll` could not be
   read on chain and keeps its EndpointV1 id as an unconfirmed corrected input.
+- TON BOCs differ from upstream `@ton/core`. A valid pruned branch with a sparse
+  level mask (for example `0b010`, inside nested Merkle proofs) parses here, so a
+  source trace carrying one in any message still reaches quorum; `@ton/core` 0.63.1
+  reads one stored hash per level, refuses it and fails the trace. Separately, a cell
+  the TON node refuses (inconsistent level mask or Merkle hash, any declared cell
+  deeper than 1,024, reachable or not) is refused here and is that provider's
+  non-vote, whatever `@ton/core` would do with it.
 - Alert on `pillar_provider_config_age_seconds` (stale provider configuration),
   `pillar_provider_config_refresh_total{result!="ok"}`,
   `pillar_provider_single_entity_chains > 0`, `pillar_signer_errors_total` and

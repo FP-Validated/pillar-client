@@ -493,7 +493,7 @@ Decisions made during the rounds:
 - Kept the Starknet receipt fingerprint projection. There was no evidence that providers returned different values for compared receipt fields.
 - TON message cell splitting follows the 1016-bit split in upstream 1.2.66 `common-ton/src/cells.ts`. `vec-c` in `ton_dvn_verify.json` is calculated by this repository's builder.
 - TON BoC cell limits use mainnet config param 43 (read via toncenter `getConfigParam`). Account storage is limited to `max_acc_state_cells` 65,536; messages and trace bodies to `max_msg_cells` 8,192. Measured mainnet storage is 15 cells for UlnConnection, 532 for Uln, and 1,223 for UlnManager; the connection storage fixture with 600 attestation nonces also reads within this limit. Peak RSS of the test process parsing a BoC filled to the limit with cells without refs or data is 60,850,176 bytes for 65,536 account cells and 11,403,264 bytes for 8,192 message cells.
-- TON BoC depth limit is the TON node cell-structure limit, `CellTraits::max_depth` (1,024, `ton-blockchain/ton` `crypto/vm/cells/CellTraits.h`). Config param 43's `max_vm_data_depth` (512) is a separate, narrower on-chain limit. The parser calculates depth from the raw BoC reference graph and rejects it before creating cell objects; this calculation, like `ton_core`, skips hashes and depth bytes stored in cells. Exotic validation runs on each popped cell, and child refs are expanded once per cell node identity. The visited key is node identity, not the representation hash a provider can manipulate.
+- TON BoC depth limit is the TON node cell-structure limit, `CellTraits::max_depth` (1,024, `ton-blockchain/ton` `crypto/vm/cells/CellTraits.h`). Config param 43's `max_vm_data_depth` (512) is a separate, narrower on-chain limit. The parser calculates the depth of every declared cell, reachable from the root or not, from the raw BoC reference graph and rejects the BoC before creating cell objects (§21, H-01); this calculation, like `ton_core`, skips hashes and depth bytes stored in cells. Exotic validation runs on each popped cell, and child refs are expanded once per cell node identity. The visited key is node identity, not the representation hash a provider can manipulate.
 - Default receive config serialization is limited to 2,048 unique cells. Config for mainnet Uln storage (532 cells) uses 2 cells; the testnet fixture config uses 3. Below the depth limit, the maximum size for two required/optional DVN chains is 2,047 cells. Serialization of a max-size config took 24 ms in release build. Mainnet fixture `ton_mainnet_uln_storage.b64` is the `data` from toncenter `getAddressInformation` response for Uln `EQAXRMTd2d1IW72G7U71RuGNiP2M2NfQp5U69W667far3CYo`, read at masterchain seqno 97941002 on 2026-10-09 23:06 KST.
 - In non-EVM readiness, 200 responses with missing or malformed fields are excluded as provider failures. Upstream Aptos `aptosBlockHeightQuorumFn` puts a `null` block and a block missing `block_height` in the same bucket. Pillar counts a `null` block on the Aptos ledger-version path and a `null` transaction on Initia as `Missing` votes; it treats a `null` transaction on the Aptos and Movement tx-hash paths and a `null` block after a transaction as provider failures.
 
@@ -786,3 +786,43 @@ the same divergence live on Arbitrum `eth_getLogs`; that row and Starknet and IO
 changed alike. Sui already compared only `type` and `parsedJson`. Aptos account
 resources and table items still compare their small whole answers. TON v3 dispatch still
 ranks by the v2 probe. No image was built and nothing was deployed.
+
+## 21. H-01, M-15 and M-16 remediation — 2026-10-22
+
+The report's baseline is `3f39fbad972794e5a9c598ea46a310334a4a4415` (2.6.2). H-01 and
+M-16 were still present at `201430d` and on the Round 3 branch; M-15 was already fixed
+by `677d676`, released in 2.7.0 and 2.7.1. The work branches from `fc8d9e9`, the Round
+3 remediation, with `de722d6` (H-01), `7a1a226` (M-16), then documentation. It is not
+released. The TON BOC ingress stages, the measurements and the upstream difference are
+in [h01-m15-m16-response.md](audit/h01-m15-m16-response.md).
+
+| ID | Implementation | Exercised evidence |
+| --- | --- | --- |
+| H-01 | Every declared cell of a provider's BOC, reachable or not, is at most 1,024 deep before any cell is built | One of three providers at quorum 2 returns an unreachable chain filling the message (trace) or account (storage) cell limit; on a 2 MiB tokio worker the two honest providers resolve and sign-validate as without it. Before the fix the child process aborted with a stack overflow |
+| M-15 | Already fixed: `rustls` 0.23.46, `rustls-webpki` 0.103.16, `webpki-roots`/`webpki-root-certs` 1.0.10 | `cargo audit` and `cargo deny check` clean; `rustls-webpki` refuses the eight eMudhra intermediate keys whatever store the anchor came from |
+| M-16 | `ton_core` 0.3.7: one stored pruned-branch hash per set level-mask bit, node-equivalent cell verification, CRC32C and exact length on every BOC, deferred deep drops; Pillar's own trace-body CRC check is removed | All seven pruned-branch masks parse, six to pytoniq-core's hashes; two providers resolve the recorded TON send with a level-0 Merkle-proof body holding a mask-`0b010` pruned branch. Upstream `@ton/core` 0.63.1 refuses that body, so Pillar now attests traces the upstream DVN cannot |
+
+### Verification
+
+| Check | Observed result |
+| --- | --- |
+| `cargo +1.98.1 fmt --all --check` | Passed, on both commits |
+| `cargo +1.98.1 clippy --workspace --all-targets --locked -- -D warnings` | Passed, on both commits |
+| `cargo +1.98.1 test --workspace --locked` | 1,159 passed at `de722d6` and 1,164 at `7a1a226`, zero failed, 15 ignored (`test result:` totals; child processes' own summaries are captured, not counted) |
+| `RUSTFLAGS="-D warnings" cargo +1.94.1 check --workspace --all-targets --locked` | Passed, on both commits |
+| `cargo test --release` for the new H-01 and M-16 tests | Passed |
+| `cargo audit`, `cargo deny check` | Passed; the second `darling` is a duplicate warning, as `deny.toml` configures |
+| Fix-reverted runs | With `Some(depths[root])` restored, the four H-01 tests fail, three by SIGABRT in their child; on `ton_core` 0.1.3 the two `pillar-layerzero` M-16 tests fail with `failed to fill whole buffer` and the runtime M-16 test with no trace quorum |
+
+The DVN payload and codec fixtures recorded from upstream pass unchanged on `ton_core`
+0.3.7, so the signed bytes did not change. Stack use was measured on macOS arm64
+only. No image was built and nothing was deployed.
+
+The re-review parsed 19,715 mainnet BOCs (7,768 recent message bodies and 11,947
+LayerZero storage, code and message BOCs read from toncenter) with `ton_core` 0.1.3 and
+0.3.7: every one parsed under both, to the same representation hash, and Pillar's ingress
+accepted all of them before and after. It also found that `ton_core`'s BOC serializer,
+in both versions, ordered shared cells by `HashMap` iteration, so about 1,700 of those
+BOCs re-serialized to different bytes from one run to the next. `boc_to_hex` and
+`boc_to_base64` now order cells as `@ton/core` `toBoc` does; the two storage fixtures
+this crate produces were regenerated with `@ton/core` 0.63.1 bytes.
