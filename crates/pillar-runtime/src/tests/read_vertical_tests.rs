@@ -744,6 +744,8 @@ mod postgres_audit_e2e;
 async fn durable_process_worker() {
     postgres_audit_e2e::run_crash_worker().await;
 }
+#[path = "h02_read_result_budget_e2e.rs"]
+mod h02_read_result_budget_e2e;
 #[path = "read_data_http_e2e.rs"]
 mod read_data_http_e2e;
 #[path = "round2_read_version_e2e.rs"]

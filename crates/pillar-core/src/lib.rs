@@ -70,6 +70,8 @@ pub const PACKET_IDENTITY_MISMATCH_ERROR_SUFFIX: &str =
 const MAX_CONCURRENT_WALLET_SIGNS: usize = 8;
 pub const MAX_READ_REQUESTS: u16 = 256;
 pub const MAX_READ_MARKERS: usize = MAX_READ_REQUESTS as usize + 1;
+/// Cap on READ returned data per `eth_call` and per command phase; 8x geth's 128 KiB tx limit.
+pub const MAX_READ_RESULT_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -936,7 +938,7 @@ impl PillarApp {
             .await;
         let HashCallDataResult {
             hash_call_data,
-            details,
+            mut details,
         } = build_result?;
         tracing::info!(
             src_chain = %src_chain_name,
@@ -1004,27 +1006,23 @@ impl PillarApp {
             .await;
         let signatures = sign_result?;
 
-        let resolved_payload = details
-            .pointer("/proof/resolvedPayload")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let request_payload = details
-            .pointer("/proof/payload")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let payload = if sent_event.lz_message_id.uln_send_version.as_str() == Some("ReadV1002") {
-            if resolved_payload.is_empty() {
-                request_payload.to_string()
+        let resolved_payload = details.pointer("/proof/resolvedPayload");
+        let payload_pointer =
+            if sent_event.lz_message_id.uln_send_version.as_str() == Some("ReadV1002") {
+                match resolved_payload.and_then(Value::as_str) {
+                    Some(resolved) if !resolved.is_empty() => "/proof/resolvedPayload",
+                    _ => "/proof/payload",
+                }
+            } else if resolved_payload.is_some() {
+                "/proof/resolvedPayload"
             } else {
-                resolved_payload.to_string()
-            }
-        } else {
-            details
-                .pointer("/proof/resolvedPayload")
-                .or_else(|| details.pointer("/proof/payload"))
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string()
+                "/proof/payload"
+            };
+        // Without debug output the details are dropped, so a READ payload is moved, not copied.
+        let payload = match details.pointer_mut(payload_pointer) {
+            Some(Value::String(text)) if self.debug_mode => text.clone(),
+            Some(Value::String(text)) => std::mem::take(text),
+            _ => String::new(),
         };
 
         let response = PillarApiResponse {

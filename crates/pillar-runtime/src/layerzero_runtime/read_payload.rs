@@ -1,14 +1,16 @@
 use super::*;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Clone)]
 pub(crate) struct RuntimeEvmReadPayloadResolver<T> {
     providers: crate::provider_snapshot::ProviderSnapshotHandle,
     transport: T,
     chain_name_by_eid: HashMap<u32, String>,
-    rpc_permits: Arc<Semaphore>,
+    call_permits: Arc<Semaphore>,
 }
 
-const MAX_CONCURRENT_READ_RPC_REQUESTS: usize = 32;
+/// Process-wide READ calls in flight; each holds its providers' votes until its quorum resolves.
+const MAX_CONCURRENT_READ_CALLS: usize = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RuntimeReadResolvedResponse {
@@ -34,26 +36,26 @@ where
         transport: T,
         chain_name_by_eid: HashMap<u32, String>,
     ) -> Self {
-        Self::new_with_rpc_limit(
+        Self::new_with_call_limit(
             providers,
             transport,
             chain_name_by_eid,
-            MAX_CONCURRENT_READ_RPC_REQUESTS,
+            MAX_CONCURRENT_READ_CALLS,
         )
     }
 
-    pub(crate) fn new_with_rpc_limit(
+    pub(crate) fn new_with_call_limit(
         providers: &crate::provider_snapshot::ProviderSnapshotHandle,
         transport: T,
         chain_name_by_eid: HashMap<u32, String>,
-        max_concurrent_rpc: usize,
+        max_concurrent_calls: usize,
     ) -> Self {
-        assert!(max_concurrent_rpc > 0, "read RPC limit must be positive");
+        assert!(max_concurrent_calls > 0, "read call limit must be positive");
         Self {
             providers: providers.clone(),
             transport,
             chain_name_by_eid,
-            rpc_permits: Arc::new(Semaphore::new(max_concurrent_rpc)),
+            call_permits: Arc::new(Semaphore::new(max_concurrent_calls)),
         }
     }
 
@@ -137,28 +139,23 @@ where
         let provider_config = snapshot.provider_config(chain_name)?;
         let quorum = required_provider_quorum(provider_config, chain_name)?;
         let block = json!({ "blockHash": pin.block_hash, "requireCanonical": true });
+        let _permit = self
+            .call_permits
+            .acquire()
+            .await
+            .map_err(|_| AppCoreError::Admission(pillar_core::execution::BudgetError::Closed))?;
         let mut requests = FuturesUnordered::new();
         for (index, uri) in provider_config.uris.iter().enumerate() {
             let (url, headers) = provider_uri_parts(uri);
             let transport = self.transport.clone();
-            let to = to.to_string();
-            let call_data = call_data.to_string();
             let block = block.clone();
-            let rpc_permits = self.rpc_permits.clone();
             requests.push(async move {
-                let observation = match rpc_permits.acquire_owned().await {
-                    Ok(_permit) => crate::provider_health::eth_call_read_observation_at_block(
-                        transport, url, headers, &to, &call_data, block,
-                    )
-                    .await
-                    .map_err(RpcError::from),
-                    Err(_) => Err(RpcError::Admission(
-                        pillar_core::execution::BudgetError::Closed,
-                    )),
-                };
-                let vote = observation.map(|(fingerprint, observation)| {
-                    Some((fingerprint, observation))
-                });
+                let vote = crate::provider_health::eth_call_read_observation_at_block(
+                    transport, url, headers, to, call_data, block,
+                )
+                .await
+                .map(Some)
+                .map_err(RpcError::from);
                 (index, vote)
             });
         }
@@ -203,10 +200,11 @@ where
     ) -> Result<String, AppCoreError> {
         let mapped_responses = if compute.setting == EvmReadComputeSetting::OnlyReduce {
             responses
-                .iter()
-                .map(|response| response.response.clone())
+                .into_iter()
+                .map(|response| response.response)
                 .collect::<Vec<_>>()
         } else {
+            let mapped_bytes = AtomicUsize::new(0);
             try_join_all(responses.iter().map(|response| async {
                 let call_data = build_evm_lz_map_call_data(&response.request, &response.response)?;
                 let raw = self
@@ -218,15 +216,15 @@ where
                         blocks,
                     )
                     .await?;
-                Ok::<String, AppCoreError>(
-                    strip_hex_prefix(&decode_evm_bytes_result(&raw)?).to_string(),
-                )
+                let mapped = strip_hex_prefix(&decode_evm_bytes_result(&raw)?).to_string();
+                charge_read_results(&mapped_bytes, &mapped, "lzMap results")?;
+                Ok::<String, AppCoreError>(mapped)
             }))
             .await?
         };
 
         if compute.setting == EvmReadComputeSetting::OnlyMap {
-            return Ok(mapped_responses.join(""));
+            return Ok(mapped_responses.concat());
         }
 
         let call_data = build_evm_lz_reduce_call_data(cmd, &mapped_responses)?;
@@ -267,24 +265,37 @@ where
             pins: &sent_event.read_block_pins,
         };
         let command = decode_evm_read_command(&sent_event.message)?;
-        let responses = try_join_all(
-            command
-                .requests
-                .into_iter()
-                .map(|request| self.resolve_request_payload(request, blocks)),
-        )
+        let request_bytes = AtomicUsize::new(0);
+        let responses = try_join_all(command.requests.into_iter().map(|request| async {
+            let response = self.resolve_request_payload(request, blocks).await?;
+            charge_read_results(&request_bytes, &response.response, "request results")?;
+            Ok::<_, AppCoreError>(response)
+        }))
         .await?;
         if let Some(compute) = command.compute {
             self.resolve_compute_payload(&sent_event.message, compute, responses, blocks)
                 .await
         } else {
-            let mut resolved_payload = String::new();
+            let mut resolved_payload = String::with_capacity(request_bytes.into_inner() * 2);
             for response in responses {
                 resolved_payload.push_str(&response.response);
             }
             Ok(resolved_payload)
         }
     }
+}
+
+/// Charged on completion, before the result is kept, so a phase never holds more than the cap.
+fn charge_read_results(used: &AtomicUsize, hex: &str, phase: &str) -> Result<(), AppCoreError> {
+    let bytes = hex.len() / 2;
+    let total = used.fetch_add(bytes, Ordering::Relaxed) + bytes;
+    if total > pillar_core::MAX_READ_RESULT_BYTES {
+        return Err(AppCoreError::UnresolvableCommand(format!(
+            "ReadV1002 command is unresolvable: {phase} exceed {} bytes",
+            pillar_core::MAX_READ_RESULT_BYTES
+        )));
+    }
+    Ok(())
 }
 
 fn read_observation_result(
@@ -296,8 +307,12 @@ fn read_observation_result(
         ReadCallObservation::NoCode => Err(AppCoreError::UnresolvableCommand(
             "ReadV1002 command is unresolvable: target has no code at the pinned block".into(),
         )),
-        ReadCallObservation::ExecutionRevert { .. } => Err(AppCoreError::UnresolvableCommand(
+        ReadCallObservation::ExecutionRevert => Err(AppCoreError::UnresolvableCommand(
             "ReadV1002 command is unresolvable: execution reverted at the pinned block".into(),
         )),
+        ReadCallObservation::ResultTooLarge => Err(AppCoreError::UnresolvableCommand(format!(
+            "ReadV1002 command is unresolvable: an eth_call result exceeds {} bytes at the pinned block",
+            pillar_core::MAX_READ_RESULT_BYTES
+        ))),
     }
 }

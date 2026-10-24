@@ -156,7 +156,7 @@ async fn collect_local_read_rpc_requests(
 }
 
 #[tokio::test]
-async fn runtime_evm_read_payload_resolver_caps_process_wide_rpc_concurrency() {
+async fn runtime_evm_read_payload_resolver_caps_process_wide_read_call_concurrency() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     let getter = StaticProviderConfig::new(
@@ -172,7 +172,7 @@ async fn runtime_evm_read_payload_resolver_caps_process_wide_rpc_concurrency() {
     .unwrap();
     let active = Arc::new(AtomicUsize::new(0));
     let peak = Arc::new(AtomicUsize::new(0));
-    let resolver = RuntimeEvmReadPayloadResolver::new_with_rpc_limit(
+    let resolver = RuntimeEvmReadPayloadResolver::new_with_call_limit(
         &ProviderSnapshotHandle::from_getter(&getter),
         ReadConcurrencyTransport {
             active: active.clone(),
