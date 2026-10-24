@@ -172,14 +172,17 @@ async fn runtime_evm_read_payload_resolver_caps_process_wide_read_call_concurren
     .unwrap();
     let active = Arc::new(AtomicUsize::new(0));
     let peak = Arc::new(AtomicUsize::new(0));
-    let resolver = RuntimeEvmReadPayloadResolver::new_with_call_limit(
+    let resolver = RuntimeEvmReadPayloadResolver::new_with_call_limits(
         &ProviderSnapshotHandle::from_getter(&getter),
         ReadConcurrencyTransport {
             active: active.clone(),
             peak: peak.clone(),
         },
         HashMap::from([(30_102, "bsc".to_string())]),
-        2,
+        ReadCallLimits {
+            process: 2,
+            per_chain: 2,
+        },
     );
 
     resolver

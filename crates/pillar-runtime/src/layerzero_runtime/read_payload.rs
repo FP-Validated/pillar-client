@@ -7,10 +7,31 @@ pub(crate) struct RuntimeEvmReadPayloadResolver<T> {
     transport: T,
     chain_name_by_eid: HashMap<u32, String>,
     call_permits: Arc<Semaphore>,
+    chain_permits: Arc<HashMap<String, Arc<Semaphore>>>,
+    per_chain: usize,
 }
 
-/// Process-wide READ calls in flight; each holds its providers' votes until its quorum resolves.
-const MAX_CONCURRENT_READ_CALLS: usize = 8;
+/// How many READ calls may be in flight; a call holds its permits, and so its providers'
+/// votes, until its quorum resolves.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ReadCallLimits {
+    /// Across the process: bounds the votes held in memory.
+    pub(crate) process: usize,
+    /// Per target chain, and per command phase, so a chain whose providers stall holds at
+    /// most this many of `process`. Chain permits are granted in arrival order and a
+    /// command queues no more calls than this, so a later command waits behind a few
+    /// calls of a large one, not behind all of them.
+    pub(crate) per_chain: usize,
+}
+/// Three chains stalling at once still leave a fourth four calls; a lone 256-request command
+/// with lzMap finishes in the 58 s request deadline while each call takes under ~0.45 s.
+const READ_CALL_LIMITS: ReadCallLimits = ReadCallLimits {
+    process: 16,
+    per_chain: 4,
+};
+
+/// An ABI `bytes` return is its data plus a 64-byte head and at most 31 bytes of padding.
+const ABI_BYTES_OVERHEAD: usize = 64 + 31;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RuntimeReadResolvedResponse {
@@ -36,26 +57,30 @@ where
         transport: T,
         chain_name_by_eid: HashMap<u32, String>,
     ) -> Self {
-        Self::new_with_call_limit(
-            providers,
-            transport,
-            chain_name_by_eid,
-            MAX_CONCURRENT_READ_CALLS,
-        )
+        Self::new_with_call_limits(providers, transport, chain_name_by_eid, READ_CALL_LIMITS)
     }
 
-    pub(crate) fn new_with_call_limit(
+    pub(crate) fn new_with_call_limits(
         providers: &crate::provider_snapshot::ProviderSnapshotHandle,
         transport: T,
         chain_name_by_eid: HashMap<u32, String>,
-        max_concurrent_calls: usize,
+        limits: ReadCallLimits,
     ) -> Self {
-        assert!(max_concurrent_calls > 0, "read call limit must be positive");
+        assert!(
+            0 < limits.per_chain && limits.per_chain <= limits.process,
+            "read call limits must nest: {limits:?}"
+        );
+        let chain_permits = chain_name_by_eid
+            .values()
+            .map(|chain| (chain.clone(), Arc::new(Semaphore::new(limits.per_chain))))
+            .collect();
         Self {
             providers: providers.clone(),
             transport,
             chain_name_by_eid,
-            call_permits: Arc::new(Semaphore::new(max_concurrent_calls)),
+            call_permits: Arc::new(Semaphore::new(limits.process)),
+            chain_permits: Arc::new(chain_permits),
+            per_chain: limits.per_chain,
         }
     }
 
@@ -120,6 +145,7 @@ where
         marker: ReadTimeMarker,
         to: &str,
         call_data: &str,
+        max_result_bytes: usize,
         blocks: ReadBlocks<'_>,
     ) -> Result<String, AppCoreError> {
         let chain_name = self.chain_name_for_eid(target_eid)?;
@@ -139,11 +165,17 @@ where
         let provider_config = snapshot.provider_config(chain_name)?;
         let quorum = required_provider_quorum(provider_config, chain_name)?;
         let block = json!({ "blockHash": pin.block_hash, "requireCanonical": true });
-        let _permit = self
-            .call_permits
+        let closed = |_| AppCoreError::Admission(pillar_core::execution::BudgetError::Closed);
+        // Chain first, then process, always in that order, so no call holds one while
+        // another waits on it in reverse.
+        let _chain_permit = self
+            .chain_permits
+            .get(chain_name)
+            .ok_or_else(|| AppCoreError::Internal(format!("No READ call lane for {chain_name}")))?
             .acquire()
             .await
-            .map_err(|_| AppCoreError::Admission(pillar_core::execution::BudgetError::Closed))?;
+            .map_err(closed)?;
+        let _permit = self.call_permits.acquire().await.map_err(closed)?;
         let mut requests = FuturesUnordered::new();
         for (index, uri) in provider_config.uris.iter().enumerate() {
             let (url, headers) = provider_uri_parts(uri);
@@ -151,7 +183,13 @@ where
             let block = block.clone();
             requests.push(async move {
                 let vote = crate::provider_health::eth_call_read_observation_at_block(
-                    transport, url, headers, to, call_data, block,
+                    transport,
+                    url,
+                    headers,
+                    to,
+                    call_data,
+                    block,
+                    max_result_bytes,
                 )
                 .await
                 .map(Some)
@@ -182,6 +220,7 @@ where
                 request.marker,
                 &request.to,
                 &request.calldata,
+                pillar_core::MAX_READ_RESULT_BYTES,
                 blocks,
             )
             .await?;
@@ -205,22 +244,17 @@ where
                 .collect::<Vec<_>>()
         } else {
             let mapped_bytes = AtomicUsize::new(0);
-            try_join_all(responses.iter().map(|response| async {
-                let call_data = build_evm_lz_map_call_data(&response.request, &response.response)?;
-                let raw = self
-                    .call_evm_view_at_marker(
-                        compute.target_eid,
-                        compute.marker,
-                        &compute.to,
-                        &call_data,
-                        blocks,
-                    )
-                    .await?;
-                let mapped = strip_hex_prefix(&decode_evm_bytes_result(&raw)?).to_string();
-                charge_read_results(&mapped_bytes, &mapped, "lzMap results")?;
-                Ok::<String, AppCoreError>(mapped)
-            }))
-            .await?
+            let calls = responses
+                .iter()
+                .map(|response| async {
+                    let call_data =
+                        build_evm_lz_map_call_data(&response.request, &response.response)?;
+                    let mapped = self.compute_call(&compute, &call_data, blocks).await?;
+                    charge_read_results(&mapped_bytes, &mapped, "lzMap results")?;
+                    Ok(mapped)
+                })
+                .collect();
+            in_command_order(calls, self.per_chain).await?
         };
 
         if compute.setting == EvmReadComputeSetting::OnlyMap {
@@ -228,16 +262,32 @@ where
         }
 
         let call_data = build_evm_lz_reduce_call_data(cmd, &mapped_responses)?;
+        self.compute_call(&compute, &call_data, blocks).await
+    }
+
+    /// An lzMap or lzReduce call: its result is ABI `bytes`, so the vote admits the encoding
+    /// overhead and the decoded data is held to the cap.
+    async fn compute_call(
+        &self,
+        compute: &EvmReadCompute,
+        call_data: &str,
+        blocks: ReadBlocks<'_>,
+    ) -> Result<String, AppCoreError> {
         let raw = self
             .call_evm_view_at_marker(
                 compute.target_eid,
                 compute.marker,
                 &compute.to,
-                &call_data,
+                call_data,
+                pillar_core::MAX_READ_RESULT_BYTES + ABI_BYTES_OVERHEAD,
                 blocks,
             )
             .await?;
-        Ok(strip_hex_prefix(&decode_evm_bytes_result(&raw)?).to_string())
+        let data = strip_hex_prefix(&decode_evm_bytes_result(&raw)?).to_string();
+        if data.len() / 2 > pillar_core::MAX_READ_RESULT_BYTES {
+            return Err(result_too_large());
+        }
+        Ok(data)
     }
 }
 
@@ -266,12 +316,16 @@ where
         };
         let command = decode_evm_read_command(&sent_event.message)?;
         let request_bytes = AtomicUsize::new(0);
-        let responses = try_join_all(command.requests.into_iter().map(|request| async {
-            let response = self.resolve_request_payload(request, blocks).await?;
-            charge_read_results(&request_bytes, &response.response, "request results")?;
-            Ok::<_, AppCoreError>(response)
-        }))
-        .await?;
+        let calls = command
+            .requests
+            .into_iter()
+            .map(|request| async {
+                let response = self.resolve_request_payload(request, blocks).await?;
+                charge_read_results(&request_bytes, &response.response, "request results")?;
+                Ok(response)
+            })
+            .collect();
+        let responses = in_command_order(calls, self.per_chain).await?;
         if let Some(compute) = command.compute {
             self.resolve_compute_payload(&sent_event.message, compute, responses, blocks)
                 .await
@@ -283,6 +337,35 @@ where
             Ok(resolved_payload)
         }
     }
+}
+
+/// Runs one command phase with at most `limit` calls in flight and returns the results in
+/// command order. The first error drops the calls still running.
+async fn in_command_order<F, R>(calls: Vec<F>, limit: usize) -> Result<Vec<R>, AppCoreError>
+where
+    F: std::future::Future<Output = Result<R, AppCoreError>>,
+{
+    async fn tagged<F, R>(index: usize, call: F) -> Result<(usize, R), AppCoreError>
+    where
+        F: std::future::Future<Output = Result<R, AppCoreError>>,
+    {
+        call.await.map(|result| (index, result))
+    }
+
+    let mut results = Vec::with_capacity(calls.len());
+    let mut pending = calls.into_iter().enumerate();
+    let mut running = FuturesUnordered::new();
+    for (index, call) in pending.by_ref().take(limit) {
+        running.push(tagged(index, call));
+    }
+    while let Some(completion) = running.next().await {
+        results.push(completion?);
+        if let Some((index, call)) = pending.next() {
+            running.push(tagged(index, call));
+        }
+    }
+    results.sort_unstable_by_key(|(index, _)| *index);
+    Ok(results.into_iter().map(|(_, result)| result).collect())
 }
 
 /// Charged on completion, before the result is kept, so a phase never holds more than the cap.
@@ -298,6 +381,13 @@ fn charge_read_results(used: &AtomicUsize, hex: &str, phase: &str) -> Result<(),
     Ok(())
 }
 
+fn result_too_large() -> AppCoreError {
+    AppCoreError::UnresolvableCommand(format!(
+        "ReadV1002 command is unresolvable: an eth_call result exceeds {} bytes at the pinned block",
+        pillar_core::MAX_READ_RESULT_BYTES
+    ))
+}
+
 fn read_observation_result(
     observation: crate::provider_health::ReadCallObservation,
 ) -> Result<String, AppCoreError> {
@@ -310,9 +400,6 @@ fn read_observation_result(
         ReadCallObservation::ExecutionRevert => Err(AppCoreError::UnresolvableCommand(
             "ReadV1002 command is unresolvable: execution reverted at the pinned block".into(),
         )),
-        ReadCallObservation::ResultTooLarge => Err(AppCoreError::UnresolvableCommand(format!(
-            "ReadV1002 command is unresolvable: an eth_call result exceeds {} bytes at the pinned block",
-            pillar_core::MAX_READ_RESULT_BYTES
-        ))),
+        ReadCallObservation::ResultTooLarge => Err(result_too_large()),
     }
 }

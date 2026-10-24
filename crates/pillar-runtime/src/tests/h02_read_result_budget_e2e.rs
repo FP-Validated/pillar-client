@@ -35,16 +35,19 @@ fn abi_bytes_hex(bytes: usize) -> String {
 type RequestSize = Arc<dyn Fn(&str, &str) -> usize + Send + Sync>;
 
 /// Answers every READ `eth_call` with a result of a chosen size and records how many calls
-/// are in flight at once.
+/// are in flight at once, overall and per provider URL.
 #[derive(Clone)]
 struct SizedReadTransport {
     request_bytes: RequestSize,
     map_bytes: usize,
     reduce_bytes: usize,
     delay: Duration,
+    /// Overrides `delay` for URLs containing any of these keys.
+    slow: Vec<(&'static str, Duration)>,
     calls: Arc<AtomicUsize>,
     active: Arc<AtomicUsize>,
     peak: Arc<AtomicUsize>,
+    url_in_flight: Arc<Mutex<HashMap<String, (usize, usize)>>>,
 }
 
 impl SizedReadTransport {
@@ -54,10 +57,21 @@ impl SizedReadTransport {
             map_bytes: 32,
             reduce_bytes: 32,
             delay: Duration::ZERO,
+            slow: Vec::new(),
             calls: Arc::new(AtomicUsize::new(0)),
             active: Arc::new(AtomicUsize::new(0)),
             peak: Arc::new(AtomicUsize::new(0)),
+            url_in_flight: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    fn url_peaks(&self) -> HashMap<String, usize> {
+        self.url_in_flight
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(url, (_, peak))| (url.clone(), *peak))
+            .collect()
     }
 }
 
@@ -75,10 +89,27 @@ impl JsonRpcTransport for SizedReadTransport {
         self.calls.fetch_add(1, Ordering::SeqCst);
         let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
         self.peak.fetch_max(active, Ordering::SeqCst);
-        if !self.delay.is_zero() {
-            tokio::time::sleep(self.delay).await;
+        {
+            let mut in_flight = self.url_in_flight.lock().unwrap();
+            let (active, peak) = in_flight.entry(url.clone()).or_default();
+            *active += 1;
+            *peak = (*peak).max(*active);
+        }
+        let delay = self
+            .slow
+            .iter()
+            .find(|(key, _)| url.contains(key))
+            .map_or(self.delay, |(_, delay)| *delay);
+        if !delay.is_zero() {
+            tokio::time::sleep(delay).await;
         }
         self.active.fetch_sub(1, Ordering::SeqCst);
+        self.url_in_flight
+            .lock()
+            .unwrap()
+            .get_mut(&url)
+            .expect("counted above")
+            .0 -= 1;
         let to = body["params"][0]["to"].as_str().unwrap_or_default();
         let data = body["params"][0]["data"].as_str().unwrap_or_default();
         let result = if to.eq_ignore_ascii_case(READ_TARGET) {
@@ -127,12 +158,73 @@ fn sized_resolver(
     )
 }
 
-async fn resolve(
+/// READ target chains for the fairness scenarios: bsc plus three more, one provider each at
+/// `https://{chain}-rpc.example`.
+const CHAINS: [(&str, u32); 4] = [
+    ("bsc", 30_102),
+    ("ethereum", 30_101),
+    ("arbitrum", 30_110),
+    ("polygon", 30_109),
+];
+
+fn multi_chain_resolver(
+    transport: SizedReadTransport,
+) -> RuntimeEvmReadPayloadResolver<SizedReadTransport> {
+    let chains = CHAINS.map(|(chain, _)| chain.to_string());
+    let getter = StaticProviderConfig::new(
+        chains
+            .iter()
+            .map(|chain| {
+                (
+                    chain.clone(),
+                    ProviderConfig::with_distinct_entities(
+                        vec![ProviderUri::Uri(format!("https://{chain}-rpc.example"))],
+                        1,
+                    ),
+                )
+            })
+            .collect(),
+        Some(&chains),
+    )
+    .unwrap();
+    RuntimeEvmReadPayloadResolver::new(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        transport,
+        CHAINS
+            .iter()
+            .map(|(chain, eid)| (*eid, chain.to_string()))
+            .collect(),
+    )
+}
+
+/// `count` block-marker requests against `chain`, with that chain's pinned blocks.
+fn chain_command(chain: &str, count: usize) -> LzSentEvent {
+    let eid = CHAINS
+        .iter()
+        .find(|(name, _)| *name == chain)
+        .expect("known chain")
+        .1;
+    let command = evm_read_command_with_repeated_block_markers(count);
+    assert_eq!(
+        command.matches("7596").count(),
+        count,
+        "one eid per request"
+    );
+    let mut event = read_command_sent_event(command.replace("7596", &format!("{eid:04x}")));
+    event.read_block_pins = bsc_read_block_pins()
+        .into_iter()
+        .map(|mut pin| {
+            pin.chain_name = chain.to_string();
+            pin
+        })
+        .collect();
+    event
+}
+
+async fn resolve_event(
     resolver: &RuntimeEvmReadPayloadResolver<SizedReadTransport>,
-    command: String,
+    event: LzSentEvent,
 ) -> Result<String, AppCoreError> {
-    let mut event = read_command_sent_event(command);
-    event.read_block_pins = bsc_read_block_pins();
     resolver
         .resolve_payload(
             &event,
@@ -144,6 +236,15 @@ async fn resolve(
             },
         )
         .await
+}
+
+async fn resolve(
+    resolver: &RuntimeEvmReadPayloadResolver<SizedReadTransport>,
+    command: String,
+) -> Result<String, AppCoreError> {
+    let mut event = read_command_sent_event(command);
+    event.read_block_pins = bsc_read_block_pins();
+    resolve_event(resolver, event).await
 }
 
 /// Two requests whose calldata differ (`0xdeadbeef`, `0xdeadbeee`), so each can be sized.
@@ -255,7 +356,7 @@ async fn h02_many_legal_results_are_refused_before_the_rest_are_read() {
     let resolver = sized_resolver(transport, &["https://bsc-rpc.example"], 1);
     let result = resolve(&resolver, evm_read_command_with_repeated_block_markers(256)).await;
     let dispatched = calls.load(Ordering::SeqCst);
-    // 16 results fill the cap, the 17th exceeds it, and at most 7 others are in flight.
+    // 16 results fill the cap, the 17th exceeds it, and at most three others of the command are in flight.
     let fits = MAX / per_request;
     artifact(
         "h02-early-refusal",
@@ -269,7 +370,7 @@ async fn h02_many_legal_results_are_refused_before_the_rest_are_read() {
     );
     assert_unresolvable(&result, &phase_reason("request results"));
     assert!(
-        dispatched <= fits + 8,
+        dispatched <= fits + 4,
         "{dispatched} calls dispatched for a command refused after {} results",
         fits + 1
     );
@@ -307,75 +408,207 @@ async fn h02_an_oversized_vote_is_one_vote() {
     assert_unresolvable(&agreed_oversized, &call_limit_reason());
 }
 
-/// lzMap results are a phase of their own, and the lzReduce result is one `eth_call`.
+/// lzMap results are a phase of their own, and the lzReduce result is one `eth_call`. Both
+/// are ABI `bytes`, so the cap applies to the decoded data: exactly the cap resolves.
 #[tokio::test]
 async fn h02_compute_results_are_bounded() {
-    let mut map_heavy = SizedReadTransport::new(|_, _| 32);
-    map_heavy.map_bytes = 64 * 1024;
-    let only_map = resolve(
-        &sized_resolver(map_heavy, &["https://bsc-rpc.example"], 1),
-        compute_command(32, 0),
-    )
-    .await;
-
-    let mut reduce_heavy = SizedReadTransport::new(|_, _| 32);
-    reduce_heavy.reduce_bytes = MAX + 1;
-    let only_reduce = resolve(
-        &sized_resolver(reduce_heavy, &["https://bsc-rpc.example"], 1),
-        compute_command(2, 1),
-    )
-    .await;
-
-    let map_reduce = resolve(
-        &sized_resolver(
-            SizedReadTransport::new(|_, _| 32),
-            &["https://bsc-rpc.example"],
-            1,
-        ),
-        compute_command(2, 2),
-    )
-    .await;
+    let compute = |map_bytes: usize, reduce_bytes: usize, command: String| async move {
+        let mut transport = SizedReadTransport::new(|_, _| 32);
+        transport.map_bytes = map_bytes;
+        transport.reduce_bytes = reduce_bytes;
+        resolve(
+            &sized_resolver(transport, &["https://bsc-rpc.example"], 1),
+            command,
+        )
+        .await
+    };
+    let only_map = compute(64 * 1024, 32, compute_command(32, 0)).await;
+    let map_at_cap = compute(MAX, 32, compute_command(1, 0)).await;
+    let map_over_cap = compute(MAX + 1, 32, compute_command(1, 0)).await;
+    let reduce_at_cap = compute(32, MAX, compute_command(2, 1)).await;
+    let only_reduce = compute(32, MAX + 1, compute_command(2, 1)).await;
+    let map_reduce = compute(32, 32, compute_command(2, 2)).await;
     artifact(
         "h02-compute",
         json!({
             "only_map_32_results_of_64_kib": outcome(&only_map),
+            "one_lz_map_result_decoded_at_cap": outcome(&map_at_cap),
+            "one_lz_map_result_decoded_cap_plus_one": outcome(&map_over_cap),
+            "lz_reduce_result_decoded_at_cap": outcome(&reduce_at_cap),
             "only_reduce_result_cap_plus_one": outcome(&only_reduce),
             "map_reduce_small": outcome(&map_reduce),
         }),
     );
     assert_unresolvable(&only_map, &phase_reason("lzMap results"));
+    assert_eq!(map_at_cap.unwrap(), "cd".repeat(MAX));
+    assert_unresolvable(&map_over_cap, &call_limit_reason());
+    assert_eq!(reduce_at_cap.unwrap(), "cd".repeat(MAX));
     assert_unresolvable(&only_reduce, &call_limit_reason());
     assert_eq!(map_reduce.unwrap(), "cd".repeat(32));
 }
 
-/// The call permit is shared by every READ command in the process and held until a call's
-/// quorum resolves, so concurrent commands cannot multiply the votes held in flight.
+/// Calls are bounded per target chain, which also bounds each command phase, and across the
+/// process, and every permit is held until a call's quorum resolves, so concurrent commands
+/// cannot multiply the votes held in flight.
 #[tokio::test]
-async fn h02_concurrent_commands_share_the_process_wide_call_limit() {
+async fn h02_concurrent_commands_share_the_nested_call_limits() {
     let mut transport = SizedReadTransport::new(|_, _| 32);
     transport.delay = Duration::from_millis(20);
     let peak = transport.peak.clone();
     let active = transport.active.clone();
-    let resolver = sized_resolver(transport, &["https://bsc-rpc.example"], 1);
-    let sibling = resolver.clone();
-    let (first, second) = tokio::join!(
-        resolve(&resolver, evm_read_command_with_repeated_block_markers(32)),
-        resolve(&sibling, evm_read_command_with_repeated_block_markers(32)),
-    );
+    let observed = transport.clone();
+    let resolver = multi_chain_resolver(transport);
+    let lone = resolve_event(&resolver, chain_command("bsc", 16)).await;
+    let lone_peak = peak.swap(0, Ordering::SeqCst);
+    let results = futures::future::join_all(
+        CHAINS
+            .iter()
+            .flat_map(|(chain, _)| [chain_command(chain, 16), chain_command(chain, 16)])
+            .map(|event| resolve_event(&resolver, event)),
+    )
+    .await;
     let peak = peak.load(Ordering::SeqCst);
+    let chain_peaks = observed.url_peaks();
     artifact(
-        "h02-process-wide-calls",
+        "h02-nested-call-limits",
         json!({
-            "commands": 2,
-            "requests_per_command": 32,
+            "one_command_peak_calls_in_flight": lone_peak,
+            "commands": results.len(),
+            "chains": CHAINS.len(),
+            "requests_per_command": 16,
             "peak_calls_in_flight": peak,
-            "both_resolved": first.is_ok() && second.is_ok(),
+            "peak_calls_in_flight_per_chain": chain_peaks,
+            "all_resolved": results.iter().all(Result::is_ok),
         }),
     );
-    assert_eq!(first.unwrap().len(), 32 * 64);
-    assert_eq!(second.unwrap().len(), 32 * 64);
+    assert_eq!(lone.unwrap().len(), 16 * 64);
+    assert_eq!(lone_peak, 4, "a lone command uses its chain's whole limit");
+    for result in results {
+        assert_eq!(result.unwrap().len(), 16 * 64);
+    }
     assert_eq!(active.load(Ordering::SeqCst), 0);
-    assert_eq!(peak, 8, "process-wide READ call limit");
+    assert_eq!(
+        peak, 16,
+        "four chains of four, inside the process-wide limit"
+    );
+    for (chain, chain_peak) in chain_peaks {
+        assert_eq!(chain_peak, 4, "{chain} per-chain READ call limit");
+    }
+}
+
+/// Chains whose providers stall every call cannot hold the permits other chains need: with
+/// three of the four chains stalled under four large commands each, the fourth chain's READ
+/// resolves without waiting for any stalled call.
+#[tokio::test(start_paused = true)]
+async fn h02_stalled_chains_do_not_delay_another_chains_reads() {
+    let stall = Duration::from_secs(50);
+    let stalled_chains = ["bsc", "arbitrum", "polygon"];
+    let mut transport = SizedReadTransport::new(|_, _| 32);
+    transport.slow = stalled_chains.iter().map(|chain| (*chain, stall)).collect();
+    let resolver = multi_chain_resolver(transport);
+    let started = tokio::time::Instant::now();
+    let stalled = futures::future::join_all(
+        stalled_chains
+            .iter()
+            .flat_map(|chain| (0..4).map(|_| resolve_event(&resolver, chain_command(chain, 16)))),
+    );
+    let other = async {
+        tokio::task::yield_now().await;
+        let result = resolve_event(&resolver, chain_command("ethereum", 1)).await;
+        (result, started.elapsed())
+    };
+    let (stalled, (other, other_elapsed)) = tokio::join!(stalled, other);
+    let stalled_elapsed = started.elapsed();
+    artifact(
+        "h02-stalled-chain-isolation",
+        json!({
+            "stalled_chains": stalled_chains,
+            "stall_per_call_ms": stall.as_millis(),
+            "stalled_commands_per_chain": 4,
+            "requests_per_stalled_command": 16,
+            "other_chain_elapsed_ms": other_elapsed.as_millis(),
+            "stalled_commands_elapsed_ms": stalled_elapsed.as_millis(),
+            "other_chain_outcome": outcome(&other),
+        }),
+    );
+    assert_eq!(other.unwrap().len(), 64);
+    assert!(
+        other_elapsed < stall,
+        "ethereum waited {other_elapsed:?} behind calls stalled for {stall:?}"
+    );
+    for result in stalled {
+        assert_eq!(result.unwrap().len(), 16 * 64);
+    }
+}
+
+/// Within one chain, permits go in arrival order and a command only queues as many calls as
+/// the chain limit, so a small command arriving behind three large ones waits for a few
+/// calls, not for the large commands to finish.
+#[tokio::test(start_paused = true)]
+async fn h02_a_large_command_does_not_hold_a_later_command_behind_it() {
+    let delay = Duration::from_millis(100);
+    let mut transport = SizedReadTransport::new(|_, _| 32);
+    transport.delay = delay;
+    let resolver = multi_chain_resolver(transport);
+    let started = tokio::time::Instant::now();
+    let large = futures::future::join_all(
+        (0..3).map(|_| resolve_event(&resolver, chain_command("bsc", 64))),
+    );
+    let small = async {
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        let arrived = tokio::time::Instant::now();
+        let result = resolve_event(&resolver, chain_command("bsc", 1)).await;
+        (result, arrived.elapsed())
+    };
+    let (large, (small, small_elapsed)) = tokio::join!(large, small);
+    let large_elapsed = started.elapsed();
+    artifact(
+        "h02-same-chain-arrival-order",
+        json!({
+            "call_delay_ms": delay.as_millis(),
+            "large_commands": 3,
+            "requests_per_large_command": 64,
+            "small_command_elapsed_ms": small_elapsed.as_millis(),
+            "large_commands_elapsed_ms": large_elapsed.as_millis(),
+            "small_outcome": outcome(&small),
+        }),
+    );
+    assert_eq!(small.unwrap().len(), 64);
+    assert!(
+        small_elapsed <= delay * 4,
+        "the small command waited {small_elapsed:?} behind {large_elapsed:?} of large commands"
+    );
+    for result in large {
+        assert_eq!(result.unwrap().len(), 64 * 64);
+    }
+}
+
+/// The limits must not refuse what upstream signs: a lone 256-request command with lzMap and
+/// lzReduce, at 200 ms per call, resolves inside the 58 s request deadline.
+#[tokio::test(start_paused = true)]
+async fn h02_a_maximal_command_resolves_inside_the_request_deadline() {
+    let delay = Duration::from_millis(200);
+    let mut transport = SizedReadTransport::new(|_, _| 32);
+    transport.delay = delay;
+    let calls = transport.calls.clone();
+    let resolver = sized_resolver(transport, &["https://bsc-rpc.example"], 1);
+    let started = tokio::time::Instant::now();
+    let result = resolve(&resolver, compute_command(256, 2)).await;
+    let elapsed = started.elapsed();
+    artifact(
+        "h02-maximal-command-latency",
+        json!({
+            "requests": 256,
+            "compute": "map-reduce",
+            "call_delay_ms": delay.as_millis(),
+            "eth_calls": calls.load(Ordering::SeqCst),
+            "elapsed_ms": elapsed.as_millis(),
+            "request_deadline_ms": 58_000,
+            "outcome": outcome(&result),
+        }),
+    );
+    assert_eq!(result.unwrap(), "cd".repeat(32));
+    assert!(elapsed < Duration::from_secs(58), "took {elapsed:?}");
 }
 
 /// `resolvedPayloadHash` is `keccak256(guid || payload)` with an odd payload left-padded,

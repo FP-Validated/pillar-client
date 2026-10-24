@@ -306,6 +306,7 @@ pub(crate) enum ReadCallObservation {
 }
 
 /// A provider's domain observation must remain a vote until entity quorum resolves it.
+/// `max_result_bytes` bounds the raw returned data this call may hold.
 pub(crate) async fn eth_call_read_observation_at_block<T>(
     transport: T,
     url: String,
@@ -313,6 +314,7 @@ pub(crate) async fn eth_call_read_observation_at_block<T>(
     to: &str,
     data: &str,
     block: Value,
+    max_result_bytes: usize,
 ) -> Result<(String, ReadCallObservation), AppCoreError>
 where
     T: JsonRpcTransport,
@@ -372,7 +374,7 @@ where
         }
     }
     // Honest providers agree on an oversized result, so it is a vote rather than an error.
-    if (value.len() - 2) / 2 > pillar_core::MAX_READ_RESULT_BYTES {
+    if (value.len() - 2) / 2 > max_result_bytes {
         return Ok((
             "result-too-large".into(),
             ReadCallObservation::ResultTooLarge,
