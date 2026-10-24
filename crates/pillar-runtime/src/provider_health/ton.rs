@@ -7,20 +7,34 @@ pub(crate) struct TonV3DispatchEntry {
     pub(crate) delay: std::time::Duration,
 }
 
+/// The rank key of a TON provider's `v3-endpoint`, written by its v3 probe and read by
+/// v3 dispatch. It is prefixed so it can never be a primary provider's key.
+pub(crate) fn ton_v3_rank_key(uri: &ProviderUri) -> Option<String> {
+    let (endpoint, _, headers) = ton_v3_provider_uri_parts(uri)?;
+    Some(format!(
+        "ton-v3 {}",
+        dialled_identity_key(endpoint, headers)
+    ))
+}
+
 /// The TON providers with a `v3-endpoint`, planned for dispatch. A provider without one
 /// cannot observe a v3 read, so it must not vote, count toward quorum or delay the rest.
+/// Each is ranked by its v3 probe, so a dead v3 endpoint behind a live v2 one is not
+/// dispatched first.
 pub(crate) async fn plan_ton_v3_dispatch(
     tracker: &ProviderRankTracker,
     quorum: QuorumRule<'_>,
 ) -> Result<Vec<TonV3DispatchEntry>, AppCoreError> {
     let config = quorum.config();
     let mut capable = Vec::new();
+    let mut keyed = Vec::new();
     let mut parts_by_index = Vec::with_capacity(config.uris.len());
     for (index, uri) in config.uris.iter().enumerate() {
         let parts =
             ton_v3_provider_uri_parts(uri).map(|(endpoint, _, headers)| (endpoint, headers));
-        if parts.is_some() {
+        if let Some(key) = ton_v3_rank_key(uri) {
             capable.push(index);
+            keyed.push((index, key));
         }
         parts_by_index.push(parts);
     }
@@ -32,7 +46,7 @@ pub(crate) async fn plan_ton_v3_dispatch(
             config.uris.len()
         )));
     }
-    let plan = plan_dispatch_for_indices(tracker, "ton", quorum, capable).await?;
+    let plan = plan_dispatch_for_keys(tracker, "ton", quorum, keyed).await?;
     Ok(plan
         .into_iter()
         .map(|DispatchEntry { index, delay, .. }| {

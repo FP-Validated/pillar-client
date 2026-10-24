@@ -484,13 +484,18 @@ pub(crate) struct DispatchEntry<'a> {
 /// but carry different header credentials are different providers: one key per
 /// URL let a dead backup key mark the live one unhealthy (M-19).
 pub(crate) fn provider_rank_key(chain_name: &str, uri: &pillar_config::ProviderUri) -> String {
-    use sha2::{Digest, Sha256};
-
     let (url, headers) = match chain_name {
         "aptos" | "movement" => aptos_provider_uri_parts(uri),
         "initia" => initia_provider_uri_parts(uri),
         _ => provider_uri_parts(uri),
     };
+    dialled_identity_key(url, headers)
+}
+
+/// `url`, plus a digest of the headers sent with it when there are any.
+pub(crate) fn dialled_identity_key(url: String, headers: HashMap<String, String>) -> String {
+    use sha2::{Digest, Sha256};
+
     if headers.is_empty() {
         return url;
     }
@@ -533,11 +538,24 @@ pub(crate) async fn plan_dispatch_for_indices<'a>(
     eligible_indices: impl IntoIterator<Item = usize>,
 ) -> Result<Vec<DispatchEntry<'a>>, AppCoreError> {
     let config = quorum.config();
-    let eligible_indices = eligible_indices.into_iter().collect::<Vec<_>>();
-    let mut ranked = Vec::with_capacity(eligible_indices.len());
-    for index in eligible_indices {
-        let uri = &config.uris[index];
-        let key = provider_rank_key(chain_name, uri);
+    let keyed = eligible_indices
+        .into_iter()
+        .map(|index| (index, provider_rank_key(chain_name, &config.uris[index])))
+        .collect();
+    plan_dispatch_for_keys(tracker, chain_name, quorum, keyed).await
+}
+
+/// [`plan_dispatch_for_indices`] ranking each provider by the given key, for a call that
+/// dials an endpoint other than the provider's primary one (TON v3).
+pub(crate) async fn plan_dispatch_for_keys<'a>(
+    tracker: &ProviderRankTracker,
+    chain_name: &str,
+    quorum: QuorumRule<'a>,
+    keyed: Vec<(usize, String)>,
+) -> Result<Vec<DispatchEntry<'a>>, AppCoreError> {
+    let config = quorum.config();
+    let mut ranked = Vec::with_capacity(keyed.len());
+    for (index, key) in keyed {
         let rank = tracker.rank_of(chain_name, &key).await;
         ranked.push((index, rank));
     }

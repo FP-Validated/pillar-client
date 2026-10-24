@@ -1,8 +1,11 @@
 //! M-18 and M-19: what a health probe records is the rank of the provider identity dispatch
-//! looks up, and nothing else. M-20: the IOTA sender lookup votes on what it consumes.
+//! looks up, and nothing else, including TON's v3 endpoint. M-20: the IOTA sender lookup
+//! votes on what it consumes.
 
 use super::*;
-use crate::provider_health::{plan_dispatch, provider_rank_key, required_provider_quorum};
+use crate::provider_health::{
+    plan_dispatch, plan_ton_v3_dispatch, provider_rank_key, required_provider_quorum,
+};
 
 fn artifact(name: &str, value: Value) {
     audit_round_artifact("h02-m21", name, value);
@@ -258,6 +261,105 @@ fn m19_rank_key_names_the_identity_dialled() {
     assert_ne!(keys["aptos_query_auth"], keys["aptos_other_auth"]);
     assert_eq!(keys["header_upper"], keys["header_lower"]);
     assert_eq!(keys["no_headers"], "https://bsc-rpc.example/v2/key");
+}
+
+const TON_DEAD_V3: &str = "https://ton-a.example?v3-endpoint=https%3A%2F%2Fton-v3-a.example";
+const TON_LIVE_V3: &str = "https://ton-b.example?v3-endpoint=https%3A%2F%2Fton-v3-b.example";
+
+/// Probes the TON pool once and plans both a v2 and a v3 dispatch from that report.
+async fn ton_probe_then_plan(
+    uris: &[&str],
+) -> (
+    Value,
+    Result<Vec<usize>, String>,
+    Result<Vec<usize>, String>,
+) {
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "ton".to_string(),
+            ProviderConfig::with_distinct_entities(
+                uris.iter()
+                    .map(|uri| ProviderUri::Uri(uri.to_string()))
+                    .collect(),
+                1,
+            ),
+        )]),
+        Some(&["ton".to_string()]),
+    )
+    .unwrap();
+    let transport = probe_transport(
+        |url, _| {
+            if url.starts_with("https://ton-v3-b.example") {
+                Ok(json!({"last": {"seqno": 9}}))
+            } else {
+                Err("HTTP 503 Service Unavailable".to_string())
+            }
+        },
+        |_, _| Ok(json!({"jsonrpc": "2.0", "id": "1", "result": {"last": {"seqno": 9}}})),
+    );
+    let source = RpcProviderHealthSource::from_getter_with_chain_types(
+        &getter,
+        transport,
+        || 1,
+        HashMap::from([("ton".to_string(), "TON".to_string())]),
+    );
+    let report = source.get_provider_health_report().await.unwrap();
+    let tracker = crate::provider_health::ProviderRankTracker::new();
+    tracker.seed_from_report(&report).await;
+    let pool = pillar_config::ProviderConfigGetter::get_provider_config(&getter, "ton").unwrap();
+    let v2 = plan_dispatch(
+        &tracker,
+        "ton",
+        required_provider_quorum(pool, "ton").unwrap(),
+    )
+    .await
+    .map(|plan| plan.into_iter().map(|entry| entry.index).collect())
+    .map_err(|error| error.to_string());
+    let v3 = plan_ton_v3_dispatch(&tracker, required_provider_quorum(pool, "ton").unwrap())
+        .await
+        .map(|plan| plan.into_iter().map(|entry| entry.index).collect())
+        .map_err(|error| error.to_string());
+    (serde_json::to_value(&report).unwrap(), v2, v3)
+}
+
+/// M-18 class for TON: the v3 probe ranks the v3 endpoint that v3 reads dial, so a dead v3
+/// endpoint behind a live v2 one is excluded from v3 dispatch and leaves v2 dispatch alone.
+#[tokio::test]
+async fn m18_ton_v3_dispatch_ranks_by_the_v3_probe() {
+    let alone = ton_probe_then_plan(&[TON_DEAD_V3]).await;
+    let with_live = ton_probe_then_plan(&[TON_DEAD_V3, TON_LIVE_V3]).await;
+    let serialized = serde_json::to_string(&with_live.0).unwrap();
+    artifact(
+        "m18-ton-v3-rank",
+        json!({
+            "dead_v3_alone": {"v2_plan": format!("{:?}", alone.1), "v3_plan": format!("{:?}", alone.2)},
+            "dead_v3_then_live_v3": {"v2_plan": format!("{:?}", with_live.1), "v3_plan": format!("{:?}", with_live.2)},
+            "report": with_live.0,
+        }),
+    );
+    assert_eq!(
+        alone.1,
+        Ok(vec![0]),
+        "v2 dispatch keeps the live v2 endpoint"
+    );
+    assert!(
+        alone
+            .2
+            .as_ref()
+            .is_err_and(|error| error.contains("Not enough healthy providers")),
+        "a dead v3 endpoint must not serve v3 reads: {:?}",
+        alone.2
+    );
+    assert_eq!(with_live.1.map(|plan| plan.len()), Ok(2));
+    assert_eq!(
+        with_live.2,
+        Ok(vec![1, 0]),
+        "the live v3 endpoint first, the dead one last"
+    );
+    assert!(
+        !serialized.contains("ton-v3 "),
+        "the v3 rank key never reaches /provider-health: {serialized}"
+    );
 }
 
 const IOTA_DIGEST: &str = "8GTGoiWbNHGYp4dYV6qKAmKZRMRpUd9VhJ6nNqzm6JEH";

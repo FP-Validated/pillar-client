@@ -168,10 +168,16 @@ where
                 uri,
                 probe_ton_v2_provider_health(transport, report_url, request_url, headers),
             )));
-            if let Some((report_url, request_url, headers)) = ton_v3_provider_uri_parts(uri) {
+            if let (Some((report_url, request_url, headers)), Some(rank_key)) =
+                (ton_v3_provider_uri_parts(uri), ton_v3_rank_key(uri))
+            {
                 let transport = self.transport.clone();
                 probes.push(Box::pin(async move {
-                    probe_ton_v3_provider_health(transport, report_url, request_url, headers).await
+                    let mut entry =
+                        probe_ton_v3_provider_health(transport, report_url, request_url, headers)
+                            .await?;
+                    entry.rank_key = rank_key;
+                    Ok(entry)
                 }));
             }
         }
