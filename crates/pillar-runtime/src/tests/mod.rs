@@ -108,6 +108,7 @@ mod layerzero_parts_wiring_tests;
 mod layerzero_read_payload_tests;
 mod layerzero_uln_v2_feather_tests;
 mod layerzero_uln_v2_mpt_tests;
+mod m18_m20_provider_identity_e2e;
 mod move_source_events_tests;
 mod move_source_parity_tests;
 mod packet_identity_http_tests;

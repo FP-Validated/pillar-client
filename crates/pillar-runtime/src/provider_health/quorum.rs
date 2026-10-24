@@ -476,24 +476,37 @@ pub(crate) struct DispatchEntry<'a> {
     pub(crate) delay: std::time::Duration,
 }
 
-/// Returns the same URL string the chain's actual RPC dispatch AND its
-/// `/provider-health` probe both key off of, so tracker lookups/writes agree.
-/// Aptos/Initia canonicalize away the query string before dispatching
-/// (`aptos_provider_uri_parts`/`initia_provider_uri_parts`, e.g. `?auth=...`
-/// moves into a header) — using the raw URL here would silently never match
-/// the tracker's key for any configured URI that carries query-string auth.
-/// Every other chain currently dispatches on the raw configured URI, so the
-/// generic parser is correct for them (including TON: its v2 surface, which
-/// `ton_v3_builder.rs::resolve_target` actually dispatches to, is keyed by
-/// the raw URI too — only the separate v3 sub-endpoint extracted from a
-/// query param has a different identity, and no call site's *real* request
-/// target is unambiguous enough to canonicalize generically here).
-pub(super) fn rank_key_url(chain_name: &str, uri: &pillar_config::ProviderUri) -> String {
-    match chain_name {
-        "aptos" | "movement" => aptos_provider_uri_parts(uri).0,
-        "initia" => initia_provider_uri_parts(uri).0,
-        _ => provider_uri_parts(uri).0,
+/// The identity a provider entry dials, keying both the probe's rank write and
+/// `plan_dispatch`'s lookup: the URL the chain dispatches to plus a digest of the
+/// headers sent with it. Aptos/Initia canonicalize the query away before
+/// dispatching (`?auth=...` becomes a header), so their key is taken after that
+/// move and both spellings of one credential agree. Two entries that share a URL
+/// but carry different header credentials are different providers: one key per
+/// URL let a dead backup key mark the live one unhealthy (M-19).
+pub(crate) fn provider_rank_key(chain_name: &str, uri: &pillar_config::ProviderUri) -> String {
+    use sha2::{Digest, Sha256};
+
+    let (url, headers) = match chain_name {
+        "aptos" | "movement" => aptos_provider_uri_parts(uri),
+        "initia" => initia_provider_uri_parts(uri),
+        _ => provider_uri_parts(uri),
+    };
+    if headers.is_empty() {
+        return url;
     }
+    let mut headers = headers
+        .into_iter()
+        .map(|(name, value)| (name.to_ascii_lowercase(), value))
+        .collect::<Vec<_>>();
+    headers.sort();
+    let mut digest = Sha256::new();
+    for (name, value) in &headers {
+        digest.update((name.len() as u64).to_be_bytes());
+        digest.update(name);
+        digest.update((value.len() as u64).to_be_bytes());
+        digest.update(value);
+    }
+    format!("{url} headers:{:x}", digest.finalize())
 }
 
 /// Orders the pool for one call and staggers it, as upstream's `getProvidersWithQuorum`
@@ -524,8 +537,8 @@ pub(crate) async fn plan_dispatch_for_indices<'a>(
     let mut ranked = Vec::with_capacity(eligible_indices.len());
     for index in eligible_indices {
         let uri = &config.uris[index];
-        let url = rank_key_url(chain_name, uri);
-        let rank = tracker.rank_of(chain_name, &url).await;
+        let key = provider_rank_key(chain_name, uri);
+        let rank = tracker.rank_of(chain_name, &key).await;
         ranked.push((index, rank));
     }
     ranked.sort_by_key(|(_, rank)| *rank);
@@ -765,29 +778,6 @@ mod tests {
 
         assert_eq!(result, "agreed");
         assert!(started.elapsed() < Duration::from_millis(250));
-    }
-
-    #[tokio::test]
-    async fn plan_dispatch_uses_aptos_canonical_url_for_rank_lookup() {
-        // aptos_provider_uri_parts strips the query string before the real
-        // request AND the /provider-health probe both dispatch on it; the
-        // rank key must match that canonical form, not the raw configured
-        // URI, or a recorded Unhealthy rank would never be found here.
-        let tracker = ProviderRankTracker::new();
-        let config = pool(
-            vec![pillar_config::ProviderUri::Uri(
-                "https://aptos.example/v1?auth=secret".to_string(),
-            )],
-            1,
-        );
-        tracker
-            .record("aptos", "https://aptos.example/v1", false, None)
-            .await;
-
-        let error = plan_dispatch(&tracker, "aptos", rule(&config))
-            .await
-            .unwrap_err();
-        assert!(error.to_string().contains("Not enough healthy providers"));
     }
 
     #[tokio::test]

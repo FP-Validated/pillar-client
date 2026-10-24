@@ -137,18 +137,21 @@ where
                 let checked_at_unix_ms = (self.now_unix_ms)();
                 let providers = crate::provider_health::rpc_scope(chain_name, async {
                     match self.chain_type_for_provider_health(chain_name) {
-                        "EVM" => self.probe_evm_provider_health(config).await,
+                        "EVM" => self.probe_evm_provider_health(chain_name, config).await,
                         "APTOS" => self.probe_aptos_provider_health(chain_name, config).await,
-                        "SOLANA" => self.probe_solana_provider_health(config).await,
+                        "SOLANA" => self.probe_solana_provider_health(chain_name, config).await,
                         "SUI" | "IOTAMOVE" => {
                             self.probe_sui_provider_health(chain_name, config).await
                         }
-                        "STARKNET" => self.probe_starknet_provider_health(config).await,
-                        "STELLAR" => self.probe_stellar_provider_health(config).await,
-                        "TON" => self.probe_ton_provider_health(config).await,
-                        "INITIA" => self.probe_initia_provider_health(config).await,
+                        "STARKNET" => {
+                            self.probe_starknet_provider_health(chain_name, config)
+                                .await
+                        }
+                        "STELLAR" => self.probe_stellar_provider_health(chain_name, config).await,
+                        "TON" => self.probe_ton_provider_health(chain_name, config).await,
+                        "INITIA" => self.probe_initia_provider_health(chain_name, config).await,
                         "TRON" => self.probe_tron_provider_health(chain_name, config).await,
-                        "CANTON" => self.probe_canton_provider_health(config).await,
+                        "CANTON" => self.probe_canton_provider_health(chain_name, config).await,
                         _ => Ok(non_evm_provider_health_entries(chain_name, config)),
                     }
                 })
@@ -285,13 +288,15 @@ pub(crate) fn non_evm_provider_health_entries(
         .iter()
         .map(|uri| {
             let (url, _) = provider_uri_parts(uri);
-            normalize_provider_health_entry(
+            let mut entry = normalize_provider_health_entry(
                 url,
                 Value::String(format!(
                     "No provider health probe is registered for the chain type of {chain_name}"
                 )),
                 None,
-            )
+            );
+            entry.rank_key = provider_rank_key(chain_name, uri);
+            entry
         })
         .collect()
 }

@@ -393,20 +393,20 @@ where
         .filter(|from| !from.is_empty())
         .ok_or_else(|| AppCoreError::Internal(format!("Missing {chain_name} transaction sender")))?
         .to_string();
+    // Only what this lookup consumes: a fullnode and an indexer render the same
+    // PTB's pure inputs differently, so binding the PTB JSON split honest votes (M-20).
     #[derive(serde::Serialize)]
     struct SuiFingerprint<'a> {
         digest: Option<&'a Value>,
         sender: &'a str,
         checkpoint: Option<&'a Value>,
         status: Option<&'a Value>,
-        transaction: Option<&'a Value>,
     }
     let fingerprint = crate::provider_health::canonical_json_fingerprint(&SuiFingerprint {
         digest: result.get("digest"),
         sender: &from,
         checkpoint: result.get("checkpoint"),
         status: result.pointer("/effects/status/status"),
-        transaction: result.pointer("/transaction/data/transaction"),
     })?;
     Ok(TransactionFromObservation { fingerprint, from })
 }

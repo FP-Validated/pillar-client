@@ -954,9 +954,9 @@ async fn readiness_answers_from_one_generation_when_a_refresh_lands_mid_probe() 
 /// A health probe that straddles a refresh must not write its observations into
 /// the process-wide provider rank.
 ///
-/// The rank key is the URL with headers stripped, so an operator rotating the
-/// credentials on an endpoint would otherwise have the failures observed under
-/// the old ones recorded against the fixed one, and `plan_dispatch` would keep
+/// An endpoint whose URL and headers survive a refresh keeps its rank key, so an
+/// operator fixing a credential carried elsewhere would otherwise have the failures
+/// observed before the fix recorded against it, and `plan_dispatch` would keep
 /// excluding it until the entry aged out - failing requests closed for a chain
 /// whose quorum then cannot be met, minutes after the configuration was fixed.
 ///
