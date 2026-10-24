@@ -784,8 +784,8 @@ re-review found that Initia event attributes still split the quorum on the node-
 the M-12 row fixes both. A review of every other whole-answer quorum read then measured
 the same divergence live on Arbitrum `eth_getLogs`; that row and Starknet and IOTA were
 changed alike. Sui already compared only `type` and `parsedJson`. Aptos account
-resources and table items still compare their small whole answers. TON v3 dispatch still
-ranks by the v2 probe. No image was built and nothing was deployed.
+resources and table items still compare their small whole answers. TON v3 dispatch ranked
+by the v2 probe until §22. No image was built and nothing was deployed.
 
 ## 21. H-01, M-15 and M-16 remediation — 2026-10-22
 
@@ -838,11 +838,11 @@ including why the READ limit is 1 MiB, is
 
 | ID | Implementation | Exercised evidence |
 | --- | --- | --- |
-| H-02 | 1 MiB of READ returned data per `eth_call` result and per command phase (request results, lzMap results), as an agreed vote or a phase charge; eight READ calls in flight per process, each holding its votes until its quorum resolves; digest fingerprints; streamed `resolvedPayloadHash`; payload moved, not copied, into the response | 256 legal results refused with `UNRESOLVABLE_COMMAND` after 24 `eth_call`s; the audit's shape at quorum 2 of 3 peaks at 41.6 MB RSS in a child process (audit: 1.75 GiB); exactly 1 MiB signs over the production HTTP route, 1 MiB + 1 is 400 without a sign stage; one hostile oversized provider is outvoted; two concurrent commands peak at exactly eight calls |
-| M-18 | Diagnostic probe entries never write rank | An Aptos indexer at the RPC's own base failing leaves the RPC dispatchable; a failing RPC with a healthy colliding indexer is still excluded, on Aptos and Initia |
+| H-02 | 1 MiB of READ returned data per request result, per decoded lzMap/lzReduce result and per command phase (request results, lzMap results), as an agreed vote or a phase charge; READ calls in flight capped at 4 per target chain and per command phase and 16 per process, chain permits granted in arrival order, all held until a call's quorum resolves; digest fingerprints; streamed `resolvedPayloadHash`; payload moved, not copied, into the response | 256 legal results refused with `UNRESOLVABLE_COMMAND` after at most four calls past the cap; the audit's shape at quorum 2 of 3 peaks far below the audit's 1.75 GiB RSS in a child process; exactly 1 MiB signs over the production HTTP route, 1 MiB + 1 is 400 without a sign stage; a decoded lzMap or lzReduce result of exactly 1 MiB resolves, 1 MiB + 1 refuses; one hostile oversized provider is outvoted; one command peaks at four calls, eight commands over four chains at sixteen with every chain at four; three chains stalling every call for 50 s do not delay a fourth chain's READ; a small command behind three large ones on one chain waits at most four call delays; a 256-request map-reduce command at 200 ms per call resolves inside the 58 s deadline |
+| M-18 | Diagnostic probe entries never write rank; TON v3 probes write, and v3 dispatch reads, `ton_v3_rank_key` | An Aptos indexer at the RPC's own base failing leaves the RPC dispatchable; a failing RPC with a healthy colliding indexer is still excluded, on Aptos and Initia; a dead TON v3 endpoint behind a live v2 one is refused for v3 reads and kept for v2 |
 | M-19 | `provider_rank_key`: dial URL plus a SHA-256 digest of the headers, one function for every voting probe and for dispatch | A dead header credential listed after or before the live one leaves the live entry dispatched first; Aptos `?auth=` and header forms agree; the key and credentials never reach `/provider-health` |
 | M-20 | The IOTA/Sui sender vote binds digest, sender, checkpoint and status | A fullnode-rendered and an indexer-rendered answer agree on the sender; a different sender or checkpoint still splits |
-| M-21 | Move V302 (Aptos, Movement, Initia) and Aptos V301 count confirmations only when positive | With the recorded configs set to require 0, a count of 0 signs at VERIFYING and VERIFIABLE; VERIFIED or a positive count at the requirement is `Payload already signed` |
+| M-21 | Move V302 (Aptos, Movement, Initia) and Aptos V301 count confirmations only when positive; Sui/IotaL1 `EConfirmationsNotFound` is no record, unsigned, and `get_confirmations` takes `keccak256(packetHeader)`, not the raw header | With the recorded configs set to require 0, a count of 0 signs at VERIFYING and VERIFIABLE; VERIFIED or a positive count at the requirement is `Payload already signed`; on Sui at a required 0 a missing record signs, a stored 0 or 1 is already signed, and the hashed header is sent; on IotaL1 a missing record signs |
 
 ### Verification
 
@@ -850,15 +850,24 @@ including why the READ limit is 1 MiB, is
 | --- | --- |
 | `cargo fmt --all --check` | Passed |
 | `cargo clippy --workspace --all-targets --locked` | Passed; one pre-existing warning in `gasolina_parity_tests.rs:89` |
-| `cargo test --workspace --locked` (1.98.1) | 1,175 passed, zero failed, 15 ignored (`test result:` totals, child processes' own summaries not counted), on the final tree |
+| `cargo test --workspace --locked` (1.98.1) | 1,181 passed, zero failed, 15 ignored (`test result:` totals, child processes' own summaries not counted), on the final tree; artifacts in `local/e2e-runs/h02-m21-*` |
 
 Failure modes were written down before the code and each is a scenario of the tests
 above. An independent read-only review found no correctness defect and three wording
-errors, corrected before the final run: TON v3 entries are not diagnostic and still
-write rank under the v3 endpoint, which dispatch never looks up; Initia drops its query
-without moving it to a header; a test comment still said headers were stripped. The
-first full run failed on `plan_dispatch_uses_aptos_canonical_url_for_rank_lookup`, which
-pinned the URL-only key M-19 replaces; it was removed. The upstream IOTA, LayerZero-v2
-and LayerZero-Aptos-Contract sources cited in the response were read at the tags named
-there; neither IOTA backend was run. Fix-reverted runs were not performed. No image was
-built and nothing was deployed.
+errors, corrected before the first final run; Initia drops its query without moving it
+to a header, and a test comment still said headers were stripped. The first full run
+failed on `plan_dispatch_uses_aptos_canonical_url_for_rank_lookup`, which pinned the
+URL-only key M-19 replaces; it was removed. The review's residuals were then fixed as
+well, diverging from upstream where needed: Sui/IotaL1 absence, TON v3 ranking, READ
+fairness across commands and chains, and the decoded lzMap/lzReduce boundary. The test
+`runtime_rpc_validation_checks_fail_closed_when_sui_confirmations_are_zero_and_required_is_zero`,
+which pinned upstream's reading of the abort as 0, was replaced. A second review of
+that work found three defects, fixed before the last run: a per-command limit of two
+stretched a lone 256-request map-reduce command past the 58 s deadline at about 0.23 s
+per call; two stalled chains filled the eight process permits; and the Sui read passed
+the raw packet header to `bytes32::from_bytes`, whose length abort shares code 1 with
+`EConfirmationsNotFound`, so no DVN confirmation was ever read there. The upstream
+IOTA, LayerZero-v2 (Aptos, Initia, Sui) and LayerZero-Aptos-Contract sources and
+upstream `lz-v2-sdk/src/uln/sui/index.ts` were read; neither IOTA backend and no live
+Sui `devInspect` was run. Fix-reverted runs were not performed. No image was built and
+nothing was deployed.

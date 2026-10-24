@@ -130,16 +130,25 @@ The following are deployment-side controls the software cannot enforce for you:
   deeper than 1,024, reachable or not) is refused here and is that provider's
   non-vote, whatever `@ton/core` would do with it.
 - `ReadV1002` results are capped where upstream has no cap: more than 1 MiB of
-  returned data in one `eth_call`, in all request results together or in all lzMap
-  results together is the non-retryable `UNRESOLVABLE_COMMAND` once the quorum
-  agrees, so no signature. A no-compute payload that large could not be delivered by
-  `lzReceive` in a geth-family transaction (128 KiB limit) anyway.
+  returned data in one request result, in one decoded lzMap or lzReduce result, in
+  all request results together or in all lzMap results together is the
+  non-retryable `UNRESOLVABLE_COMMAND` once the quorum agrees, so no signature. A
+  no-compute payload that large could not be delivered by `lzReceive` in a
+  geth-family transaction (128 KiB limit) anyway. READ calls are also admitted four
+  per target chain and per command phase and sixteen per process, where upstream
+  issues every call of a command at once, so a large command takes longer here: 256
+  requests with lzMap and lzReduce stay inside the 58 s request deadline while a
+  call's quorum resolves in about 0.45 s.
 - A Move already-signed check (Aptos, Movement and Initia V302, Aptos V301) treats
   this DVN's confirmation count of 0 as unsigned. Upstream compares `count >=
   required`, so on a pathway requiring 0 confirmations it refuses every
   `dvnAddress` request; the view answers 0 for a DVN with no record and the chain's
   `is_verified` treats that as unverified. The worst case here is one redundant
-  signature for a DVN that stored 0.
+  signature for a DVN that stored 0. On Sui and IotaL1 the view aborts
+  `EConfirmationsNotFound` without a record; upstream reads that as 0 and refuses
+  the same way, while here it is unsigned, as the chain's `verified` reads it, and a
+  stored count, 0 included, is compared with `>=`. The view is keyed by
+  `keccak256(packetHeader)`, as upstream sends it.
 - Alert on `pillar_provider_config_age_seconds` (stale provider configuration),
   `pillar_provider_config_refresh_total{result!="ok"}`,
   `pillar_provider_single_entity_chains > 0`, `pillar_signer_errors_total` and
@@ -193,13 +202,13 @@ accepted.
 | JSON pre-allocation scan | 131,072 structural parse-cost units; 524,288 for TON responses. A cost estimate, not an exact element/heap-byte count |
 | JSON container nesting | 128 normally; 512 for TON responses |
 | Retained JSON quorum candidate | 8 MiB estimated per representative, 64 MiB estimated shared pool |
-| Transport buffering/parsing | Four shared active slots; at most three per foreground target and one for background |
+| READ returned data | 1 MiB per request result, per decoded lzMap/lzReduce result, per command for all request results and for all lzMap results; READ calls in flight: 4 per target chain and per command phase, 16 per process, chain permits granted in arrival order, each holding its providers' votes until its quorum resolves |
 | Configured parser waiting | Eight shared registrations plus quiet-lane reservations (at most eight plus the fixed lane count); two queued per lane; two-second admission wait |
 | Calls without execution resources | Four shared active slots, at most eight waiting registrations |
 | Canton numeric input | 1,024 bytes before trimming/conversion; decimal parsing is linear |
 | Canton committee response | At most 64 signatures, at most 130 hex characters each; configured quorum cannot exceed 64 |
 | READ command / caller resolutions | 1–256 requests plus an optional compute marker; at most 257 caller timestamp markers; command, request and compute codec version 1 only |
-| READ returned data | 1 MiB per `eth_call` result, per command for all request results and for all lzMap results; eight READ calls in flight per process, each holding its providers' votes until its quorum resolves |
+| READ returned data | 1 MiB per request result, per decoded lzMap/lzReduce result, per command for all request results and for all lzMap results; READ calls in flight: 2 per command phase, 4 per target chain, 8 per process, granted in arrival order, each holding its providers' votes until its quorum resolves |
 | Provider health response text | Linear, case-insensitive HTTP(S) URL redaction before UTF-8-safe truncation; at most a 64 KiB prefix plus a byte-count marker per diagnostic string |
 
 An object containing an HTTP(S) URL in a key is compact-serialized and redacted as
