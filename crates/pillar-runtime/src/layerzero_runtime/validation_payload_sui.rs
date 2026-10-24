@@ -17,8 +17,9 @@
 //!    packetHeader, payloadHash)` -> `u8` state (TS: `:540-568`)
 //! 3. `bytes32::from_bytes` x2 then
 //!    `uln_302::get_confirmations(verification, dvn, r0, r1)` -> `u64`; a Move
-//!    abort with `sub_status` 1 (`EConfirmationsNotFound`) means zero
-//!    (TS: `:583-632`, abort parsing in
+//!    abort with `sub_status` 1 (`EConfirmationsNotFound`) means no record,
+//!    which the chain's `verified` treats as unverified whatever is required
+//!    (TS: `:583-632` reads it as 0; abort parsing in
 //!    `packages/common-suimove/src/utils.ts:17-38`)
 //! 4. `uln_302::get_effective_receive_uln_config(uln, receiver, srcEid)` ->
 //!    `UlnConfig`, for the required confirmations (TS: `:889-944`)
@@ -110,6 +111,18 @@ where
             .map_err(|error| AppCoreError::Internal(format!("packetHeader hex: {error}")))?;
         let payload_hash = hex::decode(proof.payload_hash.trim_start_matches("0x"))
             .map_err(|error| AppCoreError::Internal(format!("payloadHash hex: {error}")))?;
+        // `bytes32::from_bytes` aborts with code 1 on any other length, the code that also
+        // means "no confirmation record", so only 32-byte hashes may reach it.
+        if payload_hash.len() != 32 {
+            return Err(AppCoreError::Internal(format!(
+                "payloadHash must be 32 bytes, got {}",
+                payload_hash.len()
+            )));
+        }
+        let header_hash: [u8; 32] = {
+            use sha3::{Digest, Keccak256};
+            Keccak256::digest(&packet_header).into()
+        };
 
         let quorum = required_provider_quorum(provider_config, dst_chain_name)?;
         let plan = plan_dispatch(&self.rank_tracker, dst_chain_name, quorum).await?;
@@ -138,6 +151,7 @@ where
                             src_eid,
                             verifier: &verifier,
                             packet_header: &packet_header,
+                            header_hash: &header_hash,
                             payload_hash: &payload_hash,
                         },
                     )
@@ -160,6 +174,8 @@ struct SuiPayloadSignedObservation<'a> {
     src_eid: u32,
     verifier: &'a [u8; 32],
     packet_header: &'a [u8],
+    /// `keccak256(packet_header)`, the key `get_confirmations` takes.
+    header_hash: &'a [u8; 32],
     payload_hash: &'a [u8],
 }
 
@@ -187,6 +203,7 @@ where
         src_eid,
         verifier,
         packet_header,
+        header_hash,
         payload_hash,
     } = observation;
 
@@ -307,7 +324,7 @@ where
     let state = decode_sui_u8(&state_bytes).map_err(|_| RpcError::Unavailable)?;
 
     // 3. this DVN's confirmations. A Move abort with sub_status 1 is "no
-    //    confirmations recorded", which upstream maps to zero.
+    //    confirmations recorded".
     let confirmations_verification = resolve_shared_object(
         transport,
         url,
@@ -328,7 +345,7 @@ where
         &[
             SuiCallArg::Shared(confirmations_verification),
             SuiCallArg::Pure(sui_pure_address(verifier)),
-            SuiCallArg::Pure(sui_pure_bytes(packet_header)),
+            SuiCallArg::Pure(sui_pure_bytes(header_hash)),
             SuiCallArg::Pure(sui_pure_bytes(payload_hash)),
         ],
         &[
@@ -359,8 +376,8 @@ where
     )
     .await?;
     let confirmations = match confirmations_result {
-        Ok(bytes) => decode_sui_u64(&bytes).map_err(|_| RpcError::Unavailable)?,
-        Err(SuiViewFailure::MoveAbort(E_CONFIRMATIONS_NOT_FOUND)) => 0,
+        Ok(bytes) => Some(decode_sui_u64(&bytes).map_err(|_| RpcError::Unavailable)?),
+        Err(SuiViewFailure::MoveAbort(E_CONFIRMATIONS_NOT_FOUND)) => None,
         Err(_) => return Err(RpcError::Unavailable),
     };
 
@@ -404,13 +421,14 @@ where
         .map_err(|_| RpcError::Unavailable)?
         .confirmations;
 
-    let dvn_confirmed = confirmations >= required;
+    // `receive_uln::verified`: no record is unverified, even when 0 are required (M-21 class).
+    let dvn_confirmed = confirmations.is_some_and(|count| count >= required);
     let validity = if state == SUI_VERIFICATION_STATE_VERIFIED || dvn_confirmed {
         PayloadSignedValidity::Signed
     } else {
         PayloadSignedValidity::NotSigned
     };
-    Ok((format!("{state}:{confirmations}:{required}"), validity))
+    Ok((format!("{state}:{confirmations:?}:{required}"), validity))
 }
 
 /// Why a `devInspect` produced no value.

@@ -253,16 +253,16 @@ async fn runtime_rpc_validation_checks_rejects_sui_payload_at_required_confirmat
 }
 
 #[tokio::test]
-async fn runtime_rpc_validation_checks_treat_missing_sui_confirmations_as_zero() {
+async fn runtime_rpc_validation_checks_treat_missing_sui_confirmations_as_unsigned() {
     // `EConfirmationsNotFound` (sub_status 1) is "nothing recorded", not a
-    // failure, so with a non-zero requirement the payload is unsigned.
+    // failure, so the payload is unsigned.
     let responses = sui_responses(SUI_RECEIVER, 0, Some(dev_inspect_abort(1)), 15);
     let checks = sui_checks("sui", responses, Arc::new(Mutex::new(Vec::new())));
 
     checks
         .validate_payload_not_signed(&sui_sent_event("sui", 30_350), Some(VERIFIER), "sui", None)
         .await
-        .expect("an EConfirmationsNotFound abort means zero confirmations");
+        .expect("an EConfirmationsNotFound abort means no confirmation");
 }
 
 #[tokio::test]
@@ -293,19 +293,101 @@ async fn runtime_rpc_validation_checks_fail_closed_on_string_sui_abort_code() {
     assert!(matches!(error, AppCoreError::Internal(_)), "{error}");
 }
 
+/// `receive_uln::verified` is false without a record and `count >= required` with one,
+/// so on a zero-requirement pathway a missing record is unsigned and a stored 0 is
+/// signed. Upstream reads the abort as 0 and refuses both; this follows the chain.
+/// `get_confirmations` keys its record by `keccak256(packetHeader)`, and `from_bytes`
+/// aborts with the same code 1 on any other length, so the raw 81-byte header would read
+/// as "no record" for every packet.
 #[tokio::test]
-async fn runtime_rpc_validation_checks_fail_closed_when_sui_confirmations_are_zero_and_required_is_zero(
-) {
-    // A pathway requiring zero confirmations is satisfied by zero, which is the
-    // upstream `>=` semantics; assert we follow it rather than special-casing.
-    let responses = sui_responses(SUI_RECEIVER, 0, Some(dev_inspect_abort(1)), 0);
-    let checks = sui_checks("sui", responses, Arc::new(Mutex::new(Vec::new())));
+async fn m21_sui_and_iota_missing_confirmations_are_unsigned_even_when_zero_are_required() {
+    use sha3::{Digest, Keccak256};
 
-    let error = checks
-        .validate_payload_not_signed(&sui_sent_event("sui", 30_350), Some(VERIFIER), "sui", None)
-        .await
-        .unwrap_err();
-    assert!(matches!(error, AppCoreError::BadRequest(_)), "{error}");
+    let event = sui_sent_event("sui", 30_350);
+    let header = hex::decode(
+        pillar_layerzero::compute_lz_packet_v1_proof_from_event(&event)
+            .unwrap()
+            .packet_header
+            .trim_start_matches("0x"),
+    )
+    .unwrap();
+    let mut header_hash_input = vec![32u8];
+    header_hash_input.extend_from_slice(&Keccak256::digest(&header));
+    let mut observations = Vec::new();
+    for (label, confirmations, signed) in [
+        ("required-0-missing-record", dev_inspect_abort(1), false),
+        (
+            "required-0-stored-0",
+            dev_inspect_three_commands(0u64.to_le_bytes().to_vec()),
+            true,
+        ),
+        (
+            "required-0-stored-1",
+            dev_inspect_three_commands(1u64.to_le_bytes().to_vec()),
+            true,
+        ),
+    ] {
+        let calls: RecordedJsonCalls = Arc::new(Mutex::new(Vec::new()));
+        let responses = sui_responses(SUI_RECEIVER, 0, Some(confirmations), 0);
+        let checks = sui_checks("sui", responses, calls.clone());
+        let result = checks
+            .validate_payload_not_signed(&event, Some(VERIFIER), "sui", None)
+            .await;
+        let confirmation_inputs = calls
+            .lock()
+            .unwrap()
+            .iter()
+            .find_map(|(_, _, body)| {
+                let programmable =
+                    &body["variables"]["transaction"]["kind"]["programmableTransaction"];
+                (programmable["commands"][2]["moveCall"]["function"] == "get_confirmations")
+                    .then(|| programmable["inputs"].clone())
+            })
+            .expect("get_confirmations was simulated");
+        let header_hash_sent = base64_decode(confirmation_inputs[2]["pure"].as_str().unwrap())
+            .unwrap()
+            == header_hash_input;
+        observations.push(json!({
+            "chain": "sui",
+            "case": label,
+            "get_confirmations_header_input_is_keccak": header_hash_sent,
+            "result": format!("{result:?}"),
+        }));
+        assert!(
+            header_hash_sent,
+            "{label}: get_confirmations must take keccak256(header)"
+        );
+        match (signed, result) {
+            (false, result) => result.unwrap_or_else(|error| panic!("{label}: {error}")),
+            (true, Ok(())) => panic!("{label}: a stored record at the requirement is signed"),
+            (true, Err(error)) => assert!(
+                error.to_string().starts_with("Payload already signed"),
+                "{label}: {error}"
+            ),
+        }
+    }
+    // IOTA JSON-RPC reports the abort as `result.error`, as `dev_inspect_return` parses it.
+    let mut missing = iota_responses(SUI_RECEIVER, 0, 0);
+    let confirmations = missing.len() - 4;
+    missing[confirmations] = Ok(json!({"result": {
+        "error": "MoveAbort { location: .., major_status: ABORTED, sub_status: Some(1) } in command 2",
+        "results": [],
+    }}));
+    let iota = sui_checks("iotal1", missing, Arc::new(Mutex::new(Vec::new())))
+        .validate_payload_not_signed(
+            &sui_sent_event("iotal1", 30_423),
+            Some(VERIFIER),
+            "iotal1",
+            None,
+        )
+        .await;
+    observations.push(json!({"chain": "iotal1", "case": "required-0-missing-record", "result": format!("{iota:?}")}));
+    audit_round_artifact(
+        "h02-m21",
+        "m21-sui-iota-zero-confirmations",
+        json!({ "cases": observations }),
+    );
+    iota.expect("iotal1: a missing record on a zero-requirement pathway is unsigned");
 }
 
 #[tokio::test]
