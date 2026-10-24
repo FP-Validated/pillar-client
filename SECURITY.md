@@ -129,6 +129,17 @@ The following are deployment-side controls the software cannot enforce for you:
   the TON node refuses (inconsistent level mask or Merkle hash, any declared cell
   deeper than 1,024, reachable or not) is refused here and is that provider's
   non-vote, whatever `@ton/core` would do with it.
+- `ReadV1002` results are capped where upstream has no cap: more than 1 MiB of
+  returned data in one `eth_call`, in all request results together or in all lzMap
+  results together is the non-retryable `UNRESOLVABLE_COMMAND` once the quorum
+  agrees, so no signature. A no-compute payload that large could not be delivered by
+  `lzReceive` in a geth-family transaction (128 KiB limit) anyway.
+- A Move already-signed check (Aptos, Movement and Initia V302, Aptos V301) treats
+  this DVN's confirmation count of 0 as unsigned. Upstream compares `count >=
+  required`, so on a pathway requiring 0 confirmations it refuses every
+  `dvnAddress` request; the view answers 0 for a DVN with no record and the chain's
+  `is_verified` treats that as unverified. The worst case here is one redundant
+  signature for a DVN that stored 0.
 - Alert on `pillar_provider_config_age_seconds` (stale provider configuration),
   `pillar_provider_config_refresh_total{result!="ok"}`,
   `pillar_provider_single_entity_chains > 0`, `pillar_signer_errors_total` and
@@ -188,6 +199,7 @@ accepted.
 | Canton numeric input | 1,024 bytes before trimming/conversion; decimal parsing is linear |
 | Canton committee response | At most 64 signatures, at most 130 hex characters each; configured quorum cannot exceed 64 |
 | READ command / caller resolutions | 1–256 requests plus an optional compute marker; at most 257 caller timestamp markers; command, request and compute codec version 1 only |
+| READ returned data | 1 MiB per `eth_call` result, per command for all request results and for all lzMap results; eight READ calls in flight per process, each holding its providers' votes until its quorum resolves |
 | Provider health response text | Linear, case-insensitive HTTP(S) URL redaction before UTF-8-safe truncation; at most a 64 KiB prefix plus a byte-count marker per diagnostic string |
 
 An object containing an HTTP(S) URL in a key is compact-serialized and redacted as
@@ -221,8 +233,9 @@ can still defer probes and reduce health freshness.
 
 Quorum retains one JSON representative per fingerprint and streams fingerprints
 instead of storing a second full JSON string. The pool is an estimate, **not a
-hard allocator or process RSS ceiling**. Returned consumer values, typed READ data,
-SDK/network buffers and signer state are outside it. Embedded Initia event/view
+hard allocator or process RSS ceiling**. Returned consumer values, SDK/network
+buffers and signer state are outside it; READ data has its own limits above, and a
+READ vote keeps a SHA-256 fingerprint, not a second copy. Embedded Initia event/view
 JSON obeys the same byte/structural/depth checks but is decoded synchronously in
 its existing transaction pipeline, without a separate parser permit. Sui/IotaL1
 event pages are parsed one at a time but their events are kept until the last

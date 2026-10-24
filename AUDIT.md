@@ -826,3 +826,39 @@ in both versions, ordered shared cells by `HashMap` iteration, so about 1,700 of
 BOCs re-serialized to different bytes from one run to the next. `boc_to_hex` and
 `boc_to_base64` now order cells as `@ton/core` `toBoc` does; the two storage fixtures
 this crate produces were regenerated with `@ton/core` 0.63.1 bytes.
+
+## 22. H-02 and M-18 to M-21 remediation — 2026-10-24
+
+The report is Sentry Code Round 1 of 2026-10-23. All five findings were present at
+`87bbbda` (`public/main`, the H-01/M-16 remediation), where the work branches: one
+commit for H-02, one for M-18 to M-20, which share the provider-health path and its
+tests, one for M-21, then documentation. It is not released. The per-finding response,
+including why the READ limit is 1 MiB, is
+[h02-m18-m21-response.md](audit/h02-m18-m21-response.md).
+
+| ID | Implementation | Exercised evidence |
+| --- | --- | --- |
+| H-02 | 1 MiB of READ returned data per `eth_call` result and per command phase (request results, lzMap results), as an agreed vote or a phase charge; eight READ calls in flight per process, each holding its votes until its quorum resolves; digest fingerprints; streamed `resolvedPayloadHash`; payload moved, not copied, into the response | 256 legal results refused with `UNRESOLVABLE_COMMAND` after 24 `eth_call`s; the audit's shape at quorum 2 of 3 peaks at 41.6 MB RSS in a child process (audit: 1.75 GiB); exactly 1 MiB signs over the production HTTP route, 1 MiB + 1 is 400 without a sign stage; one hostile oversized provider is outvoted; two concurrent commands peak at exactly eight calls |
+| M-18 | Diagnostic probe entries never write rank | An Aptos indexer at the RPC's own base failing leaves the RPC dispatchable; a failing RPC with a healthy colliding indexer is still excluded, on Aptos and Initia |
+| M-19 | `provider_rank_key`: dial URL plus a SHA-256 digest of the headers, one function for every voting probe and for dispatch | A dead header credential listed after or before the live one leaves the live entry dispatched first; Aptos `?auth=` and header forms agree; the key and credentials never reach `/provider-health` |
+| M-20 | The IOTA/Sui sender vote binds digest, sender, checkpoint and status | A fullnode-rendered and an indexer-rendered answer agree on the sender; a different sender or checkpoint still splits |
+| M-21 | Move V302 (Aptos, Movement, Initia) and Aptos V301 count confirmations only when positive | With the recorded configs set to require 0, a count of 0 signs at VERIFYING and VERIFIABLE; VERIFIED or a positive count at the requirement is `Payload already signed` |
+
+### Verification
+
+| Check | Observed result |
+| --- | --- |
+| `cargo fmt --all --check` | Passed |
+| `cargo clippy --workspace --all-targets --locked` | Passed; one pre-existing warning in `gasolina_parity_tests.rs:89` |
+| `cargo test --workspace --locked` (1.98.1) | 1,175 passed, zero failed, 15 ignored (`test result:` totals, child processes' own summaries not counted), on the final tree |
+
+Failure modes were written down before the code and each is a scenario of the tests
+above. An independent read-only review found no correctness defect and three wording
+errors, corrected before the final run: TON v3 entries are not diagnostic and still
+write rank under the v3 endpoint, which dispatch never looks up; Initia drops its query
+without moving it to a header; a test comment still said headers were stripped. The
+first full run failed on `plan_dispatch_uses_aptos_canonical_url_for_rank_lookup`, which
+pinned the URL-only key M-19 replaces; it was removed. The upstream IOTA, LayerZero-v2
+and LayerZero-Aptos-Contract sources cited in the response were read at the tags named
+there; neither IOTA backend was run. Fix-reverted runs were not performed. No image was
+built and nothing was deployed.
