@@ -834,3 +834,90 @@ async fn initia_provider_quorum_requires_matching_valid_library_observations() {
         json!({"cases": observations}),
     );
 }
+
+/// M-21: the confirmations view answers 0 for a DVN with no record, and the chain treats
+/// that DVN as unverified whatever the requirement. On a zero-requirement pathway `["0"]`
+/// must therefore sign, while a positive count or VERIFIED is still already-signed.
+#[tokio::test]
+async fn m21_zero_confirmations_are_unsigned_even_when_zero_are_required() {
+    fn zero_required(config: &Value) -> Value {
+        let text = config.to_string();
+        assert!(
+            text.contains("000000000000000f"),
+            "recorded requirement is 15"
+        );
+        serde_json::from_str(&text.replacen("000000000000000f", "0000000000000000", 1)).unwrap()
+    }
+    let mut observations = Vec::new();
+    for chain in ["aptos", "movement", "initia"] {
+        let initia = chain == "initia";
+        let recorded = if initia {
+            recorded_initia_view("007-mainnet-endpoint-get_config-registered")
+        } else {
+            recorded_move_config(chain)
+        };
+        let library = || {
+            if initia {
+                vec![Ok(recorded_initia_view(
+                    "006-mainnet-endpoint-get_effective_receive_library-registered",
+                ))]
+            } else {
+                vec![Ok(json!([format!("0x{}", "44".repeat(32))]))]
+            }
+        };
+        let state = |state: u8| {
+            if initia {
+                json!({"data": state.to_string()})
+            } else {
+                json!([state])
+            }
+        };
+        let count = |count: u64| {
+            if initia {
+                json!({"data": format!("\"{count}\"")})
+            } else {
+                json!([count.to_string()])
+            }
+        };
+        let zero = zero_required(&recorded);
+        for (label, config, verifiable, confirmations, status, signatures) in [
+            ("required-0-count-0-verifying", &zero, 0, 0, 200, 1),
+            ("required-0-count-0-verifiable", &zero, 1, 0, 200, 1),
+            ("required-0-count-0-verified", &zero, 2, 0, 400, 0),
+            ("required-0-count-1", &zero, 0, 1, 400, 0),
+            ("required-15-count-0", &recorded, 0, 0, 200, 1),
+            ("required-15-count-15", &recorded, 0, 15, 400, 0),
+        ] {
+            let (actual_status, body, actual_signatures, _) = run_with_views(
+                chain,
+                config.clone(),
+                state(verifiable),
+                count(confirmations),
+                library(),
+            )
+            .await;
+            observations.push(json!({
+                "chain": chain,
+                "case": label,
+                "http_status": actual_status.as_u16(),
+                "signatures": actual_signatures,
+                "body": body,
+            }));
+            assert_eq!(actual_status.as_u16(), status, "{chain} {label}: {body}");
+            assert_eq!(actual_signatures, signatures, "{chain} {label}: {body}");
+            if status == 400 {
+                assert!(
+                    body["body"]
+                        .as_str()
+                        .is_some_and(|text| text.starts_with("Payload already signed")),
+                    "{chain} {label}: {body}"
+                );
+            }
+        }
+    }
+    audit_round_artifact(
+        "h02-m21",
+        "m21-move-v302-zero-confirmations",
+        json!({ "cases": observations }),
+    );
+}

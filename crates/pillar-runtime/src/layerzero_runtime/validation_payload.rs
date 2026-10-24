@@ -731,12 +731,14 @@ where
         &["vector<u8>", "vector<u8>", "address"],
     )
     .await?;
-    // `confirmationResult.length > 0 && Number(confirmationResult[0]) >= confirmations`.
+    // Upstream reads `length > 0 && Number(result[0]) >= confirmations`, but the view returns 0
+    // for a DVN with no record, which the chain's `is_verified` treats as unverified (M-21).
     let confirmations = match confirmations.first() {
         None => None,
         Some(value) => Some(move_u64(value).ok_or(RpcError::Unavailable)?),
     };
-    let dvn_confirmed = confirmations.is_some_and(|count| count >= required_confirmations);
+    let dvn_confirmed =
+        confirmations.is_some_and(|count| count > 0 && count >= required_confirmations);
     let verification_state = view(
         format!("{}::uln_301::verifiable", contracts.view_uln301),
         vec![packet_header, payload_hash],
@@ -985,8 +987,10 @@ where
         &["vector<u8>", "vector<u8>", "address"],
     )
     .await?;
-    // Upstream treats an empty vector as false even when required confirmations is 0;
-    // malformed present values still throw and remove this provider's vote.
+    // The view returns 0 for a DVN with no record (`[]` never comes back); the chain's
+    // `is_verified` treats that as unverified even when 0 are required, so only a positive
+    // count signs (M-21, a deliberate departure from upstream's `>=`). Malformed present
+    // values still throw and remove this provider's vote.
     let confirmations = match confirmation_values.first() {
         None => None,
         Some(value) => Some(
@@ -996,12 +1000,13 @@ where
                 .ok_or(RpcError::Unavailable)?,
         ),
     };
-    let validity =
-        if state == 2 || confirmations.is_some_and(|value| value >= required_confirmations) {
-            PayloadSignedValidity::Signed
-        } else {
-            PayloadSignedValidity::NotSigned
-        };
+    let validity = if state == 2
+        || confirmations.is_some_and(|value| value > 0 && value >= required_confirmations)
+    {
+        PayloadSignedValidity::Signed
+    } else {
+        PayloadSignedValidity::NotSigned
+    };
     Ok((
         format!("{receive_library}:{state}:{confirmations:?}:{required_confirmations}"),
         validity,
