@@ -1,0 +1,92 @@
+{
+ "provenance": {
+  "capturedAt": "2026-10-26",
+  "sui": {
+   "endpoint": "https://graphql.mainnet.sui.io/graphql",
+   "method": "simulateTransaction"
+  },
+  "iota": {
+   "endpoint": "https://api.mainnet.iota.cafe",
+   "method": "iota_devInspectTransactionBlock"
+  },
+  "call": "bytes32::from_bytes(headerHash), bytes32::from_bytes(payloadHash), uln_302::get_confirmations(verification, dvn=0xabab..ab, r0, r1) against the configured mainnet packages",
+  "cases": {
+   "missing": "32-byte hashes that have no record",
+   "short_header_hash": "31-byte header hash"
+  },
+  "scripts": [
+   "scripts/onchain-provenance/probe-sui-move-abort.py",
+   "scripts/onchain-provenance/probe-iota-move-abort.py"
+  ]
+ },
+ "sui": {
+  "missing": {
+   "data": {
+    "simulateTransaction": {
+     "effects": {
+      "status": "FAILURE",
+      "executionError": {
+       "message": "Error in 3rd command, from '0x3ce7457bed48ad23ee5d611dd3172ae4fbd0a22ea0e846782a7af224d905dbb0::receive_uln::get_confirmations' (instruction 22), abort code: 1",
+       "abortCode": "1",
+       "sourceLineNumber": null,
+       "instructionOffset": 22,
+       "identifier": null,
+       "constant": null,
+       "module": {
+        "name": "receive_uln",
+        "package": {
+         "address": "0x3ce7457bed48ad23ee5d611dd3172ae4fbd0a22ea0e846782a7af224d905dbb0"
+        }
+       },
+       "function": {
+        "name": "get_confirmations"
+       }
+      }
+     }
+    }
+   }
+  },
+  "short_header_hash": {
+   "data": {
+    "simulateTransaction": {
+     "effects": {
+      "status": "FAILURE",
+      "executionError": {
+       "message": "Error in 1st command, from '0x00245ba36f7a1cc643a2b037450dff1e4399e18069c6545fb5fcaaf37d39d7dc::bytes32::from_bytes' (instruction 7), abort code: 1",
+       "abortCode": "1",
+       "sourceLineNumber": null,
+       "instructionOffset": 7,
+       "identifier": null,
+       "constant": null,
+       "module": {
+        "name": "bytes32",
+        "package": {
+         "address": "0x00245ba36f7a1cc643a2b037450dff1e4399e18069c6545fb5fcaaf37d39d7dc"
+        }
+       },
+       "function": {
+        "name": "from_bytes"
+       }
+      }
+     }
+    }
+   }
+  }
+ },
+ "iota": {
+  "missing": {
+   "error": "MoveAbort: Move Runtime Abort. Location: 0x042e3bb837e5528e495124542495b9df5016acd011d89838ae529db5a814499e::receive_uln::get_confirmations (function index 10) at offset 22, Abort Code: 1; caused by: VMError with status ABORTED with sub status 1 at location Module ModuleId { address: 042e3bb837e5528e495124542495b9df5016acd011d89838ae529db5a814499e, name: Identifier(\"receive_uln\") } and message 0x042e3bb837e5528e495124542495b9df5016acd011d89838ae529db5a814499e::receive_uln::get_confirmations at offset 22 at code offset 22 in function definition 10; at command index: 2",
+   "status": {
+    "status": "failure",
+    "error": "Move Runtime Abort. Location: 0x042e3bb837e5528e495124542495b9df5016acd011d89838ae529db5a814499e::receive_uln::get_confirmations (function index 10) at offset 22, Abort Code: 1 in command 2"
+   }
+  },
+  "short_header_hash": {
+   "error": "MoveAbort: Move Runtime Abort. Location: 0x56a262afe5db9b34426f343160481290d010551ca15b427b1fb4b0010e3b69ed::bytes32::from_bytes (function index 4) at offset 7, Abort Code: 1; caused by: VMError with status ABORTED with sub status 1 at location Module ModuleId { address: 56a262afe5db9b34426f343160481290d010551ca15b427b1fb4b0010e3b69ed, name: Identifier(\"bytes32\") } and message 0x56a262afe5db9b34426f343160481290d010551ca15b427b1fb4b0010e3b69ed::bytes32::from_bytes at offset 7 at code offset 7 in function definition 4; at command index: 0",
+   "status": {
+    "status": "failure",
+    "error": "Move Runtime Abort. Location: 0x56a262afe5db9b34426f343160481290d010551ca15b427b1fb4b0010e3b69ed::bytes32::from_bytes (function index 4) at offset 7, Abort Code: 1 in command 0"
+   }
+  }
+ }
+}

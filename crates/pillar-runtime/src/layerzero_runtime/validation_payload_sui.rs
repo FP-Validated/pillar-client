@@ -17,10 +17,11 @@
 //!    packetHeader, payloadHash)` -> `u8` state (TS: `:540-568`)
 //! 3. `bytes32::from_bytes` x2 then
 //!    `uln_302::get_confirmations(verification, dvn, r0, r1)` -> `u64`; a Move
-//!    abort with `sub_status` 1 (`EConfirmationsNotFound`) means no record,
-//!    which the chain's `verified` treats as unverified whatever is required
-//!    (TS: `:583-632` reads it as 0; abort parsing in
-//!    `packages/common-suimove/src/utils.ts:17-38`)
+//!    abort with code 1 (`EConfirmationsNotFound`) raised by the ULN package's
+//!    `receive_uln::get_confirmations` means no record, which the chain's
+//!    `verified` treats as unverified whatever is required (TS: `:583-632` reads
+//!    it as 0 from the code alone; abort parsing in
+//!    `packages/common-suimove/src/utils.ts:17-48`)
 //! 4. `uln_302::get_effective_receive_uln_config(uln, receiver, srcEid)` ->
 //!    `UlnConfig`, for the required confirmations (TS: `:889-944`)
 //!
@@ -57,6 +58,10 @@ const SUI_VERIFICATION_STATE_VERIFIED: u8 = 2;
 /// `Uln302GetConfirmationsErrorCodes.EConfirmationsNotFound`
 /// (`packages/sdks/lz-v2-sdk/src/uln/sui/index.ts:62-71`).
 const E_CONFIRMATIONS_NOT_FOUND: i64 = 1;
+/// Where that abort is raised, observed on Sui and IOTA mainnet
+/// (`tests/onchain_provenance/move_abort_origin.json`).
+const MODULE_RECEIVE_ULN: &str = "receive_uln";
+const FUNCTION_GET_CONFIRMATIONS: &str = "get_confirmations";
 
 /// Method-name prefix: IOTA exposes the same JSON-RPC surface under `iota_`.
 fn sui_rpc_method(chain_name: &str, suffix: &str) -> String {
@@ -77,7 +82,7 @@ where
         sent_event: &LzSentEvent,
         verifier_address: &str,
         dst_chain_name: &str,
-    ) -> Result<(), AppCoreError> {
+    ) -> Result<Option<u64>, AppCoreError> {
         let uln_version = uln_version_value(&sent_event.lz_message_id)
             .ok_or_else(|| AppCoreError::Internal("ulnSendVersion must be a string".to_string()))?;
         // TS: `packages/sdks/lz-v2-sdk/src/uln/sui/index.ts:509-510`.
@@ -323,8 +328,9 @@ where
     .map_err(|_| RpcError::Unavailable)?;
     let state = decode_sui_u8(&state_bytes).map_err(|_| RpcError::Unavailable)?;
 
-    // 3. this DVN's confirmations. A Move abort with sub_status 1 is "no
-    //    confirmations recorded".
+    // 3. this DVN's confirmations. Abort code 1 is "no confirmations recorded" only
+    //    when `receive_uln::get_confirmations` raised it: `bytes32::from_bytes` aborts
+    //    with the same code.
     let confirmations_verification = resolve_shared_object(
         transport,
         url,
@@ -377,7 +383,16 @@ where
     .await?;
     let confirmations = match confirmations_result {
         Ok(bytes) => Some(decode_sui_u64(&bytes).map_err(|_| RpcError::Unavailable)?),
-        Err(SuiViewFailure::MoveAbort(E_CONFIRMATIONS_NOT_FOUND)) => None,
+        Err(SuiViewFailure::MoveAbort(abort))
+            if abort.code == E_CONFIRMATIONS_NOT_FOUND
+                && abort.raised_by(
+                    &uln_package,
+                    MODULE_RECEIVE_ULN,
+                    FUNCTION_GET_CONFIRMATIONS,
+                ) =>
+        {
+            None
+        }
         Err(_) => return Err(RpcError::Unavailable),
     };
 
@@ -426,7 +441,9 @@ where
     let validity = if state == SUI_VERIFICATION_STATE_VERIFIED || dvn_confirmed {
         PayloadSignedValidity::Signed
     } else {
-        PayloadSignedValidity::NotSigned
+        PayloadSignedValidity::NotSigned {
+            required: Some(required),
+        }
     };
     Ok((format!("{state}:{confirmations:?}:{required}"), validity))
 }
@@ -434,11 +451,25 @@ where
 /// Why a `devInspect` produced no value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SuiViewFailure {
-    /// The Move call aborted with this `sub_status`.
-    MoveAbort(i64),
+    MoveAbort(MoveAbortSite),
     /// Anything else: a transport failure, an unparsable response, or an
     /// execution error that is not an abort.
     Unusable,
+}
+
+/// A Move abort's code and the function that raised it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MoveAbortSite {
+    pub(crate) code: i64,
+    pub(crate) package: [u8; 32],
+    pub(crate) module: String,
+    pub(crate) function: String,
+}
+
+impl MoveAbortSite {
+    fn raised_by(&self, package: &[u8; 32], module: &str, function: &str) -> bool {
+        &self.package == package && self.module == module && self.function == function
+    }
 }
 
 /// Resolve one shared object input: read `initial_shared_version` from the
@@ -610,7 +641,7 @@ where
         let response = transport.post_json_scoped(url.to_string(), headers, json!({"jsonrpc":"2.0","id":1,"method":sui_rpc_method(chain_name,"devInspectTransactionBlock"),"params":[SUI_DEV_INSPECT_MOCK_SENDER,base64::engine::general_purpose::STANDARD.encode(&kind),Value::Null,Value::Null]})).await?;
         let result = response.get("result").ok_or(RpcError::Unavailable)?;
         if let Some(error) = result.get("error").and_then(Value::as_str) {
-            return Ok(Err(move_abort_sub_status(error)
+            return Ok(Err(iota_move_abort_site(error)
                 .map(SuiViewFailure::MoveAbort)
                 .unwrap_or(SuiViewFailure::Unusable)));
         }
@@ -649,7 +680,7 @@ where
         }}
     });
     let body = json!({
-        "query": "query($transaction: JSON!) { simulateTransaction(transaction: $transaction, checksEnabled: false, doGasSelection: true) { effects { status executionError { message abortCode } } outputs { returnValues { value { bcs } } } } }",
+        "query": "query($transaction: JSON!) { simulateTransaction(transaction: $transaction, checksEnabled: false, doGasSelection: true) { effects { status executionError { message abortCode module { name package { address } } function { name } } } outputs { returnValues { value { bcs } } } } }",
         "variables": {"transaction": transaction}
     });
     let response = transport
@@ -661,14 +692,13 @@ where
     let simulation = response
         .pointer("/data/simulateTransaction")
         .ok_or(RpcError::Unavailable)?;
-    if let Some(abort_code) = simulation.pointer("/effects/executionError/abortCode") {
-        let code = abort_code
-            .as_i64()
-            .or_else(|| abort_code.as_str()?.parse().ok());
-        let Some(code) = code else {
+    if let Some(error) = simulation.pointer("/effects/executionError") {
+        if error.get("abortCode").is_none_or(Value::is_null) {
             return Ok(Err(SuiViewFailure::Unusable));
-        };
-        return Ok(Err(SuiViewFailure::MoveAbort(code)));
+        }
+        return Ok(Err(sui_graphql_abort_site(error)
+            .map(SuiViewFailure::MoveAbort)
+            .unwrap_or(SuiViewFailure::Unusable)));
     }
     if simulation
         .pointer("/effects/status")
@@ -707,31 +737,64 @@ fn decode_return_value(value: &Value) -> Option<Vec<u8>> {
     }
 }
 
-/// Parse `major_status: ABORTED` / `sub_status: Some(N)` out of a devInspect
-/// error string, as `handleError` does
-/// (TS: `packages/common-suimove/src/utils.ts:17-38`).
-fn move_abort_sub_status(error: &str) -> Option<i64> {
-    if !error.contains("ABORTED") {
+/// A GraphQL `ExecutionError` with its abort code and raising function.
+pub(crate) fn sui_graphql_abort_site(error: &Value) -> Option<MoveAbortSite> {
+    let code = error.get("abortCode")?;
+    let code = code.as_i64().or_else(|| code.as_str()?.parse().ok())?;
+    Some(MoveAbortSite {
+        code,
+        package: sui_address_from_hex(error.pointer("/module/package/address")?.as_str()?).ok()?,
+        module: error.pointer("/module/name")?.as_str()?.to_string(),
+        function: error.pointer("/function/name")?.as_str()?.to_string(),
+    })
+}
+
+/// IOTA's `devInspect` error: `... Location: 0x<package>::<module>::<function> (function
+/// index N) at offset M, Abort Code: C ...`. Upstream reads only the code.
+pub(crate) fn iota_move_abort_site(error: &str) -> Option<MoveAbortSite> {
+    let rest = error.strip_prefix("MoveAbort: Move Runtime Abort. Location: ")?;
+    let (location, rest) = rest.split_once(' ')?;
+    let mut parts = location.split("::");
+    let (package, module, function) = (parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some() {
         return None;
     }
-    let start = error.find("sub_status: Some(")? + "sub_status: Some(".len();
-    let rest = &error[start..];
-    let end = rest.find(')')?;
-    rest[..end].trim().parse().ok()
+    let code = rest.split_once(", Abort Code: ")?.1;
+    let digits = code.split(|c: char| !c.is_ascii_digit()).next()?;
+    Some(MoveAbortSite {
+        code: digits.parse().ok()?,
+        package: sui_address_from_hex(package).ok()?,
+        module: module.to_string(),
+        function: function.to_string(),
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// IOTA mainnet's own answers, from `tests/onchain_provenance/move_abort_origin.json`:
+    /// the missing record and a short hash abort with the same code in different functions.
     #[test]
-    fn extracts_the_move_abort_sub_status() {
-        let error =
-            "MoveAbort { location: .., major_status: ABORTED, sub_status: Some(1) } in command 2";
-        assert_eq!(move_abort_sub_status(error), Some(1));
-        // A non-abort execution error must not read as an abort code.
-        assert_eq!(move_abort_sub_status("InsufficientGas"), None);
-        assert_eq!(move_abort_sub_status("major_status: ABORTED"), None);
+    fn reads_the_iota_abort_site_not_only_its_code() {
+        let uln = "0x042e3bb837e5528e495124542495b9df5016acd011d89838ae529db5a814499e";
+        let missing = format!("MoveAbort: Move Runtime Abort. Location: {uln}::receive_uln::get_confirmations (function index 10) at offset 22, Abort Code: 1; caused by: VMError with status ABORTED with sub status 1; at command index: 2");
+        let site = iota_move_abort_site(&missing).unwrap();
+        assert_eq!(site.code, 1);
+        assert!(site.raised_by(
+            &sui_address_from_hex(uln).unwrap(),
+            MODULE_RECEIVE_ULN,
+            FUNCTION_GET_CONFIRMATIONS
+        ));
+        let short = "MoveAbort: Move Runtime Abort. Location: 0x56a262afe5db9b34426f343160481290d010551ca15b427b1fb4b0010e3b69ed::bytes32::from_bytes (function index 4) at offset 7, Abort Code: 1; at command index: 0";
+        let site = iota_move_abort_site(short).unwrap();
+        assert_eq!(site.code, 1);
+        assert!(!site.raised_by(
+            &sui_address_from_hex(uln).unwrap(),
+            MODULE_RECEIVE_ULN,
+            FUNCTION_GET_CONFIRMATIONS
+        ));
+        assert_eq!(iota_move_abort_site("InsufficientGas"), None);
     }
 
     /// The 139-byte `UlnConfig` Sui mainnet actually returned for the

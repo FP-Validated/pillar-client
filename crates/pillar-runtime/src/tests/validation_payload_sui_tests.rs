@@ -1,12 +1,14 @@
 use super::*;
 
 /// A Sui address in the fixture's ULN receive config.
-const VERIFIER: &str = "0x0c12321ebe562b8fb8a74e6d29f144ea199a8f31a4cea3a417ce72477f6dfebb";
-const SUI_RECEIVER: &str = "0x1111111111111111111111111111111111111111111111111111111111111111";
+pub(super) const VERIFIER: &str =
+    "0x0c12321ebe562b8fb8a74e6d29f144ea199a8f31a4cea3a417ce72477f6dfebb";
+pub(super) const SUI_RECEIVER: &str =
+    "0x1111111111111111111111111111111111111111111111111111111111111111";
 const SIMULATION_CAPTURE: &str =
     include_str!("../../tests/gasolina_parity/transport/sui-mainnet-graphql-shared-version.json");
 
-fn sui_sent_event(dst_chain_name: &str, dst_eid: u64) -> LzSentEvent {
+pub(super) fn sui_sent_event(dst_chain_name: &str, dst_eid: u64) -> LzSentEvent {
     let mut event = payload_signed_sent_event();
     event.lz_message_id.pathway_id.dst_chain_name = dst_chain_name.to_string();
     event
@@ -52,12 +54,29 @@ fn dev_inspect_three_commands(bytes: Vec<u8>) -> Result<Value, String> {
     )
 }
 
-fn dev_inspect_abort(sub_status: i64) -> Result<Value, String> {
+/// The live Sui mainnet `ExecutionError` shape (`tests/onchain_provenance/move_abort_origin.json`).
+fn dev_inspect_abort_in(
+    code: i64,
+    package: &str,
+    module: &str,
+    function: &str,
+) -> Result<Value, String> {
     Ok(
-        json!({"data":{"simulateTransaction":{"effects":{"status":"FAILURE","executionError":{"abortCode":sub_status,"message":"MoveAbort"}},"outputs":[]}}}),
+        json!({"data":{"simulateTransaction":{"effects":{"status":"FAILURE","executionError":{"abortCode":code.to_string(),"message":"MoveAbort","module":{"name":module,"package":{"address":package}},"function":{"name":function}}},"outputs":[]}}}),
     )
 }
-fn iota_responses(channel: &str, state: u8, required: u64) -> Vec<Result<Value, String>> {
+
+const SUI_ULN_302: &str = "0x3ce7457bed48ad23ee5d611dd3172ae4fbd0a22ea0e846782a7af224d905dbb0";
+const SUI_UTILS: &str = "0x00245ba36f7a1cc643a2b037450dff1e4399e18069c6545fb5fcaaf37d39d7dc";
+
+fn dev_inspect_abort(code: i64) -> Result<Value, String> {
+    dev_inspect_abort_in(code, SUI_ULN_302, "receive_uln", "get_confirmations")
+}
+pub(super) fn iota_responses(
+    channel: &str,
+    state: u8,
+    required: u64,
+) -> Vec<Result<Value, String>> {
     let normalized = |parameters| {
         Ok(
             json!({"result":{"parameters":(0..parameters).map(|_| json!({"Reference":{"Struct":{"module":"uln_302","name":"Uln302"}}})).collect::<Vec<_>>()}}),
@@ -105,7 +124,7 @@ fn address_bytes(hex_value: &str) -> Vec<u8> {
 /// -> normalized+multiGet(verification) -> devInspect(get_confirmations)
 /// -> normalized+multiGet(uln) -> devInspect(effective config)
 #[allow(clippy::too_many_arguments)]
-fn sui_responses(
+pub(super) fn sui_responses(
     channel: &str,
     state: u8,
     confirmations: Option<Result<Value, String>>,
@@ -132,7 +151,7 @@ fn sui_responses(
     responses
 }
 
-fn sui_checks(
+pub(super) fn sui_checks(
     chain_name: &str,
     responses: Vec<Result<Value, String>>,
     calls: RecordedJsonCalls,
@@ -279,11 +298,41 @@ async fn runtime_rpc_validation_checks_fail_closed_on_other_sui_aborts() {
     assert!(matches!(error, AppCoreError::Internal(_)), "{error}");
 }
 
+/// Code 1 from anywhere but `receive_uln::get_confirmations` - `bytes32::from_bytes` on a
+/// wrong-length hash, another package, or no reported site - is not "no record".
+#[tokio::test]
+async fn runtime_rpc_validation_checks_fail_closed_on_code_1_from_another_function() {
+    let elsewhere = [
+        dev_inspect_abort_in(1, SUI_UTILS, "bytes32", "from_bytes"),
+        dev_inspect_abort_in(1, SUI_UTILS, "receive_uln", "get_confirmations"),
+        dev_inspect_abort_in(1, SUI_ULN_302, "receive_uln", "verify"),
+        Ok(
+            json!({"data":{"simulateTransaction":{"effects":{"status":"FAILURE","executionError":{"abortCode":"1","message":"MoveAbort"}},"outputs":[]}}}),
+        ),
+    ];
+    for response in elsewhere {
+        let site = format!("{response:?}");
+        let responses = sui_responses(SUI_RECEIVER, 0, Some(response), 15);
+        let checks = sui_checks("sui", responses, Arc::new(Mutex::new(Vec::new())));
+        let error = checks
+            .validate_payload_not_signed(
+                &sui_sent_event("sui", 30_350),
+                Some(VERIFIER),
+                "sui",
+                None,
+            )
+            .await
+            .expect_err(&site);
+        assert!(
+            matches!(error, AppCoreError::Internal(_)),
+            "{site}: {error}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn runtime_rpc_validation_checks_fail_closed_on_string_sui_abort_code() {
-    let response = Ok(
-        json!({"data":{"simulateTransaction":{"effects":{"status":"FAILURE","executionError":{"abortCode":"7","message":"MoveAbort"}},"outputs":[]}}}),
-    );
+    let response = dev_inspect_abort_in(7, SUI_ULN_302, "receive_uln", "get_confirmations");
     let responses = sui_responses(SUI_RECEIVER, 0, Some(response), 15);
     let checks = sui_checks("sui", responses, Arc::new(Mutex::new(Vec::new())));
     let error = checks
@@ -358,8 +407,10 @@ async fn m21_sui_and_iota_missing_confirmations_are_unsigned_even_when_zero_are_
             "{label}: get_confirmations must take keccak256(header)"
         );
         match (signed, result) {
-            (false, result) => result.unwrap_or_else(|error| panic!("{label}: {error}")),
-            (true, Ok(())) => panic!("{label}: a stored record at the requirement is signed"),
+            (false, result) => {
+                result.unwrap_or_else(|error| panic!("{label}: {error}"));
+            }
+            (true, Ok(_)) => panic!("{label}: a stored record at the requirement is signed"),
             (true, Err(error)) => assert!(
                 error.to_string().starts_with("Payload already signed"),
                 "{label}: {error}"
@@ -370,7 +421,7 @@ async fn m21_sui_and_iota_missing_confirmations_are_unsigned_even_when_zero_are_
     let mut missing = iota_responses(SUI_RECEIVER, 0, 0);
     let confirmations = missing.len() - 4;
     missing[confirmations] = Ok(json!({"result": {
-        "error": "MoveAbort { location: .., major_status: ABORTED, sub_status: Some(1) } in command 2",
+        "error": "MoveAbort: Move Runtime Abort. Location: 0x042e3bb837e5528e495124542495b9df5016acd011d89838ae529db5a814499e::receive_uln::get_confirmations (function index 10) at offset 22, Abort Code: 1; at command index: 2",
         "results": [],
     }}));
     let iota = sui_checks("iotal1", missing, Arc::new(Mutex::new(Vec::new())))
