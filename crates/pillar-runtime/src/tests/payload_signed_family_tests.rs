@@ -88,8 +88,10 @@ const PAYLOAD_SIGNED_FAMILIES: &[FamilyRead] = &[
         dst_eid: 30_500,
         receiver: EVM_RECEIVER,
         verifier: "0x3333333333333333333333333333333333333333",
+        // Upstream calls `has_payload_signed`, which ignores confirmations; this reads the
+        // DVN's stored verification instead.
         upstream: "packages/sdks/lz-v2-sdk/src/uln/starknet/index.ts:99-124 hasPayloadSigned",
-        first_read: Some("starknet_call"),
+        first_read: Some("starknet_getStorageAt"),
     },
     FamilyRead {
         chain_name: "sui",
@@ -199,7 +201,12 @@ async fn payload_signed_family_table_covers_every_destination_the_dispatch_reach
             1,
         )
         .with_sequencer(vec![ProviderUri::UriWithHeaders {
-            uri: format!("https://{}-sequencer.example", row.chain_name),
+            uri: format!(
+                "https://{}-sequencer.example/?sequencer-validators=\
+                 0x027bf07ae10c208725dd53e49e8d12bf23fad3e49684ef08ea61be56b2dfbc75a6\
+                 &sequencer-quorum=1",
+                row.chain_name
+            ),
             headers: HashMap::from([("authorization".to_string(), "Bearer t".to_string())]),
         }]);
         let getter = StaticProviderConfig::new(

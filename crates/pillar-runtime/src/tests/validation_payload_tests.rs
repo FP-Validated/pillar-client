@@ -125,7 +125,7 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_starknet_payload() {
         &ProviderSnapshotHandle::from_getter(&getter),
         RecordingTransport {
             calls: calls.clone(),
-            responses: Arc::new(Mutex::new(vec![Ok(json!({"result": ["0x0"]}))])),
+            responses: Arc::new(Mutex::new(vec![Ok(json!({"result": "0x0"}))])),
         },
     )
     .with_starknet_uln_302("0x0727f40349719ac76861a51a0b3d3e07be1577fff137bb81a5dc32e5a5c61d38");
@@ -147,11 +147,12 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_starknet_payload() {
         .await
         .unwrap();
 
+    // No stored verification for this DVN: one storage read, nothing else.
     let calls = calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].2["method"], "starknet_call");
+    assert_eq!(calls[0].2["method"], "starknet_getStorageAt");
     assert_eq!(
-        calls[0].2["params"][0]["contract_address"],
+        calls[0].2["params"][0],
         "0x0727f40349719ac76861a51a0b3d3e07be1577fff137bb81a5dc32e5a5c61d38"
     );
 }
@@ -173,7 +174,12 @@ async fn runtime_rpc_validation_checks_rejects_signed_starknet_payload() {
         &ProviderSnapshotHandle::from_getter(&getter),
         RecordingTransport {
             calls: Arc::new(Mutex::new(Vec::new())),
-            responses: Arc::new(Mutex::new(vec![Ok(json!({"result": ["0x1"]}))])),
+            // Stored verification: submitted, 5 confirmations; the OApp requires 5.
+            responses: Arc::new(Mutex::new(vec![
+                Ok(json!({"result": "0x1"})),
+                Ok(json!({"result": "0x5"})),
+                Ok(json!({"result": ["0x5", "0x1", "0x0", "0x0", "0x0", "0x0", "0x0"]})),
+            ])),
         },
     )
     .with_starknet_uln_302("0x0727f40349719ac76861a51a0b3d3e07be1577fff137bb81a5dc32e5a5c61d38");

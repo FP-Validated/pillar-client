@@ -15,14 +15,24 @@ where
             } => {
                 // Refused before the source reads: a below-floor request never signs,
                 // so its readiness RPCs would be spent for nothing.
-                if sent_event.lz_message_id.pathway_id.dst_chain_name == "ton"
-                    && sent_event.extra.contains_key("guid")
-                {
-                    self.validate_ton_confirmation_floor_with_quorum(
-                        sent_event,
-                        *block_confirmation,
-                    )
-                    .await?;
+                if sent_event.extra.contains_key("guid") {
+                    match sent_event.lz_message_id.pathway_id.dst_chain_name.as_str() {
+                        "ton" => {
+                            self.validate_ton_confirmation_floor_with_quorum(
+                                sent_event,
+                                *block_confirmation,
+                            )
+                            .await?
+                        }
+                        "starknet" => {
+                            self.validate_starknet_confirmation_floor_with_quorum(
+                                sent_event,
+                                *block_confirmation,
+                            )
+                            .await?
+                        }
+                        _ => {}
+                    }
                 }
                 self.validate_message_readiness_with_quorum(sent_event, *block_confirmation)
                     .await
