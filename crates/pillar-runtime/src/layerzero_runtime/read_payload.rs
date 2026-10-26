@@ -30,6 +30,20 @@ const READ_CALL_LIMITS: ReadCallLimits = ReadCallLimits {
     per_chain: 4,
 };
 
+/// A READ permit wait ends at the signing request's deadline. A caller outside an HTTP
+/// request has none and waits for a permit as before.
+async fn within_request_deadline<F: std::future::Future>(
+    future: F,
+) -> Result<F::Output, AppCoreError> {
+    let Some(deadline) = pillar_core::execution::current().and_then(|context| context.deadline)
+    else {
+        return Ok(future.await);
+    };
+    tokio::time::timeout_at(deadline, future)
+        .await
+        .map_err(|_| AppCoreError::Admission(pillar_core::execution::BudgetError::Deadline))
+}
+
 /// An ABI `bytes` return is its data plus a 64-byte head and at most 31 bytes of padding.
 const ABI_BYTES_OVERHEAD: usize = 64 + 31;
 
@@ -166,16 +180,18 @@ where
         let quorum = required_provider_quorum(provider_config, chain_name)?;
         let block = json!({ "blockHash": pin.block_hash, "requireCanonical": true });
         let closed = |_| AppCoreError::Admission(pillar_core::execution::BudgetError::Closed);
-        // Chain first, then process, always in that order, so no call holds one while
-        // another waits on it in reverse.
-        let _chain_permit = self
+        let lane = self
             .chain_permits
             .get(chain_name)
-            .ok_or_else(|| AppCoreError::Internal(format!("No READ call lane for {chain_name}")))?
-            .acquire()
-            .await
+            .ok_or_else(|| AppCoreError::Internal(format!("No READ call lane for {chain_name}")))?;
+        // Chain first, then process, always in that order, so no call holds one while
+        // another waits on it in reverse. Both waits end at the request deadline.
+        let _chain_permit = within_request_deadline(lane.acquire())
+            .await?
             .map_err(closed)?;
-        let _permit = self.call_permits.acquire().await.map_err(closed)?;
+        let _permit = within_request_deadline(self.call_permits.acquire())
+            .await?
+            .map_err(closed)?;
         let mut requests = FuturesUnordered::new();
         for (index, uri) in provider_config.uris.iter().enumerate() {
             let (url, headers) = provider_uri_parts(uri);
