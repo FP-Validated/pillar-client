@@ -12,10 +12,22 @@ where
         match signing_context {
             SigningContext::Message {
                 block_confirmation, ..
-            } => self
-                .validate_message_readiness_with_quorum(sent_event, *block_confirmation)
-                .await
-                .map(|()| Vec::new()),
+            } => {
+                // Refused before the source reads: a below-floor request never signs,
+                // so its readiness RPCs would be spent for nothing.
+                if sent_event.lz_message_id.pathway_id.dst_chain_name == "ton"
+                    && sent_event.extra.contains_key("guid")
+                {
+                    self.validate_ton_confirmation_floor_with_quorum(
+                        sent_event,
+                        *block_confirmation,
+                    )
+                    .await?;
+                }
+                self.validate_message_readiness_with_quorum(sent_event, *block_confirmation)
+                    .await
+                    .map(|()| Vec::new())
+            }
             SigningContext::Read {
                 resolved_timestamp_time_markers,
                 ..
