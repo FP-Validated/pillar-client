@@ -190,6 +190,29 @@ fn outcome<T>(result: Result<T, AppCoreError>, view: impl FnOnce(T) -> Value) ->
         Err(other) => json!({ "error": format!("{other:?}") }),
     }
 }
+pub(super) async fn recorded_unsigned_canton_requirement() -> u64 {
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let scenario = fixture["scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|scenario| scenario["kind"] == "payloadSigned" && scenario["name"] == "not signed")
+        .expect("Canton unsigned payload fixture exists");
+    let config = provider_config(&scenario["provider"]);
+    let sequencer = canton_sequencer("canton", &config).unwrap();
+    let transport = Replay::new(scenario["exchanges"].as_array().unwrap());
+    let event = sent_event(&scenario["sentEvent"]);
+    let (signed, required) = canton_payload_signed(
+        &transport,
+        &sequencer,
+        &event,
+        scenario["dvnAddress"].as_str().unwrap(),
+    )
+    .await
+    .expect("recorded Canton payload-signed exchange replays");
+    assert!(!signed, "fixture must return an unsigned packet");
+    required
+}
 
 #[tokio::test]
 async fn canton_sequencer_path_matches_gasolina() {
@@ -291,7 +314,10 @@ async fn canton_sequencer_path_matches_gasolina() {
                     }
                     Err(error) => Err(error),
                 };
-                (outcome(result, Value::Bool), scenario["outcome"].clone())
+                (
+                    outcome(result, |(signed, _required)| Value::Bool(signed)),
+                    scenario["outcome"].clone(),
+                )
             }
             other => panic!("unknown scenario kind {other}"),
         };

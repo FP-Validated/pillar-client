@@ -168,8 +168,8 @@ impl AppValidator for PassingValidator {
         _: Option<&str>,
         _: &str,
         _: Option<&str>,
-    ) -> Result<(), AppCoreError> {
-        Ok(())
+    ) -> Result<Option<u64>, AppCoreError> {
+        Ok(None)
     }
     async fn validate_extra_context(
         &self,

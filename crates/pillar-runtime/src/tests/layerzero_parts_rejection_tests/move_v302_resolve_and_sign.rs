@@ -381,7 +381,8 @@ async fn run_with_views(
             expiration: EXPIRATION,
             skip_v_id: None,
             dvn_address: Some(DVN.to_string()),
-            block_confirmation: 1,
+            // The recorded receive config requires 15; a request below it is refused.
+            block_confirmation: 15,
         },
         message_hash,
         ..request_v2()

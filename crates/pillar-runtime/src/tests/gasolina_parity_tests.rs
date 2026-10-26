@@ -765,16 +765,15 @@ impl RuntimeValidationChecks for ParityChecks {
         _verifier_address: Option<&str>,
         dst_chain_name: &str,
         _effective_receive_version: Option<&str>,
-    ) -> Result<(), AppCoreError> {
+    ) -> Result<Option<u64>, AppCoreError> {
         if self.already_signed {
-            // The production refusal, so the HTTP comparison covers its text.
             return crate::layerzero_runtime::payload_signed_validation_result(
                 crate::provider_health::PayloadSignedValidity::Signed,
                 sent_event,
                 dst_chain_name,
             );
         }
-        Ok(())
+        Ok(None)
     }
 
     async fn validate_extra_context(

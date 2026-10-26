@@ -216,7 +216,7 @@ impl<T: JsonRpcTransport> RuntimeValidationChecks for A3Checks<T> {
         verifier_address: Option<&str>,
         dst_chain_name: &str,
         effective_receive_version: Option<&str>,
-    ) -> Result<(), AppCoreError> {
+    ) -> Result<Option<u64>, AppCoreError> {
         self.real
             .validate_payload_not_signed(
                 sent_event,

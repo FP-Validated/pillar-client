@@ -479,7 +479,9 @@ where
         if verified || dvn_confirmed {
             PayloadSignedValidity::Signed
         } else {
-            PayloadSignedValidity::NotSigned
+            PayloadSignedValidity::NotSigned {
+                required: Some(required),
+            }
         },
     ))
 }
@@ -493,7 +495,7 @@ where
         sent_event: &LzSentEvent,
         verifier_address: &str,
         dst_chain_name: &str,
-    ) -> Result<(), AppCoreError> {
+    ) -> Result<Option<u64>, AppCoreError> {
         let contracts = self.stellar_payload_contracts.as_ref().ok_or_else(|| {
             AppCoreError::Internal("No Stellar payload-signed contracts configured".to_string())
         })?;

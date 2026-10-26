@@ -86,9 +86,9 @@ fn stellar_event(inputs: &Value) -> LzSentEvent {
     }
 }
 
-async fn run(
+pub(super) async fn run(
     returns: [(&'static str, Result<&str, &str>); 5],
-) -> (Result<(), AppCoreError>, Vec<String>) {
+) -> (Result<Option<u64>, AppCoreError>, Vec<String>) {
     let fixture = fixture();
     let xdr = |name: &str| {
         fixture["returns"][name]["xdr"]
@@ -156,7 +156,7 @@ async fn stellar_payload_signed_follows_upstreams_reads_and_verdict() {
     };
 
     let (outcome, seen) = run(base(Ok("noConfirmations"), Ok("verifying"))).await;
-    assert_eq!(outcome, Ok(()));
+    assert_eq!(outcome, Ok(Some(15)));
     let mut parallel = seen[2..].to_vec();
     parallel.sort();
     assert_eq!(
@@ -173,7 +173,7 @@ async fn stellar_payload_signed_follows_upstreams_reads_and_verdict() {
 
     assert_eq!(
         run(base(Ok("confirmations14"), Ok("verifying"))).await.0,
-        Ok(())
+        Ok(Some(15))
     );
     for (confirmations, verifiable) in [
         (Ok("confirmations15"), Ok("verifying")),
@@ -192,7 +192,7 @@ async fn stellar_payload_signed_follows_upstreams_reads_and_verdict() {
         ))
         .await
         .0,
-        Ok(()),
+        Ok(Some(15)),
         "a views read failing as unconfigured is NotInitializable"
     );
 }
@@ -227,5 +227,5 @@ async fn stellar_payload_signed_refuses_an_invalid_override_library() {
         ("uln_verifiable", Ok("verifying")),
     ])
     .await;
-    assert_eq!(outcome, Ok(()));
+    assert_eq!(outcome, Ok(Some(15)));
 }

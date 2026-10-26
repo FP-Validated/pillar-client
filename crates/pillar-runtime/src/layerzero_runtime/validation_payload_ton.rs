@@ -125,85 +125,12 @@ where
         })
     }
 
-    /// Refuses a TON MESSAGE signature whose `blockConfirmation` is below what
-    /// the destination pathway requires. `ulnConnectionVerify` stores any
-    /// well-formed attestation over this DVN's previous one, while
-    /// `_committable` never counts one below the requirement, so such a
-    /// signature can only displace a usable attestation. Upstream signs it.
-    pub(crate) async fn validate_ton_confirmation_floor_with_quorum(
-        &self,
-        sent_event: &LzSentEvent,
-        block_confirmation: i64,
-    ) -> Result<(), AppCoreError> {
-        let dst_chain_name = sent_event.lz_message_id.pathway_id.dst_chain_name.as_str();
-        crate::provider_health::rpc_scope(dst_chain_name, async {
-            let targets = self.ton_payload_targets(sent_event, dst_chain_name)?;
-            let snapshot = self.providers.load();
-            let provider_config = snapshot.provider_config(dst_chain_name)?;
-            if provider_config.uris.is_empty() {
-                return Err(AppCoreError::Internal(format!(
-                    "No provider URI for chain {dst_chain_name}"
-                )));
-            }
-            let quorum = required_provider_quorum(provider_config, dst_chain_name)?;
-            let plan = plan_dispatch(&self.rank_tracker, dst_chain_name, quorum).await?;
-            let requests = FuturesUnordered::new();
-            for DispatchEntry { index, uri, delay } in plan {
-                let (url, headers) = provider_uri_parts(uri);
-                let transport = self.transport.clone();
-                let uln_address = targets.uln_address.clone();
-                let uln_connection_address = targets.uln_connection_address.clone();
-                requests.push(async move {
-                    if !delay.is_zero() {
-                        tokio::time::sleep(delay).await;
-                    }
-                    let observation = provider_response(
-                        observe_ton_required_confirmations(
-                            &transport,
-                            &url,
-                            headers,
-                            &uln_address,
-                            &uln_connection_address,
-                        )
-                        .await,
-                    );
-                    (index, observation)
-                });
-            }
-            let context = format!("receive confirmations for chain {dst_chain_name}");
-            let required: TonRequiredConfirmations =
-                resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
-                    .await?;
-            let required = match required {
-                TonRequiredConfirmations::Required(required) => required,
-                TonRequiredConfirmations::Inactive => {
-                    return Err(AppCoreError::Internal(format!(
-                        "TON receive config for chain {dst_chain_name} is not deployed"
-                    )))
-                }
-                TonRequiredConfirmations::Undecodable => {
-                    return Err(AppCoreError::Internal(format!(
-                        "TON receive config for chain {dst_chain_name} is undecodable"
-                    )))
-                }
-            };
-            if u64::try_from(block_confirmation).is_ok_and(|requested| requested >= required) {
-                return Ok(());
-            }
-            Err(AppCoreError::BadRequest(format!(
-                "blockConfirmation {block_confirmation} is below the {required} confirmations \
-                 the destination receive config requires"
-            )))
-        })
-        .await
-    }
-
     pub(crate) async fn validate_ton_payload_not_signed_with_quorum(
         &self,
         sent_event: &LzSentEvent,
         verifier_address: &str,
         dst_chain_name: &str,
-    ) -> Result<(), AppCoreError> {
+    ) -> Result<Option<u64>, AppCoreError> {
         let targets = self.ton_payload_targets(sent_event, dst_chain_name)?;
         let snapshot = self.providers.load();
         let provider_config = snapshot.provider_config(dst_chain_name)?;
@@ -311,6 +238,11 @@ where
     let Ok(default_receive_config) = uln_default_receive_config(&uln_storage) else {
         return undecodable();
     };
+    let Ok(required_confirmations) =
+        required_receive_confirmations(&connection_storage, &default_receive_config)
+    else {
+        return undecodable();
+    };
     let Ok(default_receive_config_boc) = serialize_default_receive_config(&default_receive_config)
     else {
         return undecodable();
@@ -353,57 +285,14 @@ where
     let validity = if committable_view_is_signed(state) || dvn_confirmed {
         PayloadSignedValidity::Signed
     } else {
-        PayloadSignedValidity::NotSigned
+        PayloadSignedValidity::NotSigned {
+            required: Some(required_confirmations),
+        }
     };
     Ok((
         format!("{connection_storage_boc}:{uln_storage_boc}:{state}:{attestation:?}"),
         validity,
     ))
-}
-
-/// The quorum-agreed answer to "how many confirmations does this TON pathway
-/// require", over the same two storage cells `committableView` resolves from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TonRequiredConfirmations {
-    Required(u64),
-    /// Either contract is not active, upstream's `'0'` bucket.
-    Inactive,
-    /// The agreed cells do not decode as a receive config.
-    Undecodable,
-}
-
-async fn observe_ton_required_confirmations<T>(
-    transport: &T,
-    url: &str,
-    headers: HashMap<String, String>,
-    uln_address: &str,
-    uln_connection_address: &str,
-) -> Result<(String, TonRequiredConfirmations), RpcError>
-where
-    T: JsonRpcTransport,
-{
-    let inactive = || Ok(("0".to_string(), TonRequiredConfirmations::Inactive));
-    let (connection_boc, connection) =
-        match ton_storage_cell(transport, url, headers.clone(), uln_connection_address).await? {
-            TonStorageRead::Cell(boc, cell) => (boc, cell),
-            TonStorageRead::Inactive => return inactive(),
-            TonStorageRead::Unavailable => return Err(RpcError::Unavailable),
-        };
-    let (uln_boc, uln) = match ton_storage_cell(transport, url, headers, uln_address).await? {
-        TonStorageRead::Cell(boc, cell) => (boc, cell),
-        TonStorageRead::Inactive => return inactive(),
-        TonStorageRead::Unavailable => return Err(RpcError::Unavailable),
-    };
-    let fingerprint = format!("{connection_boc}:{uln_boc}");
-    let required = uln_default_receive_config(&uln)
-        .and_then(|default| required_receive_confirmations(&connection, &default));
-    Ok(match required {
-        Ok(required) => (fingerprint, TonRequiredConfirmations::Required(required)),
-        Err(_) => (
-            format!("undecodable:{fingerprint}"),
-            TonRequiredConfirmations::Undecodable,
-        ),
-    })
 }
 
 /// One provider's answer to `fetchQuorumedStorageCell`.

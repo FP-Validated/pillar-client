@@ -102,8 +102,7 @@ mod kms_queued_contention_tests;
 mod layerzero_config_tests;
 mod layerzero_packet_resolver_tests;
 mod layerzero_parts_non_evm_wiring_tests;
-#[path = "layerzero_parts_rejection_tests/mod.rs"]
-mod layerzero_parts_rejection_tests;
+pub(super) mod layerzero_parts_rejection_tests;
 mod layerzero_parts_wiring_tests;
 mod layerzero_read_payload_tests;
 mod layerzero_uln_v2_feather_tests;
@@ -125,6 +124,7 @@ mod provider_health_stellar_solana_probe_tests;
 mod provider_health_sui_starknet_tests;
 mod provider_health_ton_tests;
 mod provider_health_tron_tests;
+mod read_residuals_e2e;
 mod read_time_marker_resolver_tests;
 mod read_vertical_tests;
 mod round3_aptos_quorum_e2e;

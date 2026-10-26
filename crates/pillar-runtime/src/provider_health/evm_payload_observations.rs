@@ -270,15 +270,17 @@ where
             {
                 PayloadSignedValidity::Signed
             } else {
-                PayloadSignedValidity::NotSigned
+                PayloadSignedValidity::NotSigned {
+                    required: (receive_version != "ReadV1002").then_some(inbound_confirmations),
+                }
             };
             Ok((
-            format!(
-                "{}:{receive_version}:{dvn_confirmed}:{inbound_confirmations}:{verification_state:?}",
-                receive_library.to_lowercase()
-            ),
-            validity,
-        ))
+                format!(
+                    "{}:{receive_version}:{dvn_confirmed}:{inbound_confirmations}:{verification_state:?}",
+                    receive_library.to_lowercase()
+                ),
+                validity,
+            ))
         }
         Err(error) => Err(error.into()),
     }

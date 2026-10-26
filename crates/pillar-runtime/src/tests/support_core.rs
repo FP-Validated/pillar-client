@@ -75,8 +75,8 @@ impl AppValidator for NoopValidator {
         _verifier_address: Option<&str>,
         _dst_chain_name: &str,
         _effective_receive_version: Option<&str>,
-    ) -> Result<(), AppCoreError> {
-        Ok(())
+    ) -> Result<Option<u64>, AppCoreError> {
+        Ok(None)
     }
 
     async fn validate_extra_context(

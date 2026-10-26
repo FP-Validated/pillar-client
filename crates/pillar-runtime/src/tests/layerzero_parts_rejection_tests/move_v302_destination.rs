@@ -8,7 +8,7 @@ const DVN: &str = "0x33333333333333333333333333333333333333333333333333333333333
 const ULN_302: &str = "0xc33752e0220faf79e45385dd73fb28d681dcd9f1569a1480725507c1f3c3aba9";
 
 #[derive(Clone)]
-struct MoveScript {
+pub(crate) struct MoveScript {
     state: Value,
     confirmations: Value,
     required: u64,
@@ -50,7 +50,7 @@ impl JsonRpcTransport for MoveScript {
     }
 }
 
-fn v302_event(chain: &str) -> LzSentEvent {
+pub(crate) fn v302_event(chain: &str) -> LzSentEvent {
     let mut event = payload_signed_sent_event();
     event.lz_message_id.pathway_id.src_chain_name = "ethereum".to_string();
     event.lz_message_id.pathway_id.dst_chain_name = chain.to_string();
@@ -85,7 +85,7 @@ fn v302_event(chain: &str) -> LzSentEvent {
     event
 }
 
-fn move_checks(
+pub(crate) fn move_checks(
     chain: &str,
     state: Value,
     confirmations: Value,

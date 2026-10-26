@@ -40,7 +40,7 @@ pub trait RuntimeValidationChecks: Send + Sync + 'static {
         verifier_address: Option<&str>,
         dst_chain_name: &str,
         effective_receive_version: Option<&str>,
-    ) -> Result<(), AppCoreError>;
+    ) -> Result<Option<u64>, AppCoreError>;
 
     async fn validate_extra_context(
         &self,
@@ -149,7 +149,7 @@ where
         verifier_address: Option<&str>,
         dst_chain_name: &str,
         effective_receive_version: Option<&str>,
-    ) -> Result<(), AppCoreError> {
+    ) -> Result<Option<u64>, AppCoreError> {
         self.checks
             .validate_payload_not_signed(
                 sent_event,

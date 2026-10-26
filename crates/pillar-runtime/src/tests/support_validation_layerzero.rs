@@ -46,12 +46,12 @@ impl RuntimeValidationChecks for FixedValidationChecks {
         verifier_address: Option<&str>,
         dst_chain_name: &str,
         _effective_receive_version: Option<&str>,
-    ) -> Result<(), AppCoreError> {
+    ) -> Result<Option<u64>, AppCoreError> {
         self.calls.lock().unwrap().push(format!(
             "payload:{}:{dst_chain_name}",
             verifier_address.unwrap_or("none")
         ));
-        Ok(())
+        Ok(None)
     }
 
     async fn validate_extra_context(

@@ -25,7 +25,7 @@ where
         sent_event: &LzSentEvent,
         verifier_address: &str,
         dst_chain_name: &str,
-    ) -> Result<(), AppCoreError> {
+    ) -> Result<Option<u64>, AppCoreError> {
         let snapshot = self.providers.load();
         let dispatch = snapshot
             .dispatch(&self.rank_tracker, dst_chain_name)
@@ -115,6 +115,7 @@ where
             .iter()
             .map(decode_solana_account_data)
             .collect::<Result<Vec<_>, _>>()?;
+        let required = solana_required_confirmations(decoded[2].as_deref(), decoded[3].as_deref())?;
         let accounts = SolanaFetchedPayloadSignedAccounts {
             nonce: decoded[0].as_deref(),
             pending_nonce: decoded[1].as_deref(),
@@ -122,17 +123,41 @@ where
             default_receive_config: decoded[3].as_deref(),
             confirmations: decoded[4].as_deref(),
         };
-        solana_payload_is_signed(&request, accounts)
+        match solana_payload_is_signed(&request, accounts) {
+            Ok(true) => Ok(PayloadSignedValidity::Signed),
+            Ok(false) => Ok(PayloadSignedValidity::NotSigned {
+                required: Some(required),
+            }),
+            Err(error) => Err(error),
+        }
     }
     .await;
 
-    match observation {
-        Ok(true) => Ok(PayloadSignedValidity::Signed),
-        Ok(false) => Ok(PayloadSignedValidity::NotSigned),
-        Err(error) => Err(error.into()),
-    }
+    observation.map_err(Into::into)
 }
 
+fn solana_required_confirmations(
+    custom: Option<&[u8]>,
+    default: Option<&[u8]>,
+) -> Result<u64, AppCoreError> {
+    const NIL_CONFIRMATIONS: u64 = u64::MAX;
+
+    let confirmations = |data: &[u8]| {
+        let bytes = data.get(9..17).ok_or_else(|| {
+            AppCoreError::Internal("Solana receive config account data too short".to_string())
+        })?;
+        Ok::<_, AppCoreError>(u64::from_le_bytes(bytes.try_into().expect("eight bytes")))
+    };
+    let default = confirmations(default.ok_or_else(|| {
+        AppCoreError::Internal("Default Solana ULN receive config not found".to_string())
+    })?)?;
+    Ok(match custom.map(confirmations).transpose()? {
+        None => default,
+        Some(0) => default,
+        Some(NIL_CONFIRMATIONS) => 0,
+        Some(required) => required,
+    })
+}
 fn decode_solana_account_data(value: &Value) -> Result<Option<Vec<u8>>, AppCoreError> {
     if value.is_null() {
         return Ok(None);

@@ -86,15 +86,114 @@ fn storage(boc: &str) -> Result<Value, String> {
     Ok(json!({ "result": { "state": "active", "data": boc } }))
 }
 
-fn message_context(block_confirmation: i64) -> SigningContext {
-    SigningContext::Message {
-        expiration: 1,
-        skip_v_id: None,
-        dvn_address: Some(format!("0x{}", "aa".repeat(32))),
-        block_confirmation,
+struct ConfirmationFloorValidator {
+    required: u64,
+}
+
+#[async_trait]
+impl AppValidator for ConfirmationFloorValidator {
+    async fn validate_message_hash(
+        &self,
+        request: &PillarApiRequestV2,
+        sent_event: &LzSentEvent,
+    ) -> Result<(), AppCoreError> {
+        NoopValidator
+            .validate_message_hash(request, sent_event)
+            .await
+    }
+
+    async fn validate_readiness(
+        &self,
+        sent_event: &LzSentEvent,
+        context: &SigningContext,
+    ) -> Result<Vec<pillar_core::ReadBlockPin>, AppCoreError> {
+        NoopValidator.validate_readiness(sent_event, context).await
+    }
+
+    async fn validate_expiration(&self, chain: &str, expiration: i64) -> Result<(), AppCoreError> {
+        NoopValidator.validate_expiration(chain, expiration).await
+    }
+
+    async fn validate_payload_signed(
+        &self,
+        _: &LzSentEvent,
+        _: Option<&str>,
+        _: &str,
+        _: Option<&str>,
+    ) -> Result<Option<u64>, AppCoreError> {
+        Ok(Some(self.required))
+    }
+
+    async fn validate_extra_context(
+        &self,
+        sent_event: &LzSentEvent,
+        context: &SigningContext,
+    ) -> Result<(), AppCoreError> {
+        NoopValidator
+            .validate_extra_context(sent_event, context)
+            .await
+    }
+
+    async fn uln_receive_version(&self, message_id: &LzMessageId) -> Result<String, AppCoreError> {
+        NoopValidator.uln_receive_version(message_id).await
     }
 }
 
+fn core_app_with_confirmation_floor(required: u64) -> PillarApp {
+    PillarApp {
+        available_chain_names: Arc::new(vec!["ethereum".to_string(), "bsc".to_string()]),
+        wallets_by_chain_name: HashMap::from([(
+            "bsc".to_string(),
+            vec![WalletRef {
+                wallet_name: "wallet-1".to_string(),
+            }],
+        )]),
+        hash_call_data_builders: HashMap::from([(
+            "V302".to_string(),
+            Arc::new(FixedBuilder) as Arc<dyn HashCallDataBuilder>,
+        )]),
+        sent_event_resolver: Arc::new(FixedResolver),
+        validator: Arc::new(ConfirmationFloorValidator { required }),
+        signer_getter: Arc::new(FixedSigner),
+        legacy_chain_name_resolver: Arc::new(FixedChainResolver),
+        stage_observer: Arc::new(pillar_core::NoopSignStageObserver),
+        debug_mode: false,
+    }
+}
+
+async fn assert_core_confirmation_floor(required: u64) -> (String, String) {
+    let app = core_app_with_confirmation_floor(required);
+    let mut below = request_v2();
+    let SigningContext::Message {
+        block_confirmation, ..
+    } = &mut below.signing_context
+    else {
+        unreachable!()
+    };
+    *block_confirmation = i64::try_from(required).unwrap() - 1;
+    let error = app
+        .sign_request_v2(below)
+        .await
+        .expect_err("one confirmation below the receive requirement must be refused");
+    let below_error = error.to_string();
+    assert!(
+        below_error.contains(&format!("below the {required} confirmations")),
+        "{below_error}"
+    );
+
+    let mut at = request_v2();
+    let SigningContext::Message {
+        block_confirmation, ..
+    } = &mut at.signing_context
+    else {
+        unreachable!()
+    };
+    *block_confirmation = i64::try_from(required).unwrap();
+    app.sign_request_v2(at)
+        .await
+        .expect("the exact receive requirement must be admitted");
+    (below_error, format!("admitted at {required}"))
+}
 /// M-22, already-signed half: for every case the contract answers, this service's
 /// verdict must be the contract's `verifiedView` at the pathway's requirement, so a
 /// below-requirement attestation stays replaceable.
@@ -176,86 +275,81 @@ async fn m22_ton_already_signed_matches_the_deployed_contract() {
     );
 }
 
-/// M-22, prevention half: a MESSAGE request below the pathway's requirement is
-/// refused before any source RPC, at the requirement it passes the floor, and the
-/// floor reads the effective value the contract resolves (custom, else default).
+/// The TON observation supplies the requirement; the core signing path applies the floor.
 #[tokio::test]
 async fn m22_ton_confirmation_floor_refuses_below_requirement_before_source_reads() {
     let fixture = semantics();
     let event = ton_semantics_event(fixture["nonce"].as_u64().unwrap());
     let mut rows = Vec::new();
-    for case in fixture["cases"].as_array().unwrap() {
+    for case in fixture["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|case| !case["verifiedViewAtRequired"].as_bool().unwrap())
+    {
         let name = case["name"].as_str().unwrap();
-        let required = case["requiredConfirmations"].as_i64().unwrap();
-        for requested in [required - 1, required] {
-            if requested < 0 {
-                continue;
-            }
-            let calls: RecordedJsonCalls = Arc::new(Mutex::new(Vec::new()));
-            let getter = StaticProviderConfig::new(
-                IndexMap::from([(
-                    "ton".to_string(),
-                    ProviderConfig::with_distinct_entities(
-                        vec![ProviderUri::Uri("https://ton.example".to_string())],
-                        1,
-                    ),
-                )]),
-                Some(&["ton".to_string()]),
+        let expected = case["requiredConfirmations"].as_u64().unwrap();
+        let calls: RecordedJsonCalls = Arc::new(Mutex::new(Vec::new()));
+        let getter = StaticProviderConfig::new(
+            IndexMap::from([(
+                "ton".to_string(),
+                ProviderConfig::with_distinct_entities(
+                    vec![ProviderUri::Uri("https://ton.example".to_string())],
+                    1,
+                ),
+            )]),
+            Some(&["ton".to_string()]),
+        )
+        .unwrap();
+        let checks = runtime_rpc_validation_checks_from_evm_config(
+            &ProviderSnapshotHandle::from_getter(&getter),
+            RecordingTransport {
+                calls: calls.clone(),
+                responses: Arc::new(Mutex::new(vec![
+                    storage(case["connectionStorageBoc"].as_str().unwrap()),
+                    storage(case["ulnStorageBoc"].as_str().unwrap()),
+                    Ok(json!({"result": {"exit_code": 0, "stack": [["num", "0x0"]]}})),
+                ])),
+            },
+            "mainnet",
+            &["ton".to_string()],
+        )
+        .unwrap();
+        let required = checks
+            .validate_payload_not_signed(
+                &event,
+                Some(fixture["verifier"].as_str().unwrap()),
+                "ton",
+                None,
             )
-            .unwrap();
-            let checks = runtime_rpc_validation_checks_from_evm_config(
-                &ProviderSnapshotHandle::from_getter(&getter),
-                RecordingTransport {
-                    calls: calls.clone(),
-                    responses: Arc::new(Mutex::new(vec![
-                        storage(case["connectionStorageBoc"].as_str().unwrap()),
-                        storage(case["ulnStorageBoc"].as_str().unwrap()),
-                    ])),
-                },
-                "mainnet",
-                &["ton".to_string()],
-            )
-            .unwrap();
-            let outcome = checks
-                .validate_readiness(&event, &message_context(requested))
-                .await;
-            let recorded: Vec<Value> = calls
-                .lock()
-                .unwrap()
+            .await
+            .expect("TON payload-signed validation succeeds")
+            .expect("TON receive configuration has a confirmation requirement");
+        assert_eq!(required, expected, "{name}");
+        let (below_error, at_result) = assert_core_confirmation_floor(required).await;
+        let recorded: Vec<Value> = calls
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(url, _, body)| json!({"url": url, "method": body["method"]}))
+            .collect();
+        assert_eq!(
+            recorded.len(),
+            3,
+            "{name}: storage and committableView reads"
+        );
+        assert!(
+            recorded
                 .iter()
-                .map(|(url, _, body)| json!({"url": url, "method": body["method"]}))
-                .collect();
-            if requested < required {
-                let error = outcome.expect_err("below the requirement must be refused");
-                assert!(
-                    matches!(&error, AppCoreError::BadRequest(message)
-                        if message.contains(&format!("below the {required} confirmations"))),
-                    "{name} requested {requested}: {error}"
-                );
-                assert_eq!(recorded.len(), 2, "{name}: only the two TON storage reads");
-                assert!(
-                    recorded
-                        .iter()
-                        .all(|call| call["url"] == "https://ton.example"),
-                    "{name}: no source-chain RPC before the refusal: {recorded:?}"
-                );
-            } else {
-                // At the requirement the floor passes and readiness moves on to the
-                // source chain, which this test does not configure.
-                let error = outcome.expect_err("the source chain has no provider here");
-                assert!(
-                    error
-                        .to_string()
-                        .contains("No provider config for chain ethereum"),
-                    "{name} requested {requested}: the floor must pass, got {error}"
-                );
-            }
-            rows.push(json!({
-                "case": name, "required": required, "requested": requested,
-                "refused": requested < required, "calls": recorded,
-            }));
-        }
+                .all(|call| call["url"] == "https://ton.example"),
+            "{name}: payload validation does not issue source readiness reads"
+        );
+        rows.push(json!({
+            "case": name, "required": required, "below": required - 1,
+            "belowError": below_error, "at": at_result, "payloadCalls": recorded,
+        }));
     }
+    assert!(!rows.is_empty());
     artifact("m22-confirmation-floor", json!({ "cases": rows }));
 }
 
@@ -834,46 +928,208 @@ async fn m22_starknet_already_signed_compares_confirmations() {
     artifact("m22-starknet-already-signed", json!({ "cases": rows }));
 }
 
-/// Starknet floor: below the requirement is refused after one config read and no
-/// source read; at the requirement readiness moves on to the source chain.
+/// The payload-signed observation returns the requirement; `PillarApp` enforces it.
 #[tokio::test]
 async fn m22_starknet_confirmation_floor_refuses_below_requirement() {
     let mut rows = Vec::new();
-    for requested in [4i64, 5] {
-        let calls: RecordedJsonCalls = Arc::new(Mutex::new(Vec::new()));
-        let checks = starknet_checks(
-            vec![Ok(
-                json!({"result": ["0x5", "0x1", "0x0", "0x0", "0x0", "0x0", "0x0"]}),
-            )],
-            calls.clone(),
-        );
-        let outcome = checks
-            .validate_readiness(&starknet_event(), &message_context(requested))
-            .await;
-        let error = outcome.expect_err("the source chain has no provider here");
-        if requested < 5 {
-            assert!(
-                matches!(&error, AppCoreError::BadRequest(message)
-                    if message.contains("below the 5 confirmations")),
-                "{error}"
-            );
-        } else {
-            assert!(
-                error
-                    .to_string()
-                    .contains("No provider config for chain ethereum"),
-                "{error}"
-            );
-        }
-        let recorded = calls.lock().unwrap().clone();
-        assert_eq!(recorded.len(), 1, "{recorded:?}");
-        assert_eq!(recorded[0].2["method"], "starknet_call");
-        rows.push(
-            json!({"requested": requested, "required": 5, "refused": requested < 5,
-                         "outcome": error.to_string()}),
-        );
-    }
+    let calls: RecordedJsonCalls = Arc::new(Mutex::new(Vec::new()));
+    let checks = starknet_checks(
+        vec![
+            Ok(json!({"result": "0x0"})),
+            Ok(json!({"result": ["0x5", "0x1", "0x0", "0x0", "0x0", "0x0", "0x0"]})),
+        ],
+        calls.clone(),
+    );
+    let required = checks
+        .validate_payload_not_signed(&starknet_event(), Some("0x3333"), "starknet", None)
+        .await
+        .expect("Starknet payload-signed validation succeeds")
+        .expect("Starknet receive config has a confirmation requirement");
+    assert_eq!(required, 5);
+    let (below_error, at_result) = assert_core_confirmation_floor(required).await;
+    let recorded = calls.lock().unwrap().clone();
+    assert_eq!(recorded.len(), 2, "{recorded:?}");
+    assert_eq!(recorded[0].2["method"], "starknet_getStorageAt");
+    assert_eq!(recorded[1].2["method"], "starknet_call");
+    rows.push(json!({
+        "required": required, "below": required - 1,
+        "belowError": below_error, "at": at_result,
+        "payloadCalls": recorded.iter().map(|call| &call.2["method"]).collect::<Vec<_>>(),
+    }));
     artifact("m22-starknet-floor", json!({ "cases": rows }));
+}
+#[tokio::test]
+async fn m22_confirmation_floor_all_families() {
+    let mut rows = Vec::new();
+    let mut add =
+        |family: &str, requirement: Option<u64>, expected: u64, floor: (String, String)| {
+            assert_eq!(requirement, Some(expected), "{family}");
+            rows.push(json!({
+                "family": family,
+                "required": expected,
+                "below": expected - 1,
+                "belowError": floor.0,
+                "at": floor.1,
+            }));
+        };
+
+    let evm = runtime_rpc_payload_checks(
+        vec![
+            eth_call_result(&abi_address_bool(TEST_RECEIVE_ULN_302, true)),
+            eth_call_result(&abi_word(15)),
+            eth_call_result(&abi_bool_uint64(false, 0)),
+            eth_call_result(&abi_word(0)),
+        ],
+        Arc::new(Mutex::new(Vec::new())),
+    )
+    .validate_payload_not_signed(
+        &payload_signed_sent_event(),
+        Some("0x3333333333333333333333333333333333333333"),
+        "bsc",
+        None,
+    )
+    .await
+    .expect("EVM payload observation");
+    let floor = assert_core_confirmation_floor(15).await;
+    add("evm", evm, 15, floor);
+
+    let solana = runtime_rpc_solana_payload_checks(
+        vec![get_multiple_accounts_result([
+            None,
+            None,
+            None,
+            Some(solana_receive_config_account_bytes(5)),
+            None,
+        ])],
+        Arc::new(Mutex::new(Vec::new())),
+    )
+    .validate_payload_not_signed(
+        &payload_signed_solana_sent_event(),
+        Some("4gnov6q1KFcjtwBjepBmQtuf5R4ho4XVkrytY8hk4CTF"),
+        "solana",
+        None,
+    )
+    .await
+    .expect("Solana payload observation");
+    let floor = assert_core_confirmation_floor(5).await;
+    add("solana", solana, 5, floor);
+
+    let (move_checks, _) =
+        super::layerzero_parts_rejection_tests::move_checks("aptos", json!([0]), json!(["1"]), 15);
+    let move_requirement = move_checks
+        .validate_payload_not_signed(
+            &super::layerzero_parts_rejection_tests::v302_event("aptos"),
+            Some("0x3333333333333333333333333333333333333333333333333333333333333333"),
+            "aptos",
+            None,
+        )
+        .await
+        .expect("Move V302 payload observation");
+    let floor = assert_core_confirmation_floor(15).await;
+    add("move-v302", move_requirement, 15, floor);
+
+    for (family, dst_eid, responses) in [
+        (
+            "sui",
+            30_350,
+            validation_payload_sui_tests::sui_responses(
+                validation_payload_sui_tests::SUI_RECEIVER,
+                0,
+                None,
+                15,
+            ),
+        ),
+        (
+            "iotal1",
+            30_423,
+            validation_payload_sui_tests::iota_responses(
+                validation_payload_sui_tests::SUI_RECEIVER,
+                0,
+                15,
+            ),
+        ),
+    ] {
+        let requirement = validation_payload_sui_tests::sui_checks(
+            family,
+            responses,
+            Arc::new(Mutex::new(Vec::new())),
+        )
+        .validate_payload_not_signed(
+            &validation_payload_sui_tests::sui_sent_event(family, dst_eid),
+            Some(validation_payload_sui_tests::VERIFIER),
+            family,
+            None,
+        )
+        .await
+        .expect("Sui-family payload observation");
+        let floor = assert_core_confirmation_floor(15).await;
+        add(family, requirement, 15, floor);
+    }
+
+    let stellar = stellar_payload_signed_tests::run([
+        ("get_receive_library", Ok("defaultLibrary")),
+        ("is_valid_receive_library", Ok("valid")),
+        ("effective_receive_uln_config", Ok("config15")),
+        ("confirmations", Ok("noConfirmations")),
+        ("uln_verifiable", Ok("verifying")),
+    ])
+    .await
+    .0
+    .expect("Stellar payload observation");
+    let floor = assert_core_confirmation_floor(15).await;
+    add("stellar", stellar, 15, floor);
+
+    let ton_fixture = semantics();
+    let ton_case = ton_fixture["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["name"] == "below_custom")
+        .unwrap();
+    let ton_requirement = ton_checks(vec![
+        storage(ton_case["connectionStorageBoc"].as_str().unwrap()),
+        storage(ton_case["ulnStorageBoc"].as_str().unwrap()),
+        Ok(json!({"result": {"exit_code": 0, "stack": [["num", "0x0"]]}})),
+    ])
+    .validate_payload_not_signed(
+        &ton_semantics_event(ton_fixture["nonce"].as_u64().unwrap()),
+        Some(ton_fixture["verifier"].as_str().unwrap()),
+        "ton",
+        None,
+    )
+    .await
+    .expect("TON payload observation");
+    let ton_required = ton_case["requiredConfirmations"].as_u64().unwrap();
+    let floor = assert_core_confirmation_floor(ton_required).await;
+    add("ton", ton_requirement, ton_required, floor);
+
+    let starknet_calls = Arc::new(Mutex::new(Vec::new()));
+    let starknet_requirement = starknet_checks(
+        vec![
+            Ok(json!({"result": "0x0"})),
+            Ok(json!({"result": ["0x5", "0x1", "0x0", "0x0", "0x0", "0x0", "0x0"]})),
+        ],
+        starknet_calls.clone(),
+    )
+    .validate_payload_not_signed(&starknet_event(), Some("0x3333"), "starknet", None)
+    .await
+    .expect("Starknet payload observation");
+    let floor = assert_core_confirmation_floor(5).await;
+    add("starknet", starknet_requirement, 5, floor);
+
+    let canton_requirement = canton_sequencer_tests::recorded_unsigned_canton_requirement().await;
+    let floor = assert_core_confirmation_floor(canton_requirement).await;
+    add(
+        "canton",
+        Some(canton_requirement),
+        canton_requirement,
+        floor,
+    );
+
+    artifact(
+        "m22-confirmation-floor-all-families",
+        json!({ "families": rows }),
+    );
 }
 
 #[derive(Clone)]
