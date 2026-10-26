@@ -1,3 +1,5 @@
+// Test code parses its own committed fixtures; production parsing goes through pillar_core::json.
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
 mod abi;
 mod adapter_params;
 mod aptos;

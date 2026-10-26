@@ -1,3 +1,5 @@
+// Test code parses its own committed fixtures; production parsing goes through pillar_core::json.
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
 use async_trait::async_trait;
 use futures::{stream, StreamExt, TryStreamExt};
 use indexmap::IndexMap;
@@ -8,6 +10,7 @@ use std::{collections::HashMap, sync::Arc, time::Instant};
 
 pub mod audit;
 pub mod execution;
+pub mod json;
 mod provider_health_cache;
 
 pub use provider_health_cache::{

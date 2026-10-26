@@ -626,7 +626,7 @@ pub const LEGACY_PROVIDER_CONFIG_ERROR: &str = "the legacy `{ uris, quorum }` pr
 /// Refuses a provider file in the retired `{ uris, quorum }` shape by name, so an operator
 /// who has not migrated is told so rather than shown a schema error.
 pub fn reject_legacy_provider_config(raw: &str) -> Result<(), ConfigError> {
-    let value = serde_json::from_str::<serde_json::Value>(raw).map_err(|error| {
+    let value = pillar_core::json::parse_value(raw).map_err(|error| {
         ConfigError::Json(format!(
             "providers-v2.json: {}",
             crate::json_error_without_input(&error)
@@ -650,7 +650,7 @@ fn parse_providers_file(raw: &str) -> Result<RawProvidersFile, ConfigError> {
     reject_legacy_provider_config(raw)?;
     // From the text: a `serde_json::Value` object is sorted, which would lose the file's
     // chain order.
-    serde_json::from_str(raw).map_err(|error| {
+    pillar_core::json::from_str(raw).map_err(|error| {
         ConfigError::Json(format!(
             "providers-v2.json: {}",
             crate::json_error_without_input(&error)
@@ -661,7 +661,7 @@ fn parse_providers_file(raw: &str) -> Result<RawProvidersFile, ConfigError> {
 fn parse_strategy_file(
     raw: &str,
 ) -> Result<(QuorumStrategyFileContent, StrategyRestrictions), ConfigError> {
-    let raw = serde_json::from_str::<RawStrategyFile>(raw).map_err(|error| {
+    let raw = pillar_core::json::from_str::<RawStrategyFile>(raw).map_err(|error| {
         ConfigError::Json(format!(
             "quorum-strategy.json: {}",
             crate::json_error_without_input(&error)

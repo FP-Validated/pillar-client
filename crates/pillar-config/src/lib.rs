@@ -1,3 +1,5 @@
+// Test code parses its own committed fixtures; production parsing goes through pillar_core::json.
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -695,7 +697,7 @@ pub fn wallet_definitions_from_env_map(
     vars: &HashMap<String, String>,
 ) -> Result<Vec<WalletDefinition>, ConfigError> {
     let raw = required(vars, LZ_WALLETS)?;
-    let wallets = serde_json::from_str::<Vec<WalletDefinition>>(raw)
+    let wallets = pillar_core::json::from_str::<Vec<WalletDefinition>>(raw)
         .map_err(|error| ConfigError::Json(json_error_without_input(&error)))?;
     validate_wallet_definitions(wallets, LZ_WALLETS)
 }
@@ -705,7 +707,7 @@ pub fn wallet_definitions_from_file_path_env_map(
 ) -> Result<Vec<WalletDefinition>, ConfigError> {
     let path = required(vars, LZ_WALLETS_FILE_PATH)?;
     let raw = fs::read_to_string(path).map_err(|error| ConfigError::Io(error.to_string()))?;
-    let wallets = serde_json::from_str::<Vec<WalletDefinition>>(&raw)
+    let wallets = pillar_core::json::from_str::<Vec<WalletDefinition>>(&raw)
         .map_err(|error| ConfigError::Json(json_error_without_input(&error)))?;
     validate_wallet_definitions(wallets, LZ_WALLETS_FILE_PATH)
 }
@@ -763,7 +765,7 @@ pub fn wallet_to_mnemonic_map_from_env_map(
     vars: &HashMap<String, String>,
 ) -> Result<WalletToMnemonicMap, ConfigError> {
     let raw = required(vars, LZ_WALLET_MNEMONIC_MAPPING)?;
-    let mapping = serde_json::from_str::<WalletToMnemonicMap>(raw)
+    let mapping = pillar_core::json::from_str::<WalletToMnemonicMap>(raw)
         .map_err(|error| ConfigError::Json(json_error_without_input(&error)))?;
     if mapping.is_empty() {
         Err(ConfigError::NoMnemonicDefinition(
@@ -779,7 +781,7 @@ pub fn wallet_to_mnemonic_map_from_file_path_env_map(
 ) -> Result<WalletToMnemonicMap, ConfigError> {
     let path = required(vars, LZ_WALLET_MNEMONIC_MAPPING_FILE_PATH)?;
     let raw = fs::read_to_string(path).map_err(|error| ConfigError::Io(error.to_string()))?;
-    let mapping = serde_json::from_str::<WalletToMnemonicMap>(&raw)
+    let mapping = pillar_core::json::from_str::<WalletToMnemonicMap>(&raw)
         .map_err(|error| ConfigError::Json(json_error_without_input(&error)))?;
     if mapping.is_empty() {
         Err(ConfigError::NoMnemonicDefinition(

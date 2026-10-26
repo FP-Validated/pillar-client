@@ -56,7 +56,7 @@ impl AwsMnemonicSecretClient for AwsSecretsManagerMnemonicClient {
 }
 
 pub(crate) fn parse_aws_mnemonic_secret(secret: &str) -> Result<SignerLocalMnemonic, String> {
-    let secret: AwsMnemonicSecret = serde_json::from_str(secret).map_err(|error| {
+    let secret: AwsMnemonicSecret = pillar_core::json::from_str(secret).map_err(|error| {
         format!(
             "AWS mnemonic secret: {}",
             pillar_config::json_error_without_input(&error)

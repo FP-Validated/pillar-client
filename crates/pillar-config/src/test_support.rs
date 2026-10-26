@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 /// meaning "n agreeing URIs". A missing quorum is 1. Chain order is kept.
 pub fn providers_v2_from_uris_json(fixture: &str) -> (String, String) {
     let fixture: IndexMap<String, Value> =
-        serde_json::from_str(fixture).expect("fixture is a JSON object of chains");
+        pillar_core::json::from_str(fixture).expect("fixture is a JSON object of chains");
     let mut entities = Vec::new();
     let mut chains = IndexMap::new();
     let mut strategies = IndexMap::new();

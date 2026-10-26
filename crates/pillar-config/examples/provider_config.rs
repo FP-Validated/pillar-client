@@ -57,10 +57,10 @@ fn host(uri: &str) -> Result<String, String> {
 }
 
 fn convert(legacy: &str, labels: &str, out_dir: &str) -> Result<(), String> {
-    let legacy: indexmap::IndexMap<String, Value> =
-        serde_json::from_str(&read(legacy)?).map_err(|error| format!("legacy file: {error}"))?;
-    let labels: BTreeMap<String, Value> =
-        serde_json::from_str(&read(labels)?).map_err(|error| format!("labels file: {error}"))?;
+    let legacy: indexmap::IndexMap<String, Value> = pillar_core::json::from_str(&read(legacy)?)
+        .map_err(|error| format!("legacy file: {error}"))?;
+    let labels: BTreeMap<String, Value> = pillar_core::json::from_str(&read(labels)?)
+        .map_err(|error| format!("labels file: {error}"))?;
     let mut entities = Vec::<String>::new();
     let mut unlabelled = Vec::new();
     let mut chains = indexmap::IndexMap::new();

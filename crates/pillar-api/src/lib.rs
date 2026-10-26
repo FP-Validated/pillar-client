@@ -1,3 +1,5 @@
+// Test code parses its own committed fixtures; production parsing goes through pillar_core::json.
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
 use async_trait::async_trait;
 use axum::{
     body::Body,
@@ -540,9 +542,8 @@ async fn root() -> Html<&'static str> {
 /// plain `SyntaxError`, so a 500 (`bootstrap.ts:35-39,98-100,124-126`).
 fn unwrap_body_envelope(value: Value) -> Result<Value, AppError> {
     let mut value = match value.get("body").and_then(Value::as_str) {
-        Some(body) => {
-            serde_json::from_str(body).map_err(|error| AppError::Internal(error.to_string()))?
-        }
+        Some(body) => pillar_core::json::parse_value(body)
+            .map_err(|error| AppError::Internal(error.to_string()))?,
         None => value,
     };
     normalize_js_numbers(&mut value);

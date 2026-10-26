@@ -105,9 +105,11 @@ pub(crate) fn read_json_body(
             "Failed to parse the request body as JSON: expected an object or array".to_string(),
         ));
     }
-    serde_json::from_str(text).map(Some).map_err(|error| {
-        AppError::MalformedJson(format!("Failed to parse the request body as JSON: {error}"))
-    })
+    pillar_core::json::parse_value(text)
+        .map(Some)
+        .map_err(|error| {
+            AppError::MalformedJson(format!("Failed to parse the request body as JSON: {error}"))
+        })
 }
 
 fn unsupported_charset(charset: &str) -> AppError {

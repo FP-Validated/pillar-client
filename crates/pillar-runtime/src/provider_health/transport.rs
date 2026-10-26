@@ -856,13 +856,15 @@ pub(crate) fn parse_json_with_limits(bytes: &[u8], ton: bool) -> Result<Value, S
     };
     ensure_json_parse_budget(bytes, depth_limit, node_limit)?;
     if !ton {
-        return serde_json::from_slice(bytes).map_err(|error| error.to_string());
+        return pillar_core::json::parse_value_slice(bytes).map_err(|error| error.to_string());
     }
+    #[allow(clippy::disallowed_methods)] // Wrapped in UntrustedValue below.
     let mut deserializer = serde_json::Deserializer::from_slice(bytes);
     deserializer.disable_recursion_limit();
     let guarded = serde_stacker::Deserializer::new(&mut deserializer);
-    let value =
-        <Value as serde::Deserialize>::deserialize(guarded).map_err(|error| error.to_string())?;
+    let pillar_core::json::UntrustedValue(value) =
+        <pillar_core::json::UntrustedValue as serde::Deserialize>::deserialize(guarded)
+            .map_err(|error| error.to_string())?;
     if let Err(error) = deserializer.end() {
         drop_json_value_safely(value);
         return Err(error.to_string());

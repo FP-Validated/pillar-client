@@ -1,3 +1,5 @@
+// Test code parses its own committed fixtures; production parsing goes through pillar_core::json.
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
 use futures::{stream::FuturesUnordered, StreamExt};
 use pillar_core::{
     PillarApiRequestV1, PillarApiRequestV2, PillarApiResponse, ProviderHealthReport,
@@ -189,7 +191,7 @@ async fn bounded_response_json(response: reqwest::Response) -> Result<Value, Str
         let chunk = chunk.map_err(|error| error.without_url().to_string())?;
         extend_bounded_response(&mut bytes, &chunk)?;
     }
-    serde_json::from_slice(&bytes).map_err(|error| error.to_string())
+    pillar_core::json::parse_value_slice(&bytes).map_err(|error| error.to_string())
 }
 
 fn extend_bounded_response(buffer: &mut Vec<u8>, chunk: &[u8]) -> Result<(), String> {
