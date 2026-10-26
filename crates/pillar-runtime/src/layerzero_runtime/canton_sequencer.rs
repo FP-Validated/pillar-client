@@ -273,15 +273,13 @@ impl CantonSequencer {
         transport: &T,
         params: &[(&str, &str)],
     ) -> Result<SequencerAnswer<ScanEvents>, AppCoreError> {
-        self.scan(transport, "events", params, |raw| {
-            match (
-                raw.get("events").and_then(Value::as_array),
-                raw.get("latestNonce").and_then(big_uint),
-                raw.get("isLatest").is_some_and(Value::is_boolean),
-                hex_string(raw.get("stateRoot")),
-            ) {
-                (Some(events), Some(latest_nonce), true, true) => Some(ScanEvents {
-                    events: events.clone(),
+        self.scan(transport, "events", params, |mut raw| {
+            let latest_nonce = raw.get("latestNonce").and_then(big_uint)?;
+            let shaped = raw.get("isLatest").is_some_and(Value::is_boolean)
+                && hex_string(raw.get("stateRoot"));
+            match raw.get_mut("events").map(Value::take) {
+                Some(Value::Array(events)) if shaped => Some(ScanEvents {
+                    events,
                     latest_nonce,
                 }),
                 _ => None,
@@ -306,13 +304,14 @@ impl CantonSequencer {
     }
 
     /// `SequencerScanClient.#get`: the signature envelope is verified before chain-specific
-    /// shape work such as BigInt conversion over provider-controlled fields.
+    /// shape work such as BigInt conversion over provider-controlled fields, and the
+    /// verified body is handed to `shape` by value so large arrays move rather than copy.
     async fn scan<T: JsonRpcTransport, R>(
         &self,
         transport: &T,
         kind: &str,
         params: &[(&str, &str)],
-        shape: impl FnOnce(&Value) -> Option<R>,
+        shape: impl FnOnce(Value) -> Option<R>,
     ) -> Result<SequencerAnswer<R>, AppCoreError> {
         let mut query = vec![("type", kind)];
         query.extend_from_slice(params);
@@ -333,7 +332,7 @@ impl CantonSequencer {
         self.verify("scan", &request, &raw, &signatures)?;
         let answer = match error_response(&raw) {
             Some(message) => SequencerAnswer::Error(message),
-            None => shape(&raw)
+            None => shape(raw)
                 .map(SequencerAnswer::Ok)
                 .ok_or_else(unexpected_scan)?,
         };
