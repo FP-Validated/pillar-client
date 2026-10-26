@@ -24,6 +24,9 @@ the Prometheus metric names.
 - M-23: the Canton sequencer scan moves the verified events array out of the response instead of copying it. The committee check already ran before shape work and the digest was already streamed (`3985856`).
 - M-24: READ chain and process permit waits end at the request deadline; they waited until a permit freed.
 - M-25: request bodies, body envelopes, provider and client responses and configuration files are parsed with `pillar_core::json`, which refuses the `serde_json` private `RawValue` and `Number` object keys at any depth. `serde_json::Value` re-parsed a `RawValue`-keyed string with a fresh 128-level budget (the feature is enabled by `axum`), so a 70 KB body carried about 1,900 nested containers. Clippy refuses new direct `serde_json` parse calls.
+- Starknet, same class as M-22: the already-signed check reads this DVN's stored verification from ULN302 storage and counts it only at the OApp's effective receive confirmations; `has_payload_signed`, which upstream calls, is true for any stored verification. A Starknet MESSAGE request below the requirement is a 400 before any source read. New dependency `starknet-crypto` 0.8.1 for the Pedersen slot derivation.
+- READ: one provider's `eth_call` loses its vote after 10 s, so stalled target chains cannot hold every process permit until the 55.2 s RPC timeout; a fifth chain's READ is admitted within that bound.
+- Canton: a sequencer provider without `sequencer-validators` and `sequencer-quorum` is refused; upstream accepts it and trusts its answers unchecked.
 
 ### Fixes
 

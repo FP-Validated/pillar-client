@@ -894,6 +894,7 @@ documentation. It is not released. The per-finding response is
 | `cargo fmt --all --check` | Passed |
 | `cargo clippy --workspace --all-targets --locked` | Passed with the new `clippy.toml`; one pre-existing warning in `gasolina_parity_tests.rs:89` |
 | `cargo test --workspace --locked` (rustc 1.96.0) | 1,188 passed, zero failed, 15 ignored (`test result:` totals), on the final tree; artifacts in `local/reports/m22-m25-remediation-20261026/` |
+| Same, after the residual fixes | 1,193 passed, zero failed, 15 ignored, on the final tree; artifacts in `local/reports/m22-m25-residuals-20261026/`. Two earlier runs failed on test configurations that still used a committee-less Canton sequencer and on a wrong expected `srcEid` felt (30101 is `0x7595`); both were corrected and the whole suite rerun |
 
 Failure modes were written down before the code and each is a scenario of
 `m22_m25_remediation_e2e.rs`. The TON semantics were taken from the deployed code, not
@@ -912,6 +913,10 @@ before the body was read, so the M-25 child now uses tokio's default 2 MiB stack
 production uses; the Canton sequencer fixture lacked the required `authorization` header;
 and `h02_stalled_chains_do_not_delay_another_chains_reads` showed that bounding READ
 permit waits by a fixed 58 s outside a request context failed callers with no deadline,
-so the wait is now bounded only by the request's own deadline. Starknet's
-`has_payload_signed` was not examined against Cairo source. No fix-reverted run was
-performed. No image was built and nothing was deployed.
+so the wait is now bounded only by the request's own deadline. The residuals left by
+that run were then closed - Starknet's already-signed check (`has_payload_signed` ignores
+confirmations, confirmed in the Cairo source and against mainnet storage), READ
+starvation by four stalled chains, and the committee-less Canton sequencer - and each
+defect's old behaviour is shown in the final run itself rather than by reverting
+commits; see [m22-m25-response.md](audit/m22-m25-response.md). No image was built and
+nothing was deployed.

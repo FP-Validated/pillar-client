@@ -117,10 +117,41 @@ to the same `Value` as `serde_json`).
 
 ---
 
+## Residuals closed after the first pass
+
+**Starknet already-signed (same class as M-22).** `UltraLightNode302.has_payload_signed`,
+which upstream calls, is `hash_lookup != EMPTY_VERIFICATION` - true for any stored
+verification - while `_check_verifiable` counts one only at `confirmations >= required`
+and `verify` overwrites it (`@layerzerolabs/protocol-starknet-v2` 1.2.33
+`ultra_light_node_302.cairo`). No view returns the stored confirmations, so the
+verification is read from storage: `hash_lookup` at the Pedersen chain over
+`sn_keccak("hash_lookup")`, each `Bytes32` as its `u256` halves, then the DVN, with
+`submitted` and `confirmations` at offsets 0 and 1, compared with the first member of
+`get_oapp_uln_receive_config(receiver, srcEid)`. The derivation was checked on mainnet:
+for six unreclaimed `PayloadVerified` events the slot holds `submitted = 1` and the
+event's confirmations, and `has_payload_signed` agrees
+(`tests/onchain_provenance/starknet_hash_lookup.json`). A Starknet MESSAGE request
+below the requirement is refused as on TON.
+
+**READ starvation (residual of M-24).** Four stalled target chains could hold all
+sixteen process permits until the 55.2 s RPC timeout, past a waiting call's 58 s
+deadline. One provider's READ `eth_call` now loses its vote after 10 s, twice geth's
+default `--rpc.evmtimeout`. Permits are granted first in, first out, so a call for
+another chain is admitted within that bound however many chains stall.
+
+**Canton committee.** A sequencer without `sequencer-validators`/`sequencer-quorum` is
+refused. Upstream trusts it through `NoopQuorumVerifier`, which also covers the
+PacketSent events a signature is built from. The mainnet deployment configures no
+Canton chain.
+
+**Pre-fix discriminators.** The final run also shows each defect on the old rule:
+`serde_json`'s own `Value` parse of a 16-level token document overflows a 1 MiB thread
+in a child process while the new parser refuses it; every TON and Starknet case is a
+hash match the old rule called signed; a READ permit wait without a deadline is still
+pending after the deadline that ends the bounded one.
+
 ## Not changed
 
-- Starknet reads `has_payload_signed` from the contract; whether the deployed Cairo
-  compares confirmations was not established, and no change was made there.
-- A Canton sequencer without a committee is still accepted, as upstream accepts it.
-- With four target chains stalled at once, the sixteen process READ permits are all
-  held; the fifth chain waits until its deadline.
+- Every chain's signature is still issued at the caller's `blockConfirmation` on EVM,
+  Solana, Move, Sui, Stellar and Canton; only TON and Starknet refuse a request below
+  the destination's requirement.

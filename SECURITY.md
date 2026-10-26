@@ -563,6 +563,15 @@ not reproduce:
   A request whose `blockConfirmation` is below the requirement is a 400 before any
   source read; upstream signs it. Pinned against the deployed code in a TVM
   emulator (`tests/ton_contract_semantics/confirmations.json`).
+- Starknet destination, MESSAGE requests: the already-signed check is the ULN302's
+  own `_verified` (`submitted && confirmations >= required`), read from storage;
+  upstream calls `has_payload_signed`, which ignores confirmations. A request whose
+  `blockConfirmation` is below the OApp's receive confirmations is a 400; upstream
+  signs it.
+- A Canton sequencer provider without `sequencer-validators` and `sequencer-quorum`
+  is refused; upstream accepts it with `NoopQuorumVerifier`.
+- A READ provider's `eth_call` that has not answered in 10 s loses its vote; upstream
+  waits for its provider timeout.
 - A JSON object whose key is `$serde_json::private::RawValue` or
   `$serde_json::private::Number`, at any depth, in a request body, body envelope or
   provider response is a parse error here; upstream's `JSON.parse` accepts it as an
