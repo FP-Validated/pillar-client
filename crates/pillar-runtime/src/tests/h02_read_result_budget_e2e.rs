@@ -498,10 +498,11 @@ async fn h02_concurrent_commands_share_the_nested_call_limits() {
 
 /// Chains whose providers stall every call cannot hold the permits other chains need: with
 /// three of the four chains stalled under four large commands each, the fourth chain's READ
-/// resolves without waiting for any stalled call.
+/// resolves without waiting for any stalled call. The stall stays under the READ call
+/// timeout, so the stalled commands still resolve.
 #[tokio::test(start_paused = true)]
 async fn h02_stalled_chains_do_not_delay_another_chains_reads() {
-    let stall = Duration::from_secs(50);
+    let stall = Duration::from_secs(5);
     let stalled_chains = ["bsc", "arbitrum", "polygon"];
     let mut transport = SizedReadTransport::new(|_, _| 32);
     transport.slow = stalled_chains.iter().map(|chain| (*chain, stall)).collect();

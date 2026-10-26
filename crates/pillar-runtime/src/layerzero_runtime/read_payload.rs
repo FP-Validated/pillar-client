@@ -29,6 +29,11 @@ const READ_CALL_LIMITS: ReadCallLimits = ReadCallLimits {
     process: 16,
     per_chain: 4,
 };
+/// The longest one provider's READ `eth_call` may hold its call's permits. Permits are
+/// granted first in, first out, so however many target chains stall at once, a call
+/// queued for another chain is admitted within this long. Twice geth's default
+/// `--rpc.evmtimeout`, past which a node abandons the call itself.
+pub(crate) const READ_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// A READ permit wait ends at the signing request's deadline. A caller outside an HTTP
 /// request has none and waits for a permit as before.
@@ -198,18 +203,25 @@ where
             let transport = self.transport.clone();
             let block = block.clone();
             requests.push(async move {
-                let vote = crate::provider_health::eth_call_read_observation_at_block(
-                    transport,
-                    url,
-                    headers,
-                    to,
-                    call_data,
-                    block,
-                    max_result_bytes,
+                // A call holds its chain and process permits until its quorum resolves,
+                // so a provider that never answers must lose its vote in bounded time.
+                let vote = match tokio::time::timeout(
+                    READ_CALL_TIMEOUT,
+                    crate::provider_health::eth_call_read_observation_at_block(
+                        transport,
+                        url,
+                        headers,
+                        to,
+                        call_data,
+                        block,
+                        max_result_bytes,
+                    ),
                 )
                 .await
-                .map(Some)
-                .map_err(RpcError::from);
+                {
+                    Ok(vote) => vote.map(Some).map_err(RpcError::from),
+                    Err(_) => Err(RpcError::Remote("provider response timed out".to_string())),
+                };
                 (index, vote)
             });
         }
