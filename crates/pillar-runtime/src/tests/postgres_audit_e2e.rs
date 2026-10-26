@@ -97,7 +97,7 @@ impl AzureKmsClient for Sdk {
         key: &AzureKmsKeyId,
     ) -> Result<AzureEcPublicKey, SignerError> {
         assert!(matches!(key.name.as_str(), "smoke" | "other"));
-        let point = self.key.verifying_key().to_encoded_point(false);
+        let point = self.key.verifying_key().to_sec1_point(false);
         Ok(AzureEcPublicKey {
             key_id: AzureKmsKeyId {
                 name: key.name.clone(),
@@ -130,7 +130,7 @@ impl AzureKmsClient for Sdk {
         assert_eq!(
             row.get::<_, String>(3),
             pillar_core::audit::fingerprint(
-                self.key.verifying_key().to_encoded_point(false).as_bytes()
+                self.key.verifying_key().to_sec1_point(false).as_bytes()
             )
         );
         assert_eq!(row.get::<_, String>(4).len(), 64);
@@ -169,7 +169,7 @@ impl AzureKmsClient for Sdk {
                 "synthetic second-wallet failure".into(),
             ));
         }
-        let (signature, _) = self.key.sign_prehash_recoverable(digest).unwrap();
+        let (signature, _) = self.key.sign_prehash_recoverable(digest);
         if matches!(self.behavior, Behavior::CrashAfterEffect) {
             std::process::exit(74);
         }
@@ -298,9 +298,8 @@ fn verify(envelope: Value, sdk: &Sdk) -> String {
     )
     .unwrap();
     assert_eq!(recovered, *sdk.key.verifying_key());
-    let hash = <sha3::Keccak256 as sha3::Digest>::digest(
-        &recovered.to_encoded_point(false).as_bytes()[1..],
-    );
+    let hash =
+        <sha3::Keccak256 as sha3::Digest>::digest(&recovered.to_sec1_point(false).as_bytes()[1..]);
     assert!(signature
         .address
         .eq_ignore_ascii_case(&format!("0x{}", hex::encode(&hash[12..]))));

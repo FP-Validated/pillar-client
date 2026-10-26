@@ -5,10 +5,10 @@
 //! (`rpc-sdk/src/canton/index.ts:218-314`) and the already-signed check
 //! (`uln/canton/index.ts:1005-1069`, `formatUlnConfig`).
 use super::*;
-use k256::elliptic_curve::bigint::{Encoding, Limb, U256};
+use k256::elliptic_curve::bigint::{Limb, U256};
 use k256::elliptic_curve::ops::Reduce;
 use k256::elliptic_curve::point::DecompressPoint;
-use k256::elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
+use k256::elliptic_curve::sec1::{FromSec1Point, ToSec1Point};
 use k256::elliptic_curve::subtle::Choice;
 use k256::elliptic_curve::Curve;
 use pillar_config::ProviderConfig;
@@ -668,7 +668,7 @@ fn recover_public_key(digest: &[u8; 32], signature: &[u8]) -> Result<String, Str
         return Err(invalid());
     }
     let x = if recovery >= 2 {
-        let (sum, carry) = r.adc(&order, Limb::ZERO);
+        let (sum, carry) = r.carrying_add(&order, Limb::ZERO);
         if carry != Limb::ZERO {
             return Err(invalid());
         }
@@ -681,10 +681,11 @@ fn recover_public_key(digest: &[u8; 32], signature: &[u8]) -> Result<String, Str
         Choice::from(recovery & 1),
     ))
     .ok_or_else(invalid)?;
-    let r_scalar = <k256::Scalar as Reduce<U256>>::reduce(r);
+    let r_scalar = <k256::Scalar as Reduce<U256>>::reduce(&r);
     let r_inverse = Option::<k256::Scalar>::from(r_scalar.invert()).ok_or_else(invalid)?;
-    let h = <k256::Scalar as Reduce<U256>>::reduce(U256::from_be_slice(digest));
-    let s = <k256::Scalar as Reduce<U256>>::reduce(s);
+    let h_value = U256::from_be_slice(digest);
+    let h = <k256::Scalar as Reduce<U256>>::reduce(&h_value);
+    let s = <k256::Scalar as Reduce<U256>>::reduce(&s);
     let u1 = -(h * r_inverse);
     let u2 = s * r_inverse;
     let q = k256::ProjectivePoint::GENERATOR * u1 + k256::ProjectivePoint::from(r_point) * u2;
@@ -693,7 +694,7 @@ fn recover_public_key(digest: &[u8; 32], signature: &[u8]) -> Result<String, Str
     }
     Ok(format!(
         "0x{}",
-        hex::encode(q.to_affine().to_encoded_point(false).as_bytes())
+        hex::encode(q.to_affine().to_sec1_point(false).as_bytes())
     ))
 }
 
@@ -763,9 +764,7 @@ fn normalize_secp256k1_public_key(public_key: &str) -> Result<String, String> {
             .ok_or_else(not_on_curve)?
         }
         (65, Some(0x04)) => {
-            let encoded = k256::EncodedPoint::from_bytes(&bytes).map_err(|_| not_on_curve())?;
-            Option::<k256::AffinePoint>::from(k256::AffinePoint::from_encoded_point(&encoded))
-                .ok_or_else(not_on_curve)?
+            k256::AffinePoint::from_sec1_bytes(&bytes).map_err(|_| not_on_curve())?
         }
         (length, _) => {
             return Err(format!(
@@ -776,7 +775,7 @@ fn normalize_secp256k1_public_key(public_key: &str) -> Result<String, String> {
     };
     Ok(format!(
         "0x{}",
-        hex::encode(point.to_encoded_point(false).as_bytes())
+        hex::encode(point.to_sec1_point(false).as_bytes())
     ))
 }
 
@@ -1275,7 +1274,7 @@ pub(crate) async fn canton_payload_signed<T: JsonRpcTransport>(
     sequencer: &CantonSequencer,
     sent_event: &LzSentEvent,
     verifier_address: &str,
-) -> Result<bool, AppCoreError> {
+) -> Result<(bool, u64), AppCoreError> {
     let uln = CANTON_STATIC_VE3_CONTRACTS[3];
     let read = |function: &'static str, arguments: Value| async move {
         match sequencer
@@ -1338,7 +1337,7 @@ pub(crate) async fn canton_payload_signed<T: JsonRpcTransport>(
         verification_state_is_verified(js_value_to_number(&state)).map_err(AppCoreError::Internal)
     };
     let (dvn_confirmed, verified) = tokio::try_join!(dvn_confirmed, verified)?;
-    Ok(verified || dvn_confirmed)
+    Ok((verified || dvn_confirmed, required_confirmations as u64))
 }
 
 /// `formatUlnConfig`'s reads, in its order: `confirmations` by `Number`, then the two

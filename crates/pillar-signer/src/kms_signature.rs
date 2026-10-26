@@ -1,7 +1,7 @@
 use k256::ecdsa::{
     RecoveryId as EcdsaRecoveryId, Signature as EcdsaSignature, VerifyingKey as EcdsaVerifyingKey,
 };
-use k256::elliptic_curve::sec1::ToEncodedPoint;
+use k256::elliptic_curve::sec1::ToSec1Point;
 use k256::{pkcs8::DecodePublicKey, PublicKey as EcdsaPublicKey};
 use spki::SubjectPublicKeyInfoRef;
 
@@ -40,7 +40,7 @@ pub fn kms_ecdsa_signature_to_recoverable(
         KmsEcdsaSignatureEncoding::Raw => EcdsaSignature::from_slice(signature),
     }
     .map_err(|error| SignerError::Message(error.to_string()))?;
-    let signature = signature.normalize_s().unwrap_or(signature);
+    let signature = signature.normalize_s();
     let recovery_id = recover_ecdsa_recovery_id(&signature, digest, expected_public_key)?;
     let recovery_id = recovery_id_byte(recovery_id, transform_recovery_id)?;
     let mut result = signature.to_bytes().to_vec();
@@ -66,7 +66,7 @@ fn recover_ecdsa_recovery_id(
         else {
             continue;
         };
-        let recovered = recovered.to_encoded_point(false);
+        let recovered = recovered.to_sec1_point(false);
         if &recovered.as_bytes()[1..] == expected_public_key {
             return Ok(recovery_id.to_byte());
         }
@@ -79,7 +79,7 @@ fn recover_ecdsa_recovery_id(
 pub(crate) fn ecdsa_public_key_from_spki_der(der: &[u8]) -> Result<Vec<u8>, SignerError> {
     let public_key = EcdsaPublicKey::from_public_key_der(der)
         .map_err(|error| SignerError::Message(error.to_string()))?;
-    Ok(public_key.to_encoded_point(false).as_bytes().to_vec())
+    Ok(public_key.to_sec1_point(false).as_bytes().to_vec())
 }
 
 pub(crate) fn ecdsa_public_key_from_pem(pem: &str) -> Result<Vec<u8>, SignerError> {

@@ -63,7 +63,7 @@ impl LocalMnemonicRawSignerAdapter {
         let signing_key = self.ecdsa_signing_key(seed_kind)?;
         Ok(signing_key
             .verifying_key()
-            .to_encoded_point(false)
+            .to_sec1_point(false)
             .as_bytes()
             .to_vec())
     }
@@ -135,14 +135,12 @@ impl RawSignerAdapter for LocalMnemonicRawSignerAdapter {
             (SignatureType::Ecdsa, SignatureType::Ecdsa) => {
                 let signing_key = self.ecdsa_signing_key(request.seed_kind)?;
                 let record = crate::effects::local_begin(
-                    || signing_key.verifying_key().to_encoded_point(false),
+                    || signing_key.verifying_key().to_sec1_point(false),
                     &request.data,
                     "ecdsa",
                 )
                 .await?;
-                let (signature, recovery_id) = signing_key
-                    .sign_prehash_recoverable(&request.data)
-                    .map_err(|error| SignerError::Message(error.to_string()))?;
+                let (signature, recovery_id) = signing_key.sign_prehash_recoverable(&request.data);
                 let recovery_id = crate::kms_signature::recovery_id_byte(
                     recovery_id.to_byte(),
                     request.transform_recovery_id,
@@ -159,14 +157,12 @@ impl RawSignerAdapter for LocalMnemonicRawSignerAdapter {
             (SignatureType::Ecdsa, SignatureType::Ed25519) => {
                 let signing_key = self.ecdsa_signing_key_from_ed25519_seed(request.seed_kind)?;
                 let record = crate::effects::local_begin(
-                    || signing_key.verifying_key().to_encoded_point(false),
+                    || signing_key.verifying_key().to_sec1_point(false),
                     &request.data,
                     "ecdsa",
                 )
                 .await?;
-                let (signature, recovery_id) = signing_key
-                    .sign_prehash_recoverable(&request.data)
-                    .map_err(|error| SignerError::Message(error.to_string()))?;
+                let (signature, recovery_id) = signing_key.sign_prehash_recoverable(&request.data);
                 let recovery_id = crate::kms_signature::recovery_id_byte(
                     recovery_id.to_byte(),
                     request.transform_recovery_id,
@@ -204,7 +200,7 @@ impl RawSignerAdapter for LocalMnemonicRawSignerAdapter {
                 let signing_key = self.ecdsa_signing_key_from_ed25519_seed(request.seed_kind)?;
                 Ok(signing_key
                     .verifying_key()
-                    .to_encoded_point(false)
+                    .to_sec1_point(false)
                     .as_bytes()
                     .to_vec())
             }
@@ -262,7 +258,7 @@ fn derive_ed25519_seed(seed: &[u8], path: &str) -> Result<Zeroizing<[u8; 32]>, S
     let mut mac = HmacSha512::new_from_slice(b"ed25519 seed")
         .map_err(|error| SignerError::Message(error.to_string()))?;
     Mac::update(&mut mac, seed);
-    let master = Zeroizing::new(mac.finalize().into_bytes());
+    let master = Zeroizing::new(<[u8; 64]>::from(mac.finalize().into_bytes()));
     let mut key = Zeroizing::new(slice_to_32(&master[..32])?);
     let mut chain_code = Zeroizing::new(slice_to_32(&master[32..])?);
 
@@ -275,7 +271,7 @@ fn derive_ed25519_seed(seed: &[u8], path: &str) -> Result<Zeroizing<[u8; 32]>, S
         Mac::update(&mut mac, &[0]);
         Mac::update(&mut mac, &key[..]);
         Mac::update(&mut mac, &index.to_be_bytes());
-        let child = Zeroizing::new(mac.finalize().into_bytes());
+        let child = Zeroizing::new(<[u8; 64]>::from(mac.finalize().into_bytes()));
         key = Zeroizing::new(slice_to_32(&child[..32])?);
         chain_code = Zeroizing::new(slice_to_32(&child[32..])?);
     }
@@ -291,9 +287,9 @@ pub(crate) fn ton_hd_seed(
     let mut mac = HmacSha512::new_from_slice(mnemonic.as_bytes())
         .map_err(|error| SignerError::Message(error.to_string()))?;
     Mac::update(&mut mac, password.as_bytes());
-    let entropy = Zeroizing::new(mac.finalize().into_bytes());
+    let entropy = Zeroizing::new(<[u8; 64]>::from(mac.finalize().into_bytes()));
     let mut seed = Zeroizing::new([0u8; 64]);
-    pbkdf2_hmac::<Sha512>(&entropy, b"TON HD Keys seed", 100_000, &mut seed[..]);
+    pbkdf2_hmac::<Sha512>(&*entropy, b"TON HD Keys seed", 100_000, &mut seed[..]);
     Ok(seed)
 }
 

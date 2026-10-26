@@ -37,10 +37,7 @@ impl AzureKmsClient for MockAzureKmsClient {
         expected.version.get_or_insert_with(|| "version-one".into());
         assert_eq!(key_id, &expected);
         self.sign_digests.lock().await.push(digest.to_vec());
-        let (signature, _) = self
-            .ecdsa_signing_key
-            .sign_prehash_recoverable(digest)
-            .unwrap();
+        let (signature, _) = self.ecdsa_signing_key.sign_prehash_recoverable(digest);
         Ok(match self.signature_encoding {
             MockAzureSignatureEncoding::Der => signature.to_der().as_bytes().to_vec(),
             MockAzureSignatureEncoding::Raw => signature.to_bytes().to_vec(),
@@ -69,10 +66,7 @@ impl AzureKmsClient for MockAzureKmsClient {
                 y,
             });
         }
-        let public_key = self
-            .ecdsa_signing_key
-            .verifying_key()
-            .to_encoded_point(false);
+        let public_key = self.ecdsa_signing_key.verifying_key().to_sec1_point(false);
         let x = public_key.x().unwrap().to_vec();
         let y = public_key.y().unwrap().to_vec();
         Ok(AzureEcPublicKey {
@@ -105,8 +99,7 @@ async fn azure_kms_adapter_signs_raw_signature_and_decodes_coordinates() {
     )
     .unwrap();
     let digest = [0x66u8; 32];
-    let (expected_signature, expected_recovery_id) =
-        signing_key.sign_prehash_recoverable(&digest).unwrap();
+    let (expected_signature, expected_recovery_id) = signing_key.sign_prehash_recoverable(&digest);
 
     let signature = adapter
         .sign(SignRequest {
@@ -137,7 +130,7 @@ async fn azure_kms_adapter_signs_raw_signature_and_decodes_coordinates() {
         public_key,
         signing_key
             .verifying_key()
-            .to_encoded_point(false)
+            .to_sec1_point(false)
             .as_bytes()
             .to_vec()
     );
@@ -161,8 +154,7 @@ async fn azure_kms_adapter_signs_der_signature_like_typescript_fallback() {
     });
     let adapter = AzureKmsRawSignerAdapter::new("key-der".to_string(), client.clone()).unwrap();
     let digest = [0x77u8; 32];
-    let (expected_signature, expected_recovery_id) =
-        signing_key.sign_prehash_recoverable(&digest).unwrap();
+    let (expected_signature, expected_recovery_id) = signing_key.sign_prehash_recoverable(&digest);
 
     let signature = adapter
         .sign(SignRequest {
@@ -368,7 +360,7 @@ async fn azure_solana_signature_carries_the_x_coordinate_address() {
     let signing_key = EcdsaSigningKey::from_slice(&[23u8; 32]).unwrap();
     let x = signing_key
         .verifying_key()
-        .to_encoded_point(false)
+        .to_sec1_point(false)
         .x()
         .unwrap()
         .to_vec();

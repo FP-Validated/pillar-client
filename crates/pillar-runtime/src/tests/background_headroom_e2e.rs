@@ -187,7 +187,7 @@ async fn stalled_stale_refresh_reserves_actual_target_headroom_for_http_signing(
         k256::ecdsa::RecoveryId::from_byte(bytes[64] - 27).unwrap(),
     )
     .unwrap();
-    let public = recovered.to_encoded_point(false);
+    let public = recovered.to_sec1_point(false);
     let hash = <sha3::Keccak256 as sha3::Digest>::digest(&public.as_bytes()[1..]);
     let recovered_address = format!("0x{}", hex::encode(&hash[12..]));
     assert!(signature.address.eq_ignore_ascii_case(&recovered_address));

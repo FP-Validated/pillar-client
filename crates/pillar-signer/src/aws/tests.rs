@@ -30,10 +30,7 @@ impl AwsKmsClient for MockAwsKmsClient {
             format!("arn:aws:kms:us-east-1:111122223333:key/{}", self.key_id)
         );
         self.ecdsa_digests.lock().await.push(digest.to_vec());
-        let (signature, _) = self
-            .ecdsa_signing_key
-            .sign_prehash_recoverable(digest)
-            .unwrap();
+        let (signature, _) = self.ecdsa_signing_key.sign_prehash_recoverable(digest);
         Ok(signature.to_der().as_bytes().to_vec())
     }
 
@@ -73,7 +70,7 @@ async fn aws_kms_adapter_signs_ecdsa_digest_and_recovers_signature_like_typescri
     let signing_key = EcdsaSigningKey::from_slice(&[11u8; 32]).unwrap();
     let public_key = signing_key
         .verifying_key()
-        .to_encoded_point(false)
+        .to_sec1_point(false)
         .as_bytes()
         .to_vec();
     let public_key_der = secp256k1_spki_der(&public_key);
@@ -88,8 +85,7 @@ async fn aws_kms_adapter_signs_ecdsa_digest_and_recovers_signature_like_typescri
     });
     let adapter = AwsKmsRawSignerAdapter::new("aws-key".to_string(), client.clone());
     let digest = [0x44u8; 32];
-    let (expected_signature, expected_recovery_id) =
-        signing_key.sign_prehash_recoverable(&digest).unwrap();
+    let (expected_signature, expected_recovery_id) = signing_key.sign_prehash_recoverable(&digest);
 
     let signature = adapter
         .sign(SignRequest {
@@ -120,7 +116,7 @@ async fn aws_kms_adapter_signs_ecdsa_digest_and_recovers_signature_like_typescri
         public_key,
         signing_key
             .verifying_key()
-            .to_encoded_point(false)
+            .to_sec1_point(false)
             .as_bytes()
             .to_vec()
     );
@@ -175,10 +171,7 @@ async fn aws_kms_factory_uses_secret_name_as_key_id_and_rejects_other_providers(
         key_id: "factory-key".to_string(),
         ecdsa_signing_key: signing_key.clone(),
         public_key_der: secp256k1_spki_der(
-            signing_key
-                .verifying_key()
-                .to_encoded_point(false)
-                .as_bytes(),
+            signing_key.verifying_key().to_sec1_point(false).as_bytes(),
         ),
         ed25519_signature: vec![0x52; 64],
         public_key_calls: Mutex::new(0),

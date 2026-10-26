@@ -39,15 +39,20 @@ async fn rejects_unsupported_signature_type() {
             key_id: &AzureKmsKeyId,
         ) -> Result<AzureEcPublicKey, SignerError> {
             assert_eq!(key_id, &self.key_id);
-            let (x,y) = self.public_key_coordinates.lock().await.clone();
-            Ok(AzureEcPublicKey { key_id: key_id.clone(), reference: "test-key".into(), x, y })
+            let (x, y) = self.public_key_coordinates.lock().await.clone();
+            Ok(AzureEcPublicKey {
+                key_id: key_id.clone(),
+                reference: "test-key".into(),
+                x,
+                y,
+            })
         }
     }
 
     let signing_key = k256::ecdsa::SigningKey::from_slice(&[19u8; 32]).unwrap();
     let public_key = signing_key
         .verifying_key()
-        .to_encoded_point(false)
+        .to_sec1_point(false)
         .as_bytes()
         .to_vec();
     let public_key_pem = pem_rfc7468::encode_string("PUBLIC KEY", pem_rfc7468::LineEnding::LF, &{
