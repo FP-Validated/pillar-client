@@ -554,6 +554,19 @@ not reproduce:
   `preserve_order`, so its object keys are sorted; upstream sends them in
   insertion order. The replays compare content, not key order. A policy that
   compares the raw body text would see a difference.
+- TON destination, MESSAGE requests: an existing attestation counts as already
+  signed only at `confirmations >= required`, the requirement resolved as the
+  deployed `UlnConnection` resolves it (the OApp's value unless its
+  `confirmationsNull` is set, then the ULN default's value regardless of the
+  default's own flag). Upstream compares the hash alone
+  (`lz-v2-sdk/src/uln/ton/index.ts:194-206`) and throws when both flags are set.
+  A request whose `blockConfirmation` is below the requirement is a 400 before any
+  source read; upstream signs it. Pinned against the deployed code in a TVM
+  emulator (`tests/ton_contract_semantics/confirmations.json`).
+- A JSON object whose key is `$serde_json::private::RawValue` or
+  `$serde_json::private::Number`, at any depth, in a request body, body envelope or
+  provider response is a parse error here; upstream's `JSON.parse` accepts it as an
+  ordinary key.
 - Solana `PacketSent` events from a send library other than the configured ULN are
   skipped; upstream has no such filter. Upstream also re-reads the block (failing
   with `Block not found` when the node has no such block); this service does not.

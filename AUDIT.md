@@ -871,3 +871,47 @@ IOTA, LayerZero-v2 (Aptos, Initia, Sui) and LayerZero-Aptos-Contract sources and
 upstream `lz-v2-sdk/src/uln/sui/index.ts` were read; neither IOTA backend and no live
 Sui `devInspect` was run. Fix-reverted runs were not performed. No image was built and
 nothing was deployed.
+
+## 23. M-22 to M-25 remediation — 2026-10-26
+
+The report is Sentry Code Round 1 of 2026-10-23. All four findings were present at
+`201430d` (`main`). The work branches from the H-02 to M-21 branch (`b2bb67d`), which
+had already restructured the READ permits M-24 names: one commit per finding, then
+documentation. It is not released. The per-finding response is
+[m22-m25-response.md](audit/m22-m25-response.md).
+
+| ID | Implementation | Exercised evidence |
+| --- | --- | --- |
+| M-22 | TON `dvn_attestation` counts an attestation only at `confirmations >= required`, the requirement resolved as `UlnReceiveConfig::utils::resolveConfirmations`; a TON MESSAGE request below the requirement is a 400 before any source read | The deployed `UlnConnection` code run in `@ton/sandbox` (`tests/ton_contract_semantics/confirmations.json`, eight cases); the already-signed verdict equals the contract's `verifiedView` in each; one below the requirement is refused after two TON storage reads and no source read |
+| M-23 | `scan` hands the verified body to its shape function by value; events are moved | A 3 MiB committee-less scan ends in the ordinary refusal within the time bound |
+| M-24 | READ chain and process permit waits end at the signing request's deadline | With the only permit held, a second call returns `Admission(Deadline)` at its 300 ms deadline |
+| M-25 | `pillar_core::json` refuses the private `RawValue`/`Number` keys at any depth; every outside-input parse uses it; `clippy.toml` disallows direct `serde_json` parse calls | The report's 14-level body is a 400 on tokio's default 2 MiB worker stack; every key spelling and position, the envelope and provider responses are refused; every committed JSON file parses identically to `serde_json` |
+
+### Verification
+
+| Check | Observed result |
+| --- | --- |
+| `cargo fmt --all --check` | Passed |
+| `cargo clippy --workspace --all-targets --locked` | Passed with the new `clippy.toml`; one pre-existing warning in `gasolina_parity_tests.rs:89` |
+| `cargo test --workspace --locked` (rustc 1.96.0) | 1,188 passed, zero failed, 15 ignored (`test result:` totals), on the final tree; artifacts in `local/reports/m22-m25-remediation-20261026/` |
+
+Failure modes were written down before the code and each is a scenario of
+`m22_m25_remediation_e2e.rs`. The TON semantics were taken from the deployed code, not
+from source: `verifiedView` counts the attestation at `stored >= required` and not below,
+and with the OApp's `confirmationsNull` set the default's value is used even when the
+default's own flag is set (`default_null_flag_ignored`). Eight emulated cases; Pillar's
+already-signed verdict equals `verifiedView` in all eight, and the confirmation floor
+refuses one below the requirement after two TON storage reads in all seven cases with a
+positive requirement. The report's M-25 body (69,776 bytes, 14 re-parses) is a 400 naming
+the key; 97 committed JSON files parse identically to `serde_json`.
+
+An independent read-only review found no material defect. The first full run failed four
+tests, all fixed before the run above: the depth case assumed `serde_json` accepts 128
+levels (it accepts 127); a 256 KiB worker stack overflowed inside axum's request path
+before the body was read, so the M-25 child now uses tokio's default 2 MiB stack, which
+production uses; the Canton sequencer fixture lacked the required `authorization` header;
+and `h02_stalled_chains_do_not_delay_another_chains_reads` showed that bounding READ
+permit waits by a fixed 58 s outside a request context failed callers with no deadline,
+so the wait is now bounded only by the request's own deadline. Starknet's
+`has_payload_signed` was not examined against Cairo source. No fix-reverted run was
+performed. No image was built and nothing was deployed.
