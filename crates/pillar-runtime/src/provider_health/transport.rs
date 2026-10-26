@@ -17,6 +17,10 @@ const JSON_PARSER_UNKNOWN_LANE: &str = "Provider JSON parser lane is not configu
 static JSON_PARSE_WAITERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 static JSON_PARSE_SLOTS: LazyLock<std::sync::Arc<tokio::sync::Semaphore>> =
     LazyLock::new(|| std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_JSON_PARSERS)));
+// READ target bodies arrive in bursts of up to 16 calls per command; parsed apart, they
+// cannot hold the slots a request's own source and destination reads need.
+static READ_JSON_PARSE_SLOTS: LazyLock<std::sync::Arc<tokio::sync::Semaphore>> =
+    LazyLock::new(|| std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_JSON_PARSERS)));
 #[derive(Clone, Debug)]
 pub enum RpcError {
     Admission(pillar_core::execution::BudgetError),
@@ -659,6 +663,14 @@ pub(crate) fn is_http_not_found(error: &RpcError) -> bool {
     matches!(error, RpcError::Remote(message) if message.starts_with("Provider returned HTTP 404 "))
 }
 
+/// This service's own refusal of a response body over the transport limit, as opposed to
+/// a provider-reported failure.
+pub(crate) fn is_response_size_refusal(error: &RpcError) -> bool {
+    matches!(error, RpcError::Remote(message)
+        if *message == format!("Provider JSON response exceeds {MAX_JSON_RESPONSE_BYTES} byte limit")
+            || *message == format!("Provider JSON exceeds {MAX_JSON_STRING_BYTES} string byte limit"))
+}
+
 /// undici's message for a request that never got a response (`TypeError: fetch failed`).
 pub(crate) const FETCH_FAILED: &str = "fetch failed";
 
@@ -770,6 +782,17 @@ impl JsonParsePermit {
 
 async fn acquire_json_parse_slot() -> Result<JsonParsePermit, String> {
     use pillar_core::execution::{current, BudgetError};
+    if super::rpc_context::in_read_target_scope() {
+        let permit = READ_JSON_PARSE_SLOTS
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| JSON_PARSER_CLOSED.to_string())?;
+        return Ok(JsonParsePermit {
+            budget: None,
+            _global: permit,
+        });
+    }
     let context = current();
     if let Some(resources) = context
         .as_ref()

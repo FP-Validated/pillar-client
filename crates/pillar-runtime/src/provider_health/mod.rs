@@ -48,7 +48,7 @@ mod source_probes;
 mod sui_graphql;
 mod ton;
 mod transport;
-pub(crate) use rpc_context::rpc_scope;
+pub(crate) use rpc_context::{read_target_scope, rpc_scope};
 pub(crate) use transport::drop_json_value_safely;
 mod tron;
 mod types;
@@ -75,8 +75,8 @@ pub(crate) use source::provider_health_snapshot_from_report;
 pub use source::RpcProviderHealthSource;
 pub(crate) use ton::*;
 pub(crate) use transport::{
-    is_http_not_found, json_parser_local_error, parse_bounded_json, parse_json_with_limits,
-    provider_response,
+    is_http_not_found, is_response_size_refusal, json_parser_local_error, parse_bounded_json,
+    parse_json_with_limits, provider_response,
 };
 pub use transport::{
     AwsLambdaInvokeClient, AwsSdkLambdaInvokeClient, JsonRpcTransport, ReqwestJsonRpcTransport,

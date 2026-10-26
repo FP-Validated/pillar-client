@@ -207,19 +207,31 @@ where
                 // so a provider that never answers must lose its vote in bounded time.
                 let vote = match tokio::time::timeout(
                     READ_CALL_TIMEOUT,
-                    crate::provider_health::eth_call_read_observation_at_block(
-                        transport,
-                        url,
-                        headers,
-                        to,
-                        call_data,
-                        block,
-                        max_result_bytes,
+                    crate::provider_health::read_target_scope(
+                        crate::provider_health::eth_call_read_observation_at_block(
+                            transport,
+                            url,
+                            headers,
+                            to,
+                            call_data,
+                            block,
+                            max_result_bytes,
+                        ),
                     ),
                 )
                 .await
                 {
-                    Ok(vote) => vote.map(Some).map_err(RpcError::from),
+                    Ok(vote) => match vote.map_err(RpcError::from) {
+                        // A body over the transport limit holds a result over the READ limit
+                        // too, and honest providers agree on it, so it votes like one.
+                        Err(error) if crate::provider_health::is_response_size_refusal(&error) => {
+                            Ok(Some((
+                                "result-too-large".to_string(),
+                                crate::provider_health::ReadCallObservation::ResultTooLarge,
+                            )))
+                        }
+                        vote => vote.map(Some),
+                    },
                     Err(_) => Err(RpcError::Remote("provider response timed out".to_string())),
                 };
                 (index, vote)
