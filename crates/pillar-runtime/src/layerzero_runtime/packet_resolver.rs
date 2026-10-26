@@ -26,6 +26,12 @@ fn move_block_projection(value: Value) -> Value {
     project_fields(value, &["block_height", "block_hash"])
 }
 
+/// `executor_v1::AdapterParamsConfig` is read only for its table handle, so the quorum
+/// agrees on that and not on fields a node may add or order differently.
+fn aptos_adapter_params_handle_projection(value: Value) -> Value {
+    json!({"data": {"params": {"handle": value.pointer("/data/params/handle").cloned().unwrap_or(Value::Null)}}})
+}
+
 /// The log fields the ULNv2 refresh reads. Clients differ on the rest: `arb1.arbitrum.io`
 /// answers `blockTimestamp` as `0x0` where other Arbitrum providers give the block time.
 fn evm_logs_projection(value: Value) -> Value {
@@ -1905,7 +1911,7 @@ where
             .get_aptos_json(
                 chain,
                 |base| aptos_account_resource_url(base, &source.layerzero_account, &resource_type),
-                |value| value,
+                aptos_adapter_params_handle_projection,
                 "Aptos adapter params config",
             )
             .await?;
