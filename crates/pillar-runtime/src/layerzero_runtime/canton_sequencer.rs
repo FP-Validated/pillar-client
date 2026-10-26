@@ -66,8 +66,35 @@ pub(crate) struct ScanEvents {
 
 /// `createCantonMultiprovider`'s construction, for its refusals: a missing or malformed
 /// `sequencer` entry, a sequencer without an authorization header, and an `rpc` URI
-/// `parseCantonChainUri` rejects (`multiprovider/src/canton.ts:64-79`).
+/// `parseCantonChainUri` rejects (`multiprovider/src/canton.ts:64-79`), plus one of
+/// this service's own: a sequencer without `sequencer-validators`/`sequencer-quorum`.
+/// Upstream then uses `NoopQuorumVerifier` and trusts every answer, including the
+/// PacketSent events a signature is built from; here that configuration is refused.
 pub(crate) fn canton_sequencer(
+    chain_name: &str,
+    config: &ProviderConfig,
+) -> Result<CantonSequencer, AppCoreError> {
+    let sequencer = build_canton_sequencer(chain_name, config)?;
+    if sequencer.committee.is_none() {
+        return Err(AppCoreError::Internal(format!(
+            "Canton sequencer provider for {chain_name} has no committee: set \
+             sequencer-validators and sequencer-quorum so its answers are signature-checked"
+        )));
+    }
+    Ok(sequencer)
+}
+
+/// Upstream's construction alone, without the committee requirement; the replay of
+/// upstream's own committee-less scenarios needs it to compare the decoding.
+#[cfg(test)]
+pub(crate) fn canton_sequencer_as_upstream(
+    chain_name: &str,
+    config: &ProviderConfig,
+) -> Result<CantonSequencer, AppCoreError> {
+    build_canton_sequencer(chain_name, config)
+}
+
+fn build_canton_sequencer(
     chain_name: &str,
     config: &ProviderConfig,
 ) -> Result<CantonSequencer, AppCoreError> {

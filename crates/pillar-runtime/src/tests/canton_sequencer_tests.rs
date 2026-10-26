@@ -6,7 +6,8 @@
 //! upstream made, and the outcome — value or error text — must be upstream's.
 use super::*;
 use crate::layerzero_runtime::{
-    canton_block_confirmations, canton_payload_signed, canton_sequencer, resolve_canton_packet_sent,
+    canton_block_confirmations, canton_payload_signed, canton_sequencer,
+    canton_sequencer_as_upstream, resolve_canton_packet_sent,
 };
 use crate::provider_health::address_encoded_by_chain;
 
@@ -204,13 +205,33 @@ async fn canton_sequencer_path_matches_gasolina() {
     );
     let scenarios = fixture["scenarios"].as_array().unwrap();
     let mut kinds = HashMap::<&str, usize>::new();
+    let mut committee_less = 0usize;
     for scenario in scenarios {
         let kind = scenario["kind"].as_str().unwrap();
         *kinds.entry(kind).or_default() += 1;
         let name = scenario["name"].as_str().unwrap();
         let config = provider_config(&scenario["provider"]);
         let transport = Replay::new(scenario["exchanges"].as_array().unwrap_or(&Vec::new()));
-        let sequencer = canton_sequencer("canton", &config);
+        // Upstream accepts a sequencer without a committee; this service refuses it, so
+        // the replay builds the sequencer as upstream does and the refusal is checked
+        // on its own below.
+        let sequencer = canton_sequencer_as_upstream("canton", &config);
+        if let Ok(built) = &sequencer {
+            let production = canton_sequencer("canton", &config);
+            if built.describe()["committee"].is_null() {
+                committee_less += 1;
+                let error = production.expect_err("a committee-less sequencer is refused");
+                assert!(
+                    error.to_string().contains("has no committee"),
+                    "{name}: {error}"
+                );
+            } else {
+                assert!(
+                    production.is_ok(),
+                    "{name}: a committee sequencer is accepted"
+                );
+            }
+        }
         let (actual, expected) = match kind {
             "uri" => (
                 outcome(sequencer, |sequencer| sequencer.describe()),
@@ -285,5 +306,9 @@ async fn canton_sequencer_path_matches_gasolina() {
             ("payloadSigned", 10)
         ]),
         "every upstream scenario is replayed"
+    );
+    assert!(
+        committee_less > 0,
+        "the committee-less refusal was exercised"
     );
 }

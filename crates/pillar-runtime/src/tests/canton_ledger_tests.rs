@@ -10,7 +10,7 @@ use crate::layerzero_runtime::{
     CantonLedgerAuth, CantonOAuth2Config, CantonTokenProvider,
 };
 
-const SEQUENCER: &str = "https://sequencer.example";
+const SEQUENCER: &str = "https://sequencer.example/?sequencer-validators=0x027bf07ae10c208725dd53e49e8d12bf23fad3e49684ef08ea61be56b2dfbc75a6&sequencer-quorum=1";
 
 type LedgerCall = (String, HashMap<String, String>, Value);
 

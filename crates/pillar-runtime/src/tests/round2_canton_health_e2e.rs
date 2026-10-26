@@ -121,7 +121,7 @@ async fn canton_only(ledger: Ledger, oauth: &str) -> Outcome {
         .unwrap()
         .push(json!("canton-sequencer"));
     providers["chains"]["canton"]["sequencer"] = json!([{
-        "uri": "https://sequencer.example",
+        "uri": "https://sequencer.example/?sequencer-validators=0x027bf07ae10c208725dd53e49e8d12bf23fad3e49684ef08ea61be56b2dfbc75a6&sequencer-quorum=1",
         "headers": {"authorization": "Bearer sequencer"},
         "category": "internal",
         "entity": "canton-sequencer",
@@ -344,7 +344,7 @@ async fn round2_m08_canton_failure_does_not_fail_other_chains() {
                 "canton".to_string(),
                 ProviderConfig::with_distinct_entities(vec![ProviderUri::Uri(ledger_uri(""))], 1)
                     .with_sequencer(vec![ProviderUri::Uri(
-                        "https://sequencer.example".to_string(),
+                        "https://sequencer.example/?sequencer-validators=0x027bf07ae10c208725dd53e49e8d12bf23fad3e49684ef08ea61be56b2dfbc75a6&sequencer-quorum=1".to_string(),
                     )]),
             ),
         ]),
