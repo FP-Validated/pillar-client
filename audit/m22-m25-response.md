@@ -130,8 +130,9 @@ verification is read from storage: `hash_lookup` at the Pedersen chain over
 `get_oapp_uln_receive_config(receiver, srcEid)`. The derivation was checked on mainnet:
 for six unreclaimed `PayloadVerified` events the slot holds `submitted = 1` and the
 event's confirmations, and `has_payload_signed` agrees
-(`tests/onchain_provenance/starknet_hash_lookup.json`). A Starknet MESSAGE request
-below the requirement is refused as on TON.
+(`tests/onchain_provenance/starknet_hash_lookup.json`). The Pedersen hash comes from
+`starknet-types-core`; `starknet-crypto` would have pulled `crypto-bigint` 0.5
+(RUSTSEC-2026-0387).
 
 **READ starvation (residual of M-24).** Four stalled target chains could hold all
 sixteen process permits until the 55.2 s RPC timeout, past a waiting call's 58 s
@@ -150,8 +151,45 @@ in a child process while the new parser refuses it; every TON and Starknet case 
 hash match the old rule called signed; a READ permit wait without a deadline is still
 pending after the deadline that ends the bounded one.
 
+**Confirmation floor on every destination.** Every family's already-signed observation
+already reads the destination's effective receive requirement (EVM `getUlnConfig`,
+Solana receive config, Move ULN config, Sui and IOTA `get_effective_receive_uln_config`,
+Stellar `effective_receive_uln_config`, TON connection and default config, Starknet
+`get_oapp_uln_receive_config`, Canton `getUlnConfig`). The agreed value is now part of
+the quorum fingerprint and is returned with the "not signed" verdict, and
+`sign_request_v2` refuses a MESSAGE whose `blockConfirmation` is below it, before the
+extra-context check and signing. The receive library never counts such an attestation,
+and storing it overwrites this DVN's earlier one. No extra RPC is made; the separate
+TON and Starknet floor reads are gone. ReadV1002 has no confirmation requirement.
+
+**Move abort origin.** Abort code 1 is "no confirmation record" only when the ULN
+package's `receive_uln::get_confirmations` raised it. On Sui and IOTA mainnet a 31-byte
+hash makes `bytes32::from_bytes` abort with the same code
+(`tests/onchain_provenance/move_abort_origin.json`); upstream reads only the code. The
+Sui GraphQL query asks for the raising module and function, and IOTA's error names its
+location.
+
+**READ shared admission.** READ target `eth_call` bodies are parsed in a pool of their
+own, so stalled READ targets no longer hold the parser slots a request's source and
+destination reads need. Before, two lanes of stalled READ bodies held all four slots and
+an Ethereum receipt read was refused after the 2 s parser wait.
+
+**READ bodies over the transport limit.** A body over 4 MiB necessarily holds a result
+over the 1 MiB READ limit. It is now that oversized-result vote, so providers that agree
+on it give the 400 refusal instead of a 500 with no quorum that callers retry; one such
+provider among honest ones is still outvoted.
+
+**Aptos adapter-params config.** The quorum compares only the table handle it reads.
+
+**Dependencies.** `cargo audit` reported RUSTSEC-2026-0387 (`crypto-bigint` 0.5.5, via
+`k256` 0.13, `bip32` 0.5 and the S3 `sigv4a` feature), RUSTSEC-2026-0385 (`ctutils`
+0.4.2) and RUSTSEC-2026-0386 (`tokio` 1.52.3). `k256` is 0.14, `bip32` 0.6, `tokio`
+1.54.1 and `ctutils` 0.4.6. `sigv4a` is off, so S3 multi-region access points are not
+supported; nothing configures one.
+
 ## Not changed
 
-- Every chain's signature is still issued at the caller's `blockConfirmation` on EVM,
-  Solana, Move, Sui, Stellar and Canton; only TON and Starknet refuse a request below
-  the destination's requirement.
+- `6f97e3a` on the public mirror does not build alone; it is history, and fixing it
+  needs a force push.
+- Whether the deployed Sui and IOTA Move bytecode rebuilds from its published source is
+  not proven; the abort-origin check no longer depends on it.

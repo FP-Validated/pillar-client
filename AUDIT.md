@@ -895,6 +895,8 @@ documentation. It is not released. The per-finding response is
 | `cargo clippy --workspace --all-targets --locked` | Passed with the new `clippy.toml`; one pre-existing warning in `gasolina_parity_tests.rs:89` |
 | `cargo test --workspace --locked` (rustc 1.96.0) | 1,188 passed, zero failed, 15 ignored (`test result:` totals), on the final tree; artifacts in `local/reports/m22-m25-remediation-20261026/` |
 | Same, after the residual fixes | 1,193 passed, zero failed, 15 ignored, on the final tree; artifacts in `local/reports/m22-m25-residuals-20261026/`. Two earlier runs failed on test configurations that still used a committee-less Canton sequencer and on a wrong expected `srcEid` felt (30101 is `0x7595`); both were corrected and the whole suite rerun |
+| `cargo audit`, `cargo deny check` (second residual pass) | Both exit 0 after the dependency upgrades; before them `cargo audit` reported RUSTSEC-2026-0387, -0385 and -0386 |
+| `cargo test --workspace --locked`, second residual pass | 1,198 passed, zero failed, 15 ignored, on the final tree; artifacts in `local/reports/residuals-round2-20261026/`. Three earlier runs failed and each was fixed and the whole suite rerun: Starknet fixtures assumed the requirement was read first and Move tests signed at `blockConfirmation` 1 below their recorded requirement of 15 (both test-side); an Azure test assertion was inverted while porting `normalize_s` to k256 0.14; a tracing callsite interest cached `never` by a parallel test thread |
 
 Failure modes were written down before the code and each is a scenario of
 `m22_m25_remediation_e2e.rs`. The TON semantics were taken from the deployed code, not

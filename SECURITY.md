@@ -572,6 +572,12 @@ not reproduce:
   is refused; upstream accepts it with `NoopQuorumVerifier`.
 - A READ provider's `eth_call` that has not answered in 10 s loses its vote; upstream
   waits for its provider timeout.
+- Every destination, MESSAGE requests: a `blockConfirmation` below the destination's
+  effective receive confirmations is a 400; upstream signs it.
+- Sui and IOTA: an abort counts as "no confirmation record" only when raised by the
+  ULN package's `receive_uln::get_confirmations`; upstream reads only the abort code.
+- A READ target body over the transport limit is an oversized-result vote; upstream
+  treats it as a provider failure.
 - A JSON object whose key is `$serde_json::private::RawValue` or
   `$serde_json::private::Number`, at any depth, in a request body, body envelope or
   provider response is a parse error here; upstream's `JSON.parse` accepts it as an
