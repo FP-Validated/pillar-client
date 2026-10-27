@@ -947,5 +947,37 @@ health rounds launched every chain at once and serialized each chain's probes; t
 zero-success signal readiness reports as "not found"; and Sui GraphQL byte decoding
 changed upstream's `Uint8Array.from` errors. A PostgreSQL audit scenario overflowed the
 test thread stack by starting several runtimes in one future and now boxes them.
-`cargo audit` and `cargo deny` were not run locally (tools absent); CI runs both. Live
-providers were not exercised. No image was built and nothing was deployed.
+`cargo audit` and `cargo deny` were not run locally (tools absent); CI's `audit, deny, sbom`
+job passed on the PR, main and tag runs. Live providers were not exercised by the suite.
+
+### Published image and mainnet rollout
+
+- Source `5fbaadd825f1db5c256cc77888a544d740278520` (PR #5) is tagged `v2.7.2`.
+  Main CI [40438269752](https://github.com/FP-Validated/pillar-client/actions/runs/40438269752)
+  and tag CI [40438316003](https://github.com/FP-Validated/pillar-client/actions/runs/40438316003)
+  each passed all six jobs.
+- The attested tag-build tar was pushed without rebuilding. Its SHA-256 is
+  `48c51297ff2013b477a0d490a215ed9a71cd0cf19efbcaa75cdf2e55167d0751`; the tar,
+  checksum, Sigstore bundle and CI diagnostics are attached to the
+  [release](https://github.com/FP-Validated/pillar-client/releases/tag/v2.7.2).
+- Published image:
+  `ghcr.io/fp-validated/pillar-dvn-client:ci-5fbaadd825f1-r40438316003-a1@sha256:4da30970db6f585883995151ae975372c1ed1204ec7fabb8e2ea490bbe5d8084`.
+  The remote config SHA-256 equals CI image ID
+  `225d565c3eb348053695778e07a09c7c8e924669eae3a74369bb1da31e73c1fe`;
+  revision, `v2.7.2` label and `linux/amd64` platform match.
+- Before the rollout, an isolated, non-serving instance of the digest started with the
+  production configuration, reached Ready with zero restarts and reported the same
+  per-chain provider health as production. It was removed after the check.
+- Only the image tag, `PILLAR_IMAGE_VERSION` and the config-revision annotation changed,
+  and only the Deployment was synced. All three Pods run the new digest, Ready, with zero
+  restarts and no ERROR-level log lines.
+- Post-rollout GETs to `/`, `/ready`, `/version`, `/provider-health`,
+  `/provider-health/report` and `/signer-info?chainName=ethereum` returned 200 on every
+  Pod. Version is `v2.7.2`, provider health equals the pre-rollout observation, and the
+  Ethereum address and public key exactly match it:
+  `0x06bb41FE76F41429f55aC8C355ac8669769A1ba1`.
+- M-57 and M-27 on the live digest: every provider URL in `/provider-health/report` is
+  `http://<redacted>/<redacted>`, and a signing body stalled after its headers was answered
+  `408` after 2.1 s on one Pod. No signing request was sent.
+- Rollback is a narrow revert of the image commit followed by the same Deployment-only
+  sync, back to `sha256:d4733afe62e39a73c8eb2e01d2a08ced1f0770e036ae80ce6a6fc79931b7a86c`.
