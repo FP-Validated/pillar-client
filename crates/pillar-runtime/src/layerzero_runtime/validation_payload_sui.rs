@@ -636,7 +636,11 @@ where
     let simulation = response
         .pointer("/data/simulateTransaction")
         .ok_or(RpcError::Unavailable)?;
-    if let Some(error) = simulation.pointer("/effects/executionError") {
+    // A successful simulation renders `executionError: null`.
+    if let Some(error) = simulation
+        .pointer("/effects/executionError")
+        .filter(|error| !error.is_null())
+    {
         if error.get("abortCode").is_none_or(Value::is_null) {
             return Ok(Err(SuiViewFailure::Unusable));
         }

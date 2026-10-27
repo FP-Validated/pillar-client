@@ -4,6 +4,13 @@ All notable changes to this project are documented here. This project follows
 semantic versioning for the HTTP surface, the environment-variable contract and
 the Prometheus metric names.
 
+## Unreleased
+
+### Fixed
+
+- Sui destinations: the already-signed check refused every request that named a `dvnAddress`. Sui GraphQL answers a successful `simulateTransaction` with `executionError: null`, and that null was read as an execution error, so each provider lost its vote and the quorum failed with a 500. Found against `graphql.mainnet.sui.io`; the recorded fixtures already carried the null.
+- Stellar provider health: the probe now reads `getHealth`'s `latestLedger`. `getLatestLedger` returns the full ledger metadata, 2-3 MB per call on current Soroban RPC, which did not finish inside the 2 s background probe deadline, so every provider was unhealthy and every Stellar source and destination was refused with `Not enough healthy providers`.
+
 ## 2.7.2 - 2026-10-27
 
 ### Security
