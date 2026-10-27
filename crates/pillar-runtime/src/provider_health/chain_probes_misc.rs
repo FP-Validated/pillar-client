@@ -117,12 +117,14 @@ where
     T: JsonRpcTransport,
 {
     let started_at = Instant::now();
+    // `getLatestLedger` now carries the full ledger metadata (megabytes per call), which
+    // cannot download inside the background probe deadline; `getHealth` reports the same height.
     let response = match transport
         .post_json_scoped(
             url.clone(),
             headers,
             json!({
-                "method": "getLatestLedger",
+                "method": "getHealth",
                 "id": 1,
                 "jsonrpc": "2.0",
             }),
@@ -131,7 +133,7 @@ where
     {
         Ok(response) => response
             .get("result")
-            .and_then(|result| result.get("sequence"))
+            .and_then(|result| result.get("latestLedger"))
             .cloned()
             .unwrap_or(Value::Null),
         Err(RpcError::Remote(error)) => Value::String(error),

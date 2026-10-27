@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test]
-async fn provider_health_probes_stellar_latest_ledger_like_typescript() {
+async fn provider_health_probes_stellar_latest_ledger_through_get_health() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "stellar".to_string(),
@@ -23,7 +23,7 @@ async fn provider_health_probes_stellar_latest_ledger_like_typescript() {
     let transport = RecordingTransport {
         calls: calls.clone(),
         responses: Arc::new(Mutex::new(vec![Ok(
-            json!({"result": {"sequence": 112233}}),
+            json!({"result": {"status": "healthy", "latestLedger": 112233}}),
         )])),
     };
     let source = RpcProviderHealthSource::from_getter_with_chain_types(
@@ -48,7 +48,7 @@ async fn provider_health_probes_stellar_latest_ledger_like_typescript() {
         calls[0].1.get("authorization"),
         Some(&"Bearer stellar-token".to_string())
     );
-    assert_eq!(calls[0].2["method"], "getLatestLedger");
+    assert_eq!(calls[0].2["method"], "getHealth");
     // Older Stellar RPC releases refuse any `params` on a parameterless method (M-82).
     assert!(calls[0].2.get("params").is_none(), "{}", calls[0].2);
 }
