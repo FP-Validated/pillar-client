@@ -94,7 +94,7 @@ impl E2eTransport {
         if url == self.source_url {
             return match body["method"].as_str().unwrap_or_default() {
                 "eth_getTransactionReceipt" => Ok(json!({ "result": self.receipt })),
-                "eth_getBlockByNumber" => Ok(json!({ "result": { "number": "0x100" } })),
+                "eth_blockNumber" => Ok(json!({ "result": "0x100" })),
                 method => Err(format!("unexpected source RPC method: {method}")),
             };
         }
@@ -381,7 +381,8 @@ async fn run_with_views(
             expiration: EXPIRATION,
             skip_v_id: None,
             dvn_address: Some(DVN.to_string()),
-            block_confirmation: 1,
+            // The recorded receive config requires 15; a request below it is refused.
+            block_confirmation: 15,
         },
         message_hash,
         ..request_v2()
@@ -431,7 +432,9 @@ async fn evm_v302_to_aptos_and_movement_runs_resolver_validator_builder_and_sign
         let (status, body, signatures, requests) = run_resolve_and_sign(
             chain,
             0,
-            vec![Ok(json!([format!("0x{}", "44".repeat(32))]))],
+            vec![Ok(json!([
+                "0xc33752e0220faf79e45385dd73fb28d681dcd9f1569a1480725507c1f3c3aba9"
+            ]))],
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{chain}: {body}");
@@ -454,7 +457,9 @@ async fn evm_v302_to_aptos_and_movement_runs_resolver_validator_builder_and_sign
         let (status, body, signatures, _) = run_resolve_and_sign(
             chain,
             2,
-            vec![Ok(json!([format!("0x{}", "44".repeat(32))]))],
+            vec![Ok(json!([
+                "0xc33752e0220faf79e45385dd73fb28d681dcd9f1569a1480725507c1f3c3aba9"
+            ]))],
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{chain}: {body}");
@@ -470,6 +475,10 @@ async fn move_v302_receive_library_error_and_malformed_value_refuse_without_sign
             "provider error",
         ),
         (vec![Ok(json!([42]))], "malformed address"),
+        (
+            vec![Ok(json!([format!("0x{}", "44".repeat(32))]))],
+            "unsupported registered library",
+        ),
     ];
     for (index, (responses, label)) in cases.into_iter().enumerate() {
         let (status, body, signatures, requests) =
@@ -491,17 +500,21 @@ async fn move_v302_receive_library_error_and_malformed_value_refuse_without_sign
 
 #[tokio::test]
 async fn move_v302_receive_library_quorum_requires_matching_observations() {
-    let library = |digit: char| Ok(json!([format!("0x{}", digit.to_string().repeat(64))]));
+    let library = || {
+        Ok(json!([
+            "0xc33752e0220faf79e45385dd73fb28d681dcd9f1569a1480725507c1f3c3aba9"
+        ]))
+    };
     let cases = [
         (
-            vec![library('4'), library('4')],
+            vec![library(), library()],
             "matching providers",
             StatusCode::OK,
             1,
         ),
         (
             vec![
-                library('4'),
+                library(),
                 Err("Provider returned HTTP 400 Bad Request".to_string()),
             ],
             "one provider failed",
@@ -509,7 +522,7 @@ async fn move_v302_receive_library_quorum_requires_matching_observations() {
             0,
         ),
         (
-            vec![library('4'), library('5')],
+            vec![library(), Ok(json!([format!("0x{}", "55".repeat(32))]))],
             "providers disagree on library address",
             StatusCode::INTERNAL_SERVER_ERROR,
             0,
@@ -832,5 +845,94 @@ async fn initia_provider_quorum_requires_matching_valid_library_observations() {
         "round2-completion",
         "initia-provider-quorum",
         json!({"cases": observations}),
+    );
+}
+
+/// M-21: the confirmations view answers 0 for a DVN with no record, and the chain treats
+/// that DVN as unverified whatever the requirement. On a zero-requirement pathway `["0"]`
+/// must therefore sign, while a positive count or VERIFIED is still already-signed.
+#[tokio::test]
+async fn m21_zero_confirmations_are_unsigned_even_when_zero_are_required() {
+    fn zero_required(config: &Value) -> Value {
+        let text = config.to_string();
+        assert!(
+            text.contains("000000000000000f"),
+            "recorded requirement is 15"
+        );
+        serde_json::from_str(&text.replacen("000000000000000f", "0000000000000000", 1)).unwrap()
+    }
+    let mut observations = Vec::new();
+    for chain in ["aptos", "movement", "initia"] {
+        let initia = chain == "initia";
+        let recorded = if initia {
+            recorded_initia_view("007-mainnet-endpoint-get_config-registered")
+        } else {
+            recorded_move_config(chain)
+        };
+        let library = || {
+            if initia {
+                vec![Ok(recorded_initia_view(
+                    "006-mainnet-endpoint-get_effective_receive_library-registered",
+                ))]
+            } else {
+                vec![Ok(json!([
+                    "0xc33752e0220faf79e45385dd73fb28d681dcd9f1569a1480725507c1f3c3aba9"
+                ]))]
+            }
+        };
+        let state = |state: u8| {
+            if initia {
+                json!({"data": state.to_string()})
+            } else {
+                json!([state])
+            }
+        };
+        let count = |count: u64| {
+            if initia {
+                json!({"data": format!("\"{count}\"")})
+            } else {
+                json!([count.to_string()])
+            }
+        };
+        let zero = zero_required(&recorded);
+        for (label, config, verifiable, confirmations, status, signatures) in [
+            ("required-0-count-0-verifying", &zero, 0, 0, 200, 1),
+            ("required-0-count-0-verifiable", &zero, 1, 0, 200, 1),
+            ("required-0-count-0-verified", &zero, 2, 0, 400, 0),
+            ("required-0-count-1", &zero, 0, 1, 400, 0),
+            ("required-15-count-0", &recorded, 0, 0, 200, 1),
+            ("required-15-count-15", &recorded, 0, 15, 400, 0),
+        ] {
+            let (actual_status, body, actual_signatures, _) = run_with_views(
+                chain,
+                config.clone(),
+                state(verifiable),
+                count(confirmations),
+                library(),
+            )
+            .await;
+            observations.push(json!({
+                "chain": chain,
+                "case": label,
+                "http_status": actual_status.as_u16(),
+                "signatures": actual_signatures,
+                "body": body,
+            }));
+            assert_eq!(actual_status.as_u16(), status, "{chain} {label}: {body}");
+            assert_eq!(actual_signatures, signatures, "{chain} {label}: {body}");
+            if status == 400 {
+                assert!(
+                    body["body"]
+                        .as_str()
+                        .is_some_and(|text| text.starts_with("Payload already signed")),
+                    "{chain} {label}: {body}"
+                );
+            }
+        }
+    }
+    audit_round_artifact(
+        "h02-m21",
+        "m21-move-v302-zero-confirmations",
+        json!({ "cases": observations }),
     );
 }

@@ -141,6 +141,7 @@ pub struct ProviderSnapshotHandle {
     /// The chain set signing capability was assembled for. Every published
     /// generation is restricted to it.
     startup_chain_names: Arc<[String]>,
+    pub(crate) rank_tracker: Arc<ProviderRankTracker>,
 }
 
 impl ProviderSnapshotHandle {
@@ -159,6 +160,7 @@ impl ProviderSnapshotHandle {
                 available_chain_names,
             }))),
             startup_chain_names,
+            rank_tracker: Arc::new(ProviderRankTracker::new()),
         }
     }
 

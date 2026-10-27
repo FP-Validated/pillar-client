@@ -12,9 +12,12 @@ pub(crate) fn aptos_provider_uri_parts(uri: &ProviderUri) -> (String, HashMap<St
         .map(|(_, value)| value.into_owned())
         .filter(|value| !value.is_empty())
     {
-        headers
-            .entry("authorization".to_string())
-            .or_insert_with(|| format!("Bearer {api_key}"));
+        if !headers
+            .keys()
+            .any(|key| key.eq_ignore_ascii_case("authorization"))
+        {
+            headers.insert("authorization".to_string(), format!("Bearer {api_key}"));
+        }
     }
 
     parsed_url.set_query(None);
@@ -42,22 +45,20 @@ pub(crate) fn aptos_indexer_provider_health_request(
         .find(|(key, _)| key == "event-indexer")
         .map(|(_, value)| value.clone())
         .filter(|value| !value.is_empty());
-    let report_url = no_code_indexer.or(event_indexer)?;
-
-    let event_indexer_api_key = query_pairs
+    let (report_url, credential_name) = match no_code_indexer {
+        Some(url) => (url, "no-code-indexer-api-key"),
+        None => (event_indexer?, "event-indexer-api-key"),
+    };
+    let auxiliary = reqwest::Url::parse(&report_url).ok()?;
+    if auxiliary.origin() != parsed_url.origin() {
+        headers.clear();
+    }
+    if let Some((_, api_key)) = query_pairs
         .iter()
-        .find(|(key, _)| key == "event-indexer-api-key")
-        .or_else(|| {
-            query_pairs
-                .iter()
-                .find(|(key, _)| key == "no-code-indexer-api-key")
-        })
-        .map(|(_, value)| value.clone())
-        .filter(|value| !value.is_empty());
-    if let Some(api_key) = event_indexer_api_key {
-        headers
-            .entry("Authorization".to_string())
-            .or_insert_with(|| format!("Bearer {api_key}"));
+        .find(|(key, value)| key == credential_name && !value.is_empty())
+    {
+        headers.retain(|key, _| !key.eq_ignore_ascii_case("authorization"));
+        headers.insert("Authorization".to_string(), format!("Bearer {api_key}"));
     }
 
     let kind = if is_movement {

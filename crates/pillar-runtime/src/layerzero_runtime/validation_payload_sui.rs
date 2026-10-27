@@ -10,25 +10,7 @@
 //! `dvnConfirmed` is `getConfirmation(...) >= inboundUlnConfig.confirmations`
 //! (TS: `:475-499`).
 //!
-//! Every view is a `devInspect` of a programmable transaction. Per provider:
-//! 1. `endpoint_v2::get_messaging_channel(endpoint, receiver)` -> channel id
-//!    (TS: `packages/sdks/lz-v2-sdk/src/utils/suimove/index.ts:47-76`)
-//! 2. `uln_302_views::verifiable(uln, verification, endpoint, channel,
-//!    packetHeader, payloadHash)` -> `u8` state (TS: `:540-568`)
-//! 3. `bytes32::from_bytes` x2 then
-//!    `uln_302::get_confirmations(verification, dvn, r0, r1)` -> `u64`; a Move
-//!    abort with `sub_status` 1 (`EConfirmationsNotFound`) means zero
-//!    (TS: `:583-632`, abort parsing in
-//!    `packages/common-suimove/src/utils.ts:17-38`)
-//! 4. `uln_302::get_effective_receive_uln_config(uln, receiver, srcEid)` ->
-//!    `UlnConfig`, for the required confirmations (TS: `:889-944`)
-//!
-//! Object inputs must carry each shared object's `initial_shared_version` and
-//! whether the Move signature takes it mutably, so the SDK's resolver steps are
-//! reproduced: `getNormalizedMoveFunction` per target, then `multiGetObjects`
-//! with `showOwner: true` (TS: the published resolver's `normalizeInputs` ->
-//! `resolveObjectReferences`; `Reference` means immutable, anything else
-//! mutable).
+//! Shared-object versions and function signatures are resolved once per provider observation.
 
 use super::validation_payload::payload_signed_validation_result;
 use super::*;
@@ -56,6 +38,10 @@ const SUI_VERIFICATION_STATE_VERIFIED: u8 = 2;
 /// `Uln302GetConfirmationsErrorCodes.EConfirmationsNotFound`
 /// (`packages/sdks/lz-v2-sdk/src/uln/sui/index.ts:62-71`).
 const E_CONFIRMATIONS_NOT_FOUND: i64 = 1;
+/// Where that abort is raised, observed on Sui and IOTA mainnet
+/// (`tests/onchain_provenance/move_abort_origin.json`).
+const MODULE_RECEIVE_ULN: &str = "receive_uln";
+const FUNCTION_GET_CONFIRMATIONS: &str = "get_confirmations";
 
 /// Method-name prefix: IOTA exposes the same JSON-RPC surface under `iota_`.
 fn sui_rpc_method(chain_name: &str, suffix: &str) -> String {
@@ -76,7 +62,7 @@ where
         sent_event: &LzSentEvent,
         verifier_address: &str,
         dst_chain_name: &str,
-    ) -> Result<(), AppCoreError> {
+    ) -> Result<Option<u64>, AppCoreError> {
         let uln_version = uln_version_value(&sent_event.lz_message_id)
             .ok_or_else(|| AppCoreError::Internal("ulnSendVersion must be a string".to_string()))?;
         // TS: `packages/sdks/lz-v2-sdk/src/uln/sui/index.ts:509-510`.
@@ -110,6 +96,18 @@ where
             .map_err(|error| AppCoreError::Internal(format!("packetHeader hex: {error}")))?;
         let payload_hash = hex::decode(proof.payload_hash.trim_start_matches("0x"))
             .map_err(|error| AppCoreError::Internal(format!("payloadHash hex: {error}")))?;
+        // `bytes32::from_bytes` aborts with code 1 on any other length, the code that also
+        // means "no confirmation record", so only 32-byte hashes may reach it.
+        if payload_hash.len() != 32 {
+            return Err(AppCoreError::Internal(format!(
+                "payloadHash must be 32 bytes, got {}",
+                payload_hash.len()
+            )));
+        }
+        let header_hash: [u8; 32] = {
+            use sha3::{Digest, Keccak256};
+            Keccak256::digest(&packet_header).into()
+        };
 
         let quorum = required_provider_quorum(provider_config, dst_chain_name)?;
         let plan = plan_dispatch(&self.rank_tracker, dst_chain_name, quorum).await?;
@@ -122,10 +120,18 @@ where
             let contracts = contracts.clone();
             let packet_header = packet_header.clone();
             let payload_hash = payload_hash.clone();
+            let budget = self.sui_observation_budget.clone();
+            let voter = &provider_config.voters[index];
+            let entity = serde_json::to_string(&(dst_chain_name, &voter.category, &voter.entity))
+                .expect("provider entity strings serialize");
             requests.push(async move {
                 if !delay.is_zero() {
                     tokio::time::sleep(delay).await;
                 }
+                let _entity_permit = match budget.acquire_for(&chain_name, Some(&entity)).await {
+                    Ok(permit) => permit,
+                    Err(error) => return (index, Err(RpcError::Admission(error))),
+                };
                 let observation = provider_response(
                     observe_sui_payload_signed(
                         &transport,
@@ -138,6 +144,7 @@ where
                             src_eid,
                             verifier: &verifier,
                             packet_header: &packet_header,
+                            header_hash: &header_hash,
                             payload_hash: &payload_hash,
                         },
                     )
@@ -160,6 +167,8 @@ struct SuiPayloadSignedObservation<'a> {
     src_eid: u32,
     verifier: &'a [u8; 32],
     packet_header: &'a [u8],
+    /// `keccak256(packet_header)`, the key `get_confirmations` takes.
+    header_hash: &'a [u8; 32],
     payload_hash: &'a [u8],
 }
 
@@ -187,6 +196,7 @@ where
         src_eid,
         verifier,
         packet_header,
+        header_hash,
         payload_hash,
     } = observation;
 
@@ -212,6 +222,7 @@ where
         0,
     )
     .await?;
+    let endpoint_version = endpoint_object.initial_shared_version;
     let channel_bytes = dev_inspect_return(
         transport,
         url,
@@ -232,55 +243,44 @@ where
     .map_err(|_| RpcError::Unavailable)?;
     let channel_id = decode_sui_address(&channel_bytes).map_err(|_| RpcError::Unavailable)?;
 
-    // 2. verification state.
-    let uln_object = resolve_shared_object(
+    let view_parameters = normalized_parameters(
         transport,
         url,
         headers.clone(),
         chain_name,
-        &contracts.uln_302_object,
         views_package,
         MODULE_ULN_302_VIEWS,
         "verifiable",
-        0,
     )
     .await?;
-    let verification_object = resolve_shared_object(
+    let channel_address = format!("0x{}", hex::encode(channel_id));
+    let versions = shared_object_initial_versions(
         transport,
         url,
         headers.clone(),
         chain_name,
+        &[
+            &contracts.uln_302_object,
+            &contracts.uln_302_verification_object,
+            &channel_address,
+        ],
+    )
+    .await?;
+    let uln_object =
+        shared_object_input(&contracts.uln_302_object, versions[0], &view_parameters, 0)?;
+    let verification_object = shared_object_input(
         &contracts.uln_302_verification_object,
-        views_package,
-        MODULE_ULN_302_VIEWS,
-        "verifiable",
+        versions[1],
+        &view_parameters,
         1,
-    )
-    .await?;
-    let endpoint_for_views = resolve_shared_object(
-        transport,
-        url,
-        headers.clone(),
-        chain_name,
+    )?;
+    let endpoint_for_views = shared_object_input(
         &contracts.endpoint_v2_object,
-        views_package,
-        MODULE_ULN_302_VIEWS,
-        "verifiable",
+        endpoint_version,
+        &view_parameters,
         2,
-    )
-    .await?;
-    let channel_object = resolve_shared_object_id(
-        transport,
-        url,
-        headers.clone(),
-        chain_name,
-        &format!("0x{}", hex::encode(channel_id)),
-        views_package,
-        MODULE_ULN_302_VIEWS,
-        "verifiable",
-        3,
-    )
-    .await?;
+    )?;
+    let channel_object = shared_object_input(&channel_address, versions[2], &view_parameters, 3)?;
 
     let state_bytes = dev_inspect_return(
         transport,
@@ -306,20 +306,25 @@ where
     .map_err(|_| RpcError::Unavailable)?;
     let state = decode_sui_u8(&state_bytes).map_err(|_| RpcError::Unavailable)?;
 
-    // 3. this DVN's confirmations. A Move abort with sub_status 1 is "no
-    //    confirmations recorded", which upstream maps to zero.
-    let confirmations_verification = resolve_shared_object(
+    // 3. this DVN's confirmations. Abort code 1 is "no confirmations recorded" only
+    //    when `receive_uln::get_confirmations` raised it: `bytes32::from_bytes` aborts
+    //    with the same code.
+    let confirmation_parameters = normalized_parameters(
         transport,
         url,
         headers.clone(),
         chain_name,
-        &contracts.uln_302_verification_object,
         uln_package,
         MODULE_ULN_302,
         "get_confirmations",
-        0,
     )
     .await?;
+    let confirmations_verification = shared_object_input(
+        &contracts.uln_302_verification_object,
+        versions[1],
+        &confirmation_parameters,
+        0,
+    )?;
     let confirmations_result = dev_inspect_return(
         transport,
         url,
@@ -328,7 +333,7 @@ where
         &[
             SuiCallArg::Shared(confirmations_verification),
             SuiCallArg::Pure(sui_pure_address(verifier)),
-            SuiCallArg::Pure(sui_pure_bytes(packet_header)),
+            SuiCallArg::Pure(sui_pure_bytes(header_hash)),
             SuiCallArg::Pure(sui_pure_bytes(payload_hash)),
         ],
         &[
@@ -359,24 +364,37 @@ where
     )
     .await?;
     let confirmations = match confirmations_result {
-        Ok(bytes) => decode_sui_u64(&bytes).map_err(|_| RpcError::Unavailable)?,
-        Err(SuiViewFailure::MoveAbort(E_CONFIRMATIONS_NOT_FOUND)) => 0,
+        Ok(bytes) => Some(decode_sui_u64(&bytes).map_err(|_| RpcError::Unavailable)?),
+        Err(SuiViewFailure::MoveAbort(abort))
+            if abort.code == E_CONFIRMATIONS_NOT_FOUND
+                && abort.raised_by(
+                    &uln_package,
+                    MODULE_RECEIVE_ULN,
+                    FUNCTION_GET_CONFIRMATIONS,
+                ) =>
+        {
+            None
+        }
         Err(_) => return Err(RpcError::Unavailable),
     };
 
     // 4. the pathway's required confirmations.
-    let config_uln_object = resolve_shared_object(
+    let config_parameters = normalized_parameters(
         transport,
         url,
         headers.clone(),
         chain_name,
-        &contracts.uln_302_object,
         uln_package,
         MODULE_ULN_302,
         "get_effective_receive_uln_config",
-        0,
     )
     .await?;
+    let config_uln_object = shared_object_input(
+        &contracts.uln_302_object,
+        versions[0],
+        &config_parameters,
+        0,
+    )?;
     let config_bytes = dev_inspect_return(
         transport,
         url,
@@ -404,58 +422,44 @@ where
         .map_err(|_| RpcError::Unavailable)?
         .confirmations;
 
-    let dvn_confirmed = confirmations >= required;
+    // `receive_uln::verified`: no record is unverified, even when 0 are required (M-21 class).
+    let dvn_confirmed = confirmations.is_some_and(|count| count >= required);
     let validity = if state == SUI_VERIFICATION_STATE_VERIFIED || dvn_confirmed {
         PayloadSignedValidity::Signed
     } else {
-        PayloadSignedValidity::NotSigned
+        PayloadSignedValidity::NotSigned {
+            required: Some(required),
+        }
     };
-    Ok((format!("{state}:{confirmations}:{required}"), validity))
+    Ok((format!("{state}:{confirmations:?}:{required}"), validity))
 }
 
 /// Why a `devInspect` produced no value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SuiViewFailure {
-    /// The Move call aborted with this `sub_status`.
-    MoveAbort(i64),
+    MoveAbort(MoveAbortSite),
     /// Anything else: a transport failure, an unparsable response, or an
     /// execution error that is not an abort.
     Unusable,
 }
 
-/// Resolve one shared object input: read `initial_shared_version` from the
-/// chain and take mutability from the target's normalized Move signature.
-#[allow(clippy::too_many_arguments)]
-async fn resolve_shared_object<T>(
-    transport: &T,
-    url: &str,
-    headers: HashMap<String, String>,
-    chain_name: &str,
-    object_id: &str,
-    package: [u8; 32],
-    module: &str,
-    function: &str,
-    parameter_index: usize,
-) -> Result<SuiSharedObject, RpcError>
-where
-    T: JsonRpcTransport,
-{
-    resolve_shared_object_id(
-        transport,
-        url,
-        headers,
-        chain_name,
-        object_id,
-        package,
-        module,
-        function,
-        parameter_index,
-    )
-    .await
+/// A Move abort's code and the function that raised it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MoveAbortSite {
+    pub(crate) code: i64,
+    pub(crate) package: [u8; 32],
+    pub(crate) module: String,
+    pub(crate) function: String,
+}
+
+impl MoveAbortSite {
+    fn raised_by(&self, package: &[u8; 32], module: &str, function: &str) -> bool {
+        &self.package == package && self.module == module && self.function == function
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn resolve_shared_object_id<T>(
+async fn resolve_shared_object<T: JsonRpcTransport>(
     transport: &T,
     url: &str,
     headers: HashMap<String, String>,
@@ -465,11 +469,8 @@ async fn resolve_shared_object_id<T>(
     module: &str,
     function: &str,
     parameter_index: usize,
-) -> Result<SuiSharedObject, RpcError>
-where
-    T: JsonRpcTransport,
-{
-    let mutable = normalized_parameter_is_mutable(
+) -> Result<SuiSharedObject, RpcError> {
+    let parameters = normalized_parameters(
         transport,
         url,
         headers.clone(),
@@ -477,24 +478,27 @@ where
         package,
         module,
         function,
-        parameter_index,
     )
     .await?;
-    let initial_shared_version =
-        shared_object_initial_version(transport, url, headers, chain_name, object_id).await?;
+    let versions =
+        shared_object_initial_versions(transport, url, headers, chain_name, &[object_id]).await?;
+    shared_object_input(object_id, versions[0], &parameters, parameter_index)
+}
+
+fn shared_object_input(
+    object_id: &str,
+    initial_shared_version: u64,
+    parameters: &[bool],
+    index: usize,
+) -> Result<SuiSharedObject, RpcError> {
     Ok(SuiSharedObject {
         object_id: sui_address_from_hex(object_id).map_err(|_| RpcError::Unavailable)?,
         initial_shared_version,
-        mutable,
+        mutable: *parameters.get(index).ok_or(RpcError::Unavailable)?,
     })
 }
 
-/// `getNormalizedMoveFunction` -> is `parameters[index]` taken mutably?
-///
-/// A `Reference` is immutable; `MutableReference` and a by-value parameter are
-/// both mutable, matching the SDK resolver's `isUsedAsMutable`.
-#[allow(clippy::too_many_arguments)]
-async fn normalized_parameter_is_mutable<T>(
+async fn normalized_parameters<T: JsonRpcTransport>(
     transport: &T,
     url: &str,
     headers: HashMap<String, String>,
@@ -502,76 +506,65 @@ async fn normalized_parameter_is_mutable<T>(
     package: [u8; 32],
     module: &str,
     function: &str,
-    parameter_index: usize,
-) -> Result<bool, RpcError>
-where
-    T: JsonRpcTransport,
-{
-    let body = json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": sui_rpc_method(chain_name, "getNormalizedMoveFunction"),
-        "params": [format!("0x{}", hex::encode(package)), module, function],
-    });
+) -> Result<Vec<bool>, RpcError> {
     let response = transport
-        .post_json_scoped(url.to_string(), headers, body)
+        .post_json_scoped(
+            url.to_string(),
+            headers,
+            json!({
+                "jsonrpc": "2.0", "id": 1,
+                "method": sui_rpc_method(chain_name, "getNormalizedMoveFunction"),
+                "params": [format!("0x{}", hex::encode(package)), module, function],
+            }),
+        )
         .await?;
-    let parameter = response
-        .get("result")
-        .ok_or(RpcError::Unavailable)?
-        .get("parameters")
-        .ok_or(RpcError::Unavailable)?
-        .as_array()
-        .ok_or(RpcError::Unavailable)?
-        .get(parameter_index)
+    let parameters = response
+        .pointer("/result/parameters")
+        .and_then(Value::as_array)
         .ok_or(RpcError::Unavailable)?;
-    // A `Reference` parameter is an immutable borrow; anything else is mutable.
-    Ok(parameter.get("Reference").is_none())
+    Ok(parameters
+        .iter()
+        .map(|parameter| parameter.get("Reference").is_none())
+        .collect())
 }
 
-/// `multiGetObjects` with `showOwner: true` -> the shared object's
-/// `initial_shared_version`. A non-shared object is refused: the encoder only
-/// supports shared inputs.
-async fn shared_object_initial_version<T>(
+async fn shared_object_initial_versions<T: JsonRpcTransport>(
     transport: &T,
     url: &str,
     headers: HashMap<String, String>,
     chain_name: &str,
-    object_id: &str,
-) -> Result<u64, RpcError>
-where
-    T: JsonRpcTransport,
-{
-    let body = json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": sui_rpc_method(chain_name, "multiGetObjects"),
-        "params": [[object_id], { "showOwner": true }],
-    });
+    object_ids: &[&str],
+) -> Result<Vec<u64>, RpcError> {
     let response = transport
-        .post_json_scoped(url.to_string(), headers, body)
+        .post_json_scoped(
+            url.to_string(),
+            headers,
+            json!({
+                "jsonrpc": "2.0", "id": 1,
+                "method": sui_rpc_method(chain_name, "multiGetObjects"),
+                "params": [object_ids, { "showOwner": true }],
+            }),
+        )
         .await?;
-    let shared = response
+    let objects = response
         .get("result")
-        .ok_or(RpcError::Unavailable)?
-        .as_array()
-        .ok_or(RpcError::Unavailable)?
-        .first()
-        .ok_or(RpcError::Unavailable)?
-        .get("data")
-        .ok_or(RpcError::Unavailable)?
-        .get("owner")
-        .ok_or(RpcError::Unavailable)?
-        .get("Shared")
+        .and_then(Value::as_array)
         .ok_or(RpcError::Unavailable)?;
-    let version = shared
-        .get("initial_shared_version")
-        .ok_or(RpcError::Unavailable)?;
-    match version {
-        Value::Number(number) => number.as_u64().ok_or(RpcError::Unavailable),
-        Value::String(text) => text.parse().map_err(|_| RpcError::Unavailable),
-        _ => Err(RpcError::Unavailable),
+    if objects.len() != object_ids.len() {
+        return Err(RpcError::Unavailable);
     }
+    objects
+        .iter()
+        .map(|object| {
+            let version = object
+                .pointer("/data/owner/Shared/initial_shared_version")
+                .ok_or(RpcError::Unavailable)?;
+            version
+                .as_u64()
+                .or_else(|| version.as_str()?.parse().ok())
+                .ok_or(RpcError::Unavailable)
+        })
+        .collect()
 }
 
 /// `devInspectTransactionBlock` -> the last command's first return value.
@@ -592,7 +585,7 @@ where
         let response = transport.post_json_scoped(url.to_string(), headers, json!({"jsonrpc":"2.0","id":1,"method":sui_rpc_method(chain_name,"devInspectTransactionBlock"),"params":[SUI_DEV_INSPECT_MOCK_SENDER,base64::engine::general_purpose::STANDARD.encode(&kind),Value::Null,Value::Null]})).await?;
         let result = response.get("result").ok_or(RpcError::Unavailable)?;
         if let Some(error) = result.get("error").and_then(Value::as_str) {
-            return Ok(Err(move_abort_sub_status(error)
+            return Ok(Err(iota_move_abort_site(error)
                 .map(SuiViewFailure::MoveAbort)
                 .unwrap_or(SuiViewFailure::Unusable)));
         }
@@ -631,7 +624,7 @@ where
         }}
     });
     let body = json!({
-        "query": "query($transaction: JSON!) { simulateTransaction(transaction: $transaction, checksEnabled: false, doGasSelection: true) { effects { status executionError { message abortCode } } outputs { returnValues { value { bcs } } } } }",
+        "query": "query($transaction: JSON!) { simulateTransaction(transaction: $transaction, checksEnabled: false, doGasSelection: true) { effects { status executionError { message abortCode module { name package { address } } function { name } } } outputs { returnValues { value { bcs } } } } }",
         "variables": {"transaction": transaction}
     });
     let response = transport
@@ -643,14 +636,13 @@ where
     let simulation = response
         .pointer("/data/simulateTransaction")
         .ok_or(RpcError::Unavailable)?;
-    if let Some(abort_code) = simulation.pointer("/effects/executionError/abortCode") {
-        let code = abort_code
-            .as_i64()
-            .or_else(|| abort_code.as_str()?.parse().ok());
-        let Some(code) = code else {
+    if let Some(error) = simulation.pointer("/effects/executionError") {
+        if error.get("abortCode").is_none_or(Value::is_null) {
             return Ok(Err(SuiViewFailure::Unusable));
-        };
-        return Ok(Err(SuiViewFailure::MoveAbort(code)));
+        }
+        return Ok(Err(sui_graphql_abort_site(error)
+            .map(SuiViewFailure::MoveAbort)
+            .unwrap_or(SuiViewFailure::Unusable)));
     }
     if simulation
         .pointer("/effects/status")
@@ -689,31 +681,64 @@ fn decode_return_value(value: &Value) -> Option<Vec<u8>> {
     }
 }
 
-/// Parse `major_status: ABORTED` / `sub_status: Some(N)` out of a devInspect
-/// error string, as `handleError` does
-/// (TS: `packages/common-suimove/src/utils.ts:17-38`).
-fn move_abort_sub_status(error: &str) -> Option<i64> {
-    if !error.contains("ABORTED") {
+/// A GraphQL `ExecutionError` with its abort code and raising function.
+pub(crate) fn sui_graphql_abort_site(error: &Value) -> Option<MoveAbortSite> {
+    let code = error.get("abortCode")?;
+    let code = code.as_i64().or_else(|| code.as_str()?.parse().ok())?;
+    Some(MoveAbortSite {
+        code,
+        package: sui_address_from_hex(error.pointer("/module/package/address")?.as_str()?).ok()?,
+        module: error.pointer("/module/name")?.as_str()?.to_string(),
+        function: error.pointer("/function/name")?.as_str()?.to_string(),
+    })
+}
+
+/// IOTA's `devInspect` error: `... Location: 0x<package>::<module>::<function> (function
+/// index N) at offset M, Abort Code: C ...`. Upstream reads only the code.
+pub(crate) fn iota_move_abort_site(error: &str) -> Option<MoveAbortSite> {
+    let rest = error.strip_prefix("MoveAbort: Move Runtime Abort. Location: ")?;
+    let (location, rest) = rest.split_once(' ')?;
+    let mut parts = location.split("::");
+    let (package, module, function) = (parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some() {
         return None;
     }
-    let start = error.find("sub_status: Some(")? + "sub_status: Some(".len();
-    let rest = &error[start..];
-    let end = rest.find(')')?;
-    rest[..end].trim().parse().ok()
+    let code = rest.split_once(", Abort Code: ")?.1;
+    let digits = code.split(|c: char| !c.is_ascii_digit()).next()?;
+    Some(MoveAbortSite {
+        code: digits.parse().ok()?,
+        package: sui_address_from_hex(package).ok()?,
+        module: module.to_string(),
+        function: function.to_string(),
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// IOTA mainnet's own answers, from `tests/onchain_provenance/move_abort_origin.json`:
+    /// the missing record and a short hash abort with the same code in different functions.
     #[test]
-    fn extracts_the_move_abort_sub_status() {
-        let error =
-            "MoveAbort { location: .., major_status: ABORTED, sub_status: Some(1) } in command 2";
-        assert_eq!(move_abort_sub_status(error), Some(1));
-        // A non-abort execution error must not read as an abort code.
-        assert_eq!(move_abort_sub_status("InsufficientGas"), None);
-        assert_eq!(move_abort_sub_status("major_status: ABORTED"), None);
+    fn reads_the_iota_abort_site_not_only_its_code() {
+        let uln = "0x042e3bb837e5528e495124542495b9df5016acd011d89838ae529db5a814499e";
+        let missing = format!("MoveAbort: Move Runtime Abort. Location: {uln}::receive_uln::get_confirmations (function index 10) at offset 22, Abort Code: 1; caused by: VMError with status ABORTED with sub status 1; at command index: 2");
+        let site = iota_move_abort_site(&missing).unwrap();
+        assert_eq!(site.code, 1);
+        assert!(site.raised_by(
+            &sui_address_from_hex(uln).unwrap(),
+            MODULE_RECEIVE_ULN,
+            FUNCTION_GET_CONFIRMATIONS
+        ));
+        let short = "MoveAbort: Move Runtime Abort. Location: 0x56a262afe5db9b34426f343160481290d010551ca15b427b1fb4b0010e3b69ed::bytes32::from_bytes (function index 4) at offset 7, Abort Code: 1; at command index: 0";
+        let site = iota_move_abort_site(short).unwrap();
+        assert_eq!(site.code, 1);
+        assert!(!site.raised_by(
+            &sui_address_from_hex(uln).unwrap(),
+            MODULE_RECEIVE_ULN,
+            FUNCTION_GET_CONFIRMATIONS
+        ));
+        assert_eq!(iota_move_abort_site("InsufficientGas"), None);
     }
 
     /// The 139-byte `UlnConfig` Sui mainnet actually returned for the

@@ -10,18 +10,16 @@ where
         verifier_address: Option<&str>,
         dst_chain_name: &str,
         effective_receive_version: Option<&str>,
-    ) -> Result<(), AppCoreError> {
+    ) -> Result<Option<u64>, AppCoreError> {
         crate::provider_health::rpc_scope(
             &sent_event.lz_message_id.pathway_id.dst_chain_name,
             async {
-                // Legacy V1 packets have no V2 payload to query.
                 if !sent_event.extra.contains_key("guid") {
-                    return Ok(());
+                    return Ok(None);
                 }
                 if is_chain_native_payload_signed_destination(dst_chain_name) {
-                    // The native duplicate query needs a DVN address; EVM resolution does not.
                     let Some(verifier_address) = verifier_address else {
-                        return Ok(());
+                        return Ok(None);
                     };
                     return self
                         .validate_chain_native_payload_not_signed_with_quorum(
@@ -296,7 +294,7 @@ where
         verifier_address: &str,
         dst_chain_name: &str,
         effective_receive_version: Option<&str>,
-    ) -> Result<(), AppCoreError> {
+    ) -> Result<Option<u64>, AppCoreError> {
         if dst_chain_name == "solana" {
             return self
                 .validate_solana_payload_not_signed_with_quorum(
@@ -356,14 +354,16 @@ where
             let snapshot = self.providers.load();
             let sequencer =
                 canton_sequencer(dst_chain_name, snapshot.provider_config(dst_chain_name)?)?;
-            let signed =
+            let (signed, required) =
                 canton_payload_signed(&self.transport, &sequencer, sent_event, verifier_address)
                     .await?;
             return payload_signed_validation_result(
                 if signed {
                     PayloadSignedValidity::Signed
                 } else {
-                    PayloadSignedValidity::NotSigned
+                    PayloadSignedValidity::NotSigned {
+                        required: Some(required),
+                    }
                 },
                 sent_event,
                 dst_chain_name,
@@ -378,7 +378,7 @@ where
         verifier_address: &str,
         dst_chain_name: &str,
         effective_receive_version: Option<&str>,
-    ) -> Result<(), AppCoreError> {
+    ) -> Result<Option<u64>, AppCoreError> {
         let uln_version = effective_receive_version
             .or_else(|| uln_version_value(&sent_event.lz_message_id))
             .ok_or_else(|| AppCoreError::Internal("ulnSendVersion must be a string".to_string()))?;
@@ -472,7 +472,7 @@ where
         &self,
         sent_event: &LzSentEvent,
         verifier_address: &str,
-    ) -> Result<(), AppCoreError> {
+    ) -> Result<Option<u64>, AppCoreError> {
         let contracts = self.aptos_v301_contracts.clone().ok_or_else(|| {
             AppCoreError::Internal("No Aptos EndpointV1 contracts configured".to_string())
         })?;
@@ -547,7 +547,7 @@ where
         sent_event: &LzSentEvent,
         verifier_address: &str,
         dst_chain_name: &str,
-    ) -> Result<(), AppCoreError> {
+    ) -> Result<Option<u64>, AppCoreError> {
         let snapshot = self.providers.load();
         let provider_config = snapshot.provider_config(dst_chain_name)?;
         if provider_config.uris.is_empty() {
@@ -617,9 +617,9 @@ pub(crate) fn payload_signed_validation_result(
     validity: PayloadSignedValidity,
     sent_event: &LzSentEvent,
     dst_chain_name: &str,
-) -> Result<(), AppCoreError> {
+) -> Result<Option<u64>, AppCoreError> {
     match validity {
-        PayloadSignedValidity::NotSigned => Ok(()),
+        PayloadSignedValidity::NotSigned { required } => Ok(required),
         PayloadSignedValidity::Signed => Err(AppCoreError::BadRequest(format!(
             "{} for message {} on chain {}",
             PAYLOAD_ALREADY_SIGNED_ERROR_PREFIX,
@@ -629,9 +629,6 @@ pub(crate) fn payload_signed_validation_result(
         PayloadSignedValidity::Missing => Err(AppCoreError::Internal(format!(
             "Payload-signed validation unavailable for chain {dst_chain_name}"
         ))),
-        // Nothing about retrying changes the receiver's configuration, so this
-        // is the caller's problem to fix, the same classification upstream's
-        // `NonRetryableError` gets.
         PayloadSignedValidity::UnsupportedReceiveLibrary => Err(AppCoreError::BadRequest(format!(
             "Receiver {} on chain {} receives on a library this service cannot validate; \
                  refusing to sign",
@@ -731,12 +728,14 @@ where
         &["vector<u8>", "vector<u8>", "address"],
     )
     .await?;
-    // `confirmationResult.length > 0 && Number(confirmationResult[0]) >= confirmations`.
+    // Upstream reads `length > 0 && Number(result[0]) >= confirmations`, but the view returns 0
+    // for a DVN with no record, which the chain's `is_verified` treats as unverified (M-21).
     let confirmations = match confirmations.first() {
         None => None,
         Some(value) => Some(move_u64(value).ok_or(RpcError::Unavailable)?),
     };
-    let dvn_confirmed = confirmations.is_some_and(|count| count >= required_confirmations);
+    let dvn_confirmed =
+        confirmations.is_some_and(|count| count > 0 && count >= required_confirmations);
     let verification_state = view(
         format!("{}::uln_301::verifiable", contracts.view_uln301),
         vec![packet_header, payload_hash],
@@ -784,7 +783,9 @@ where
     let validity = if signed {
         PayloadSignedValidity::Signed
     } else {
-        PayloadSignedValidity::NotSigned
+        PayloadSignedValidity::NotSigned {
+            required: Some(required_confirmations),
+        }
     };
     Ok((
         format!("{required_confirmations}:{confirmations:?}:{verification_state}:{verified:?}"),
@@ -946,6 +947,9 @@ where
     .as_str()
     .and_then(aptos_address_bytes32)
     .ok_or(RpcError::Unavailable)?;
+    if aptos_address_bytes32(uln_302).as_deref() != Some(receive_library.as_str()) {
+        return Err(RpcError::Remote("Unsupported Move receive library".into()));
+    }
     let config = move_view_value(
         &transport,
         chain_name,
@@ -985,8 +989,10 @@ where
         &["vector<u8>", "vector<u8>", "address"],
     )
     .await?;
-    // Upstream treats an empty vector as false even when required confirmations is 0;
-    // malformed present values still throw and remove this provider's vote.
+    // The view returns 0 for a DVN with no record (`[]` never comes back); the chain's
+    // `is_verified` treats that as unverified even when 0 are required, so only a positive
+    // count signs (M-21, a deliberate departure from upstream's `>=`). Malformed present
+    // values still throw and remove this provider's vote.
     let confirmations = match confirmation_values.first() {
         None => None,
         Some(value) => Some(
@@ -996,12 +1002,15 @@ where
                 .ok_or(RpcError::Unavailable)?,
         ),
     };
-    let validity =
-        if state == 2 || confirmations.is_some_and(|value| value >= required_confirmations) {
-            PayloadSignedValidity::Signed
-        } else {
-            PayloadSignedValidity::NotSigned
-        };
+    let validity = if state == 2
+        || confirmations.is_some_and(|value| value > 0 && value >= required_confirmations)
+    {
+        PayloadSignedValidity::Signed
+    } else {
+        PayloadSignedValidity::NotSigned {
+            required: Some(required_confirmations),
+        }
+    };
     Ok((
         format!("{receive_library}:{state}:{confirmations:?}:{required_confirmations}"),
         validity,
@@ -1206,6 +1215,13 @@ fn encode_uleb128(mut value: usize) -> Vec<u8> {
     }
 }
 
+/// `UltraLightNode302._verified` for this DVN: `submitted && confirmations >= required`,
+/// with `required` the OApp's effective receive confirmations. The contract's own
+/// `has_payload_signed`, which upstream calls, is true for any stored verification,
+/// so a below-requirement one that `commit` never counts would pin the duplicate
+/// check while `verify` would overwrite it. The verification is read from storage
+/// because no view returns it; the slot derivation is pinned against mainnet in
+/// `tests/onchain_provenance/starknet_hash_lookup.json`.
 async fn observe_starknet_payload_signed<T>(
     transport: T,
     url: String,
@@ -1224,15 +1240,76 @@ where
     let Ok(payload_hash) = decode_bytes32(payload_hash) else {
         return Err(RpcError::Unavailable);
     };
+    let Some((src_eid, receiver)) = starknet_header_receive_path(&header) else {
+        return Err(RpcError::Unavailable);
+    };
     use sha3::{Digest, Keccak256};
-    let header_hash: [u8; 32] = Keccak256::digest(header).into();
-    let calldata = [
-        starknet_u256_low(&header_hash),
-        starknet_u256_high(&header_hash),
-        starknet_u256_low(&payload_hash),
-        starknet_u256_high(&payload_hash),
-        normalize_starknet_felt(verifier_address),
-    ];
+    let header_hash: [u8; 32] = Keccak256::digest(&header).into();
+    let Some(slot) = starknet_hash_lookup_slot(&header_hash, &payload_hash, verifier_address)
+    else {
+        return Err(RpcError::Unavailable);
+    };
+    let read_slot = |offset: u8| {
+        let key = starknet_slot_offset(&slot, offset);
+        let transport = transport.clone();
+        let (url, headers) = (url.clone(), headers.clone());
+        async move {
+            let response = transport
+                .post_json_scoped(
+                    url,
+                    headers,
+                    json!({
+                        "method": "starknet_getStorageAt",
+                        "params": [uln_address, key, "latest"],
+                        "id": 1,
+                        "jsonrpc": "2.0",
+                    }),
+                )
+                .await?;
+            response
+                .get("result")
+                .and_then(Value::as_str)
+                .and_then(starknet_felt_u64)
+                .ok_or(RpcError::Unavailable)
+        }
+    };
+    let submitted = read_slot(0).await?;
+    let stored = match submitted {
+        0 => None,
+        1 => Some(read_slot(1).await?),
+        _ => return Err(RpcError::Unavailable),
+    };
+    let required = observe_starknet_required_confirmations(
+        &transport,
+        url.clone(),
+        headers.clone(),
+        uln_address,
+        &receiver,
+        src_eid,
+    )
+    .await?;
+    Ok(if stored.is_some_and(|stored| stored >= required) {
+        PayloadSignedValidity::Signed
+    } else {
+        PayloadSignedValidity::NotSigned {
+            required: Some(required),
+        }
+    })
+}
+
+/// `get_oapp_uln_receive_config(receiver, src_eid)`: the effective receive config,
+/// whose first serialized member is `confirmations`.
+pub(crate) async fn observe_starknet_required_confirmations<T>(
+    transport: &T,
+    url: String,
+    headers: HashMap<String, String>,
+    uln_address: &str,
+    receiver: &str,
+    src_eid: u32,
+) -> Result<u64, RpcError>
+where
+    T: JsonRpcTransport,
+{
     let response = transport
         .post_json_scoped(
             url,
@@ -1241,29 +1318,69 @@ where
                 "method": "starknet_call",
                 "params": [{
                     "contract_address": uln_address,
-                    "entry_point_selector": starknet_selector("has_payload_signed"),
-                    "calldata": calldata,
+                    "entry_point_selector": starknet_selector("get_oapp_uln_receive_config"),
+                    "calldata": [normalize_starknet_felt(receiver), format!("0x{src_eid:x}")],
                 }, "latest"],
                 "id": 1,
                 "jsonrpc": "2.0",
             }),
         )
         .await?;
-    match Some(response)
-        .and_then(|response| {
-            response
-                .get("result")?
-                .as_array()?
-                .first()?
-                .as_str()
-                .map(str::to_string)
-        })
-        .as_deref()
-    {
-        Some("0x0" | "0") => Ok(PayloadSignedValidity::NotSigned),
-        Some("0x1" | "1") => Ok(PayloadSignedValidity::Signed),
-        _ => Err(RpcError::Unavailable),
+    response
+        .get("result")
+        .and_then(Value::as_array)
+        .and_then(|result| result.first())
+        .and_then(Value::as_str)
+        .and_then(starknet_felt_u64)
+        .ok_or(RpcError::Unavailable)
+}
+
+/// `srcEid` and `receiver` of a PacketV1 header: version(1) nonce(8) srcEid(4)
+/// sender(32) dstEid(4) receiver(32).
+pub(crate) fn starknet_header_receive_path(header: &[u8]) -> Option<(u32, String)> {
+    if header.len() != 81 {
+        return None;
     }
+    let src_eid = u32::from_be_bytes(header[9..13].try_into().ok()?);
+    Some((src_eid, format!("0x{}", hex::encode(&header[49..81]))))
+}
+
+/// `hash_lookup.entry(header_hash).entry(payload_hash).entry(dvn)`: Pedersen over
+/// `sn_keccak("hash_lookup")`, each `Bytes32` as its `u256` low then high half, then
+/// the DVN address, reduced into the storage address range `[0, 2^251 - 256)`.
+pub(crate) fn starknet_hash_lookup_slot(
+    header_hash: &[u8; 32],
+    payload_hash: &[u8; 32],
+    dvn: &str,
+) -> Option<num_bigint::BigUint> {
+    use starknet_types_core::felt::Felt;
+    use starknet_types_core::hash::{Pedersen, StarkHash};
+    let pedersen_hash = Pedersen::hash;
+    let half = |bytes: &[u8]| {
+        let mut word = [0u8; 32];
+        word[16..].copy_from_slice(bytes);
+        Felt::from_bytes_be(&word)
+    };
+    let mut state = Felt::from_hex(&starknet_selector("hash_lookup")).ok()?;
+    for hash in [header_hash, payload_hash] {
+        state = pedersen_hash(&state, &half(&hash[16..]));
+        state = pedersen_hash(&state, &half(&hash[..16]));
+    }
+    state = pedersen_hash(&state, &Felt::from_hex(&normalize_starknet_felt(dvn)).ok()?);
+    let bound = (num_bigint::BigUint::from(1u8) << 251u32) - 256u32;
+    Some(num_bigint::BigUint::from_bytes_be(&state.to_bytes_be()) % bound)
+}
+
+fn starknet_slot_offset(slot: &num_bigint::BigUint, offset: u8) -> String {
+    format!("0x{:x}", slot + offset)
+}
+
+fn starknet_felt_u64(value: &str) -> Option<u64> {
+    let digits = value.strip_prefix("0x")?.trim_start_matches('0');
+    if digits.is_empty() {
+        return Some(0);
+    }
+    u64::from_str_radix(digits, 16).ok()
 }
 
 fn decode_bytes32(value: &str) -> Result<[u8; 32], hex::FromHexError> {
@@ -1280,14 +1397,6 @@ fn decode_bytes32_or_longer(value: &str) -> Result<Vec<u8>, hex::FromHexError> {
         return Err(hex::FromHexError::InvalidStringLength);
     }
     Ok(decoded)
-}
-
-fn starknet_u256_low(value: &[u8; 32]) -> String {
-    normalize_starknet_felt(&hex::encode(&value[16..]))
-}
-
-fn starknet_u256_high(value: &[u8; 32]) -> String {
-    normalize_starknet_felt(&hex::encode(&value[..16]))
 }
 
 fn normalize_starknet_felt(value: &str) -> String {

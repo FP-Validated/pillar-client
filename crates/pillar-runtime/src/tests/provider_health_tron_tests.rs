@@ -70,11 +70,10 @@ async fn provider_health_probes_tron_json_rpc_block_number_like_typescript() {
     assert_eq!(calls[0].2["method"], "eth_blockNumber");
     assert_eq!(calls[0].2["params"], json!([]));
     assert_eq!(calls[1].0, "https://tron-web.example/wallet/getblock");
-    assert_eq!(
-        calls[1].1.get("TRON-PRO-API-KEY"),
-        Some(&"secret-token".to_string())
+    assert!(
+        calls[1].1.is_empty(),
+        "primary credentials must not reach a different TronWeb origin"
     );
-    assert_eq!(calls[1].1.get("x-extra"), Some(&"yes".to_string()));
     assert_eq!(calls[1].2["detail"], Value::from(false));
 }
 
@@ -190,4 +189,22 @@ async fn provider_health_marks_tron_unhealthy_when_block_number_probe_fails() {
     assert!(report["tron"].providers.iter().any(|entry| {
         entry.response == "block number unavailable" && entry.numeric_response.is_none()
     }));
+}
+
+#[tokio::test]
+async fn tron_signing_strips_auxiliary_credentials_and_promotes_the_primary_key() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let transport = RecordingTransport {
+        calls: calls.clone(),
+        responses: Arc::new(Mutex::new(vec![Ok(json!({"result": "0x1"}))])),
+    };
+    crate::provider_health::rpc_scope("tron", transport.post_json_scoped(
+        "https://user:password@tron.example/jsonrpc?tron-api-key=primary&tron-web-url=https%3A%2F%2Fother%3Aprivate%40web.example&keep=1".into(),
+        HashMap::new(),
+        json!({"jsonrpc":"2.0", "id":1, "method":"eth_getTransactionReceipt", "params":["0x123"]}),
+    )).await.unwrap();
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls[0].0, "https://tron.example/jsonrpc?keep=1");
+    assert_eq!(calls[0].1["TRON-PRO-API-KEY"], "primary");
+    assert_eq!(calls[0].1["Authorization"], "Basic dXNlcjpwYXNzd29yZA==");
 }

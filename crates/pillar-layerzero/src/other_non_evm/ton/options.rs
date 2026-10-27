@@ -4,7 +4,7 @@ use pillar_core::AppCoreError;
 use serde_json::{json, Map, Value};
 use ton_core::cell::TonCell;
 
-use super::cell::map_err;
+use super::cell::{map_err, require_ordinary};
 use super::cl_declare::{cell_name, cl_get_uint_be};
 
 #[derive(Default)]
@@ -29,24 +29,26 @@ pub fn decode_ton_relayer_options(
     let mut relayer_options = Map::new();
 
     let lz_receive_gas = &extra.lz_receive_gas + &enforced.lz_receive_gas;
-    if lz_receive_gas != BigUint::default() {
+    let lz_receive_value = &extra.lz_receive_value + &enforced.lz_receive_value;
+    if lz_receive_gas != BigUint::default() || lz_receive_value != BigUint::default() {
         relayer_options.insert(
             "lzReceive".to_string(),
             json!({
                 "gas": lz_receive_gas.to_string(),
-                "value": (&extra.lz_receive_value + &enforced.lz_receive_value).to_string(),
+                "value": lz_receive_value.to_string(),
             }),
         );
     }
 
     let lz_compose_gas = &extra.lz_compose_gas + &enforced.lz_compose_gas;
-    if lz_compose_gas != BigUint::default() {
+    let lz_compose_value = &extra.lz_compose_value + &enforced.lz_compose_value;
+    if lz_compose_gas != BigUint::default() || lz_compose_value != BigUint::default() {
         relayer_options.insert(
             "compose".to_string(),
             json!([{
                 "index": 0,
                 "gas": lz_compose_gas.to_string(),
-                "value": (&extra.lz_compose_value + &enforced.lz_compose_value).to_string(),
+                "value": lz_compose_value.to_string(),
             }]),
         );
     }
@@ -82,14 +84,26 @@ pub fn decode_ton_relayer_options(
 }
 
 fn decode_options(cell: &TonCell) -> Result<DecodedOptions, AppCoreError> {
+    require_ordinary(cell)?;
     let mut parser = cell.parser();
     if parser.data_bits_left().map_err(map_err)? == 0 {
         return Ok(DecodedOptions::default());
     }
 
+    let name = cell_name(cell)?;
+    match name.as_str() {
+        "NULL" => return Ok(DecodedOptions::default()),
+        "OptionsV1" => validate_options_layout(cell, 4)?,
+        "OptionsV2" => validate_options_layout(cell, 6)?,
+        _ => {
+            return Err(AppCoreError::Internal(format!(
+                "Unknown TON options cell {name}"
+            )))
+        }
+    }
     let read_uint =
         |index| cl_get_uint_be(cell, index, 256).map(|bytes| BigUint::from_bytes_be(&bytes));
-    match cell_name(cell)?.as_str() {
+    match name.as_str() {
         "OptionsV1" => Ok(DecodedOptions {
             lz_receive_gas: read_uint(0)?,
             lz_receive_value: read_uint(1)?,
@@ -109,6 +123,29 @@ fn decode_options(cell: &TonCell) -> Result<DecodedOptions, AppCoreError> {
             "Unknown TON options cell {name}"
         ))),
     }
+}
+
+fn validate_options_layout(cell: &TonCell, fields: usize) -> Result<(), AppCoreError> {
+    let mut parser = cell.parser();
+    parser.read_bits(80).map_err(map_err)?;
+    for index in 0..15 {
+        let expected = if index >= fields {
+            (1u32 << 18) - 1
+        } else {
+            let (target, offset) = if index < 2 {
+                (0, 350 + index * 256)
+            } else {
+                (2 + (index - 2) / 3, ((index - 2) % 3) * 256)
+            };
+            (8u32 << 14) | ((target as u32) << 12) | ((offset as u32) << 2) | 3
+        };
+        if parser.read_num::<u32>(18).map_err(map_err)? != expected {
+            return Err(AppCoreError::Internal(
+                "Noncanonical TON options field metadata".to_string(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn left_pad_32(bytes: Vec<u8>) -> Result<[u8; 32], AppCoreError> {
@@ -159,6 +196,49 @@ mod tests {
             ],
         )
         .unwrap()
+    }
+
+    #[test]
+    fn ton_options_preserve_value_only_and_null_named_requests() {
+        let null = cl_declare("NULL", Vec::new()).unwrap();
+        assert_eq!(
+            decode_ton_relayer_options(&null, &options_v1(0, 7, 0, 0), "ton").unwrap(),
+            json!({"lzReceive": {"gas": "0", "value": "7"}, "ordered": false}),
+        );
+        let v2 = cl_declare(
+            "OptionsV2",
+            vec![
+                ClField::uint(T_UINT256, 0u64),
+                ClField::uint(T_UINT256, 0u64),
+                ClField::uint(T_UINT256, 0u64),
+                ClField::uint(T_UINT256, 9u64),
+                ClField::uint(T_UINT256, 0u64),
+                ClField::uint(T_UINT256, 0u64),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            decode_ton_relayer_options(&v2, &null, "ton").unwrap(),
+            json!({"compose": [{"index": 0, "gas": "0", "value": "9"}], "ordered": false}),
+        );
+    }
+
+    #[test]
+    fn ton_options_reject_redirected_fee_metadata() {
+        let options = options_v1(10, 7, 0, 0);
+        let count = options.data_len_bits();
+        let mut bytes = options.parser().read_bits(count).unwrap();
+        for offset in 86..96 {
+            bytes[offset / 8] &= !(1 << (7 - offset % 8));
+        }
+        let mut builder = TonCell::builder();
+        builder.write_bits(&bytes, count).unwrap();
+        for reference in options.refs() {
+            builder.write_ref(reference.clone()).unwrap();
+        }
+        assert!(
+            decode_ton_relayer_options(&builder.build().unwrap(), TonCell::empty(), "ton").is_err()
+        );
     }
 
     #[test]

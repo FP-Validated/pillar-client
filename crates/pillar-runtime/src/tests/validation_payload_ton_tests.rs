@@ -449,7 +449,7 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_ton_payload() {
 
     let calls = calls.lock().unwrap();
     assert_eq!(calls.len(), 3);
-    assert_eq!(calls[0].0, "https://ton.example");
+    assert_eq!(calls[0].0, "https://ton.example/jsonRPC");
     assert_eq!(calls[0].2["method"], "getAddressInformation");
     assert_eq!(calls[1].2["method"], "getAddressInformation");
     // The two storage reads target different contracts: UlnConnection, then Uln.
@@ -626,9 +626,12 @@ impl JsonRpcTransport for PerUrlTransport {
         _headers: HashMap<String, String>,
         _body: Value,
     ) -> Result<Value, String> {
+        let provider = url
+            .strip_suffix("/jsonRPC")
+            .unwrap_or_else(|| panic!("TON destination reads dial the jsonRPC path: {url}"));
         let mut responses = self.responses.lock().unwrap();
         let queue = responses
-            .get_mut(&url)
+            .get_mut(provider)
             .unwrap_or_else(|| panic!("no responses queued for {url}"));
         queue.remove(0)
     }
@@ -818,7 +821,7 @@ async fn ton_quorum_refuses_to_let_dead_providers_agree() {
 
     let rendered = format!("{error}");
     assert!(
-        rendered.contains("0 distinct successful responses, 2 errors"),
+        rendered.contains("0 distinct successful responses"),
         "two providers that never answered must be counted as errors, not as an \
          agreeing majority: {rendered}"
     );
@@ -1005,4 +1008,58 @@ async fn ton_quorum_reaches_a_verdict_when_the_readers_outnumber_the_failures() 
         "two providers read the same non-active contract, so the verdict is determined \
          rather than an incomplete response set"
     );
+}
+
+#[tokio::test]
+async fn ton_worker_opaque_library_storage_cannot_poison_receive_configuration() {
+    use ton_core::cell::{BoC, TonCell};
+    let replace = |cell: &TonCell, index: usize, replacement: TonCell| {
+        let mut builder = TonCell::builder();
+        builder
+            .write_bits(
+                cell.parser().read_bits(cell.data_len_bits()).unwrap(),
+                cell.data_len_bits(),
+            )
+            .unwrap();
+        for (at, child) in cell.refs().iter().enumerate() {
+            builder
+                .write_ref(if at == index {
+                    replacement.clone()
+                } else {
+                    child.clone()
+                })
+                .unwrap();
+        }
+        builder.build().unwrap()
+    };
+    let mut bytes = vec![0xb5, 0xee, 0x9c, 0x72, 1, 1, 1, 1, 0, 35, 0, 8, 66, 2];
+    bytes.extend([0; 32]);
+    let library = BoC::from_bytes(Arc::new(bytes))
+        .unwrap()
+        .single_root()
+        .unwrap();
+    let root = BoC::from_base64(ULN_STORAGE)
+        .unwrap()
+        .single_root()
+        .unwrap();
+    for consumed in [false, true] {
+        let storage = if consumed {
+            replace(&root, 1, library.clone())
+        } else {
+            replace(&root, 2, replace(&root.refs()[2], 2, library.clone()))
+        };
+        let storage = BoC::new(storage).to_base64(true).unwrap();
+        let checks = ton_checks(
+            vec![
+                address_information(EMPTY_CONNECTION),
+                address_information(&storage),
+                committable_view(0),
+            ],
+            Arc::new(Mutex::new(Vec::new())),
+        );
+        let result = checks
+            .validate_payload_not_signed(&ton_sent_event(), Some(CONFIGURED_VERIFIER), "ton", None)
+            .await;
+        assert_eq!(result.is_ok(), !consumed, "consumed={consumed}: {result:?}");
+    }
 }

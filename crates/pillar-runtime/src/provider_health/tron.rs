@@ -14,9 +14,15 @@ pub(crate) fn tron_json_rpc_provider_uri_parts(
             parsed_url.username(),
             parsed_url.password().unwrap_or("")
         );
-        headers
-            .entry("Authorization".to_string())
-            .or_insert_with(|| format!("Basic {}", base64_encode(credentials.as_bytes())));
+        if !headers
+            .keys()
+            .any(|key| key.eq_ignore_ascii_case("authorization"))
+        {
+            headers.insert(
+                "Authorization".to_string(),
+                format!("Basic {}", base64_encode(credentials.as_bytes())),
+            );
+        }
         let _ = parsed_url.set_username("");
         let _ = parsed_url.set_password(None);
     }
@@ -26,10 +32,12 @@ pub(crate) fn tron_json_rpc_provider_uri_parts(
         .map(|(key, value)| (key.into_owned(), value.into_owned()))
         .collect::<Vec<_>>();
     if let Some((_, api_key)) = query_pairs.iter().find(|(key, _)| key == "tron-api-key") {
-        if !api_key.is_empty() {
-            headers
-                .entry("TRON-PRO-API-KEY".to_string())
-                .or_insert_with(|| api_key.clone());
+        if !api_key.is_empty()
+            && !headers
+                .keys()
+                .any(|key| key.eq_ignore_ascii_case("tron-pro-api-key"))
+        {
+            headers.insert("TRON-PRO-API-KEY".to_string(), api_key.clone());
         }
     }
 
@@ -43,6 +51,9 @@ pub(crate) fn tron_json_rpc_provider_uri_parts(
             query.append_pair(key, value);
         }
     }
+    if parsed_url.query() == Some("") {
+        parsed_url.set_query(None);
+    }
 
     (parsed_url.to_string(), headers)
 }
@@ -50,7 +61,7 @@ pub(crate) fn tron_json_rpc_provider_uri_parts(
 pub(crate) fn tron_web_provider_uri_parts(
     uri: &ProviderUri,
 ) -> Option<(String, String, HashMap<String, String>)> {
-    let (url, headers) = provider_uri_parts(uri);
+    let (url, _) = provider_uri_parts(uri);
     let parsed_url = reqwest::Url::parse(&url).ok()?;
     let query_pairs = parsed_url
         .query_pairs()
@@ -62,13 +73,21 @@ pub(crate) fn tron_web_provider_uri_parts(
         .map(|(_, value)| value.clone())
         .filter(|value| !value.is_empty())?;
 
-    let mut headers = headers;
-    if let Some((_, api_key)) = query_pairs.iter().find(|(key, _)| key == "tron-api-key") {
-        if !api_key.is_empty() {
-            headers
-                .entry("TRON-PRO-API-KEY".to_string())
-                .or_insert_with(|| api_key.clone());
-        }
+    let auxiliary = reqwest::Url::parse(&tron_web_url).ok()?;
+    let mut headers = if auxiliary.origin() == parsed_url.origin() {
+        let (_, headers) = tron_json_rpc_provider_uri_parts(uri);
+        headers
+    } else {
+        HashMap::new()
+    };
+    if !auxiliary.username().is_empty() {
+        headers.retain(|key, _| !key.eq_ignore_ascii_case("authorization"));
+    }
+    if auxiliary
+        .query_pairs()
+        .any(|(key, _)| key == "tron-api-key")
+    {
+        headers.retain(|key, _| !key.eq_ignore_ascii_case("tron-pro-api-key"));
     }
 
     tron_web_endpoint_parts(&tron_web_url, headers)

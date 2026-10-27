@@ -28,9 +28,9 @@ pub type TonStorageCell = ton_core::cell::TonCell;
 pub use options::decode_ton_relayer_options;
 pub use payload::{build_ton_dvn_verify, TonDvnVerifyOutput, TonDvnVerifyRequest};
 pub use payload_signed::{
-    committable_view_is_signed, dvn_attestation, ton_payload_signed_targets,
-    uln_default_receive_config, DvnAttestation, TonPayloadSignedRequest, TonPayloadSignedTargets,
-    LIVE_TON_PACKET_BOC,
+    committable_view_is_signed, dvn_attestation, effective_receive_confirmations,
+    required_receive_confirmations, ton_payload_signed_targets, uln_default_receive_config,
+    DvnAttestation, TonPayloadSignedRequest, TonPayloadSignedTargets, LIVE_TON_PACKET_BOC,
 };
 pub use proxy::decode_proxy_admin_target;
 

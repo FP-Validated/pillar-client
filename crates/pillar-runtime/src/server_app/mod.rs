@@ -90,19 +90,17 @@ pub(crate) fn filtered_available_chain_names(
 /// Records a health report into the rank tracker, unless a refresh landed under
 /// the probe that produced it.
 ///
-/// Rank is keyed by `(chain, url)` and describes a URL's transport health, which
-/// is why a refresh does not invalidate the tracker wholesale: an observation of
-/// a URL that both generations configure stays true, and one of a URL the new
-/// generation dropped is simply never looked up again.
+/// Rank is keyed by `(chain, provider identity)` and describes that identity's
+/// transport health, which is why a refresh does not invalidate the tracker
+/// wholesale: an observation of an identity both generations configure stays
+/// true, and one the new generation dropped is simply never looked up again.
 ///
 /// A probe that *straddles* a refresh is different. The URIs it dialled came
-/// from the old generation, and the rank key is the URL alone - headers are
-/// stripped (`rank_key_url`) - so an operator who rotates the credentials on an
-/// endpoint would have the failures observed under the old ones recorded
-/// against the fixed one, and `plan_dispatch` would keep excluding it until the
+/// from the old generation; recording them could rank an entry by what its
+/// predecessor answered, and `plan_dispatch` would keep excluding it until the
 /// entry ages out. Requests for a chain whose quorum then cannot be met fail
 /// closed, so a configuration fix would not take effect for up to a reprobe
-/// interval. Discarding the observation instead leaves those URLs unranked,
+/// interval. Discarding the observation instead leaves those entries unranked,
 /// which `rank_of` reports as `Normal` - the documented pre-ranking default -
 /// so dispatch tries them and the quorum itself decides.
 /// `task` labels the background heartbeats render under. Named here rather than

@@ -29,7 +29,7 @@ edition = "2021"
 license = "MIT"
 repository = "https://github.com/FP-Validated/pillar-client"
 rust-version = "1.94.1"
-version = "2.7.1"
+version = "2.7.2"
 
 # Arithmetic on attacker-influenced on-chain payloads must never wrap silently:
 # a panic is recoverable per request, a wrapped offset is a wrong signature.
@@ -59,12 +59,12 @@ azure_identity = "1.0.0"
 azure_security_keyvault_keys = "1.0.0"
 aws-sdk-kms = { version = "1.117.0", default-features = false, features = ["default-https-client", "rt-tokio"] }
 aws-sdk-lambda = { version = "1.141.0", default-features = false, features = ["default-https-client", "rt-tokio"] }
-aws-sdk-s3 = { version = "1.144.0", default-features = false, features = ["default-https-client", "rt-tokio", "http-1x", "sigv4a"] }
+aws-sdk-s3 = { version = "1.144.0", default-features = false, features = ["default-https-client", "rt-tokio", "http-1x"] }
 aws-sdk-secretsmanager = { version = "1.114.0", default-features = false, features = ["default-https-client", "rt-tokio"] }
 axum = "0.7"
 base64 = "0.22"
 bech32 = "0.12.0"
-bip32 = "0.5.3"
+bip32 = { version = "0.6", features = ["alloc"] }
 bip39 = { version = "2.2.2", features = ["zeroize"] }
 blake2 = "0.10.6"
 bs58 = "0.5"
@@ -78,8 +78,10 @@ google-cloud-kms-v1 = "1.11.0"
 google-cloud-storage = "1.15.0"
 hmac = "0.12"
 http = "1"
+http-body-util = "0.1"
 hex = "0.4"
 hyper = { version = "1", features = ["http1", "server"] }
+hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "ring", "tls12"] }
 # Only the tokio IO adapter is used. `server-auto` is deliberately absent
 # because its builder negotiates h2, which would let one connection multiplex
 # many requests behind the single semaphore permit `PILLAR_MAX_CONNECTIONS`
@@ -93,7 +95,7 @@ sha3 = "0.10"
 sha2 = "0.10"
 spki = "0.7.3"
 indexmap = { version = "2", features = ["serde"] }
-k256 = { version = "0.13.4", features = ["ecdsa"] }
+k256 = { version = "0.14", features = ["ecdsa"] }
 pem-rfc7468 = { version = "1.0.0", features = ["alloc"] }
 num-bigint = "0.4"
 pbkdf2 = "0.12"
@@ -103,6 +105,9 @@ ripemd = "0.1.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["unbounded_depth"] }
 serde_stacker = "0.1"
+# Pedersen hashing to derive Starknet ULN302 `hash_lookup` storage slots; starknet-crypto
+# would pull crypto-bigint 0.5 (RUSTSEC-2026-0387).
+starknet-types-core = { version = "1.0.0", default-features = false, features = ["alloc", "hash"] }
 thiserror = "1"
 tokio = { version = "1", features = ["io-util", "macros", "rt-multi-thread", "signal", "time", "sync", "net"] }
 tower = { version = "0.5", features = ["util"] }
@@ -118,6 +123,7 @@ zeroize = { version = "1.9", features = ["serde"] }
 parking_lot = "0.12"
 tokio-postgres = "0.7"
 tokio-postgres-rustls = "0.13"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 webpki-roots = "1"
 google-cloud-gax = "1.11.0"

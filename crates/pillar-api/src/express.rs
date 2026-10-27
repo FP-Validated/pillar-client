@@ -17,13 +17,45 @@ use crate::AppError;
 /// `express.json()`'s default `limit: '100kb'`, counted on the bytes after inflation.
 pub(crate) const JSON_BODY_LIMIT_BYTES: usize = 100 * 1024;
 
+static DECOMPRESSION_SLOTS: std::sync::LazyLock<std::sync::Arc<tokio::sync::Semaphore>> =
+    std::sync::LazyLock::new(|| std::sync::Arc::new(tokio::sync::Semaphore::new(2)));
+
+pub(crate) async fn read_json_body(
+    headers: HeaderMap,
+    body: Result<Bytes, BytesRejection>,
+) -> Result<Option<Value>, AppError> {
+    let compressed = headers
+        .get(header::CONTENT_ENCODING)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            value.eq_ignore_ascii_case("gzip") || value.eq_ignore_ascii_case("deflate")
+        });
+    if !compressed {
+        return read_json_body_sync(&headers, body);
+    }
+    let permit = DECOMPRESSION_SLOTS
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| AppError::Http {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            message: "Compressed request processing capacity exhausted".to_string(),
+        })?;
+    tokio::task::spawn_blocking(move || {
+        // The worker owns admission even if its HTTP request is cancelled.
+        let _permit = permit;
+        read_json_body_sync(&headers, body)
+    })
+    .await
+    .map_err(|error| AppError::Internal(format!("Request decoder failed: {error}")))?
+}
+
 /// `express.json()` with its defaults (`bootstrap.ts:44`), in its order: no body
 /// headers or a non-`application/json` type leave `req.body` undefined (`None`);
 /// then the charset (`utf-*` only), the content encoding, a declared length over
 /// the limit, iconv-lite's support for the charset, the size limit on inflated
 /// bytes, decoding with the BOM dropped, empty → `{}`, and a top level that must
 /// be an object or array.
-pub(crate) fn read_json_body(
+fn read_json_body_sync(
     headers: &HeaderMap,
     body: Result<Bytes, BytesRejection>,
 ) -> Result<Option<Value>, AppError> {
@@ -35,25 +67,9 @@ pub(crate) fn read_json_body(
             .and_then(|value| value.to_str().ok())
             .is_some_and(|value| value.trim().parse::<u64>().is_ok())
         || body.as_ref().map_or(true, |bytes| !bytes.is_empty());
-    let content_type = headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or_default();
-    let mut parts = content_type.split(';');
-    let media_type = parts.next().unwrap_or_default().trim();
-    if !has_body || !media_type.eq_ignore_ascii_case("application/json") {
+    let Some(charset) = json_charset(headers).filter(|_| has_body) else {
         return Ok(None);
-    }
-    let charset = parts
-        .rev()
-        .find_map(|parameter| {
-            let (name, value) = parameter.split_once('=')?;
-            name.trim()
-                .eq_ignore_ascii_case("charset")
-                .then(|| value.trim().trim_matches('"').to_ascii_lowercase())
-        })
-        .filter(|charset| !charset.is_empty())
-        .unwrap_or_else(|| "utf-8".to_string());
+    };
     if !charset.starts_with("utf-") {
         return Err(unsupported_charset(&charset));
     }
@@ -105,8 +121,48 @@ pub(crate) fn read_json_body(
             "Failed to parse the request body as JSON: expected an object or array".to_string(),
         ));
     }
-    serde_json::from_str(text).map(Some).map_err(|error| {
-        AppError::MalformedJson(format!("Failed to parse the request body as JSON: {error}"))
+    pillar_core::json::parse_value(text)
+        .map(Some)
+        .map_err(|error| {
+            AppError::MalformedJson(format!("Failed to parse the request body as JSON: {error}"))
+        })
+}
+
+/// The charset of an `application/json` body, defaulting to UTF-8; `None` for any other type.
+fn json_charset(headers: &HeaderMap) -> Option<String> {
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    let mut parts = content_type.split(';');
+    let media_type = parts.next().unwrap_or_default().trim();
+    if !media_type.eq_ignore_ascii_case("application/json") {
+        return None;
+    }
+    Some(
+        parts
+            .rev()
+            .find_map(|parameter| {
+                let (name, value) = parameter.split_once('=')?;
+                name.trim()
+                    .eq_ignore_ascii_case("charset")
+                    .then(|| value.trim().trim_matches('"').to_ascii_lowercase())
+            })
+            .filter(|charset| !charset.is_empty())
+            .unwrap_or_else(|| "utf-8".to_string()),
+    )
+}
+
+/// Whether `read_json_body` would read the raw bytes; every other outcome is decided by
+/// headers alone, before upstream's raw-body starts reading.
+pub(crate) fn reads_body(headers: &HeaderMap) -> bool {
+    json_charset(headers).is_some_and(|charset| {
+        charset.starts_with("utf-")
+            && Decoder::for_label(&charset).is_some()
+            && matches!(
+                content_coding(headers),
+                Ok(Coding::Identity | Coding::Gzip | Coding::Deflate)
+            )
     })
 }
 
@@ -160,13 +216,7 @@ fn content_coding(headers: &HeaderMap) -> Result<Coding, AppError> {
     }
 }
 
-/// Node's `createGunzip` or `createInflate` (`read.js` contentstream), producing at
-/// most one byte past the limit so a decompression bomb costs at most that. gzip
-/// reads members back to back until the input ends or the next byte is 0x00
-/// (Node's "trailing zero bytes are okay"), and anything else there must be a
-/// member; a zlib stream must reach its end and checksum, and bytes after it are
-/// ignored. The compressed input is itself capped by the router's body limit,
-/// which upstream does not apply to compressed bytes (`SECURITY.md`).
+// Both wire and output bytes are bounded; gzip also limits decoder initialization count.
 fn inflate(raw: &[u8], coding: Coding) -> Result<Vec<u8>, AppError> {
     let invalid = |reason: String| {
         AppError::MalformedJson(format!("Failed to inflate the request body: {reason}"))
@@ -195,7 +245,7 @@ fn inflate(raw: &[u8], coding: Coding) -> Result<Vec<u8>, AppError> {
         Coding::Gzip => {
             let mut out = Vec::new();
             let mut input = raw;
-            loop {
+            for _ in 0..32 {
                 let mut member = flate2::bufread::GzDecoder::new(input);
                 (&mut member)
                     .take((budget - out.len()) as u64)
@@ -209,6 +259,10 @@ fn inflate(raw: &[u8], coding: Coding) -> Result<Vec<u8>, AppError> {
                     return Ok(out);
                 }
             }
+            Err(AppError::Http {
+                status: StatusCode::PAYLOAD_TOO_LARGE,
+                message: "Compressed request exceeds 32 gzip members".to_string(),
+            })
         }
         Coding::Identity | Coding::Brotli => unreachable!("handled before inflation"),
     }

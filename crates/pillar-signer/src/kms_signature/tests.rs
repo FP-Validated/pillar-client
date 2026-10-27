@@ -6,11 +6,11 @@ fn kms_ecdsa_signature_to_recoverable_matches_typescript_der_and_raw_paths() {
     let signing_key = EcdsaSigningKey::from_slice(&[7u8; 32]).unwrap();
     let public_key = signing_key
         .verifying_key()
-        .to_encoded_point(false)
+        .to_sec1_point(false)
         .as_bytes()
         .to_vec();
     let digest = [9u8; 32];
-    let (signature, recovery_id) = signing_key.sign_prehash_recoverable(&digest).unwrap();
+    let (signature, recovery_id) = signing_key.sign_prehash_recoverable(&digest);
     let compact = signature.to_bytes().to_vec();
 
     let der_recoverable = kms_ecdsa_signature_to_recoverable(
@@ -50,10 +50,7 @@ fn ethereum_recovery_transform_rejects_rare_recovery_ids_but_raw_mode_preserves_
                 let recovered =
                     EcdsaVerifyingKey::recover_from_prehash(&digest, &signature, recovery_id)
                         .ok()?;
-                Some((
-                    compact,
-                    recovered.to_encoded_point(false).as_bytes().to_vec(),
-                ))
+                Some((compact, recovered.to_sec1_point(false).as_bytes().to_vec()))
             })
             .expect("small deterministic r range contains a valid recovery-id 2/3 point");
         let raw = kms_ecdsa_signature_to_recoverable(

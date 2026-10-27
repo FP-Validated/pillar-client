@@ -560,12 +560,16 @@ async fn production_read_vertical_never_signs_when_the_read_block_moved_after_va
             "{marker:?}: the signer stage was entered for a read from a reorganised block; \
              stages={stages:?}"
         );
-        assert_eq!(
-            read_call_blocks(&calls),
-            vec![json!({"blockHash": BLOCK_A, "requireCanonical": true}); 2],
-            "{marker:?}: both providers must have been asked for the validated block"
-        );
+        assert_pinned_to_block_a(read_call_blocks(&calls), &format!("{marker:?}"));
     }
+}
+/// An impossible quorum stops dispatch early (M-36), so the count varies; the pin may not.
+fn assert_pinned_to_block_a(blocks: Vec<Value>, context: &str) {
+    let pinned = json!({"blockHash": BLOCK_A, "requireCanonical": true});
+    assert!(
+        !blocks.is_empty() && blocks.iter().all(|block| *block == pinned),
+        "{context}: every read must target the validated block: {blocks:?}"
+    );
 }
 fn read_code_blocks(calls: &RecordedJsonCalls) -> Vec<Value> {
     calls
@@ -598,10 +602,7 @@ async fn production_read_vertical_refuses_malformed_read_data_before_signing() {
             stages.iter().all(|stage| stage != "sign"),
             "invalid eth_call DATA reached signer: result={bad_data}, stages={stages:?}"
         );
-        assert_eq!(
-            read_call_blocks(&calls),
-            vec![json!({"blockHash": BLOCK_A, "requireCanonical": true}); 2]
-        );
+        assert_pinned_to_block_a(read_call_blocks(&calls), &bad_data.to_string());
         assert!(
             read_code_blocks(&calls).is_empty(),
             "invalid eth_call DATA must not trigger eth_getCode: {:?}",
@@ -631,14 +632,8 @@ async fn production_read_vertical_refuses_malformed_code_data_before_signing() {
             stages.iter().all(|stage| stage != "sign"),
             "invalid eth_getCode DATA reached signer: result={bad_code}, stages={stages:?}"
         );
-        assert_eq!(
-            read_call_blocks(&calls),
-            vec![json!({"blockHash": BLOCK_A, "requireCanonical": true}); 2]
-        );
-        assert_eq!(
-            read_code_blocks(&calls),
-            vec![json!({"blockHash": BLOCK_A, "requireCanonical": true}); 2]
-        );
+        assert_pinned_to_block_a(read_call_blocks(&calls), &bad_code.to_string());
+        assert_pinned_to_block_a(read_code_blocks(&calls), &bad_code.to_string());
     }
 }
 #[tokio::test]
@@ -654,14 +649,8 @@ async fn production_read_vertical_one_malformed_provider_cannot_form_code_quorum
         stages.iter().all(|stage| stage != "sign"),
         "single-provider malformed code reached signer: {stages:?}"
     );
-    assert_eq!(
-        read_call_blocks(&calls),
-        vec![json!({"blockHash": BLOCK_A, "requireCanonical": true}); 2]
-    );
-    assert_eq!(
-        read_code_blocks(&calls),
-        vec![json!({"blockHash": BLOCK_A, "requireCanonical": true}); 2]
-    );
+    assert_pinned_to_block_a(read_call_blocks(&calls), "one malformed code provider");
+    assert_pinned_to_block_a(read_code_blocks(&calls), "one malformed code provider");
 }
 
 #[tokio::test]
@@ -744,6 +733,8 @@ mod postgres_audit_e2e;
 async fn durable_process_worker() {
     postgres_audit_e2e::run_crash_worker().await;
 }
+#[path = "h02_read_result_budget_e2e.rs"]
+mod h02_read_result_budget_e2e;
 #[path = "read_data_http_e2e.rs"]
 mod read_data_http_e2e;
 #[path = "round2_read_version_e2e.rs"]

@@ -355,7 +355,18 @@ pub(super) fn payload_signed_sent_event() -> LzSentEvent {
         },
         message: "0xdeadbeef".to_string(),
         tx_hash: "0xtx".to_string(),
-        source_evidence: None,
+        source_evidence: Some(pillar_core::SourceEvidence::Evm(
+            pillar_core::EvmSourceEvidence {
+                block_hash: format!("0x{}", "ab".repeat(32)),
+                block_number: 96,
+                status: "1".to_string(),
+                packet_log_index: 0,
+                transaction_hash: "0xtx".to_string(),
+                packet_log_address: TEST_ENDPOINT_V2.to_string(),
+                packet_log_topics: Vec::new(),
+                packet_log_data: "0x".to_string(),
+            },
+        )),
         read_block_pins: Vec::new(),
         extra: IndexMap::from([(
             "guid".to_string(),

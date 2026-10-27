@@ -270,15 +270,17 @@ where
             {
                 PayloadSignedValidity::Signed
             } else {
-                PayloadSignedValidity::NotSigned
+                PayloadSignedValidity::NotSigned {
+                    required: (receive_version != "ReadV1002").then_some(inbound_confirmations),
+                }
             };
             Ok((
-            format!(
-                "{}:{receive_version}:{dvn_confirmed}:{inbound_confirmations}:{verification_state:?}",
-                receive_library.to_lowercase()
-            ),
-            validity,
-        ))
+                format!(
+                    "{}:{receive_version}:{dvn_confirmed}:{inbound_confirmations}:{verification_state:?}",
+                    receive_library.to_lowercase()
+                ),
+                validity,
+            ))
         }
         Err(error) => Err(error.into()),
     }
@@ -301,10 +303,12 @@ where
 pub(crate) enum ReadCallObservation {
     Data { value: String },
     NoCode,
-    ExecutionRevert { data: Option<String> },
+    ExecutionRevert,
+    ResultTooLarge,
 }
 
 /// A provider's domain observation must remain a vote until entity quorum resolves it.
+/// `max_result_bytes` bounds the raw returned data this call may hold.
 pub(crate) async fn eth_call_read_observation_at_block<T>(
     transport: T,
     url: String,
@@ -312,11 +316,14 @@ pub(crate) async fn eth_call_read_observation_at_block<T>(
     to: &str,
     data: &str,
     block: Value,
+    max_result_bytes: usize,
 ) -> Result<(String, ReadCallObservation), AppCoreError>
 where
     T: JsonRpcTransport,
 {
-    let response = transport
+    use sha2::{Digest, Sha256};
+
+    let mut response = transport
         .post_json_scoped(
             url.clone(),
             headers.clone(),
@@ -340,39 +347,45 @@ where
             || (code == Some(-32000) && message.eq_ignore_ascii_case("execution reverted"))
         {
             let data = match error.get("data") {
-                None => None,
+                None => "0x".to_string(),
                 Some(value) => {
                     let value = value.as_str().ok_or_else(|| {
                         AppCoreError::Internal("eth_call revert DATA must be a string".into())
                     })?;
                     validate_evm_data(value, "eth_call revert")?;
-                    Some(value.to_ascii_lowercase())
+                    value.to_ascii_lowercase()
                 }
             };
             // Absent and empty DATA both report no returned revert bytes, so they share a fingerprint.
-            let fingerprint = format!("execution-revert:{}", data.as_deref().unwrap_or("0x"));
-            return Ok((fingerprint, ReadCallObservation::ExecutionRevert { data }));
+            let fingerprint = format!("execution-revert:{:x}", Sha256::digest(data.as_bytes()));
+            return Ok((fingerprint, ReadCallObservation::ExecutionRevert));
         }
         return Err(AppCoreError::Internal(
             "JSON-RPC eth_call returned an error".into(),
         ));
     }
 
-    let value = response
-        .get("result")
-        .and_then(Value::as_str)
-        .ok_or_else(|| AppCoreError::Internal("Missing eth_call result".into()))?;
-    validate_evm_data(value, "eth_call")?;
+    let Some(Value::String(mut value)) = response.get_mut("result").map(Value::take) else {
+        return Err(AppCoreError::Internal("Missing eth_call result".into()));
+    };
+    validate_evm_data(&value, "eth_call")?;
     if value == "0x" {
         let code = eth_get_code_at_block(transport, url, headers, to, block).await?;
         if code == "0x" {
             return Ok(("no-code".into(), ReadCallObservation::NoCode));
         }
     }
-    let canonical = value.to_ascii_lowercase();
+    // Honest providers agree on an oversized result, so it is a vote rather than an error.
+    if (value.len() - 2) / 2 > max_result_bytes {
+        return Ok((
+            "result-too-large".into(),
+            ReadCallObservation::ResultTooLarge,
+        ));
+    }
+    value.make_ascii_lowercase();
     Ok((
-        format!("data:{canonical}"),
-        ReadCallObservation::Data { value: canonical },
+        format!("data:{:x}", Sha256::digest(value.as_bytes())),
+        ReadCallObservation::Data { value },
     ))
 }
 
@@ -398,6 +411,7 @@ where
                 "params": [{
                     "to": to,
                     "data": data,
+                    "gas": "0xf4240",
                 }, block],
                 "id": 1,
                 "jsonrpc": "2.0",

@@ -151,12 +151,12 @@ async fn sui_source_events_match_gasolina() {
             .get_lz_sent_event(digest, &request)
             .await;
         let resolved = result.is_ok();
-        // GraphQL renders `vector<u8>` as base64, so a JSON-RPC-only digit-string encoding
-        // reaching the Sui GraphQL path is a malformed provider answer, not a packet.
+        // GraphQL renders `vector<u8>` as base64; providers agree on the raw string (M-55), so
+        // a JSON-RPC-only digit-string encoding is refused when the agreed packet is decoded.
         if chain == "sui" && name == "options as a type-1 digit string" {
             assert!(
                 matches!(&result, Err(AppCoreError::Internal(message))
-                    if message.starts_with("No Sui transaction events quorum")),
+                    if message == "PacketSent GraphQL byte field is not base64"),
                 "{chain} {name}: {result:?}"
             );
             stricter_refused += 1;
@@ -470,5 +470,104 @@ async fn iota_error_on_an_earlier_event_page_loses_the_vote() {
     assert!(
         matches!(&error, AppCoreError::Internal(message) if message.contains("quorum")),
         "{error:?}"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn source_dispatch_interleaves_entities_before_rpc_admission() {
+    use pillar_core::execution::{BudgetLimits, ExecutionResources, FairBudget, RequestContext};
+    #[derive(Clone)]
+    struct SlowEntity(ScriptedSui);
+    #[async_trait]
+    impl JsonRpcTransport for SlowEntity {
+        async fn post_json(
+            &self,
+            url: String,
+            headers: HashMap<String, String>,
+            body: Value,
+        ) -> Result<Value, String> {
+            if url.contains("slow") {
+                return futures::future::pending().await;
+            }
+            self.0.post_json(url, headers, body).await
+        }
+        async fn get_json(&self, _: String, _: HashMap<String, String>) -> Result<Value, String> {
+            Err("unexpected GET".into())
+        }
+    }
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let scenario = fixture["scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|scenario| scenario["chain"] == "sui" && scenario["name"] == "V302 match")
+        .unwrap();
+    let mut pool = ProviderConfig::with_distinct_entities(
+        (0..10)
+            .map(|index| {
+                ProviderUri::Uri(format!(
+                    "https://{}-{index}.example",
+                    if index < 8 { "slow" } else { "healthy" }
+                ))
+            })
+            .collect(),
+        2,
+    );
+    for voter in &mut pool.voters[..8] {
+        voter.entity = "slow-entity".into();
+    }
+    let getter = StaticProviderConfig::new(
+        IndexMap::from([("sui".into(), pool)]),
+        Some(&["sui".into()]),
+    )
+    .unwrap();
+    let config = runtime_evm_layerzero_config(
+        fixture["environment"].as_str().unwrap(),
+        &["sui".into(), "ethereum".into()],
+    )
+    .unwrap();
+    let resolver = EvmPacketSentResolver::new(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        SlowEntity(ScriptedSui {
+            events: scenario["response"].clone(),
+            unavailable_at: None,
+        }),
+        config.packet_sent_resolver_config,
+    );
+    let budget = || {
+        FairBudget::new(
+            vec!["sui".into()],
+            BudgetLimits {
+                active: 8,
+                per_lane: 8,
+                waiting: 16,
+                per_lane_waiting: 16,
+                wait: std::time::Duration::from_secs(2),
+            },
+        )
+        .unwrap()
+    };
+    let mut context = RequestContext::new(std::time::Duration::from_secs(3));
+    context.source_chain = Some(Arc::from("sui"));
+    context.resources = Some(Arc::new(ExecutionResources {
+        signing: budget(),
+        rpc: budget(),
+        kms: budget(),
+        parser: budget(),
+    }));
+    let request: LzMessageId = serde_json::from_value(scenario["request"].clone()).unwrap();
+    // The second honest entity is staggered one stall timeout behind the first wave.
+    let resolved = tokio::time::timeout(
+        std::time::Duration::from_millis(2_500),
+        context.scope(resolver.get_lz_sent_event(fixture["digest"].as_str().unwrap(), &request)),
+    )
+    .await
+    .expect("honest entities must be admitted before redundant slow URLs")
+    .unwrap();
+    // The resolver renders the EVM receiver as bytes32; the request may name it in 20 bytes.
+    assert_eq!(resolved.lz_message_id.nonce, request.nonce);
+    assert_eq!(
+        resolved.lz_message_id.pathway_id.dst_chain_name,
+        request.pathway_id.dst_chain_name
     );
 }

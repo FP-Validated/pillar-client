@@ -26,6 +26,12 @@ fn move_block_projection(value: Value) -> Value {
     project_fields(value, &["block_height", "block_hash"])
 }
 
+/// `executor_v1::AdapterParamsConfig` is read only for its table handle, so the quorum
+/// agrees on that and not on fields a node may add or order differently.
+fn aptos_adapter_params_handle_projection(value: Value) -> Value {
+    json!({"data": {"params": {"handle": value.pointer("/data/params/handle").cloned().unwrap_or(Value::Null)}}})
+}
+
 /// The log fields the ULNv2 refresh reads. Clients differ on the rest: `arb1.arbitrum.io`
 /// answers `blockTimestamp` as `0x0` where other Arbitrum providers give the block time.
 fn evm_logs_projection(value: Value) -> Value {
@@ -61,7 +67,7 @@ fn move_events_projection(value: Value) -> Value {
         Some(Value::Array(events)) => Value::Array(
             events
                 .into_iter()
-                .map(|event| project_fields(event, &["type", "parsedJson"]))
+                .map(|event| project_fields(event, &["type", "parsedJson", "byteEncoding"]))
                 .collect(),
         ),
         Some(other) => other,
@@ -253,7 +259,8 @@ where
         let provider_config = snapshot.provider_config(src_chain_name)?;
         let quorum = required_provider_quorum(provider_config, src_chain_name)?;
         let mut requests = FuturesUnordered::new();
-        for (index, uri) in provider_config.uris.iter().enumerate() {
+        let plan = plan_dispatch(&self.providers.rank_tracker, src_chain_name, quorum).await?;
+        for DispatchEntry { index, uri, delay } in plan {
             let transport = self.transport.clone();
             let (url, headers) = provider_uri_parts(uri);
             let request = json!({
@@ -270,6 +277,9 @@ where
                 "jsonrpc": "2.0",
             });
             requests.push(async move {
+                if !delay.is_zero() {
+                    tokio::time::sleep(delay).await;
+                }
                 let response = transport.post_json_scoped(url, headers, request).await;
                 (index, provider_response(response))
             });
@@ -314,6 +324,9 @@ where
                     Ok(value)
                 };
             }
+            if !accumulator.can_reach_quorum() {
+                break;
+            }
         }
         let result = self
             .finish_quorum(src_chain_name, accumulator, "Solana transaction")
@@ -333,12 +346,16 @@ where
         let provider_config = snapshot.provider_config(chain_name)?;
         let quorum = required_provider_quorum(provider_config, chain_name)?;
         let mut requests = FuturesUnordered::new();
-        for (index, uri) in provider_config.uris.iter().enumerate() {
+        let plan = plan_dispatch(&self.providers.rank_tracker, chain_name, quorum).await?;
+        for DispatchEntry { index, uri, delay } in plan {
             let transport = self.transport.clone();
             let (url, headers) = move_provider_uri_parts(chain_name, uri);
             let chain_name = chain_name.to_string();
             let tx_hash = src_tx_hash.to_string();
             requests.push(async move {
+                if !delay.is_zero() {
+                    tokio::time::sleep(delay).await;
+                }
                 (
                     index,
                     fetch_move_transaction(transport, &chain_name, url, headers, &tx_hash).await,
@@ -367,6 +384,9 @@ where
             if let Some(value) = accumulator.unambiguous_result() {
                 return Ok(value);
             }
+            if !accumulator.can_reach_quorum() {
+                break;
+            }
         }
         self.finish_quorum(
             chain_name,
@@ -388,11 +408,15 @@ where
         let provider_config = snapshot.provider_config(chain)?;
         let quorum = required_provider_quorum(provider_config, chain)?;
         let mut requests = FuturesUnordered::new();
-        for (index, uri) in provider_config.uris.iter().enumerate() {
+        let plan = plan_dispatch(&self.providers.rank_tracker, chain, quorum).await?;
+        for DispatchEntry { index, uri, delay } in plan {
             let transport = self.transport.clone();
             let (base, headers) = move_provider_uri_parts(chain, uri);
             let url = url_for(&base);
             requests.push(async move {
+                if !delay.is_zero() {
+                    tokio::time::sleep(delay).await;
+                }
                 let response = match url {
                     Some(url) => transport.get_json_scoped(url, headers).await,
                     None => Err(RpcError::Remote(
@@ -423,6 +447,9 @@ where
             }
             if let Some(value) = accumulator.unambiguous_result() {
                 return Ok(value);
+            }
+            if !accumulator.can_reach_quorum() {
+                break;
             }
         }
         self.finish_quorum(chain, accumulator, context).await
@@ -526,6 +553,7 @@ where
             );
             extra.insert("blockHash".to_string(), block_hash);
             extra.insert("blockNumber".to_string(), block_number);
+            extra.insert("onChainTxHash".to_string(), Value::from(version.clone()));
             let sent_event = LzSentEvent {
                 lz_message_id: LzMessageId {
                     pathway_id: PathwayId {
@@ -675,11 +703,15 @@ where
                 _ => |value| value,
             };
             let mut requests = FuturesUnordered::new();
-            for (index, uri) in provider_config.uris.iter().enumerate() {
+            let plan = plan_dispatch(&self.providers.rank_tracker, chain_name, quorum).await?;
+            for DispatchEntry { index, uri, delay } in plan {
                 let transport = self.transport.clone();
                 let (url, headers) = provider_uri_parts(uri);
                 let body = body.clone();
                 requests.push(async move {
+                    if !delay.is_zero() {
+                        tokio::time::sleep(delay).await;
+                    }
                     (index, transport.post_json_scoped(url, headers, body).await)
                 });
             }
@@ -741,6 +773,9 @@ where
                 }
                 if let Some(result) = accumulator.unambiguous_result() {
                     return Ok(result);
+                }
+                if !accumulator.can_reach_quorum() {
+                    break;
                 }
             }
 
@@ -815,19 +850,21 @@ where
             {
                 continue;
             }
-            let sent_event =
-                match self.solana_packet_to_lz_sent_event(src_tx_hash, event, transaction) {
-                    Ok(SourceEventConversion::Converted(sent_event)) => sent_event,
-                    Ok(SourceEventConversion::NotOurs) => continue,
-                    Ok(SourceEventConversion::SourceFault(error)) => {
-                        first_source_fault.get_or_insert(error);
-                        continue;
-                    }
-                    Err(error) => return Err(error),
-                };
-            if lz_message_id_matches(expected_lz_message_id, &sent_event.lz_message_id) {
-                return Ok(sent_event);
-            }
+            let sent_event = match self.solana_packet_to_lz_sent_event(
+                src_tx_hash,
+                event,
+                transaction,
+                expected_lz_message_id,
+            ) {
+                Ok(SourceEventConversion::Converted(sent_event)) => sent_event,
+                Ok(SourceEventConversion::NotOurs) => continue,
+                Ok(SourceEventConversion::SourceFault(error)) => {
+                    first_source_fault.get_or_insert(error);
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            return Ok(sent_event);
         }
         Err(first_source_fault.unwrap_or_else(|| {
             AppCoreError::Internal("Could not find sentEvent that matches lzMessageId".to_string())
@@ -839,6 +876,7 @@ where
         src_tx_hash: &str,
         event: SolanaPacketSentEvent,
         transaction: &Value,
+        expected_lz_message_id: &LzMessageId,
     ) -> Result<SourceEventConversion, AppCoreError> {
         let packet = event.packet;
         let src_chain_name = match self.chain_name_for_eid(packet.src_eid) {
@@ -854,13 +892,25 @@ where
         pathway_extra.insert("dstEid".to_string(), Value::from(packet.dst_eid));
         pathway_extra.insert("sender".to_string(), Value::from(packet.sender));
         pathway_extra.insert("receiver".to_string(), Value::from(packet.receiver));
+        let lz_message_id = LzMessageId {
+            pathway_id: PathwayId {
+                src_chain_name,
+                dst_chain_name,
+                extra: pathway_extra,
+            },
+            nonce: packet.nonce,
+            uln_send_version: Value::from(ULN_VERSION_V302),
+        };
+        if !lz_message_id_matches(expected_lz_message_id, &lz_message_id) {
+            return Ok(SourceEventConversion::NotOurs);
+        }
         let mut extra = IndexMap::new();
         extra.insert("guid".to_string(), Value::from(packet.guid));
-        let options =
-            super::relayer_options::decode_move_relayer_options(&event.options, &dst_chain_name)
-                .map_err(|error| {
-                    AppCoreError::Internal(format!("Solana options decode error: {error}"))
-                })?;
+        let options = super::relayer_options::decode_move_relayer_options(
+            &event.options,
+            &lz_message_id.pathway_id.dst_chain_name,
+        )
+        .map_err(|error| AppCoreError::Internal(format!("Solana options decode error: {error}")))?;
         extra.insert("options".to_string(), options);
         extra.insert("sendLibrary".to_string(), Value::from(event.send_library));
         extra.insert(
@@ -875,15 +925,7 @@ where
             extra.insert("blockTimestamp".to_string(), Value::from(block_time));
         }
         Ok(SourceEventConversion::Converted(LzSentEvent {
-            lz_message_id: LzMessageId {
-                pathway_id: PathwayId {
-                    src_chain_name,
-                    dst_chain_name,
-                    extra: pathway_extra,
-                },
-                nonce: packet.nonce,
-                uln_send_version: Value::from(ULN_VERSION_V302),
-            },
+            lz_message_id,
             message: packet.message,
             tx_hash: src_tx_hash.to_string(),
             source_evidence: None,
@@ -984,8 +1026,16 @@ where
                 .map_err(|error| AppCoreError::Internal(format!("PacketSent options: {error}")))?;
             extra.insert("options".to_string(), options);
         }
+        let send_library = if uln_send_version == ULN_VERSION_V301 {
+            send_library.to_ascii_lowercase()
+        } else {
+            pillar_layerzero::evm_checksum_address(&send_library)
+        };
         extra.insert("sendLibrary".to_string(), Value::from(send_library));
-        extra.insert("packetEmitAddress".to_string(), Value::from(log_address));
+        extra.insert(
+            "packetEmitAddress".to_string(),
+            Value::from(pillar_layerzero::evm_checksum_address(log_address)),
+        );
         Ok(SourceEventConversion::Converted(LzSentEvent {
             lz_message_id: LzMessageId {
                 pathway_id: PathwayId {
@@ -1010,79 +1060,92 @@ where
                 "srcTxHash must encode a 32-byte TON transaction hash".to_string(),
             ));
         }
-        crate::provider_health::rpc_scope("ton", async { let snapshot = self.providers.load();
-    let provider_config = snapshot.provider_config("ton")?;
-    let quorum = required_provider_quorum(provider_config, "ton")?;
-    let mut requests = FuturesUnordered::new();
-    let mut dispatched = Vec::new();
-    let mut unusable = Vec::new();
-    for (index, uri) in provider_config.uris.iter().enumerate() {
-        let Some((endpoint, _, headers)) = ton_v3_provider_uri_parts(uri) else {
-            unusable.push(index);
-            continue;
-        };
-        dispatched.push(index);
-        // Sink-side refusal, as in `move_tx_url`; the core's `srcTxHash` shape
-        // check is the first gate, not the only one.
-        let Some(encoded_tx_hash) = encode_path_segment(src_tx_hash) else {
-            return Err(AppCoreError::BadRequest(format!(
-                "srcTxHash {src_tx_hash} cannot be used as a TON trace query value"
-            )));
-        };
-        let transport = self.transport.clone();
-        requests.push(async move {
-            let observation =
-                fetch_ton_transaction_trace(&transport, &endpoint, &headers, &encoded_tx_hash).await;
-            (
-                index,
-                observation.map(|tree| tree.and_then(|tree| {
-                    ton_trace_contains_hash(&tree, src_tx_hash)
-                        .then(|| ton_trace_quorum_fingerprint(&tree).map(|fingerprint| (fingerprint, tree)))
-                        .flatten()
-                })),
+        crate::provider_health::rpc_scope("ton", async {
+            let snapshot = self.providers.load();
+            let provider_config = snapshot.provider_config("ton")?;
+            let quorum = required_provider_quorum(provider_config, "ton")?;
+            let mut requests = FuturesUnordered::new();
+            let keyed = provider_config
+                .uris
+                .iter()
+                .enumerate()
+                .filter_map(|(index, uri)| {
+                    let (endpoint, _, headers) = ton_v3_provider_uri_parts(uri)?;
+                    Some((
+                        index,
+                        crate::provider_health::dialled_identity_key(endpoint, headers),
+                    ))
+                })
+                .collect();
+            let plan = crate::provider_health::plan_dispatch_for_keys(
+                &self.providers.rank_tracker,
+                "ton",
+                quorum,
+                keyed,
             )
-        });
-    }
-    // The accumulator only counts what was actually dispatched: a URI whose
-    // `v3-endpoint` will not parse is never asked, and counting it as pending would
-    // keep `unambiguous_result` from ever firing. Refusing up front mirrors
-    // `plan_dispatch`, and naming the unusable URIs makes the misconfiguration visible.
-    if !unusable.is_empty() {
-        tracing::warn!(
-            chain = "ton",
-            unusable_uri_indexes = ?unusable,
-            dispatched = dispatched.len(),
-            configured = provider_config.uris.len(),
-            "TON provider URIs without a parseable v3-endpoint are excluded from quorum"
-        );
-    }
-    if !quorum.is_met_by(&dispatched) {
-        return Err(AppCoreError::Internal(format!(
-            "TON transaction trace for {src_tx_hash} needs quorum {} but only {} of {} configured providers have a parseable v3-endpoint",
-            quorum.describe(),
-            dispatched.len(),
-            provider_config.uris.len()
-        )));
-    }
-    let mut accumulator = ExactQuorumAccumulator::new(quorum, dispatched);
-    while let Some((index, observation)) = requests.next().await {
-        match observation {
-            Ok(Some((fingerprint, value))) => {
-                accumulator.record_json_result(index, fingerprint, value)?;
+            .await?;
+            let dispatched = plan.iter().map(|entry| entry.index).collect::<Vec<_>>();
+            for DispatchEntry { index, uri, delay } in plan {
+                let (endpoint, _, headers) = ton_v3_provider_uri_parts(uri)
+                    .expect("dispatch includes only eligible TON v3 endpoints");
+                // Sink-side refusal, as in `move_tx_url`; the core's `srcTxHash` shape
+                // check is the first gate, not the only one.
+                let Some(encoded_tx_hash) = encode_path_segment(src_tx_hash) else {
+                    return Err(AppCoreError::BadRequest(format!(
+                        "srcTxHash {src_tx_hash} cannot be used as a TON trace query value"
+                    )));
+                };
+                let transport = self.transport.clone();
+                requests.push(async move {
+                    if !delay.is_zero() {
+                        tokio::time::sleep(delay).await;
+                    }
+                    let observation = fetch_ton_transaction_trace(
+                        &transport,
+                        &endpoint,
+                        &headers,
+                        &encoded_tx_hash,
+                    )
+                    .await;
+                    (
+                        index,
+                        observation.map(|tree| {
+                            tree.and_then(|tree| {
+                                ton_trace_contains_hash(&tree, src_tx_hash)
+                                    .then(|| {
+                                        ton_trace_quorum_fingerprint(&tree)
+                                            .map(|fingerprint| (fingerprint, tree))
+                                    })
+                                    .flatten()
+                            })
+                        }),
+                    )
+                });
             }
-            Ok(None) => accumulator.record_result(index, Ok(None))?,
-            Err(error) => accumulator.record_result(index, Err(error))?,
-        }
-        if let Some(value) = accumulator.unambiguous_result() {
-            return Ok(value);
-        }
-    }
-    self.finish_quorum(
-        "ton",
-        accumulator,
-        &format!("TON transaction trace for {src_tx_hash}"),
-    )
-    .await }).await
+            let mut accumulator = ExactQuorumAccumulator::new(quorum, dispatched);
+            while let Some((index, observation)) = requests.next().await {
+                match observation {
+                    Ok(Some((fingerprint, value))) => {
+                        accumulator.record_json_result(index, fingerprint, value)?;
+                    }
+                    Ok(None) => accumulator.record_result(index, Ok(None))?,
+                    Err(error) => accumulator.record_result(index, Err(error))?,
+                }
+                if let Some(value) = accumulator.unambiguous_result() {
+                    return Ok(value);
+                }
+                if !accumulator.can_reach_quorum() {
+                    break;
+                }
+            }
+            self.finish_quorum(
+                "ton",
+                accumulator,
+                &format!("TON transaction trace for {src_tx_hash}"),
+            )
+            .await
+        })
+        .await
     }
 
     fn chain_name_for_eid(&self, eid: u32) -> Result<String, AppCoreError> {
@@ -1191,6 +1254,13 @@ where
                         "Did not find correct PacketSent() event in tx {src_tx_hash}"
                     )))),
                 };
+                let identity_field = if src_chain_name == "initia" { "txhash" } else { "version" };
+                if let Some(identity) = transaction.get(identity_field).and_then(|value| {
+                    value.as_str().map(str::to_owned)
+                        .or_else(|| value.as_u64().map(|number| number.to_string()))
+                }) {
+                    sent_event.extra.insert("onChainTxHash".to_string(), Value::from(identity));
+                }
                 if sent_event.lz_message_id.uln_send_version == ULN_VERSION_V301 {
                     // `onChainEvent.txHash`: the ledger version on Aptos, the hash on Initia.
                     let field = if src_chain_name == "initia" { "txhash" } else { "version" };
@@ -1446,17 +1516,16 @@ where
                     );
                     let mut extra = IndexMap::new();
                     extra.insert("guid".to_string(), Value::from(event.packet.guid.clone()));
-                    extra.insert("options".to_string(), event.options);
+                    match event.options {
+                        Ok(options) => { extra.insert("options".to_string(), options); }
+                        Err(error) => { extra.insert("optionsError".to_string(), Value::from(error)); }
+                    }
                     extra.insert("sendLibrary".to_string(), Value::from(event.send_library));
                     extra.insert(
                         "packetEmitAddress".to_string(),
                         Value::from(event.endpoint_address),
                     );
                     extra.insert("blockNumber".to_string(), Value::from(event.block_number));
-                    extra.insert(
-                        "blockHash".to_string(),
-                        Value::from(event.block_number.to_string()),
-                    );
                     let sent_event = LzSentEvent {
                         lz_message_id: LzMessageId {
                             pathway_id: PathwayId {
@@ -1602,8 +1671,7 @@ fn aptos_v1_guid_address(eid: u64, address: &str) -> Result<Vec<u8>, AppCoreErro
     Ok(bytes)
 }
 
-/// `calculateAptosGuid` (`common-aptos/src/utils.ts:464-486`): sha3-256 over the
-/// nonce, both u16 chain ids and both addresses in their chains' hex encodings.
+// V1 executor GUIDs commit to raw packet addresses, not policy-normalized addresses.
 pub(crate) fn aptos_v1_guid(lz_message_id: &LzMessageId) -> Result<String, AppCoreError> {
     let pathway = &lz_message_id.pathway_id.extra;
     let eid = |key: &str| {
@@ -1626,11 +1694,19 @@ pub(crate) fn aptos_v1_guid(lz_message_id: &LzMessageId) -> Result<String, AppCo
         })
     };
     let (src_eid, dst_eid) = (eid("srcEid")?, eid("dstEid")?);
+    let guid_address = |eid, address: &str| {
+        if lz_message_id.uln_send_version.as_str() == Some(ULN_VERSION_V2) {
+            hex::decode(strip_hex_prefix(address))
+                .map_err(|error| AppCoreError::Internal(error.to_string()))
+        } else {
+            aptos_v1_guid_address(eid, address)
+        }
+    };
     let mut encoded = lz_message_id.nonce.to_be_bytes().to_vec();
     encoded.extend_from_slice(&u16_eid(src_eid)?.to_be_bytes());
-    encoded.extend(aptos_v1_guid_address(src_eid, address("sender")?)?);
+    encoded.extend(guid_address(src_eid, address("sender")?)?);
     encoded.extend_from_slice(&u16_eid(dst_eid)?.to_be_bytes());
-    encoded.extend(aptos_v1_guid_address(dst_eid, address("receiver")?)?);
+    encoded.extend(guid_address(dst_eid, address("receiver")?)?);
     Ok(format!(
         "0x{}",
         hex::encode(<sha3::Sha3_256 as sha3::Digest>::digest(encoded))
@@ -1687,12 +1763,16 @@ where
         let provider_config = snapshot.provider_config(chain)?;
         let quorum = required_provider_quorum(provider_config, chain)?;
         let mut requests = FuturesUnordered::new();
-        for (index, uri) in provider_config.uris.iter().enumerate() {
+        let plan = plan_dispatch(&self.providers.rank_tracker, chain, quorum).await?;
+        for DispatchEntry { index, uri, delay } in plan {
             let transport = self.transport.clone();
             let (base, headers) = move_provider_uri_parts(chain, uri);
             let url = url_for(&base);
             let body = body.clone();
             requests.push(async move {
+                if !delay.is_zero() {
+                    tokio::time::sleep(delay).await;
+                }
                 let response = match url {
                     Some(url) => transport.post_json_scoped(url, headers, body).await,
                     None => Err(RpcError::Remote("Unusable Aptos table handle".to_string())),
@@ -1720,6 +1800,9 @@ where
             }
             if let Some(value) = accumulator.unambiguous_result() {
                 return Ok(value);
+            }
+            if !accumulator.can_reach_quorum() {
+                break;
             }
         }
         self.finish_quorum(chain, accumulator, context).await
@@ -1775,13 +1858,20 @@ where
                 )
             })?;
         let account = strip_move_account_zeros(&source.layerzero_account);
-        let find = |event_type: String| {
-            events.iter().find(|event| {
+        let find = |event_type: String| -> Result<Option<&Value>, AppCoreError> {
+            let mut matches = events.iter().filter(|event| {
                 event.get("type").and_then(Value::as_str) == Some(event_type.as_str())
                     && event.pointer("/data/guid").and_then(Value::as_str) == Some(guid.as_str())
-            })
+            });
+            let first = matches.next();
+            if matches.next().is_some() {
+                return Err(AppCoreError::Internal(
+                    "ambiguous Aptos executor association".into(),
+                ));
+            }
+            Ok(first)
         };
-        let executor_v2 = find(format!("{account}::executor_v2::ExecutorRequested"))
+        let executor_v2 = find(format!("{account}::executor_v2::ExecutorRequested"))?
             .and_then(|event| event.pointer("/data/adapter_params"))
             .filter(|raw| js_truthy(raw))
             .cloned();
@@ -1789,7 +1879,7 @@ where
             Some(raw) => raw,
             None => {
                 let event =
-                    find(format!("{account}::executor_v1::RequestEvent")).ok_or_else(|| {
+                    find(format!("{account}::executor_v1::RequestEvent"))?.ok_or_else(|| {
                         AppCoreError::Internal(
                             "Cannot read properties of undefined (reading 'data')".to_string(),
                         )
@@ -1905,7 +1995,7 @@ where
             .get_aptos_json(
                 chain,
                 |base| aptos_account_resource_url(base, &source.layerzero_account, &resource_type),
-                |value| value,
+                aptos_adapter_params_handle_projection,
                 "Aptos adapter params config",
             )
             .await?;

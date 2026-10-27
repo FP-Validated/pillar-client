@@ -1,0 +1,9 @@
+disallowed-methods = [
+    { path = "serde_json::from_str", reason = "use pillar_core::json: serde_json::Value re-parses a RawValue-token object with a fresh depth budget" },
+    { path = "serde_json::from_slice", reason = "use pillar_core::json: serde_json::Value re-parses a RawValue-token object with a fresh depth budget" },
+    { path = "serde_json::from_reader", reason = "use pillar_core::json: serde_json::Value re-parses a RawValue-token object with a fresh depth budget" },
+    { path = "serde_json::Deserializer::from_str", reason = "use pillar_core::json or pillar_core::json::UntrustedValue" },
+    { path = "serde_json::Deserializer::from_slice", reason = "use pillar_core::json or pillar_core::json::UntrustedValue" },
+    { path = "serde_json::Deserializer::from_reader", reason = "use pillar_core::json or pillar_core::json::UntrustedValue" },
+    { path = "reqwest::Response::json", reason = "read the body under a byte cap and parse it with pillar_core::json" },
+]

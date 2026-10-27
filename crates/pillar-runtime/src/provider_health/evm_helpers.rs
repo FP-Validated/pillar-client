@@ -59,38 +59,101 @@ pub(crate) fn pathway_extra_string_value(
         .ok_or_else(|| AppCoreError::Internal(format!("Missing lzMessageId.pathwayId.{key}")))
 }
 
-pub(crate) fn extra_context_sent_event_payload(sent_event: &LzSentEvent) -> Value {
-    let mut value = serde_json::to_value(sent_event).unwrap_or_else(|_| json!({}));
-    let Some(object) = value.as_object_mut() else {
-        return value;
+pub(crate) fn extra_context_sent_event_payload(
+    sent_event: &LzSentEvent,
+) -> Result<Value, AppCoreError> {
+    if sent_event.extra.contains_key("optionsError") {
+        return Err(AppCoreError::BadRequest(
+            "Extra context policy requires successfully decoded packet options".to_string(),
+        ));
+    }
+    let missing_identity = || {
+        AppCoreError::BadRequest(
+            "Extra context policy requires a resolved transaction and source block identity"
+                .to_string(),
+        )
     };
+    let pathway = &sent_event.lz_message_id.pathway_id;
+    let canton = pathway.src_chain_name == "canton";
+    let (tx_hash, block_hash, block_number) = match sent_event.source_evidence.as_ref() {
+        Some(pillar_core::SourceEvidence::Evm(evidence)) => (
+            evidence.transaction_hash.as_str(),
+            evidence.block_hash.as_str(),
+            evidence.block_number,
+        ),
+        Some(pillar_core::SourceEvidence::Starknet(evidence)) => (
+            evidence.transaction_hash.as_str(),
+            evidence.block_hash.as_str(),
+            evidence.block_number,
+        ),
+        // Canton has no blocks: upstream sends an empty hash beside the sequencer event nonce.
+        None if canton => (
+            sent_event.tx_hash.as_str(),
+            "",
+            sent_event
+                .extra
+                .get("blockNumber")
+                .and_then(Value::as_i64)
+                .ok_or_else(missing_identity)?,
+        ),
+        None => (
+            sent_event
+                .extra
+                .get("onChainTxHash")
+                .and_then(Value::as_str)
+                .ok_or_else(missing_identity)?,
+            sent_event
+                .extra
+                .get("blockHash")
+                .and_then(Value::as_str)
+                .ok_or_else(missing_identity)?,
+            sent_event
+                .extra
+                .get("blockNumber")
+                .and_then(Value::as_i64)
+                .ok_or_else(missing_identity)?,
+        ),
+    };
+    let block_hash_valid = if canton {
+        block_hash.is_empty()
+    } else {
+        block_hash.strip_prefix("0x").is_some_and(|digits| {
+            !digits.is_empty()
+                && digits.len() <= 64
+                && (pathway.src_chain_name == "starknet" || digits.len() == 64)
+                && digits.bytes().all(|byte| byte.is_ascii_hexdigit())
+        })
+    };
+    if tx_hash.is_empty() || tx_hash == "undefined" || block_number < 0 || !block_hash_valid {
+        return Err(missing_identity());
+    }
+    let mut value = serde_json::to_value(sent_event)
+        .map_err(|error| AppCoreError::Internal(error.to_string()))?;
+    for (field, chain) in [
+        ("sender", pathway.src_chain_name.as_str()),
+        ("receiver", pathway.dst_chain_name.as_str()),
+    ] {
+        let address = pathway
+            .extra
+            .get(field)
+            .and_then(Value::as_str)
+            .and_then(|raw| address_encoded_by_chain(chain, raw))
+            .ok_or_else(|| AppCoreError::BadRequest(format!("Invalid policy pathway {field}")))?;
+        value["lzMessageId"]["pathwayId"][field] = Value::from(address);
+    }
+    let object = value.as_object_mut().ok_or_else(missing_identity)?;
     object.remove("txHash");
+    object.remove("onChainTxHash");
     object.insert(
         "onChainEvent".to_string(),
         json!({
-            "chainName": sent_event.lz_message_id.pathway_id.src_chain_name,
-            "txHash": sent_event.tx_hash,
-            "blockHash": sent_event
-                .source_evidence
-                .as_ref()
-                .map(|evidence| match evidence {
-                    pillar_core::SourceEvidence::Evm(evidence) => evidence.block_hash.as_str(),
-                    pillar_core::SourceEvidence::Starknet(evidence) => evidence.block_hash.as_str(),
-                })
-                .or_else(|| sent_event.extra.get("blockHash").and_then(Value::as_str))
-                .unwrap_or_default(),
-            "blockNumber": sent_event
-                .source_evidence
-                .as_ref()
-                .map(|evidence| match evidence {
-                    pillar_core::SourceEvidence::Evm(evidence) => evidence.block_number,
-                    pillar_core::SourceEvidence::Starknet(evidence) => evidence.block_number,
-                })
-                .or_else(|| sent_event.extra.get("blockNumber").and_then(Value::as_i64))
-                .unwrap_or_default(),
+            "chainName": pathway.src_chain_name,
+            "txHash": tx_hash,
+            "blockHash": block_hash,
+            "blockNumber": block_number,
         }),
     );
-    value
+    Ok(value)
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

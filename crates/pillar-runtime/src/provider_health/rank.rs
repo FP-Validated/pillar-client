@@ -94,21 +94,15 @@ impl ProviderRankTracker {
 }
 
 impl ProviderRankTracker {
-    /// Feeds every per-provider entry of an already-fetched health report
-    /// into the tracker. Used both to seed initial state from the report
-    /// startup already computes and by the periodic reprobe loop below.
-    /// Records a probe report.
-    ///
-    /// Keys off `rank_key`, the URL the probe dispatched to, not the redacted
-    /// `url` the report publishes. They are the same string only for a provider
-    /// with no path, query or userinfo; for anything realistic - an RPC key in
-    /// the path or query - the redacted form is what `plan_dispatch` would never
-    /// find, so ranking silently stopped applying to exactly the providers that
-    /// carry credentials.
+    /// Feeds every voting entry of an already-fetched health report into the
+    /// tracker, keyed by `rank_key`, the identity the probe dispatched to, not the
+    /// redacted `url` the report publishes. Diagnostic entries (Aptos/Movement and
+    /// Initia indexers, TronWeb) are skipped: dispatch never ranks them, and one
+    /// sharing a key with a voting provider would overwrite that provider's rank.
     pub(crate) async fn seed_from_report(&self, report: &ProviderHealthReport) {
         for (chain_name, chain_report) in report.iter() {
             for entry in &chain_report.providers {
-                if !entry.observed {
+                if !entry.observed || entry.diagnostic {
                     continue;
                 }
                 self.record(chain_name, &entry.rank_key, entry.healthy, entry.latency_ms)

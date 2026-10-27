@@ -164,26 +164,16 @@ pub(crate) fn parse_transaction_from_observation(
         .and_then(Value::as_str)
         .map(str::to_ascii_lowercase)
         .ok_or_else(|| AppCoreError::Internal("Missing transaction from".to_string()))?;
-    let fingerprint = [
-        "hash",
-        "from",
-        "to",
-        "input",
-        "data",
-        "nonce",
-        "value",
-        "blockHash",
-        "blockNumber",
-    ]
-    .into_iter()
-    .map(|key| {
-        result
-            .get(key)
-            .map(normalize_fingerprint_value)
-            .unwrap_or_default()
-    })
-    .collect::<Vec<_>>()
-    .join("|");
+    let fingerprint = ["hash", "from", "blockHash", "blockNumber"]
+        .into_iter()
+        .map(|key| {
+            result
+                .get(key)
+                .map(normalize_fingerprint_value)
+                .unwrap_or_default()
+        })
+        .collect::<Vec<_>>()
+        .join("|");
     Ok(TransactionFromObservation { fingerprint, from })
 }
 

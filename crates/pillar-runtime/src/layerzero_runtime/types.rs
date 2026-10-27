@@ -103,6 +103,7 @@ pub struct RuntimeRpcValidationChecks<T> {
     pub(super) move_views_by_chain_name: HashMap<String, String>,
     pub(super) aptos_v301_contracts: Option<AptosV301Contracts>,
     pub(super) sui_payload_contracts: HashMap<String, SuiPayloadContracts>,
+    pub(super) sui_observation_budget: pillar_core::execution::FairBudget,
     pub(super) ton_payload_config: Option<Arc<RuntimeTonLayerZeroConfig>>,
     pub(super) extra_context: RuntimeExtraContextConfig,
     pub(super) extra_context_lambda_client: Option<Arc<dyn AwsLambdaInvokeClient>>,
@@ -165,6 +166,18 @@ where
             move_views_by_chain_name: HashMap::new(),
             aptos_v301_contracts: None,
             sui_payload_contracts: HashMap::new(),
+            sui_observation_budget: pillar_core::execution::FairBudget::with_resource_limit(
+                vec!["sui".to_string(), "iotal1".to_string()],
+                pillar_core::execution::BudgetLimits {
+                    active: 16,
+                    per_lane: 8,
+                    waiting: 32,
+                    per_lane_waiting: 16,
+                    wait: std::time::Duration::from_secs(2),
+                },
+                2,
+            )
+            .expect("fixed Sui observation budget is valid"),
             ton_payload_config: None,
             extra_context: RuntimeExtraContextConfig::default(),
             extra_context_lambda_client: None,

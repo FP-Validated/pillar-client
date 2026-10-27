@@ -25,10 +25,7 @@ impl GcpKmsClient for MockGcpKmsClient {
     ) -> Result<Vec<u8>, SignerError> {
         assert_eq!(version_name, self.version_name);
         self.sign_digests.lock().await.push(digest.to_vec());
-        let (signature, _) = self
-            .ecdsa_signing_key
-            .sign_prehash_recoverable(digest)
-            .unwrap();
+        let (signature, _) = self.ecdsa_signing_key.sign_prehash_recoverable(digest);
         Ok(signature.to_der().as_bytes().to_vec())
     }
 
@@ -50,7 +47,7 @@ async fn gcp_kms_adapter_signs_ecdsa_digest_and_decodes_pem_public_key() {
     let signing_key = EcdsaSigningKey::from_slice(&[14u8; 32]).unwrap();
     let public_key = signing_key
         .verifying_key()
-        .to_encoded_point(false)
+        .to_sec1_point(false)
         .as_bytes()
         .to_vec();
     let version_name =
@@ -65,8 +62,7 @@ async fn gcp_kms_adapter_signs_ecdsa_digest_and_decodes_pem_public_key() {
     });
     let adapter = GcpKmsRawSignerAdapter::new(version_name, client.clone());
     let digest = [0x55u8; 32];
-    let (expected_signature, expected_recovery_id) =
-        signing_key.sign_prehash_recoverable(&digest).unwrap();
+    let (expected_signature, expected_recovery_id) = signing_key.sign_prehash_recoverable(&digest);
 
     let signature = adapter
         .sign(SignRequest {
@@ -101,7 +97,7 @@ async fn gcp_kms_factory_builds_crypto_key_version_name_like_typescript() {
     let signing_key = EcdsaSigningKey::from_slice(&[15u8; 32]).unwrap();
     let public_key = signing_key
         .verifying_key()
-        .to_encoded_point(false)
+        .to_sec1_point(false)
         .as_bytes()
         .to_vec();
     let expected_version =

@@ -47,6 +47,7 @@ async fn runtime_evm_uln_v2_payload_builder_derives_mpt_hash_info_with_quorum() 
             MPT_BLOCK_HASH,
         ))),
         mpt_receipt(MPT_BLOCK_HASH),
+        false,
     )
     .await
     .0
@@ -54,7 +55,7 @@ async fn runtime_evm_uln_v2_payload_builder_derives_mpt_hash_info_with_quorum() 
 }
 #[tokio::test]
 async fn runtime_evm_uln_v2_mpt_refuses_missing_source_evidence() {
-    let (result, calls) = run_mpt_payload(None, mpt_receipt(MPT_BLOCK_HASH)).await;
+    let (result, calls) = run_mpt_payload(None, mpt_receipt(MPT_BLOCK_HASH), false).await;
     result.expect_err("missing source evidence must fail before reading the block");
     assert_eq!(
         calls, 0,
@@ -70,6 +71,7 @@ async fn runtime_evm_uln_v2_mpt_refuses_a_receipt_that_changed_after_resolution(
     let (result, calls) = run_mpt_payload(
         Some(pillar_core::SourceEvidence::Evm(evidence.clone())),
         mpt_receipt(MPT_BLOCK_HASH),
+        false,
     )
     .await;
     result.expect("an unchanged receipt still builds");
@@ -79,6 +81,7 @@ async fn runtime_evm_uln_v2_mpt_refuses_a_receipt_that_changed_after_resolution(
     let (result, calls) = run_mpt_payload(
         Some(pillar_core::SourceEvidence::Evm(evidence)),
         mpt_receipt(other),
+        false,
     )
     .await;
     // A provider whose receipt contradicts the captured evidence is a failed provider
@@ -87,9 +90,29 @@ async fn runtime_evm_uln_v2_mpt_refuses_a_receipt_that_changed_after_resolution(
     assert_eq!(calls, 5, "no eth_getBlockByHash after a changed receipt");
 }
 
+#[tokio::test]
+async fn message_policy_cannot_authorize_an_entire_mpt_block() {
+    let (result, calls) = run_mpt_payload(
+        Some(pillar_core::SourceEvidence::Evm(mpt_evidence(
+            MPT_BLOCK_HASH,
+        ))),
+        mpt_receipt(MPT_BLOCK_HASH),
+        true,
+    )
+    .await;
+    assert!(matches!(result, Err(AppCoreError::BadRequest(_))));
+    assert_eq!(calls, 4, "refuse before constructing a block-wide proof");
+    audit_round_artifact(
+        "full-audit",
+        "h03-mpt-message-policy",
+        json!({"messagePolicy": true, "mptRejected": true, "rpcCalls": calls}),
+    );
+}
+
 async fn run_mpt_payload(
     source_evidence: Option<pillar_core::SourceEvidence>,
     receipt: Value,
+    message_policy_enabled: bool,
 ) -> (Result<pillar_core::HashCallDataResult, AppCoreError>, usize) {
     let calls = Arc::new(Mutex::new(Vec::new()));
     let getter = StaticProviderConfig::new(
@@ -148,7 +171,8 @@ async fn run_mpt_payload(
             "bsc".to_string(),
             test_receive_contracts(),
         )])),
-    );
+    )
+    .with_message_policy(message_policy_enabled);
     let mut pathway_extra = IndexMap::new();
     pathway_extra.insert("srcEid".to_string(), Value::from(30_101_u64));
     pathway_extra.insert("dstEid".to_string(), Value::from(30_102_u64));

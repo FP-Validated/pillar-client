@@ -1,3 +1,5 @@
+// Test code parses its own committed fixtures; production parsing goes through pillar_core::json.
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
 use async_trait::async_trait;
 use axum::{
     body::Body,
@@ -28,6 +30,8 @@ use tokio::sync::Mutex;
 use tracing::Instrument;
 
 mod express;
+mod upload;
+pub use upload::RequestUploadBudget;
 
 use express::JSON_BODY_LIMIT_BYTES;
 
@@ -329,6 +333,10 @@ pub fn router_with_shutdown(
         .route(VERSION_ROUTE, get(version))
         .route(READY_ROUTE, get(ready))
         .with_state(state.clone())
+        .layer(middleware::from_fn_with_state(
+            RequestUploadBudget::new(32),
+            upload::buffer_request,
+        ))
         .layer(middleware::from_fn_with_state(state, request_middleware))
         .layer(DefaultBodyLimit::max(JSON_BODY_LIMIT_BYTES));
     (
@@ -540,9 +548,8 @@ async fn root() -> Html<&'static str> {
 /// plain `SyntaxError`, so a 500 (`bootstrap.ts:35-39,98-100,124-126`).
 fn unwrap_body_envelope(value: Value) -> Result<Value, AppError> {
     let mut value = match value.get("body").and_then(Value::as_str) {
-        Some(body) => {
-            serde_json::from_str(body).map_err(|error| AppError::Internal(error.to_string()))?
-        }
+        Some(body) => pillar_core::json::parse_value(body)
+            .map_err(|error| AppError::Internal(error.to_string()))?,
         None => value,
     };
     normalize_js_numbers(&mut value);
@@ -735,7 +742,9 @@ async fn sign_v1(
     headers: axum::http::HeaderMap,
     payload: Result<axum::body::Bytes, BytesRejection>,
 ) -> Result<Json<ResponseEnvelope<PillarApiResponse>>, AppError> {
-    let value = express::read_json_body(&headers, payload)?.ok_or_else(unparsed_body)?;
+    let value = express::read_json_body(headers, payload)
+        .await?
+        .ok_or_else(unparsed_body)?;
     let mut raw = unwrap_body_envelope(value)?;
     if raw.is_null() {
         return Err(AppError::Internal(
@@ -787,7 +796,9 @@ async fn sign_v2(
     headers: axum::http::HeaderMap,
     payload: Result<axum::body::Bytes, BytesRejection>,
 ) -> Result<Json<ResponseEnvelope<PillarApiResponse>>, AppError> {
-    let value = express::read_json_body(&headers, payload)?.ok_or_else(unparsed_body)?;
+    let value = express::read_json_body(headers, payload)
+        .await?
+        .ok_or_else(unparsed_body)?;
     let mut raw = unwrap_body_envelope(value)?;
     validate_v2_request_shape(&raw)?;
     // Zod objects strip unknown keys (`common-model/src/v2/lzMessage.ts:78-85`), so

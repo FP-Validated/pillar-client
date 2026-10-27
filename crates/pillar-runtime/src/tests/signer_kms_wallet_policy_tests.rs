@@ -176,3 +176,73 @@ fn signer_policy_rejects_runtime_core_openbao_kms_provider() {
 
     assert_eq!(err, "Unknown KMS cloud type: OPENBAO");
 }
+
+#[test]
+fn kms_mode_refuses_wallet_scope_it_cannot_enforce() {
+    for source in [
+        pillar_config::LZ_WALLETS,
+        pillar_config::LZ_WALLETS_FILE_PATH,
+    ] {
+        let vars = HashMap::from([
+            (SIGNER_TYPE.to_string(), "KMS".to_string()),
+            (
+                pillar_config::LZ_KMS_IDS.to_string(),
+                "evm-key,solana-key".to_string(),
+            ),
+            (
+                pillar_config::LZ_KMS_CLOUD_TYPE.to_string(),
+                "AWS".to_string(),
+            ),
+            (
+                source.to_string(),
+                if source == pillar_config::LZ_WALLETS {
+                    r#"[{"name":"ethereum-only","walletSetName":"scoped","supportedChainNames":["ethereum"],"byChainType":{"EVM":{"secretName":"evm-key"}}}]"#.to_string()
+                } else {
+                    "/unused/scoped-wallets.json".to_string()
+                },
+            ),
+        ]);
+        let result = runtime_signer_config_from_env_map(
+            &vars,
+            &["ethereum".to_string(), "solana".to_string()],
+            &HashMap::from([
+                ("ethereum".to_string(), "EVM".to_string()),
+                ("solana".to_string(), "SOLANA".to_string()),
+            ]),
+        );
+        let error = result
+            .err()
+            .expect("KMS must not silently discard wallet scope");
+        assert!(error.contains(source), "{error}");
+    }
+}
+
+#[test]
+fn wallet_scope_typos_fail_before_signer_assembly() {
+    let valid = json!([{"name": "ethereum-only", "walletSetName": "scoped",
+        "supportedChainNames": ["ethereum"], "byChainType": {"EVM": {"secretName": "evm-key"}}
+    }]);
+    let parse = |wallets: Value| {
+        pillar_config::wallet_definitions_from_env_map(&HashMap::from([(
+            pillar_config::LZ_WALLETS.to_string(),
+            wallets.to_string(),
+        )]))
+    };
+    let wallets = parse(valid.clone()).unwrap();
+    let mapping =
+        pillar_config::build_wallets_by_chain_name(&wallets, &["ethereum".into(), "bsc".into()])
+            .unwrap();
+    assert_eq!(mapping["ethereum"], vec!["ethereum-only"]);
+    assert!(mapping["bsc"].is_empty());
+    let mut typo = valid.clone();
+    let scope = typo[0]
+        .as_object_mut()
+        .unwrap()
+        .remove("supportedChainNames")
+        .unwrap();
+    typo[0]["supportdChainNames"] = scope;
+    assert!(parse(typo).is_err());
+    let mut typo = valid;
+    typo[0]["byChainType"]["EVM"]["kmsProvidr"] = json!("AWS");
+    assert!(parse(typo).is_err());
+}

@@ -1,6 +1,9 @@
 use super::*;
 use std::{future::Future, sync::LazyLock};
 
+mod projection;
+mod read_http;
+
 const MAX_JSON_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_PAGINATED_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 // Non-TON responses: ~60x the largest recorded one (Solana 2,150), ~3,000 EVM logs.
@@ -16,6 +19,10 @@ const JSON_PARSER_CLOSED: &str = "Provider JSON parser is draining";
 const JSON_PARSER_UNKNOWN_LANE: &str = "Provider JSON parser lane is not configured";
 static JSON_PARSE_WAITERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 static JSON_PARSE_SLOTS: LazyLock<std::sync::Arc<tokio::sync::Semaphore>> =
+    LazyLock::new(|| std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_JSON_PARSERS)));
+// READ target bodies arrive in bursts of up to 16 calls per command; parsed apart, they
+// cannot hold the slots a request's own source and destination reads need.
+static READ_JSON_PARSE_SLOTS: LazyLock<std::sync::Arc<tokio::sync::Semaphore>> =
     LazyLock::new(|| std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_JSON_PARSERS)));
 #[derive(Clone, Debug)]
 pub enum RpcError {
@@ -166,6 +173,17 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         body: Value,
     ) -> Result<Value, RpcError> {
         let target = rpc_target_for_call()?;
+        let (url, headers) = match target.as_ref() {
+            "ton" if body.get("jsonrpc").is_some() => {
+                let (_, url, headers) =
+                    ton_v2_provider_uri_parts(&ProviderUri::UriWithHeaders { uri: url, headers });
+                (url, headers)
+            }
+            "tron" if body.get("jsonrpc").is_some() => {
+                tron_json_rpc_provider_uri_parts(&ProviderUri::UriWithHeaders { uri: url, headers })
+            }
+            _ => (url, headers),
+        };
         if target.as_ref() == "iotal1"
             && body.get("method").and_then(Value::as_str) == Some("iotax_queryEvents")
         {
@@ -174,15 +192,24 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
             let mut events = Vec::new();
             let mut response_bytes = 0usize;
             let mut structural_units = 0usize;
-            for page in 0..21 {
+            let mut page_size = 50;
+            for page in 0..1030 {
                 page_body["params"][1] = cursor.clone();
-                page_body["params"][2] = Value::from(50);
+                page_body["params"][2] = Value::from(page_size);
                 page_body["params"][3] = Value::Bool(false);
-                let mut response = limited_rpc(
+                let mut response = match limited_rpc(
                     &target,
                     self.post_json(url.clone(), headers.clone(), page_body.clone()),
                 )
-                .await?;
+                .await
+                {
+                    Ok(response) => response,
+                    Err(error) if page_size > 1 && is_response_size_refusal(&error) => {
+                        page_size /= 2;
+                        continue;
+                    }
+                    Err(error) => return Err(error),
+                };
                 response_bytes = accumulate_paginated_response_bytes(response_bytes, &response)
                     .ok_or_else(|| {
                         RpcError::Remote("IOTA transaction exceeds 16 MiB response limit".into())
@@ -230,7 +257,7 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
                     complete["result"]["hasNextPage"] = Value::Bool(false);
                     return Ok(complete);
                 }
-                if page == 20 {
+                if page == 1029 || events.len() == 1024 {
                     return Err(RpcError::Remote(
                         "IOTA transaction exceeds 1024 events".into(),
                     ));
@@ -538,6 +565,7 @@ impl AwsLambdaInvokeClient for AwsSdkLambdaInvokeClient {
 #[derive(Clone, Debug)]
 pub struct ReqwestJsonRpcTransport {
     client: reqwest::Client,
+    read_http: read_http::ReadHttp,
 }
 
 /// Matches TS RPC_TIMEOUT_MS (packages/multiprovider/src/common.ts:18), plus the
@@ -556,7 +584,10 @@ impl ReqwestJsonRpcTransport {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|error| error.to_string())?;
-        Ok(Self { client })
+        Ok(Self {
+            client,
+            read_http: read_http::ReadHttp::new()?,
+        })
     }
 }
 
@@ -568,15 +599,25 @@ impl JsonRpcTransport for ReqwestJsonRpcTransport {
         headers: HashMap<String, String>,
         body: Value,
     ) -> Result<Value, String> {
+        let projection = projection::for_post(&body);
         let mut request = self.client.post(url).json(&body);
         for (key, value) in headers {
             request = request.header(key, value);
+        }
+        if super::rpc_context::in_read_target_scope() {
+            let request = request
+                .build()
+                .map_err(|error| error.without_url().to_string())?;
+            return self.read_http.execute(request).await;
         }
         let response = request
             .send()
             .await
             .map_err(|error| error.without_url().to_string())?;
-        bounded_json_response(response).await
+        match projection {
+            Some(projection) => projection::response(response, projection).await,
+            None => bounded_json_response(response).await,
+        }
     }
 
     async fn get_json(
@@ -584,6 +625,7 @@ impl JsonRpcTransport for ReqwestJsonRpcTransport {
         url: String,
         headers: HashMap<String, String>,
     ) -> Result<Value, String> {
+        let projection = projection::for_get(&url);
         let mut request = self.client.get(url);
         for (key, value) in headers {
             request = request.header(key, value);
@@ -592,7 +634,10 @@ impl JsonRpcTransport for ReqwestJsonRpcTransport {
             .send()
             .await
             .map_err(|error| error.without_url().to_string())?;
-        bounded_json_response(response).await
+        match projection {
+            Some(projection) => projection::response(response, projection).await,
+            None => bounded_json_response(response).await,
+        }
     }
     async fn get_ton_json(
         &self,
@@ -657,6 +702,14 @@ impl JsonRpcTransport for ReqwestJsonRpcTransport {
 /// for a resource or table item that does not exist.
 pub(crate) fn is_http_not_found(error: &RpcError) -> bool {
     matches!(error, RpcError::Remote(message) if message.starts_with("Provider returned HTTP 404 "))
+}
+
+/// This service's own refusal of a response body over the transport limit, as opposed to
+/// a provider-reported failure.
+pub(crate) fn is_response_size_refusal(error: &RpcError) -> bool {
+    matches!(error, RpcError::Remote(message)
+        if *message == format!("Provider JSON response exceeds {MAX_JSON_RESPONSE_BYTES} byte limit")
+            || *message == format!("Provider JSON exceeds {MAX_JSON_STRING_BYTES} string byte limit"))
 }
 
 /// undici's message for a request that never got a response (`TypeError: fetch failed`).
@@ -770,6 +823,17 @@ impl JsonParsePermit {
 
 async fn acquire_json_parse_slot() -> Result<JsonParsePermit, String> {
     use pillar_core::execution::{current, BudgetError};
+    if super::rpc_context::in_read_target_scope() {
+        let permit = READ_JSON_PARSE_SLOTS
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| JSON_PARSER_CLOSED.to_string())?;
+        return Ok(JsonParsePermit {
+            budget: None,
+            _global: permit,
+        });
+    }
     let context = current();
     if let Some(resources) = context
         .as_ref()
@@ -856,13 +920,15 @@ pub(crate) fn parse_json_with_limits(bytes: &[u8], ton: bool) -> Result<Value, S
     };
     ensure_json_parse_budget(bytes, depth_limit, node_limit)?;
     if !ton {
-        return serde_json::from_slice(bytes).map_err(|error| error.to_string());
+        return pillar_core::json::parse_value_slice(bytes).map_err(|error| error.to_string());
     }
+    #[allow(clippy::disallowed_methods)] // Wrapped in UntrustedValue below.
     let mut deserializer = serde_json::Deserializer::from_slice(bytes);
     deserializer.disable_recursion_limit();
     let guarded = serde_stacker::Deserializer::new(&mut deserializer);
-    let value =
-        <Value as serde::Deserialize>::deserialize(guarded).map_err(|error| error.to_string())?;
+    let pillar_core::json::UntrustedValue(value) =
+        <pillar_core::json::UntrustedValue as serde::Deserialize>::deserialize(guarded)
+            .map_err(|error| error.to_string())?;
     if let Err(error) = deserializer.end() {
         drop_json_value_safely(value);
         return Err(error.to_string());

@@ -28,8 +28,8 @@ where
         url.clone(),
         headers.clone(),
         json!({
-            "method": "eth_getBlockByNumber",
-            "params": ["latest", false],
+            "method": "eth_blockNumber",
+            "params": [],
             "id": 1,
             "jsonrpc": "2.0",
         }),
@@ -91,7 +91,9 @@ where
         parse_receipt_block_placement(&receipt_value).ok().zip(
             latest_block_response
                 .as_ref()
-                .and_then(|block| parse_block_number(block).ok()),
+                .and_then(|block| block.get("result"))
+                .and_then(numeric_response)
+                .and_then(|height| height.parse::<i64>().ok()),
         )
     else {
         return Err(RpcError::Remote(

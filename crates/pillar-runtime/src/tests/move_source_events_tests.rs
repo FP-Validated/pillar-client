@@ -196,3 +196,105 @@ async fn move_source_events_match_gasolina() {
     );
     assert_eq!(stricter_refused, PILLAR_STRICTER_SCENARIOS);
 }
+
+/// M-77: eight slow URLs of one entity listed first cannot hold the Aptos source lane
+/// while independent entities wait out admission; the planner interleaves entities first.
+#[tokio::test(start_paused = true)]
+async fn aptos_source_fan_out_interleaves_entities_before_rpc_admission() {
+    use pillar_core::execution::{BudgetLimits, ExecutionResources, FairBudget, RequestContext};
+    #[derive(Clone)]
+    struct SlowEntity(ScriptedMove);
+    #[async_trait]
+    impl JsonRpcTransport for SlowEntity {
+        async fn post_json(
+            &self,
+            url: String,
+            headers: HashMap<String, String>,
+            body: Value,
+        ) -> Result<Value, String> {
+            self.0.post_json(url, headers, body).await
+        }
+        async fn get_json(
+            &self,
+            url: String,
+            headers: HashMap<String, String>,
+        ) -> Result<Value, String> {
+            if url.contains("slow") {
+                return futures::future::pending().await;
+            }
+            self.0.get_json(url, headers).await
+        }
+    }
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let environment = fixture["environment"].as_str().unwrap();
+    let scenario = fixture["scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|scenario| scenario["chain"] == "aptos" && scenario["name"] == "V302 match")
+        .unwrap();
+    let mut pool = ProviderConfig::with_distinct_entities(
+        (0..10)
+            .map(|index| {
+                ProviderUri::Uri(format!(
+                    "https://{}-{index}.example/v1",
+                    if index < 8 { "slow" } else { "healthy" }
+                ))
+            })
+            .collect(),
+        2,
+    );
+    for voter in &mut pool.voters[..8] {
+        voter.entity = "slow-entity".into();
+    }
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([("aptos".to_string(), pool)]),
+        Some(&["aptos".to_string()]),
+    )
+    .unwrap();
+    let config =
+        runtime_evm_layerzero_config(environment, &["aptos".to_string(), "ethereum".to_string()])
+            .unwrap();
+    let resolver = EvmPacketSentResolver::new(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        SlowEntity(ScriptedMove {
+            transaction: scenario["transaction"].clone(),
+            block: scenario["block"].clone(),
+            urls: Arc::new(Mutex::new(Vec::new())),
+        }),
+        config.packet_sent_resolver_config,
+    );
+    let budget = || {
+        FairBudget::new(
+            vec!["aptos".into()],
+            BudgetLimits {
+                active: 8,
+                per_lane: 8,
+                waiting: 16,
+                per_lane_waiting: 16,
+                wait: std::time::Duration::from_secs(2),
+            },
+        )
+        .unwrap()
+    };
+    let mut context = RequestContext::new(std::time::Duration::from_secs(3));
+    context.source_chain = Some(Arc::from("aptos"));
+    context.resources = Some(Arc::new(ExecutionResources {
+        signing: budget(),
+        rpc: budget(),
+        kms: budget(),
+        parser: budget(),
+    }));
+    let request: LzMessageId = serde_json::from_value(scenario["request"].clone()).unwrap();
+    // The second honest entity is staggered one stall timeout behind the first wave.
+    let resolved = tokio::time::timeout(
+        std::time::Duration::from_millis(2_500),
+        context.scope(
+            resolver.get_lz_sent_event(scenario["transaction"]["hash"].as_str().unwrap(), &request),
+        ),
+    )
+    .await
+    .expect("honest entities must be admitted before redundant slow URLs")
+    .unwrap();
+    assert_eq!(resolved.lz_message_id.nonce, request.nonce);
+}

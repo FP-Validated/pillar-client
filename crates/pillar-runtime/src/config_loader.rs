@@ -804,6 +804,8 @@ mod tests {
                     .with_writer(move || writer.clone())
                     .finish(),
             );
+            // Another test thread may have cached this callsite as `never` meanwhile.
+            tracing::callsite::rebuild_interest_cache();
             let serving = owner_serving(SERVING_PROVIDERS);
             let registry = Arc::new(Mutex::new(PillarMetrics::new()));
             let metrics = refresh_with(&serving, &registry, result).await;

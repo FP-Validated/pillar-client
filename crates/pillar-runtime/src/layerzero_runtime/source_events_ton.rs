@@ -21,7 +21,7 @@ const MAX_TON_TRACE_PROJECTED_STRING_BYTES: usize = 4 * 1024 * 1024;
 #[derive(Debug, Clone)]
 pub(crate) struct TonPacketSentEvent {
     pub(crate) packet: LzPacketV1,
-    pub(crate) options: Value,
+    pub(crate) options: Result<Value, String>,
     pub(crate) send_library: String,
     pub(crate) endpoint_address: String,
     pub(crate) tx_hash: String,
@@ -317,9 +317,11 @@ fn ton_message_digest(transaction: &Value, message: &Value) -> Option<String> {
         Some(_) => Some(message_opcode(message)?),
     };
     let subtopic = match opcode {
-        Some(EVENT_OPCODE) => Some(ascii_of_uint(
-            &class_bytes(root.refs().first()?, 0, 256).ok()?,
-        )),
+        Some(EVENT_OPCODE) => root
+            .refs()
+            .first()
+            .and_then(|event| class_bytes(event, 0, 256).ok())
+            .map(|bytes| ascii_of_uint(&bytes)),
         _ => None,
     };
     let topic = opcode.map_or_else(|| "-1".to_string(), |opcode| opcode.to_string());
@@ -428,7 +430,13 @@ fn decode_ton_message(
     let body = message
         .pointer("/message_content/body")
         .and_then(Value::as_str)?;
-    let root = pillar_layerzero::boc_from_base64(body).ok()?;
+    let root = pillar_layerzero::boc_from_base64_with_limits(
+        body,
+        pillar_layerzero::MAX_MESSAGE_CELLS,
+        false,
+    )
+    .ok()?;
+    require_ordinary(&root).ok()?;
     let event = root.refs().first()?.clone();
     if class_name(&event).ok()?.as_str() != EVENT_CLASS_NAME {
         return None;
@@ -457,11 +465,13 @@ fn decode_ton_message(
         return None;
     }
     let send_library = format!("0x{}", hex::encode(class_bytes(&packet_sent, 6, 256).ok()?));
-    let extra_options = class_ref(&packet_sent, 2).ok()?;
-    let enforced_options = class_ref(&packet_sent, 3).ok()?;
     let dst_chain_name = chain_name_by_eid.get(&packet.dst_eid)?;
-    let options =
-        decode_ton_relayer_options(&extra_options, &enforced_options, dst_chain_name).ok()?;
+    let options = (|| {
+        let extra_options = class_ref(&packet_sent, 2)?;
+        let enforced_options = class_ref(&packet_sent, 3)?;
+        decode_ton_relayer_options(&extra_options, &enforced_options, dst_chain_name)
+    })()
+    .map_err(|error: AppCoreError| error.to_string());
     let tx_hash = transaction.get("hash").and_then(Value::as_str)?.to_string();
     let block_number = transaction
         .get("mc_block_seqno")
@@ -546,6 +556,7 @@ fn emitted_by_controller_owned_channel(
 }
 
 fn decode_packet(cell: &TonCell) -> Result<LzPacketV1, AppCoreError> {
+    require_ordinary(cell)?;
     let mut parser = cell.parser();
     let version = parser.read_num::<u8>(8).map_err(ton_error)?;
     if version != 1 {
@@ -573,6 +584,7 @@ fn decode_packet(cell: &TonCell) -> Result<LzPacketV1, AppCoreError> {
 }
 
 fn class_name(cell: &TonCell) -> Result<String, AppCoreError> {
+    require_ordinary(cell)?;
     let mut parser = cell.parser();
     let bytes = parser.read_bits(80).map_err(ton_error)?;
     let first_nonzero = bytes
@@ -584,6 +596,7 @@ fn class_name(cell: &TonCell) -> Result<String, AppCoreError> {
 }
 
 fn field_info(cell: &TonCell, index: usize) -> Result<(u8, usize, usize, usize), AppCoreError> {
+    require_ordinary(cell)?;
     let mut parser = cell.parser();
     parser
         .read_bits(80 + index * FIELD_INFO_WIDTH)
@@ -626,13 +639,16 @@ fn class_ref(cell: &TonCell, index: usize) -> Result<TonCell, AppCoreError> {
 /// Upstream `clGetUint`/`clGetCellRef` (`common-ton/src/class/index.ts:237-275`): data
 /// cell `i > 0` is the root's `i`-th reference, counted from zero.
 fn data_cell(cell: &TonCell, cell_index: usize) -> Result<TonCell, AppCoreError> {
-    if cell_index == 0 {
-        return Ok(cell.clone());
-    }
-    cell.refs()
-        .get(cell_index)
-        .cloned()
-        .ok_or_else(|| AppCoreError::Internal("TON class data cell missing".to_string()))
+    let target = if cell_index == 0 {
+        cell.clone()
+    } else {
+        cell.refs()
+            .get(cell_index)
+            .cloned()
+            .ok_or_else(|| AppCoreError::Internal("TON class data cell missing".to_string()))?
+    };
+    require_ordinary(&target)?;
+    Ok(target)
 }
 
 fn flatten_cell_bytes(cell: &TonCell) -> Result<Vec<u8>, AppCoreError> {
@@ -650,12 +666,20 @@ fn flatten_cell_bytes(cell: &TonCell) -> Result<Vec<u8>, AppCoreError> {
 fn flatten_bits(cell: &TonCell, bits: &mut Vec<bool>) -> Result<(), AppCoreError> {
     let mut current = Some(cell.clone());
     while let Some(cell) = current {
+        require_ordinary(&cell)?;
         let mut parser = cell.parser();
         let count = parser.data_bits_left().map_err(ton_error)?;
         for _ in 0..count {
             bits.push(parser.read_bit().map_err(ton_error)?);
         }
         current = cell.refs().first().cloned();
+    }
+    Ok(())
+}
+
+fn require_ordinary(cell: &TonCell) -> Result<(), AppCoreError> {
+    if cell.cell_type() != ton_core::cell::CellType::Ordinary || cell.level_mask().mask() != 0 {
+        return Err(ton_error("consumed cell must be ordinary and level zero"));
     }
     Ok(())
 }
@@ -847,6 +871,114 @@ mod tests {
             ]),
         )
         .len()
+    }
+
+    fn library_reference() -> TonCell {
+        let mut bytes = vec![0xb5, 0xee, 0x9c, 0x72, 1, 1, 1, 1, 0, 35, 0, 8, 66, 2];
+        bytes.extend([0; 32]);
+        BoC::from_bytes(std::sync::Arc::new(bytes))
+            .unwrap()
+            .single_root()
+            .unwrap()
+    }
+
+    #[test]
+    fn ton_packet_ignores_unread_option_refs_but_rejects_exotic_packet_data() {
+        let mut options = TonCell::builder();
+        options.write_bits(b"\0OptionsV1", 80).unwrap();
+        for index in 0..15 {
+            let field = match index {
+                0 => (8u64 << 14) | (350 << 2) | 3,
+                1 => (8u64 << 14) | (606 << 2) | 3,
+                2 => (8u64 << 14) | (2 << 12) | 3,
+                3 => (8u64 << 14) | (2 << 12) | (256 << 2) | 3,
+                _ => (1 << 18) - 1,
+            };
+            options.write_num(&field, 18).unwrap();
+        }
+        options.write_bits([0; 64], 512).unwrap();
+        options.write_ref(library_reference()).unwrap();
+        options.write_ref(TonCell::empty().clone()).unwrap();
+        let mut data = TonCell::builder();
+        data.write_bits([0; 64], 512).unwrap();
+        options.write_ref(data.build().unwrap()).unwrap();
+        let options = options.build().unwrap();
+        assert_eq!(
+            events_after(
+                |event| {
+                    let packet_sent = class_ref(event, 1).unwrap();
+                    with_class_ref(event, 1, with_class_ref(&packet_sent, 2, options.clone()))
+                },
+                false
+            ),
+            1
+        );
+        assert_eq!(
+            events_after(
+                |event| {
+                    let packet_sent = class_ref(event, 1).unwrap();
+                    with_class_ref(
+                        event,
+                        1,
+                        with_class_ref(&packet_sent, 4, library_reference()),
+                    )
+                },
+                false
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn ton_option_projection_failure_does_not_erase_the_authenticated_packet() {
+        let mut options = TonCell::builder();
+        options.write_bits(b"\0\0\0Unknown", 80).unwrap();
+        let options = options.build().unwrap();
+        assert_eq!(
+            events_after(
+                |event| {
+                    let packet_sent = class_ref(event, 1).unwrap();
+                    with_class_ref(event, 1, with_class_ref(&packet_sent, 2, options.clone()))
+                },
+                false
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn malformed_event_opcode_sibling_does_not_erase_a_real_packet() {
+        let mut tree =
+            ton_transaction_trace_tree(&serde_json::from_str(RECORDED).unwrap()).unwrap();
+        tree["children"].as_array_mut().unwrap().push(json!({
+            "transaction": {
+                "hash": format!("{:064x}", 123),
+                "mc_block_seqno": 1,
+                "in_msg": {
+                    "opcode": EVENT_OPCODE,
+                    "destination": MAINNET_CONTROLLER,
+                    "source": format!("0:{}", "11".repeat(32)),
+                    "message_content": {"body": BoC::new(TonCell::empty().clone()).to_base64(true).unwrap()},
+                },
+            },
+            "children": [],
+        }));
+        let fingerprint = ton_trace_quorum_fingerprint(&tree)
+            .expect("uninterpreted sibling remains fingerprintable");
+        assert_eq!(
+            decode_ton_packet_sent_events(
+                &tree,
+                &HashSet::from([MAINNET_CONTROLLER.to_string()]),
+                &HashMap::from([
+                    (30_343, "ton".to_string()),
+                    (30_110, "arbitrum".to_string())
+                ]),
+            )
+            .len(),
+            1
+        );
+        tree["children"].as_array_mut().unwrap().pop();
+        assert_ne!(ton_trace_quorum_fingerprint(&tree).unwrap(), fingerprint);
     }
 
     #[test]

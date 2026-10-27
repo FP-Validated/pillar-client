@@ -86,7 +86,7 @@ impl HttpClient for Wire {
                 let digest =
                     azure_core::base64::decode_url_safe(body["value"].as_str().unwrap()).unwrap();
                 assert_eq!(digest, [0x66; 32]);
-                let (signature, _) = self.key.sign_prehash_recoverable(&digest).unwrap();
+                let (signature, _) = self.key.sign_prehash_recoverable(&digest);
                 let signature = if self.high_s {
                     k256::ecdsa::Signature::from_scalars(
                         signature.r().to_bytes(),
@@ -104,7 +104,7 @@ impl HttpClient for Wire {
                 value
             }
         } else {
-            let point = self.key.verifying_key().to_encoded_point(false);
+            let point = self.key.verifying_key().to_sec1_point(false);
             json!({"key":{"kid":self.kid,"kty":"EC","crv":"P-256K","x":azure_core::base64::encode_url_safe(point.x().unwrap()),"y":azure_core::base64::encode_url_safe(point.y().unwrap())}})
         };
         Ok(AsyncRawResponse::from_bytes(
@@ -196,10 +196,9 @@ async fn azure_wire_real_format_versions_case_retry_and_high_s() {
         )
         .unwrap();
         assert_eq!(recovered, *wire.key.verifying_key());
-        assert!(k256::ecdsa::Signature::from_slice(&signature[..64])
-            .unwrap()
-            .normalize_s()
-            .is_none());
+        // The adapter returns the low-s form of Azure's high-s signature.
+        let returned = k256::ecdsa::Signature::from_slice(&signature[..64]).unwrap();
+        assert_eq!(returned.normalize_s(), returned);
         let paths = wire.requests.lock().unwrap().clone();
         assert_eq!(paths.len(), 3);
         assert!(paths[2].0.contains(&format!("/keys/key-a/{VERSION}/sign?")));

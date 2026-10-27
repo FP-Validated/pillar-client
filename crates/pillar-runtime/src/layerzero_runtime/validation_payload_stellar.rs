@@ -479,7 +479,9 @@ where
         if verified || dvn_confirmed {
             PayloadSignedValidity::Signed
         } else {
-            PayloadSignedValidity::NotSigned
+            PayloadSignedValidity::NotSigned {
+                required: Some(required),
+            }
         },
     ))
 }
@@ -493,7 +495,7 @@ where
         sent_event: &LzSentEvent,
         verifier_address: &str,
         dst_chain_name: &str,
-    ) -> Result<(), AppCoreError> {
+    ) -> Result<Option<u64>, AppCoreError> {
         let contracts = self.stellar_payload_contracts.as_ref().ok_or_else(|| {
             AppCoreError::Internal("No Stellar payload-signed contracts configured".to_string())
         })?;
@@ -501,7 +503,13 @@ where
         let provider_config = snapshot.provider_config(dst_chain_name)?;
         let receiver =
             stellar_address_argument(&pathway_extra_string_value(sent_event, "receiver")?)?;
-        let verifier = stellar_address_argument(verifier_address)?;
+        let verifier = if verifier_address.starts_with('G') {
+            StellarAddress::Account(pillar_layerzero::stellar_account_id_from_strkey(
+                verifier_address,
+            )?)
+        } else {
+            stellar_address_argument(verifier_address)?
+        };
         let src_eid = pathway_extra_u32(sent_event, "srcEid")?;
         let proof = compute_lz_packet_v1_proof_from_event(sent_event)?;
         let packet_header = hex::decode(proof.packet_header.trim_start_matches("0x"))

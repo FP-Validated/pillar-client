@@ -129,6 +129,26 @@ The following are deployment-side controls the software cannot enforce for you:
   the TON node refuses (inconsistent level mask or Merkle hash, any declared cell
   deeper than 1,024, reachable or not) is refused here and is that provider's
   non-vote, whatever `@ton/core` would do with it.
+- `ReadV1002` results are capped where upstream has no cap: more than 1 MiB of
+  returned data in one request result, in one decoded lzMap or lzReduce result, in
+  all request results together or in all lzMap results together is the
+  non-retryable `UNRESOLVABLE_COMMAND` once the quorum agrees, so no signature. A
+  no-compute payload that large could not be delivered by `lzReceive` in a
+  geth-family transaction (128 KiB limit) anyway. READ calls are also admitted four
+  per target chain and per command phase and sixteen per process, where upstream
+  issues every call of a command at once, so a large command takes longer here: 256
+  requests with lzMap and lzReduce stay inside the 58 s request deadline while a
+  call's quorum resolves in about 0.45 s.
+- A Move already-signed check (Aptos, Movement and Initia V302, Aptos V301) treats
+  this DVN's confirmation count of 0 as unsigned. Upstream compares `count >=
+  required`, so on a pathway requiring 0 confirmations it refuses every
+  `dvnAddress` request; the view answers 0 for a DVN with no record and the chain's
+  `is_verified` treats that as unverified. The worst case here is one redundant
+  signature for a DVN that stored 0. On Sui and IotaL1 the view aborts
+  `EConfirmationsNotFound` without a record; upstream reads that as 0 and refuses
+  the same way, while here it is unsigned, as the chain's `verified` reads it, and a
+  stored count, 0 included, is compared with `>=`. The view is keyed by
+  `keccak256(packetHeader)`, as upstream sends it.
 - Alert on `pillar_provider_config_age_seconds` (stale provider configuration),
   `pillar_provider_config_refresh_total{result!="ok"}`,
   `pillar_provider_single_entity_chains > 0`, `pillar_signer_errors_total` and
@@ -182,12 +202,13 @@ accepted.
 | JSON pre-allocation scan | 131,072 structural parse-cost units; 524,288 for TON responses. A cost estimate, not an exact element/heap-byte count |
 | JSON container nesting | 128 normally; 512 for TON responses |
 | Retained JSON quorum candidate | 8 MiB estimated per representative, 64 MiB estimated shared pool |
-| Transport buffering/parsing | Four shared active slots; at most three per foreground target and one for background |
+| READ returned data | 1 MiB per request result, per decoded lzMap/lzReduce result, per command for all request results and for all lzMap results; READ calls in flight: 4 per target chain and per command phase, 16 per process, chain permits granted in arrival order, each holding its providers' votes until its quorum resolves |
 | Configured parser waiting | Eight shared registrations plus quiet-lane reservations (at most eight plus the fixed lane count); two queued per lane; two-second admission wait |
 | Calls without execution resources | Four shared active slots, at most eight waiting registrations |
 | Canton numeric input | 1,024 bytes before trimming/conversion; decimal parsing is linear |
 | Canton committee response | At most 64 signatures, at most 130 hex characters each; configured quorum cannot exceed 64 |
 | READ command / caller resolutions | 1–256 requests plus an optional compute marker; at most 257 caller timestamp markers; command, request and compute codec version 1 only |
+| READ returned data | 1 MiB per request result, per decoded lzMap/lzReduce result, per command for all request results and for all lzMap results; READ calls in flight: 2 per command phase, 4 per target chain, 8 per process, granted in arrival order, each holding its providers' votes until its quorum resolves |
 | Provider health response text | Linear, case-insensitive HTTP(S) URL redaction before UTF-8-safe truncation; at most a 64 KiB prefix plus a byte-count marker per diagnostic string |
 
 An object containing an HTTP(S) URL in a key is compact-serialized and redacted as
@@ -221,8 +242,9 @@ can still defer probes and reduce health freshness.
 
 Quorum retains one JSON representative per fingerprint and streams fingerprints
 instead of storing a second full JSON string. The pool is an estimate, **not a
-hard allocator or process RSS ceiling**. Returned consumer values, typed READ data,
-SDK/network buffers and signer state are outside it. Embedded Initia event/view
+hard allocator or process RSS ceiling**. Returned consumer values, SDK/network
+buffers and signer state are outside it; READ data has its own limits above, and a
+READ vote keeps a SHA-256 fingerprint, not a second copy. Embedded Initia event/view
 JSON obeys the same byte/structural/depth checks but is decoded synchronously in
 its existing transaction pipeline, without a separate parser permit. Sui/IotaL1
 event pages are parsed one at a time but their events are kept until the last
@@ -261,6 +283,10 @@ lookup repeats that binding before evaluating a strictly parsed principal.
 
 Any non-null `walletRestrictions` is refused at startup and signer conversion.
 Omission or null means **no wallet restriction**, not an implemented allowlist.
+Unknown wallet fields are refused, so a misspelled `supportedChainNames` cannot
+widen a key's scope. In KMS mode `LAYERZERO_WALLETS` and
+`LAYERZERO_WALLETS_FILE_PATH` are refused: every `LAYERZERO_KMS_IDS` key signs
+every configured chain, and a chain-scoped wallet file would be silently ignored.
 
 ## Durable signing audit (default disabled)
 
@@ -532,6 +558,34 @@ not reproduce:
   `preserve_order`, so its object keys are sorted; upstream sends them in
   insertion order. The replays compare content, not key order. A policy that
   compares the raw body text would see a difference.
+- TON destination, MESSAGE requests: an existing attestation counts as already
+  signed only at `confirmations >= required`, the requirement resolved as the
+  deployed `UlnConnection` resolves it (the OApp's value unless its
+  `confirmationsNull` is set, then the ULN default's value regardless of the
+  default's own flag). Upstream compares the hash alone
+  (`lz-v2-sdk/src/uln/ton/index.ts:194-206`) and throws when both flags are set.
+  A request whose `blockConfirmation` is below the requirement is a 400 before any
+  source read; upstream signs it. Pinned against the deployed code in a TVM
+  emulator (`tests/ton_contract_semantics/confirmations.json`).
+- Starknet destination, MESSAGE requests: the already-signed check is the ULN302's
+  own `_verified` (`submitted && confirmations >= required`), read from storage;
+  upstream calls `has_payload_signed`, which ignores confirmations. A request whose
+  `blockConfirmation` is below the OApp's receive confirmations is a 400; upstream
+  signs it.
+- A Canton sequencer provider without `sequencer-validators` and `sequencer-quorum`
+  is refused; upstream accepts it with `NoopQuorumVerifier`.
+- A READ provider's `eth_call` that has not answered in 10 s loses its vote; upstream
+  waits for its provider timeout.
+- Every destination, MESSAGE requests: a `blockConfirmation` below the destination's
+  effective receive confirmations is a 400; upstream signs it.
+- Sui and IOTA: an abort counts as "no confirmation record" only when raised by the
+  ULN package's `receive_uln::get_confirmations`; upstream reads only the abort code.
+- A READ target body over the transport limit is an oversized-result vote; upstream
+  treats it as a provider failure.
+- A JSON object whose key is `$serde_json::private::RawValue` or
+  `$serde_json::private::Number`, at any depth, in a request body, body envelope or
+  provider response is a parse error here; upstream's `JSON.parse` accepts it as an
+  ordinary key.
 - Solana `PacketSent` events from a send library other than the configured ULN are
   skipped; upstream has no such filter. Upstream also re-reads the block (failing
   with `Block not found` when the node has no such block); this service does not.
@@ -818,6 +872,22 @@ Addresses live in `stellar_uln_302_for_environment`,
   They preserve the existing Serde formats and optional omission for MESSAGE and READ.
   Closed-schema policy handlers must accept the new fields.
   This forwarding does not replace on-chain state validation and does not change paths where no policy is configured.
+- The extra-context `sentEvent` is rendered for the policy, not copied from the
+  request. `lzMessageId.pathwayId.sender`/`receiver` use each chain's own
+  address form (20-byte hex on EVM, not bytes32). EVM `sendLibrary` and
+  `packetEmitAddress` are EIP-55, except a `SendUln301` library, which is
+  lowercase as upstream sends it. `onChainEvent.txHash` is the resolved
+  transaction's identity: the receipt hash on EVM, the ledger version on
+  Aptos/Movement, the node `txhash` on Initia. `onChainEvent.blockHash` and
+  `blockNumber` come from the agreed source evidence; a source family that
+  cannot supply a real block hash is refused before the policy is called, never
+  sent `0` or an empty string. Canton has no blocks: its hash is the empty string
+  upstream sends, beside the sequencer event nonce. `from` is canonical per family
+  (Aptos/Movement `0x` plus 64 lowercase hex, Starknet a range-checked felt, Initia
+  derived from the signer key type, Canton only a sender the same ledger event's
+  `signatories` or `actingParties` authorize).
+- With a policy configured, a ULNv2 MPT proof is refused: it attests every packet
+  of its source block, so a per-message verdict cannot cover it.
 - An external extra-context policy must answer `true`, and the two transports
   wrap that verdict differently. **The shapes are not interchangeable** - a
   policy service migrated from one form to the other will be refused.

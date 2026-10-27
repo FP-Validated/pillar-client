@@ -10,7 +10,7 @@
 use num_bigint::BigUint;
 use ton_core::cell::{CellBuilder, TonCell};
 
-use super::cell::{build, builder, map_err};
+use super::cell::{build, builder, map_err, require_ordinary};
 use pillar_core::AppCoreError;
 
 // `cl.t` type codes used by the ported LayerZero TON schemas (type code 0 = bool
@@ -189,6 +189,7 @@ pub fn cl_declare(name: &str, fields: Vec<ClField>) -> Result<TonCell, AppCoreEr
 }
 
 fn field_info(cell: &TonCell, field_index: usize) -> Result<(usize, usize, usize), AppCoreError> {
+    require_ordinary(cell)?;
     let mut parser = cell.parser();
     let field_info_offset = BASIC_HEADER_WIDTH + field_index * FIELD_INFO_WIDTH;
     parser
@@ -217,6 +218,7 @@ pub fn cl_get_uint_be(
             parser.read_next_ref().map_err(map_err)?;
         }
         let target = parser.read_next_ref().map_err(map_err)?.clone();
+        require_ordinary(&target)?;
         let mut inner = target.parser();
         inner.read_bits(offset).map_err(map_err)?;
         inner.read_num(width).map_err(map_err)?
@@ -243,6 +245,7 @@ pub fn cl_get_ref(cell: &TonCell, field_index: usize) -> Result<TonCell, AppCore
         parser.read_next_ref().map_err(map_err)?;
     }
     let nested = parser.read_next_ref().map_err(map_err)?.clone();
+    require_ordinary(&nested)?;
     let mut inner = nested.parser();
     for _ in 0..ref_idx {
         inner.read_next_ref().map_err(map_err)?;
@@ -252,6 +255,7 @@ pub fn cl_get_ref(cell: &TonCell, field_index: usize) -> Result<TonCell, AppCore
 
 /// `getCellName`: the class name stored in the first 80 bits, as ASCII.
 pub fn cell_name(cell: &TonCell) -> Result<String, AppCoreError> {
+    require_ordinary(cell)?;
     let mut parser = cell.parser();
     let value: BigUint = parser.read_num(NAME_WIDTH).map_err(map_err)?;
     // `to_bytes_be` strips leading zero bytes, matching `bigintToAsciiString`.

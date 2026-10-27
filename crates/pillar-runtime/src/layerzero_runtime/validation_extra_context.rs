@@ -1,6 +1,6 @@
 use super::*;
 use crate::layerzero_runtime::source_events_stellar::stellar_transaction_source_from_envelope_xdr;
-use crate::provider_health::{normalize_fingerprint_value, TransactionFromObservation};
+use crate::provider_health::TransactionFromObservation;
 
 impl<T> RuntimeRpcValidationChecks<T>
 where
@@ -16,12 +16,13 @@ where
             return Ok(());
         }
 
+        let policy_event = extra_context_sent_event_payload(sent_event)?;
         let src_chain_name = &sent_event.lz_message_id.pathway_id.src_chain_name;
         let from = self
             .source_transaction_from_address(src_chain_name, &sent_event.tx_hash)
             .await?;
         let payload = json!({
-            "sentEvent": extra_context_sent_event_payload(sent_event),
+            "sentEvent": policy_event,
             "from": from,
             "signingContext": signing_context,
         });
@@ -266,6 +267,24 @@ where
     }
 }
 
+fn canonical_hex_address_digits(value: &str) -> Option<String> {
+    let digits = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))?;
+    if digits.is_empty()
+        || digits.len() > 64
+        || !digits.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return None;
+    }
+    let digits = digits.trim_start_matches('0');
+    Some(if digits.is_empty() {
+        "0".to_string()
+    } else {
+        digits.to_ascii_lowercase()
+    })
+}
+
 async fn observe_move_transaction_from<T>(
     transport: T,
     chain_name: &str,
@@ -293,58 +312,75 @@ where
             .map_err(AppCoreError::from)?
     };
     let from = if chain_name == "initia" {
-        let encoded_public_key = transaction
-            .pointer("/tx/auth_info/signer_infos/0/public_key/key")
-            .and_then(Value::as_str)
-            .filter(|key| !key.is_empty())
+        let public_key = transaction
+            .pointer("/tx/auth_info/signer_infos/0/public_key")
             .ok_or_else(|| {
                 AppCoreError::Internal("Missing initia transaction signer public key".to_string())
             })?;
-        initia_address_from_public_key(encoded_public_key)?
+        initia_address_from_public_key(public_key)?
     } else {
-        transaction
+        let sender = transaction
             .get("sender")
             .and_then(Value::as_str)
-            .filter(|from| !from.is_empty())
-            .map(str::to_ascii_lowercase)
+            .and_then(canonical_hex_address_digits)
             .ok_or_else(|| {
-                AppCoreError::Internal(format!("Missing {chain_name} transaction sender"))
-            })?
+                AppCoreError::Internal(format!("Invalid {chain_name} transaction sender"))
+            })?;
+        if sender.len() == 1 {
+            format!("0x{sender}")
+        } else {
+            format!("0x{sender:0>64}")
+        }
     };
     #[derive(serde::Serialize)]
     struct MoveFingerprint<'a> {
         hash: Option<&'a Value>,
         sender: &'a str,
-        events: Option<&'a Value>,
     }
     let fingerprint = crate::provider_health::canonical_json_fingerprint(&MoveFingerprint {
         hash: transaction
             .get("hash")
             .or_else(|| transaction.get("txhash")),
         sender: &from,
-        events: transaction
-            .get("events")
-            .or_else(|| transaction.get("logs")),
     })?;
     Ok(TransactionFromObservation { fingerprint, from })
 }
 
-fn initia_address_from_public_key(encoded: &str) -> Result<String, AppCoreError> {
+fn initia_address_from_public_key(public_key: &Value) -> Result<String, AppCoreError> {
     use base64::Engine;
+    use k256::elliptic_curve::sec1::ToSec1Point;
     use ripemd::Ripemd160;
     use sha2::{Digest, Sha256};
 
-    let public_key = base64::engine::general_purpose::STANDARD
-        .decode(encoded)
-        .map_err(|error| AppCoreError::Internal(format!("Invalid initia public key: {error}")))?;
-    if !matches!(public_key.len(), 33 | 65) {
-        return Err(AppCoreError::Internal(format!(
-            "Invalid initia public key length {}",
-            public_key.len()
-        )));
-    }
-    let sha256 = Sha256::digest(public_key);
-    let account_id = Ripemd160::digest(sha256);
+    let ethereum = match public_key.get("@type").and_then(Value::as_str) {
+        Some("/cosmos.crypto.secp256k1.PubKey") => false,
+        Some("/initia.crypto.v1beta1.ethsecp256k1.PubKey") => true,
+        _ => {
+            return Err(AppCoreError::Internal(
+                "Unsupported or missing Initia signer key type".into(),
+            ))
+        }
+    };
+    let encoded = public_key
+        .get("key")
+        .and_then(Value::as_str)
+        .filter(|encoded| matches!(encoded.len(), 44 | 88))
+        .ok_or_else(|| AppCoreError::Internal("Invalid Initia signer public key length".into()))?;
+    let mut bytes = [0u8; 66];
+    let length = base64::engine::general_purpose::STANDARD
+        .decode_slice(encoded, &mut bytes)
+        .map_err(|error| AppCoreError::Internal(format!("Invalid Initia public key: {error}")))?;
+    let key = k256::PublicKey::from_sec1_bytes(&bytes[..length])
+        .map_err(|_| AppCoreError::Internal("Invalid Initia secp256k1 public key".into()))?;
+    let account_id: [u8; 20] = if ethereum {
+        let point = key.to_sec1_point(false);
+        let digest = sha3::Keccak256::digest(&point.as_bytes()[1..]);
+        let mut account = [0u8; 20];
+        account.copy_from_slice(&digest[12..]);
+        account
+    } else {
+        Ripemd160::digest(Sha256::digest(key.to_sec1_point(true).as_bytes())).into()
+    };
     let hrp =
         bech32::Hrp::parse("init").map_err(|error| AppCoreError::Internal(error.to_string()))?;
     bech32::encode::<bech32::Bech32>(hrp, &account_id)
@@ -393,20 +429,20 @@ where
         .filter(|from| !from.is_empty())
         .ok_or_else(|| AppCoreError::Internal(format!("Missing {chain_name} transaction sender")))?
         .to_string();
+    // Only what this lookup consumes: a fullnode and an indexer render the same
+    // PTB's pure inputs differently, so binding the PTB JSON split honest votes (M-20).
     #[derive(serde::Serialize)]
     struct SuiFingerprint<'a> {
         digest: Option<&'a Value>,
         sender: &'a str,
         checkpoint: Option<&'a Value>,
         status: Option<&'a Value>,
-        transaction: Option<&'a Value>,
     }
     let fingerprint = crate::provider_health::canonical_json_fingerprint(&SuiFingerprint {
         digest: result.get("digest"),
         sender: &from,
         checkpoint: result.get("checkpoint"),
         status: result.pointer("/effects/status/status"),
-        transaction: result.pointer("/transaction/data/transaction"),
     })?;
     Ok(TransactionFromObservation { fingerprint, from })
 }
@@ -437,29 +473,36 @@ where
         .get("result")
         .filter(|result| !result.is_null())
         .ok_or_else(|| AppCoreError::Internal("Missing Starknet transaction".to_string()))?;
-    let from = result
+    let sender = result
         .get("sender_address")
         .and_then(Value::as_str)
-        .filter(|from| !from.is_empty() && *from != "0x0")
-        .ok_or_else(|| AppCoreError::Internal("Missing Starknet transaction sender".to_string()))?
-        .to_string();
-    let fingerprint = [
-        "transaction_hash",
-        "sender_address",
-        "calldata",
-        "nonce",
-        "version",
-        "type",
-    ]
-    .into_iter()
-    .map(|key| {
-        result
-            .get(key)
-            .map(normalize_fingerprint_value)
-            .unwrap_or_default()
-    })
-    .collect::<Vec<_>>()
-    .join("|");
+        .and_then(canonical_hex_address_digits)
+        .ok_or_else(|| AppCoreError::Internal("Invalid Starknet transaction sender".to_string()))?;
+    const FIELD_PRIME: &str = "800000000000011000000000000000000000000000000000000000000000001";
+    if sender == "0"
+        || sender.len() > FIELD_PRIME.len()
+        || (sender.len() == FIELD_PRIME.len() && sender.as_str() >= FIELD_PRIME)
+    {
+        return Err(AppCoreError::Internal(
+            "Invalid Starknet transaction sender felt".to_string(),
+        ));
+    }
+    let from = format!("0x{sender}");
+    #[derive(serde::Serialize)]
+    struct StarknetFingerprint<'a> {
+        transaction_hash: Option<&'a Value>,
+        sender_address: &'a str,
+        nonce: Option<&'a Value>,
+        version: Option<&'a Value>,
+        transaction_type: Option<&'a Value>,
+    }
+    let fingerprint = crate::provider_health::canonical_json_fingerprint(&StarknetFingerprint {
+        transaction_hash: result.get("transaction_hash"),
+        sender_address: &from,
+        nonce: result.get("nonce"),
+        version: result.get("version"),
+        transaction_type: result.get("type"),
+    })?;
     Ok(TransactionFromObservation { fingerprint, from })
 }
 

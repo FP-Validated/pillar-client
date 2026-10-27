@@ -23,6 +23,7 @@ azure_security_keyvault_keys.workspace = true
 base64.workspace = true
 bech32.workspace = true
 bs58.workspace = true
+bytes.workspace = true
 futures.workspace = true
 pillar-api = { path = "../pillar-api" }
 pillar-config = { path = "../pillar-config" }
@@ -33,6 +34,11 @@ ton_core.workspace = true
 pillar-signer = { path = "../pillar-signer" }
 google-cloud-storage.workspace = true
 hex.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["client"] }
+hyper-util = { workspace = true, features = ["client-legacy", "client-proxy", "client-proxy-system"] }
+hyper-rustls.workspace = true
 indexmap.workspace = true
 num-bigint.workspace = true
 k256.workspace = true
@@ -44,7 +50,10 @@ sha2.workspace = true
 sha3.workspace = true
 serde_json.workspace = true
 serde_stacker.workspace = true
+starknet-types-core.workspace = true
 tokio.workspace = true
+tokio-rustls.workspace = true
+tower.workspace = true
 tracing.workspace = true
 zeroize.workspace = true
 tokio-postgres.workspace = true
@@ -56,7 +65,6 @@ webpki-roots.workspace = true
 pillar-config = { path = "../pillar-config", features = ["test-support"] }
 axum.workspace = true
 url.workspace = true
-tower.workspace = true
 tracing-subscriber.workspace = true
 parking_lot.workspace = true
 # `tokio::time::advance` for the provider-config age tests: paused-clock only,

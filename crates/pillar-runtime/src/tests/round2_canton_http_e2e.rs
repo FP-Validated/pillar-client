@@ -60,7 +60,7 @@ impl JsonRpcTransport for CantonHttpWire {
                 "updateId":TX_HASH,
                 "offset":42,
                 "recordTime":"2026-10-21T00:00:00Z",
-                "events":[{"CreatedEvent":{"createArgument":{"sender":SENDER}}}]
+                "events":[{"CreatedEvent":{"createArgument":{"sender":SENDER},"signatories":[SENDER]}}]
             }}}}));
         }
         if url == "https://eth-rpc.example" {

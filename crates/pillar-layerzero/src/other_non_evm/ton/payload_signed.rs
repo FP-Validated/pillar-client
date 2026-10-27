@@ -25,7 +25,7 @@ use ton_core::cell::TonCell;
 
 use super::address::{address_to_be32, derive_uln_addresses, TonContractCodeCells, TonPathway};
 use super::builders::{build_lz_packet, build_lz_path};
-use super::cell::{boc_to_base64, map_err, repr_hash_hex};
+use super::cell::{boc_to_base64, map_err, repr_hash_hex, require_ordinary};
 use super::cl_declare::{cl_get_ref, cl_get_uint_be};
 use super::dict::dict256_get_ref;
 use super::payload::hex_to_be32;
@@ -36,8 +36,13 @@ const ULN_CONNECTION_HASH_LOOKUPS: usize = 8;
 const ULN_CONNECTION_RECEIVE_CONFIG: usize = 7;
 /// `Uln.defaultUlnReceiveConfig` (`objRef`).
 const ULN_DEFAULT_RECEIVE_CONFIG: usize = 3;
-/// `lz::Attestation.hash` (`uint256`).
+/// `lz::Attestation.hash` (`uint256`) / `.confirmations` (`uint64`).
 const ATTESTATION_HASH: usize = 0;
+const ATTESTATION_CONFIRMATIONS: usize = 1;
+
+/// `UlnReceiveConfig.confirmationsNull` / `.confirmations` (`uint64`).
+const RECEIVE_CONFIG_CONFIRMATIONS_NULL: usize = 2;
+const RECEIVE_CONFIG_CONFIRMATIONS: usize = 3;
 
 /// `UlnReceiveConfig.requiredDVNsNull` / `.requiredDVNs`.
 const RECEIVE_CONFIG_REQUIRED_DVNS_NULL: usize = 4;
@@ -146,6 +151,7 @@ pub fn deserialize_address_list(cell: &TonCell) -> Result<Vec<[u8; 32]>, AppCore
     let mut addresses = Vec::new();
     let mut current = Some(cell.clone());
     while let Some(node) = current {
+        require_ordinary(&node)?;
         let mut parser = node.parser();
         while parser.data_bits_left().map_err(map_err)? >= 256 {
             let mut address = [0u8; 32];
@@ -240,10 +246,15 @@ pub fn uln_connection_receive_config(
 /// Outcome of the DVN attestation half of the check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DvnAttestation {
-    /// This DVN has an attestation for the packet.
+    /// This DVN has an attestation for the packet with at least the
+    /// confirmations the pathway requires.
     Matches,
     /// No attestation for this nonce/DVN, or a different packet hash.
     Absent,
+    /// An attestation for this packet whose confirmations are below the
+    /// pathway's requirement. `_committable` never counts it and
+    /// `ulnConnectionVerify` overwrites it, so a replacement must be signed.
+    InsufficientConfirmations,
     /// The DVN is not in the destination receive config, so TON could never
     /// accept its proof. Upstream short-circuits to "already signed" so the
     /// signing request becomes a no-op instead of a failing verify workflow.
@@ -252,7 +263,52 @@ pub enum DvnAttestation {
     NotInReceiveConfig,
 }
 
-/// `hasDvnVerified`, minus the two storage reads.
+/// `UlnReceiveConfig::utils::resolveConfirmations`: the OApp's value unless its
+/// `confirmationsNull` is set, then the ULN default's value, whose own null
+/// flag the contract does not consult.
+///
+/// FunC: `ultralightnode/msgdata/UlnReceiveConfig.fc` `resolveConfirmations`,
+/// confirmed against the pinned `UlnConnection` code in a TVM emulator. Upstream
+/// TypeScript (`lz-ton-contracts/src/uln.ts:176-193`) instead throws when both
+/// are null; the contract is what decides whether a verification counts.
+pub fn effective_receive_confirmations(
+    custom_config: &TonCell,
+    default_config: &TonCell,
+) -> Result<u64, AppCoreError> {
+    let source = if read_bool(custom_config, RECEIVE_CONFIG_CONFIRMATIONS_NULL)? {
+        default_config
+    } else {
+        custom_config
+    };
+    read_u64(source, RECEIVE_CONFIG_CONFIRMATIONS)
+}
+
+fn read_u64(cell: &TonCell, field_index: usize) -> Result<u64, AppCoreError> {
+    let be = cl_get_uint_be(cell, field_index, 64)?;
+    let bytes: [u8; 8] = be
+        .as_slice()
+        .try_into()
+        .map_err(|_| AppCoreError::Internal("TON uint64 field is not 8 bytes".to_string()))?;
+    Ok(u64::from_be_bytes(bytes))
+}
+
+/// The confirmations a TON destination pathway requires, read from the same
+/// two cells `committableView` resolves them from.
+pub fn required_receive_confirmations(
+    connection_storage: &TonCell,
+    default_receive_config: &TonCell,
+) -> Result<u64, AppCoreError> {
+    effective_receive_confirmations(
+        &uln_connection_receive_config(connection_storage)?,
+        default_receive_config,
+    )
+}
+
+/// `hasDvnVerified`, minus the two storage reads, with the contract's own
+/// predicate: a hash match counts only at `confirmations >= required`
+/// (`ulnConnection/handler.fc` `verifiedView` and `_committable`). Upstream
+/// TypeScript compares the hash alone, which let a low-confirmation attestation
+/// pass as already signed and block its own replacement.
 ///
 /// TS: `packages/sdks/lz-v2-sdk/src/uln/ton/index.ts:132-223`
 pub fn dvn_attestation(
@@ -281,10 +337,14 @@ pub fn dvn_attestation(
         return Ok(DvnAttestation::Absent);
     };
     let attested_hash = cl_get_uint_be(&attestation, ATTESTATION_HASH, 256)?;
-    if attested_hash.as_slice() == packet_hash_be.as_slice() {
+    if attested_hash.as_slice() != packet_hash_be.as_slice() {
+        return Ok(DvnAttestation::Absent);
+    }
+    let required = effective_receive_confirmations(&custom_receive_config, default_receive_config)?;
+    if read_u64(&attestation, ATTESTATION_CONFIRMATIONS)? >= required {
         Ok(DvnAttestation::Matches)
     } else {
-        Ok(DvnAttestation::Absent)
+        Ok(DvnAttestation::InsufficientConfirmations)
     }
 }
 

@@ -86,9 +86,9 @@ fn legacy_message_ids_convert_like_upstreams_sign_request_v1() {
             (Err(error), Some(message)) if error.to_string() == message => {}
             (Err(AppCoreError::BadRequest(message)), None)
                 if message.contains("is not a uint64")
-                    && !expected["nonce"]
+                    && expected["nonce"]
                         .as_u64()
-                        .is_some_and(|nonce| nonce < u64::MAX) => {}
+                        .is_none_or(|nonce| nonce == u64::MAX) => {}
             (Ok(id), None) => {
                 let pathway = &expected["pathwayId"];
                 let got = json!({
@@ -765,16 +765,15 @@ impl RuntimeValidationChecks for ParityChecks {
         _verifier_address: Option<&str>,
         dst_chain_name: &str,
         _effective_receive_version: Option<&str>,
-    ) -> Result<(), AppCoreError> {
+    ) -> Result<Option<u64>, AppCoreError> {
         if self.already_signed {
-            // The production refusal, so the HTTP comparison covers its text.
             return crate::layerzero_runtime::payload_signed_validation_result(
                 crate::provider_health::PayloadSignedValidity::Signed,
                 sent_event,
                 dst_chain_name,
             );
         }
-        Ok(())
+        Ok(None)
     }
 
     async fn validate_extra_context(

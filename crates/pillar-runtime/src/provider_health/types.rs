@@ -63,7 +63,9 @@ pub(crate) struct UlnV2InboundProofTypeObservation {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum PayloadSignedValidity {
-    NotSigned,
+    NotSigned {
+        required: Option<u64>,
+    },
     Signed,
     Missing,
     /// The receiver receives on a library this service cannot validate

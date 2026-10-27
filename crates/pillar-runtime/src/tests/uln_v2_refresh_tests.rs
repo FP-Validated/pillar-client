@@ -214,12 +214,9 @@ fn assert_hydrated_like_upstream(
         upstream["message"].as_str().unwrap(),
         "{name}: hydrated message"
     );
-    assert!(
-        hydrated.extra["sendLibrary"]
-            .as_str()
-            .unwrap()
-            .eq_ignore_ascii_case(upstream["sendLibrary"].as_str().unwrap()),
-        "{name}: hydrated sendLibrary"
+    assert_eq!(
+        hydrated.extra["sendLibrary"], upstream["sendLibrary"],
+        "{name}: hydrated sendLibrary is EIP-55, as upstream sends it"
     );
 }
 
@@ -433,4 +430,56 @@ async fn aptos_uln_v2_refresh_matches_gasolina() {
         compared += 1;
     }
     assert_eq!(compared, 10, "every upstream Aptos scenario is replayed");
+}
+
+#[tokio::test]
+async fn aptos_executor_settings_are_bound_to_raw_receiver_and_unique_event() {
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let event = sent_event_from(&fixture["aptos"]["sentEvent"], None);
+    let mut padded = event.clone();
+    let receiver = event.lz_message_id.pathway_id.extra["receiver"]
+        .as_str()
+        .unwrap();
+    padded.lz_message_id.pathway_id.extra.insert(
+        "receiver".into(),
+        Value::from(format!("0x00{}", receiver.trim_start_matches("0x"))),
+    );
+    assert_ne!(
+        crate::layerzero_runtime::aptos_v1_guid(&event.lz_message_id).unwrap(),
+        crate::layerzero_runtime::aptos_v1_guid(&padded.lz_message_id).unwrap(),
+    );
+    let config = runtime_evm_layerzero_config(
+        fixture["environment"].as_str().unwrap(),
+        &["aptos".into(), "arbitrum".into()],
+    )
+    .unwrap();
+    let account = config
+        .packet_sent_resolver_config
+        .aptos_v1_source
+        .as_ref()
+        .unwrap()
+        .layerzero_account
+        .trim_start_matches("0x")
+        .trim_start_matches('0');
+    let executor = json!({
+        "type": format!("0x{account}::executor_v2::ExecutorRequested"),
+        "data": {
+            "guid": crate::layerzero_runtime::aptos_v1_guid(&event.lz_message_id).unwrap(),
+            "adapter_params": "0x00010000000000000000000000000000000000000000000000000000000000030d40"
+        }
+    });
+    let resolver = EvmPacketSentResolver::new(
+        &ProviderSnapshotHandle::from_getter(&providers("aptos")),
+        ScriptedAptos {
+            script: json!({"events": [executor.clone(), executor]}),
+            calls: Arc::new(Mutex::new(Vec::new())),
+        },
+        config.packet_sent_resolver_config,
+    );
+    assert!(resolver
+        .refresh_uln_v2_sent_event(&event)
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("ambiguous Aptos executor"));
 }

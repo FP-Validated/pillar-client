@@ -29,6 +29,7 @@ use tower::ServiceExt;
 use tracing_subscriber::{fmt, EnvFilter};
 mod connections;
 mod healthcheck;
+mod response_body;
 
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(58);
 const KEEP_ALIVE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -149,6 +150,9 @@ async fn serve_until_with_lifetime(
     shutdown: impl Future<Output = io::Result<&'static str>>,
 ) -> io::Result<()> {
     let semaphore = Arc::new(Semaphore::new(max_connections));
+    let app = app.layer(axum::Extension(pillar_api::RequestUploadBudget::new(
+        (max_connections / 2).clamp(1, 32),
+    )));
     let (shutdown_grace, shutdown_withdrawal) = shutdown_durations;
     let connections = connections::Connections::new(shutdown_signal.clone());
     let mut tasks = tokio::task::JoinSet::new();
@@ -346,6 +350,7 @@ where
     I: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let service_control = control.as_ref().map(|(control, _)| control.clone());
+    let io_control = service_control.clone();
     let service = service_fn(move |request: Request<hyper::body::Incoming>| {
         let app = app.clone();
         let control = service_control.clone();
@@ -364,9 +369,6 @@ where
                 .clone()
                 .scope(tokio::time::timeout_at(deadline, app.oneshot(request)))
                 .await;
-            if let Some(control) = &control {
-                control.idle();
-            }
             let draining = control
                 .as_ref()
                 .is_some_and(|control| control.is_draining());
@@ -388,6 +390,16 @@ where
                                 .headers_mut()
                                 .insert(CONNECTION, HeaderValue::from_static("close"));
                         }
+                        if let Some(control) = control {
+                            let length = response
+                                .headers()
+                                .get(hyper::header::CONTENT_LENGTH)
+                                .and_then(|value| value.to_str().ok())
+                                .and_then(|value| value.parse().ok());
+                            response = response.map(|body| {
+                                Body::new(response_body::ResponseBody::new(body, control, length))
+                            });
+                        }
                         Ok(response)
                     }
                     Ok(Err(error)) => match error {},
@@ -401,15 +413,18 @@ where
         .timer(TokioTimer::new())
         .header_read_timeout(header_read_timeout)
         .serve_connection(
-            TokioIo::new(IdleTimeoutIo::new(
-                io,
-                keep_alive_timeout,
-                if control.is_some() {
-                    max_connection_lifetime + header_read_timeout + request_timeout
-                } else {
-                    max_connection_lifetime
-                },
-            )),
+            TokioIo::new(
+                IdleTimeoutIo::new(
+                    io,
+                    keep_alive_timeout,
+                    if control.is_some() {
+                        max_connection_lifetime + header_read_timeout + request_timeout
+                    } else {
+                        max_connection_lifetime
+                    },
+                )
+                .with_control(io_control),
+            ),
             service,
         );
     tokio::pin!(connection);
@@ -435,6 +450,8 @@ struct IdleTimeoutIo<I> {
     /// refreshed by every successful read, so on its own it bounds silence but
     /// not lifetime, and a trickling client renews it indefinitely.
     hard_deadline: Pin<Box<Sleep>>,
+    control: Option<Arc<connections::ConnectionControl>>,
+    write_deadline: Option<Pin<Box<Sleep>>>,
 }
 
 impl<I> IdleTimeoutIo<I> {
@@ -444,7 +461,14 @@ impl<I> IdleTimeoutIo<I> {
             timeout,
             deadline: Box::pin(tokio::time::sleep(timeout)),
             hard_deadline: Box::pin(tokio::time::sleep(max_lifetime)),
+            control: None,
+            write_deadline: None,
         }
+    }
+
+    fn with_control(mut self, control: Option<Arc<connections::ConnectionControl>>) -> Self {
+        self.control = control;
+        self
     }
 
     fn reset_deadline(&mut self) {
@@ -452,6 +476,24 @@ impl<I> IdleTimeoutIo<I> {
     }
 
     fn poll_hard_deadline(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        if let Some(deadline) = self
+            .control
+            .as_ref()
+            .and_then(|control| control.write_deadline())
+        {
+            let timer = self
+                .write_deadline
+                .get_or_insert_with(|| Box::pin(tokio::time::sleep_until(deadline)));
+            if timer.deadline() != deadline {
+                timer.as_mut().reset(deadline);
+            }
+            if timer.as_mut().poll(cx).is_ready() {
+                return Poll::Ready(Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "HTTP response write timed out",
+                )));
+            }
+        }
         if self.hard_deadline.as_mut().poll(cx).is_ready() {
             return Poll::Ready(Err(io::Error::new(
                 io::ErrorKind::TimedOut,
@@ -527,7 +569,17 @@ impl<I: AsyncWrite + Unpin> AsyncWrite for IdleTimeoutIo<I> {
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
-        Pin::new(&mut self.get_mut().inner).poll_flush(cx)
+        let this = self.get_mut();
+        if let Poll::Ready(Err(error)) = this.poll_hard_deadline(cx) {
+            return Poll::Ready(Err(error));
+        }
+        let result = Pin::new(&mut this.inner).poll_flush(cx);
+        if matches!(result, Poll::Ready(Ok(()))) {
+            if let Some(control) = &this.control {
+                control.flushed();
+            }
+        }
+        result
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {

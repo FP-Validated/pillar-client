@@ -109,11 +109,8 @@ async fn evm_source_events_match_gasolina() {
                 );
                 assert_eq!(event.extra["guid"], theirs["guid"], "{name}: guid");
                 assert_eq!(event.message, theirs["message"].as_str().unwrap(), "{name}");
-                assert!(
-                    event.extra["sendLibrary"]
-                        .as_str()
-                        .unwrap()
-                        .eq_ignore_ascii_case(theirs["sendLibrary"].as_str().unwrap()),
+                assert_eq!(
+                    event.extra["sendLibrary"], theirs["sendLibrary"],
                     "{name}: sendLibrary"
                 );
                 assert_eq!(

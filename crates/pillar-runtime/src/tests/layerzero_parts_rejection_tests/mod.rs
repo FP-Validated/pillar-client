@@ -8,3 +8,4 @@ mod nonevm_destination_diff;
 mod nonevm_refusal_arms;
 mod sui_iotamove;
 mod ton_v302_destination;
+pub(super) use move_v302_destination::{move_checks, v302_event};

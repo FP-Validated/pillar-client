@@ -577,3 +577,149 @@ async fn completed_response_keeps_success_after_later_shutdown() {
         "{\"wire_body\":\"COMPLETED\",\"success\":1,\"shutdown\":0}",
     );
 }
+
+#[tokio::test]
+async fn incomplete_upload_budget_preserves_health_connections_and_expires_silent_bodies() {
+    let (app, signal) = pillar_api::router_with_shutdown(
+        pillar_api::StaticApp::observed_mainnet().with_api_auth_enabled(false),
+        "audit",
+    );
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(serve_until(
+        listener,
+        app,
+        4,
+        Duration::from_secs(1),
+        Duration::ZERO,
+        signal,
+        async move {
+            stopped.await.unwrap();
+            Ok("audit")
+        },
+    ));
+    let mut uploads = tokio::task::JoinSet::new();
+    for _ in 0..3 {
+        let mut peer = TcpStream::connect(address).await.unwrap();
+        peer.write_all(b"POST /v2/resolve-and-sign HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{").await.unwrap();
+        uploads.spawn(async move {
+            let mut response = Vec::new();
+            peer.read_to_end(&mut response).await.unwrap();
+            response
+        });
+    }
+    let refused = tokio::time::timeout(Duration::from_millis(700), uploads.join_next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(refused.starts_with(b"HTTP/1.1 503"), "{refused:?}");
+    let mut health = TcpStream::connect(address).await.unwrap();
+    health
+        .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let mut healthy = Vec::new();
+    tokio::time::timeout(Duration::from_millis(700), health.read_to_end(&mut healthy))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(healthy.starts_with(b"HTTP/1.1 200"));
+    for _ in 0..2 {
+        let expired = tokio::time::timeout(Duration::from_secs(2), uploads.join_next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(expired.starts_with(b"HTTP/1.1 408"), "{expired:?}");
+    }
+    stop.send(()).unwrap();
+    server.await.unwrap().unwrap();
+    artifact("M27-upload-budget", "{\"connectionLimit\":4,\"incompleteBodies\":2,\"excessStatus\":503,\"healthStatus\":200,\"silentBodyStatus\":408}");
+}
+
+#[tokio::test]
+async fn blocked_response_writers_do_not_hide_other_idle_connections() {
+    let (sender_a, receiver_a) = tokio::sync::mpsc::channel(1);
+    let (sender_b, receiver_b) = tokio::sync::mpsc::channel(1);
+    let receivers = Arc::new(tokio::sync::Mutex::new(vec![receiver_a, receiver_b]));
+    let app = Router::new()
+        .route(
+            "/slow",
+            get(move || {
+                let receivers = receivers.clone();
+                async move {
+                    axum::http::Response::builder()
+                        .header("Content-Length", 8192)
+                        .body(Body::new(StreamingBody(
+                            receivers.lock().await.pop().unwrap(),
+                        )))
+                        .unwrap()
+                }
+            }),
+        )
+        .route("/fast", get(|| async { "READY" }));
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (_, signal) =
+        pillar_api::router_with_shutdown(pillar_api::StaticApp::observed_mainnet(), "audit");
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(serve_until(
+        listener,
+        app,
+        4,
+        Duration::from_secs(1),
+        Duration::ZERO,
+        signal,
+        async move {
+            stopped.await.unwrap();
+            Ok("audit")
+        },
+    ));
+    let mut peers = Vec::new();
+    for route in ["/slow", "/slow", "/fast", "/fast"] {
+        let mut peer = TcpStream::connect(address).await.unwrap();
+        peer.write_all(format!("GET {route} HTTP/1.1\r\nHost: localhost\r\n\r\n").as_bytes())
+            .await
+            .unwrap();
+        let mut response = Vec::new();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let mut chunk = [0; 1024];
+                let read = peer.read(&mut chunk).await.unwrap();
+                assert_ne!(read, 0);
+                response.extend_from_slice(&chunk[..read]);
+                if (route == "/slow" && response.windows(4).any(|bytes| bytes == b"\r\n\r\n"))
+                    || response.ends_with(b"READY")
+                {
+                    break;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        peers.push(peer);
+    }
+    let mut admitted = TcpStream::connect(address).await.unwrap();
+    admitted
+        .write_all(b"GET /fast HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let mut response = Vec::new();
+    let result = tokio::time::timeout(
+        Duration::from_millis(700),
+        admitted.read_to_end(&mut response),
+    )
+    .await;
+    drop((sender_a, sender_b, peers));
+    stop.send(()).unwrap();
+    server.await.unwrap().unwrap();
+    assert!(
+        result.is_ok(),
+        "coalesced idle notifications hid reclaimable keepalives"
+    );
+    assert!(response.starts_with(b"HTTP/1.1 200"));
+    assert!(response.ends_with(b"READY"));
+    artifact("M52-response-writer-headroom", "{\"blockedWriters\":2,\"idleKeepalives\":2,\"connectionLimit\":4,\"newRequestStatus\":200}");
+}

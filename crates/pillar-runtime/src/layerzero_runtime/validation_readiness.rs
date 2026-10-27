@@ -889,7 +889,6 @@ where
         headers,
         json!({
             "method": "getLatestLedger",
-            "params": {},
             "id": 1,
             "jsonrpc": "2.0",
         }),

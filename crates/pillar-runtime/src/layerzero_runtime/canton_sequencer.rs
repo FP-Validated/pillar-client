@@ -5,10 +5,10 @@
 //! (`rpc-sdk/src/canton/index.ts:218-314`) and the already-signed check
 //! (`uln/canton/index.ts:1005-1069`, `formatUlnConfig`).
 use super::*;
-use k256::elliptic_curve::bigint::{Encoding, Limb, U256};
+use k256::elliptic_curve::bigint::{Limb, U256};
 use k256::elliptic_curve::ops::Reduce;
 use k256::elliptic_curve::point::DecompressPoint;
-use k256::elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
+use k256::elliptic_curve::sec1::{FromSec1Point, ToSec1Point};
 use k256::elliptic_curve::subtle::Choice;
 use k256::elliptic_curve::Curve;
 use pillar_config::ProviderConfig;
@@ -66,8 +66,35 @@ pub(crate) struct ScanEvents {
 
 /// `createCantonMultiprovider`'s construction, for its refusals: a missing or malformed
 /// `sequencer` entry, a sequencer without an authorization header, and an `rpc` URI
-/// `parseCantonChainUri` rejects (`multiprovider/src/canton.ts:64-79`).
+/// `parseCantonChainUri` rejects (`multiprovider/src/canton.ts:64-79`), plus one of
+/// this service's own: a sequencer without `sequencer-validators`/`sequencer-quorum`.
+/// Upstream then uses `NoopQuorumVerifier` and trusts every answer, including the
+/// PacketSent events a signature is built from; here that configuration is refused.
 pub(crate) fn canton_sequencer(
+    chain_name: &str,
+    config: &ProviderConfig,
+) -> Result<CantonSequencer, AppCoreError> {
+    let sequencer = build_canton_sequencer(chain_name, config)?;
+    if sequencer.committee.is_none() {
+        return Err(AppCoreError::Internal(format!(
+            "Canton sequencer provider for {chain_name} has no committee: set \
+             sequencer-validators and sequencer-quorum so its answers are signature-checked"
+        )));
+    }
+    Ok(sequencer)
+}
+
+/// Upstream's construction alone, without the committee requirement; the replay of
+/// upstream's own committee-less scenarios needs it to compare the decoding.
+#[cfg(test)]
+pub(crate) fn canton_sequencer_as_upstream(
+    chain_name: &str,
+    config: &ProviderConfig,
+) -> Result<CantonSequencer, AppCoreError> {
+    build_canton_sequencer(chain_name, config)
+}
+
+fn build_canton_sequencer(
     chain_name: &str,
     config: &ProviderConfig,
 ) -> Result<CantonSequencer, AppCoreError> {
@@ -273,15 +300,13 @@ impl CantonSequencer {
         transport: &T,
         params: &[(&str, &str)],
     ) -> Result<SequencerAnswer<ScanEvents>, AppCoreError> {
-        self.scan(transport, "events", params, |raw| {
-            match (
-                raw.get("events").and_then(Value::as_array),
-                raw.get("latestNonce").and_then(big_uint),
-                raw.get("isLatest").is_some_and(Value::is_boolean),
-                hex_string(raw.get("stateRoot")),
-            ) {
-                (Some(events), Some(latest_nonce), true, true) => Some(ScanEvents {
-                    events: events.clone(),
+        self.scan(transport, "events", params, |mut raw| {
+            let latest_nonce = raw.get("latestNonce").and_then(big_uint)?;
+            let shaped = raw.get("isLatest").is_some_and(Value::is_boolean)
+                && hex_string(raw.get("stateRoot"));
+            match raw.get_mut("events").map(Value::take) {
+                Some(Value::Array(events)) if shaped => Some(ScanEvents {
+                    events,
                     latest_nonce,
                 }),
                 _ => None,
@@ -306,13 +331,14 @@ impl CantonSequencer {
     }
 
     /// `SequencerScanClient.#get`: the signature envelope is verified before chain-specific
-    /// shape work such as BigInt conversion over provider-controlled fields.
+    /// shape work such as BigInt conversion over provider-controlled fields, and the
+    /// verified body is handed to `shape` by value so large arrays move rather than copy.
     async fn scan<T: JsonRpcTransport, R>(
         &self,
         transport: &T,
         kind: &str,
         params: &[(&str, &str)],
-        shape: impl FnOnce(&Value) -> Option<R>,
+        shape: impl FnOnce(Value) -> Option<R>,
     ) -> Result<SequencerAnswer<R>, AppCoreError> {
         let mut query = vec![("type", kind)];
         query.extend_from_slice(params);
@@ -333,7 +359,7 @@ impl CantonSequencer {
         self.verify("scan", &request, &raw, &signatures)?;
         let answer = match error_response(&raw) {
             Some(message) => SequencerAnswer::Error(message),
-            None => shape(&raw)
+            None => shape(raw)
                 .map(SequencerAnswer::Ok)
                 .ok_or_else(unexpected_scan)?,
         };
@@ -642,7 +668,7 @@ fn recover_public_key(digest: &[u8; 32], signature: &[u8]) -> Result<String, Str
         return Err(invalid());
     }
     let x = if recovery >= 2 {
-        let (sum, carry) = r.adc(&order, Limb::ZERO);
+        let (sum, carry) = r.carrying_add(&order, Limb::ZERO);
         if carry != Limb::ZERO {
             return Err(invalid());
         }
@@ -655,10 +681,11 @@ fn recover_public_key(digest: &[u8; 32], signature: &[u8]) -> Result<String, Str
         Choice::from(recovery & 1),
     ))
     .ok_or_else(invalid)?;
-    let r_scalar = <k256::Scalar as Reduce<U256>>::reduce(r);
+    let r_scalar = <k256::Scalar as Reduce<U256>>::reduce(&r);
     let r_inverse = Option::<k256::Scalar>::from(r_scalar.invert()).ok_or_else(invalid)?;
-    let h = <k256::Scalar as Reduce<U256>>::reduce(U256::from_be_slice(digest));
-    let s = <k256::Scalar as Reduce<U256>>::reduce(s);
+    let h_value = U256::from_be_slice(digest);
+    let h = <k256::Scalar as Reduce<U256>>::reduce(&h_value);
+    let s = <k256::Scalar as Reduce<U256>>::reduce(&s);
     let u1 = -(h * r_inverse);
     let u2 = s * r_inverse;
     let q = k256::ProjectivePoint::GENERATOR * u1 + k256::ProjectivePoint::from(r_point) * u2;
@@ -667,7 +694,7 @@ fn recover_public_key(digest: &[u8; 32], signature: &[u8]) -> Result<String, Str
     }
     Ok(format!(
         "0x{}",
-        hex::encode(q.to_affine().to_encoded_point(false).as_bytes())
+        hex::encode(q.to_affine().to_sec1_point(false).as_bytes())
     ))
 }
 
@@ -737,9 +764,7 @@ fn normalize_secp256k1_public_key(public_key: &str) -> Result<String, String> {
             .ok_or_else(not_on_curve)?
         }
         (65, Some(0x04)) => {
-            let encoded = k256::EncodedPoint::from_bytes(&bytes).map_err(|_| not_on_curve())?;
-            Option::<k256::AffinePoint>::from(k256::AffinePoint::from_encoded_point(&encoded))
-                .ok_or_else(not_on_curve)?
+            k256::AffinePoint::from_sec1_bytes(&bytes).map_err(|_| not_on_curve())?
         }
         (length, _) => {
             return Err(format!(
@@ -750,7 +775,7 @@ fn normalize_secp256k1_public_key(public_key: &str) -> Result<String, String> {
     };
     Ok(format!(
         "0x{}",
-        hex::encode(point.to_encoded_point(false).as_bytes())
+        hex::encode(point.to_sec1_point(false).as_bytes())
     ))
 }
 
@@ -1135,8 +1160,7 @@ fn requested_message_id_json(lz_message_id: &LzMessageId) -> String {
     )
 }
 
-/// `EndpointV2CantonSdk.getLZSentEvent`: every PacketSent of the commitment transaction,
-/// each decoded, then the one matching the request.
+// Authenticate the commitment before independently converting its packet events.
 pub(crate) async fn resolve_canton_packet_sent<T: JsonRpcTransport>(
     transport: &T,
     sequencer: &CantonSequencer,
@@ -1157,20 +1181,34 @@ pub(crate) async fn resolve_canton_packet_sent<T: JsonRpcTransport>(
         SequencerAnswer::Ok(response) => response.events,
         SequencerAnswer::Error(message) => return Err(AppCoreError::Internal(message)),
     };
+    select_canton_packet(&events, src_tx_hash, lz_message_id)
+}
+
+fn select_canton_packet(
+    events: &[Value],
+    src_tx_hash: &str,
+    lz_message_id: &LzMessageId,
+) -> Result<LzSentEvent, AppCoreError> {
     if events.is_empty() {
         return Err(AppCoreError::Internal(
             "Packet sent event not found or not valid".to_string(),
         ));
     }
-    let decoded = events
-        .iter()
-        .map(packet_sent_event)
-        .collect::<Result<Vec<_>, _>>()?;
-    if let Some(found) = decoded
-        .iter()
-        .find(|event| lz_message_id_matches(lz_message_id, &event.lz_message_id))
-    {
-        return Ok(found.clone());
+    let mut decoded = Vec::new();
+    let mut first_error = None;
+    for event in events {
+        match packet_sent_event(event) {
+            Ok(event) if lz_message_id_matches(lz_message_id, &event.lz_message_id) => {
+                return Ok(event);
+            }
+            Ok(event) => decoded.push(event),
+            Err(error) => {
+                first_error.get_or_insert(error);
+            }
+        }
+    }
+    if let Some(error) = first_error {
+        return Err(error);
     }
     Err(AppCoreError::Internal(format!(
         "Did not find correct PacketSent() event in tx {src_tx_hash}: matched {} packet(s) by \
@@ -1249,7 +1287,7 @@ pub(crate) async fn canton_payload_signed<T: JsonRpcTransport>(
     sequencer: &CantonSequencer,
     sent_event: &LzSentEvent,
     verifier_address: &str,
-) -> Result<bool, AppCoreError> {
+) -> Result<(bool, u64), AppCoreError> {
     let uln = CANTON_STATIC_VE3_CONTRACTS[3];
     let read = |function: &'static str, arguments: Value| async move {
         match sequencer
@@ -1312,7 +1350,7 @@ pub(crate) async fn canton_payload_signed<T: JsonRpcTransport>(
         verification_state_is_verified(js_value_to_number(&state)).map_err(AppCoreError::Internal)
     };
     let (dvn_confirmed, verified) = tokio::try_join!(dvn_confirmed, verified)?;
-    Ok(verified || dvn_confirmed)
+    Ok((verified || dvn_confirmed, required_confirmations as u64))
 }
 
 /// `formatUlnConfig`'s reads, in its order: `confirmations` by `Number`, then the two
@@ -1360,6 +1398,42 @@ fn verification_state_is_verified(state: f64) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canton_selection_ignores_rejected_siblings_but_not_selected_packet_errors() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../tests/gasolina_parity/canton_sequencer.json"
+        ))
+        .unwrap();
+        let scenario = fixture["scenarios"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|scenario| scenario["kind"] == "resolve" && scenario["name"] == "one match")
+            .unwrap();
+        let body: Value =
+            serde_json::from_str(scenario["exchanges"][0]["text"].as_str().unwrap()).unwrap();
+        let valid = body["events"][0].clone();
+        let request: LzMessageId = serde_json::from_value(scenario["lzMessageId"].clone()).unwrap();
+        let mut unknown = valid.clone();
+        let mut bytes = hex::decode(
+            valid["data"]["encodedPayload"]
+                .as_str()
+                .unwrap()
+                .trim_start_matches("0x"),
+        )
+        .unwrap();
+        bytes[45..49].copy_from_slice(&u32::MAX.to_be_bytes());
+        unknown["data"]["encodedPayload"] = Value::from(format!("0x{}", hex::encode(bytes)));
+        for invalid in [unknown, json!({"data":{"encodedPayload":"0xbroken"}})] {
+            let selected =
+                select_canton_packet(&[invalid.clone(), valid.clone()], "commitment", &request)
+                    .unwrap();
+            assert_eq!(selected.lz_message_id.nonce, 7);
+            assert_eq!(selected.message, "0xdeadbeef");
+            assert!(select_canton_packet(&[invalid], "commitment", &request).is_err());
+        }
+    }
 
     #[test]
     fn js_number_conversions_follow_ecmascript() {

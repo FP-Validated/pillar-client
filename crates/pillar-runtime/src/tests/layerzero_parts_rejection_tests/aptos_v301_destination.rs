@@ -431,7 +431,7 @@ async fn sign_v301_to_aptos(environment: &str, dvn: Option<&str>, state: AptosSt
         if url.starts_with(&src_rpc) {
             return match body["method"].as_str()? {
                 "eth_getTransactionReceipt" => Some(Ok(json!({ "result": receipt }))),
-                "eth_getBlockByNumber" => {
+                "eth_blockNumber" => {
                     let provider_index = url
                         .rsplit('/')
                         .next()
@@ -446,7 +446,7 @@ async fn sign_v301_to_aptos(environment: &str, dvn: Option<&str>, state: AptosSt
                             .copied()
                             .unwrap_or(state.source_head)
                     };
-                    Some(Ok(json!({ "result": { "number": format!("0x{head:x}") } })))
+                    Some(Ok(json!({ "result": format!("0x{head:x}") })))
                 }
                 _ => None,
             };
@@ -1629,4 +1629,51 @@ async fn v301_aptos_source_readiness_accepts_exact_confirmation_threshold() {
     .await;
     assert_eq!(outcome.status, StatusCode::OK, "{}", outcome.body);
     assert_eq!(outcome.signatures, 1);
+}
+
+/// M-21 on Aptos V301: a zero confirmation count is the view's answer for a DVN with no
+/// record, so on a zero-requirement pathway it is not a signature; a positive count is.
+#[tokio::test]
+async fn m21_v301_zero_confirmations_are_unsigned_even_when_zero_are_required() {
+    let mut observations = Vec::new();
+    for (label, required, count, status, signatures) in [
+        ("required-0-count-0", 0, 0, StatusCode::OK, 1),
+        ("required-0-count-1", 0, 1, StatusCode::BAD_REQUEST, 0),
+        ("required-2-count-0", 2, 0, StatusCode::OK, 1),
+        ("required-2-count-2", 2, 2, StatusCode::BAD_REQUEST, 0),
+    ] {
+        let outcome = sign_v301_to_aptos(
+            "mainnet",
+            Some(DVN),
+            AptosState {
+                required_confirmations: required,
+                dvn_confirmations: count,
+                ..UNSIGNED
+            },
+        )
+        .await;
+        observations.push(json!({
+            "case": label,
+            "http_status": outcome.status.as_u16(),
+            "signatures": outcome.signatures,
+            "body": outcome.body,
+        }));
+        assert_eq!(outcome.status, status, "{label}: {}", outcome.body);
+        assert_eq!(outcome.signatures, signatures, "{label}: {}", outcome.body);
+        if status == StatusCode::BAD_REQUEST {
+            assert!(
+                outcome
+                    .body
+                    .to_string()
+                    .contains(PAYLOAD_ALREADY_SIGNED_ERROR_PREFIX),
+                "{label}: {}",
+                outcome.body
+            );
+        }
+    }
+    audit_round_artifact(
+        "h02-m21",
+        "m21-aptos-v301-zero-confirmations",
+        json!({ "cases": observations }),
+    );
 }

@@ -334,7 +334,7 @@ async fn evm_packet_sent_resolver_decodes_endpoint_v2_receipt_log() {
     );
     assert_eq!(
         sent_event.extra["packetEmitAddress"],
-        "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"
     );
     assert_eq!(sent_event.lz_message_id.pathway_id.extra["srcEid"], 30_101);
     assert_eq!(sent_event.lz_message_id.pathway_id.extra["dstEid"], 30_102);
@@ -396,7 +396,7 @@ async fn evm_packet_sent_resolver_requires_receipt_quorum() {
     assert_eq!(sent_event.message, "0xdeadbeef");
     assert_eq!(
         sent_event.extra["packetEmitAddress"],
-        "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"
     );
 }
 

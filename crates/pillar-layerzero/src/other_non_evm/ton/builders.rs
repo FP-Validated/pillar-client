@@ -23,10 +23,15 @@ fn require_nonneg(value: i64, field: &str) -> Result<u64, AppCoreError> {
     })
 }
 
-/// `hexToCells`: encode an arbitrary-length hex payload into byte-aligned TON snake cells,
-/// each holding up to 1016 bits, the first cell being the root.
+// Reserve one level for the packet wrapper before constructing its message snake.
 pub fn hex_to_cells(hex: &str) -> Result<TonCell, AppCoreError> {
     let body = hex.strip_prefix("0x").unwrap_or(hex);
+    let max_bytes = super::cell::MAX_CELL_DEPTH * 127;
+    if body.len() > max_bytes * 2 {
+        return Err(AppCoreError::BadRequest(format!(
+            "TON message exceeds the {max_bytes}-byte cell-depth budget",
+        )));
+    }
     let total_bits = body.len() * 4;
     if total_bits == 0 {
         return build(builder());
@@ -34,19 +39,11 @@ pub fn hex_to_cells(hex: &str) -> Result<TonCell, AppCoreError> {
     let bytes = hex::decode(body)
         .map_err(|e| AppCoreError::Internal(format!("TON message hex decode: {e}")))?;
 
-    const CELL_BITS: usize = 1016;
-    let mut spans: Vec<(usize, usize)> = Vec::new();
-    let mut offset = 0;
-    while offset < total_bits {
-        let bits = std::cmp::min(CELL_BITS, total_bits - offset);
-        spans.push((offset, bits));
-        offset += CELL_BITS;
-    }
-
+    const CELL_BYTES: usize = 127;
     let mut acc: Option<TonCell> = None;
-    for (bit_offset, bits) in spans.into_iter().rev() {
+    for chunk in bytes.chunks(CELL_BYTES).rev() {
         let mut b = builder();
-        b.write_bits_with_offset(&bytes, bit_offset, bits)
+        b.write_bits_with_offset(chunk, 0, chunk.len() * 8)
             .map_err(map_err)?;
         if let Some(child) = acc.take() {
             b.write_ref(child).map_err(map_err)?;
@@ -259,5 +256,32 @@ mod tests {
             }
             assert_eq!(actual, expected, "{bytes}-byte payload");
         }
+    }
+
+    #[test]
+    fn packet_message_budget_is_checked_before_building_a_recursive_snake() {
+        let limit = super::super::cell::MAX_CELL_DEPTH * 127;
+        let worker = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || {
+                let path = build_lz_path(30101, &[1; 32], 30343, &[2; 32]).unwrap();
+                let packet = build_lz_packet(path, &"ab".repeat(limit), 1, &[3; 32]).unwrap();
+                assert_eq!(
+                    usize::from(packet.depth().unwrap()),
+                    super::super::cell::MAX_CELL_DEPTH
+                );
+                let _ = repr_hash_hex(&packet).unwrap();
+                drop(packet);
+                assert!(matches!(
+                    hex_to_cells(&"ab".repeat(limit + 1)),
+                    Err(AppCoreError::BadRequest(_))
+                ));
+                assert!(matches!(
+                    hex_to_cells(&"ab".repeat(260_000)),
+                    Err(AppCoreError::BadRequest(_))
+                ));
+            })
+            .unwrap();
+        worker.join().unwrap();
     }
 }

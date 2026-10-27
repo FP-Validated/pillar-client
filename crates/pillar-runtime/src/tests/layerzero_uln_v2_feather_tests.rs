@@ -37,7 +37,8 @@ async fn runtime_evm_uln_v2_payload_builder_discovers_feather_proof_type_from_de
             "bsc".to_string(),
             test_receive_contracts(),
         )])),
-    );
+    )
+    .with_message_policy(true);
     let mut pathway_extra = IndexMap::new();
     pathway_extra.insert("srcEid".to_string(), Value::from(101_u64));
     pathway_extra.insert("dstEid".to_string(), Value::from(102_u64));

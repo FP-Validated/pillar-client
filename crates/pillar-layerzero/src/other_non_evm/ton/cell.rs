@@ -22,6 +22,13 @@ pub fn map_err(err: impl std::fmt::Display) -> AppCoreError {
     AppCoreError::Internal(format!("TON cell error: {err}"))
 }
 
+pub(super) fn require_ordinary(cell: &TonCell) -> Result<(), AppCoreError> {
+    if cell.cell_type() != CellType::Ordinary || cell.level_mask().mask() != 0 {
+        return Err(map_err("consumed TON cell must be ordinary and level zero"));
+    }
+    Ok(())
+}
+
 pub fn build(builder: CellBuilder) -> Result<TonCell, AppCoreError> {
     builder.build().map_err(map_err)
 }

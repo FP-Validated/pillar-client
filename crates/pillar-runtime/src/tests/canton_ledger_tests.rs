@@ -10,7 +10,7 @@ use crate::layerzero_runtime::{
     CantonLedgerAuth, CantonOAuth2Config, CantonTokenProvider,
 };
 
-const SEQUENCER: &str = "https://sequencer.example";
+const SEQUENCER: &str = "https://sequencer.example/?sequencer-validators=0x027bf07ae10c208725dd53e49e8d12bf23fad3e49684ef08ea61be56b2dfbc75a6&sequencer-quorum=1";
 
 type LedgerCall = (String, HashMap<String, String>, Value);
 
@@ -154,9 +154,9 @@ async fn canton_sender_is_read_like_common_canton() {
     let events = json!([
         {"ArchivedEvent": {"contractId": "00a"}},
         {"CreatedEvent": {"createArgument": {"sender": ""}}},
-        {"ExercisedEvent": {"choiceArgument": {"sender": "Alice::1220"}},
-         "CreatedEvent": {"createArgument": {"sender": "Bob::1220"}}},
-        {"CreatedEvent": {"createArgument": {"sender": "Carol::1220"}}},
+        {"ExercisedEvent": {"choiceArgument": {"sender": "Alice::1220"}, "actingParties": ["Alice::1220"]}},
+        {"CreatedEvent": {"createArgument": {"sender": "Bob::1220"}, "signatories": ["Bob::1220"]}},
+        {"CreatedEvent": {"createArgument": {"sender": "Carol::1220"}, "signatories": ["Carol::1220"]}},
     ]);
     let answers = HashMap::from([
         (
@@ -231,7 +231,7 @@ async fn canton_reads_fall_back_party_by_party() {
         (
             (base.to_string(), "P2::1220".to_string()),
             transaction(
-                json!([{"CreatedEvent": {"createArgument": {"sender": "Dave::1220"}}}]),
+                json!([{"CreatedEvent": {"createArgument": {"sender": "Dave::1220"}, "signatories": ["Dave::1220"]}}]),
                 "t",
             ),
         ),
@@ -313,6 +313,85 @@ async fn canton_sender_edge_cases_and_quorum() {
     .is_err());
     // Providers that disagree on the projected recordTime do not make a quorum of two.
     assert!(read(json!([]), ["t1", "t2"]).await.is_err());
+}
+
+#[tokio::test]
+async fn canton_policy_sender_requires_same_event_authority_and_bounded_events() {
+    let sender = "Alice::1220";
+    let created =
+        json!({"CreatedEvent": {"createArgument": {"sender": sender}, "signatories": [sender]}});
+    let exercised = json!({"ExercisedEvent": {"choiceArgument": {"sender": sender}, "actingParties": [sender]}});
+    let mut at_limit = vec![json!({}); 4096];
+    at_limit[0] = created.clone();
+    let mut over_limit = at_limit.clone();
+    over_limit.push(json!({}));
+    let cases = [
+        ("created signer", json!([created.clone()]), true),
+        ("exercise actor", json!([exercised]), true),
+        (
+            "forged created sender",
+            json!([{"CreatedEvent": {"createArgument": {"sender": sender}, "signatories": ["Mallory::1220"]}}]),
+            false,
+        ),
+        (
+            "forged exercised sender",
+            json!([{"ExercisedEvent": {"choiceArgument": {"sender": sender}, "actingParties": ["Mallory::1220"]}}]),
+            false,
+        ),
+        (
+            "missing authority",
+            json!([{"CreatedEvent": {"createArgument": {"sender": sender}}}]),
+            false,
+        ),
+        (
+            "wrong authority shape",
+            json!([{"CreatedEvent": {"createArgument": {"sender": sender}, "signatories": sender}}]),
+            false,
+        ),
+        (
+            "sibling authority",
+            json!([{"CreatedEvent": {"createArgument": {"sender": sender}, "signatories": ["Mallory::1220"]}}, created.clone()]),
+            false,
+        ),
+        ("event count boundary", json!(at_limit), true),
+        ("event count exceeded", json!(over_limit), false),
+        (
+            "fingerprint bytes exceeded",
+            json!([created, {"payload": "x".repeat(4 * 1024 * 1024)}]),
+            false,
+        ),
+    ];
+    let mut evidence = Vec::new();
+    for (name, events, accepted) in cases {
+        let ledger = Ledger {
+            answers: Arc::new(HashMap::from([(
+                ("https://a.example".into(), "P1::1220".into()),
+                transaction(events, "t"),
+            )])),
+            ..Ledger::default()
+        };
+        let result = checks(
+            ledger,
+            vec![ProviderUri::Uri(ledger_uri(
+                "https://a.example",
+                "P1::1220",
+            ))],
+            1,
+        )
+        .canton_transaction_from_address(&["P1::1220".into()], "1220abcd", test_bearer)
+        .await;
+        if accepted {
+            assert_eq!(result.unwrap(), sender, "{name}");
+        } else {
+            assert!(result.is_err(), "{name}");
+        }
+        evidence.push(json!({"scenario": name, "accepted": accepted}));
+    }
+    audit_round_artifact(
+        "full-audit",
+        "h05-m50-canton-authenticated-sender",
+        json!(evidence),
+    );
 }
 
 #[tokio::test]
@@ -513,7 +592,7 @@ async fn canton_sender_is_read_with_an_oauth2_token_through_the_production_path(
     let answers = HashMap::from([(
         (base.to_string(), "P1::1220".to_string()),
         transaction(
-            json!([{"CreatedEvent": {"createArgument": {"sender": "Erin::1220"}}}]),
+            json!([{"CreatedEvent": {"createArgument": {"sender": "Erin::1220"}, "signatories": ["Erin::1220"]}}]),
             "t",
         ),
     )]);

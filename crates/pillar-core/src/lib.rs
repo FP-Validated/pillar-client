@@ -1,3 +1,5 @@
+// Test code parses its own committed fixtures; production parsing goes through pillar_core::json.
+#![cfg_attr(test, allow(clippy::disallowed_methods))]
 use async_trait::async_trait;
 use futures::{stream, StreamExt, TryStreamExt};
 use indexmap::IndexMap;
@@ -8,6 +10,7 @@ use std::{collections::HashMap, sync::Arc, time::Instant};
 
 pub mod audit;
 pub mod execution;
+pub mod json;
 mod provider_health_cache;
 
 pub use provider_health_cache::{
@@ -70,6 +73,8 @@ pub const PACKET_IDENTITY_MISMATCH_ERROR_SUFFIX: &str =
 const MAX_CONCURRENT_WALLET_SIGNS: usize = 8;
 pub const MAX_READ_REQUESTS: u16 = 256;
 pub const MAX_READ_MARKERS: usize = MAX_READ_REQUESTS as usize + 1;
+/// Cap on READ returned data per `eth_call` and per command phase; 8x geth's 128 KiB tx limit.
+pub const MAX_READ_RESULT_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -384,7 +389,7 @@ pub trait AppValidator: Send + Sync + 'static {
         verifier_address: Option<&str>,
         dst_chain_name: &str,
         effective_receive_version: Option<&str>,
-    ) -> Result<(), AppCoreError>;
+    ) -> Result<Option<u64>, AppCoreError>;
 
     async fn validate_extra_context(
         &self,
@@ -873,14 +878,13 @@ impl PillarApp {
             self.validator
                 .validate_message_hash(&request, &sent_event)
                 .await?;
-            let (read_block_pins, (), ()) = tokio::try_join!(
+            let (read_block_pins, (), required_confirmations) = tokio::try_join!(
                 self.validator
                     .validate_readiness(&sent_event, &request.signing_context),
                 self.validator
                     .validate_expiration(dst_chain_name, request.signing_context.expiration()),
                 self.validator.validate_payload_signed(
                     &sent_event,
-                    // Upstream gates the check on a truthy address (`app.ts:308-309`).
                     request
                         .signing_context
                         .dvn_address()
@@ -889,6 +893,16 @@ impl PillarApp {
                     quorum_receive_version.as_deref(),
                 ),
             )?;
+            if let (SigningContext::Message { block_confirmation, .. }, Some(required)) =
+                (&request.signing_context, required_confirmations)
+            {
+                if u64::try_from(*block_confirmation).map_or(true, |requested| requested < required)
+                {
+                    return Err(AppCoreError::BadRequest(format!(
+                        "blockConfirmation {block_confirmation} is below the {required} confirmations the destination receive config requires"
+                    )));
+                }
+            }
             self.validator
                 .validate_extra_context(&sent_event, &request.signing_context)
                 .await?;
@@ -936,7 +950,7 @@ impl PillarApp {
             .await;
         let HashCallDataResult {
             hash_call_data,
-            details,
+            mut details,
         } = build_result?;
         tracing::info!(
             src_chain = %src_chain_name,
@@ -1004,27 +1018,23 @@ impl PillarApp {
             .await;
         let signatures = sign_result?;
 
-        let resolved_payload = details
-            .pointer("/proof/resolvedPayload")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let request_payload = details
-            .pointer("/proof/payload")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let payload = if sent_event.lz_message_id.uln_send_version.as_str() == Some("ReadV1002") {
-            if resolved_payload.is_empty() {
-                request_payload.to_string()
+        let resolved_payload = details.pointer("/proof/resolvedPayload");
+        let payload_pointer =
+            if sent_event.lz_message_id.uln_send_version.as_str() == Some("ReadV1002") {
+                match resolved_payload.and_then(Value::as_str) {
+                    Some(resolved) if !resolved.is_empty() => "/proof/resolvedPayload",
+                    _ => "/proof/payload",
+                }
+            } else if resolved_payload.is_some() {
+                "/proof/resolvedPayload"
             } else {
-                resolved_payload.to_string()
-            }
-        } else {
-            details
-                .pointer("/proof/resolvedPayload")
-                .or_else(|| details.pointer("/proof/payload"))
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string()
+                "/proof/payload"
+            };
+        // Without debug output the details are dropped, so a READ payload is moved, not copied.
+        let payload = match details.pointer_mut(payload_pointer) {
+            Some(Value::String(text)) if self.debug_mode => text.clone(),
+            Some(Value::String(text)) => std::mem::take(text),
+            _ => String::new(),
         };
 
         let response = PillarApiResponse {
@@ -1674,8 +1684,8 @@ mod tests {
             _verifier_address: Option<&str>,
             _dst_chain_name: &str,
             _effective_receive_version: Option<&str>,
-        ) -> Result<(), AppCoreError> {
-            Ok(())
+        ) -> Result<Option<u64>, AppCoreError> {
+            Ok(None)
         }
 
         async fn validate_extra_context(
@@ -1732,8 +1742,8 @@ mod tests {
             _verifier_address: Option<&str>,
             _dst_chain_name: &str,
             _effective_receive_version: Option<&str>,
-        ) -> Result<(), AppCoreError> {
-            Ok(())
+        ) -> Result<Option<u64>, AppCoreError> {
+            Ok(None)
         }
 
         async fn validate_extra_context(
@@ -2139,9 +2149,9 @@ mod tests {
             _verifier_address: Option<&str>,
             _dst_chain_name: &str,
             _effective_receive_version: Option<&str>,
-        ) -> Result<(), AppCoreError> {
+        ) -> Result<Option<u64>, AppCoreError> {
             self.observe().await;
-            Ok(())
+            Ok(None)
         }
 
         async fn validate_extra_context(
@@ -2244,7 +2254,7 @@ mod tests {
                 _verifier_address: Option<&str>,
                 _dst_chain_name: &str,
                 _effective_receive_version: Option<&str>,
-            ) -> Result<(), AppCoreError> {
+            ) -> Result<Option<u64>, AppCoreError> {
                 self.issued.fetch_add(1, Ordering::SeqCst);
                 tokio::time::sleep(Duration::from_millis(50)).await;
                 Err(AppCoreError::BadRequest("payload signed".to_string()))

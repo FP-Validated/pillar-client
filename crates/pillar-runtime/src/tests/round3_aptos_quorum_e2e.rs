@@ -486,8 +486,8 @@ async fn round3_m12_initia_node_index_events_still_reach_quorum() {
     );
 }
 
-/// The Initia sender read hashes the same events, so it must agree across the same
-/// `index-events` difference and still split on a changed attribute value.
+/// The Initia sender read consumes only the transaction hash and the signer key (M-61), so
+/// event attributes, indexed or changed, never split it, and a different hash still does.
 #[tokio::test]
 async fn round3_m12_initia_sender_read_ignores_node_index_events() {
     let transaction = |indexed: fn(&str) -> bool, value: &str| {
@@ -524,13 +524,21 @@ async fn round3_m12_initia_sender_read_ignores_node_index_events() {
         .unwrap(),
         "init1w508d6qejxtdg4y5r3zarvary0c5xw7k5thfy6"
     );
-    let error = sender(
-        transaction(index_all, "2294"),
-        transaction(index_all, "2295"),
-    )
-    .await
-    .unwrap_err()
-    .to_string();
+    let mut other_hash = transaction(index_all, "2294");
+    other_hash["txhash"] = json!("ABD");
+    assert_eq!(
+        sender(
+            transaction(index_all, "2294"),
+            transaction(index_all, "2295"),
+        )
+        .await
+        .unwrap(),
+        "init1w508d6qejxtdg4y5r3zarvary0c5xw7k5thfy6"
+    );
+    let error = sender(transaction(index_all, "2294"), other_hash)
+        .await
+        .unwrap_err()
+        .to_string();
     assert!(
         error.contains("quorum: response set is ambiguous or incomplete"),
         "{error}"

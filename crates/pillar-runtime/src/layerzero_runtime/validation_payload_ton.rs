@@ -28,9 +28,10 @@ use super::validation_payload::payload_signed_validation_result;
 use super::*;
 
 use pillar_layerzero::{
-    boc_from_base64_with_limits, committable_view_is_signed, dvn_attestation, ton_address_to_be32,
-    ton_boc_to_base64, ton_payload_signed_targets, uln_default_receive_config, DvnAttestation,
-    TonContractCodeCells, TonPayloadSignedRequest, TonStorageCell, MAX_ACCOUNT_STATE_CELLS,
+    boc_from_base64_with_limits, committable_view_is_signed, dvn_attestation,
+    required_receive_confirmations, ton_address_to_be32, ton_boc_to_base64,
+    ton_payload_signed_targets, uln_default_receive_config, DvnAttestation, TonContractCodeCells,
+    TonPayloadSignedRequest, TonPayloadSignedTargets, TonStorageCell, MAX_ACCOUNT_STATE_CELLS,
 };
 
 /// The per-pathway contract inputs an observation needs.
@@ -78,25 +79,18 @@ impl<T> RuntimeRpcValidationChecks<T>
 where
     T: JsonRpcTransport,
 {
-    pub(crate) async fn validate_ton_payload_not_signed_with_quorum(
+    /// The `Uln` / `UlnConnection` addresses and packet for a TON destination,
+    /// derived exactly as the DVN verify builder derives them.
+    fn ton_payload_targets(
         &self,
         sent_event: &LzSentEvent,
-        verifier_address: &str,
         dst_chain_name: &str,
-    ) -> Result<(), AppCoreError> {
+    ) -> Result<TonPayloadSignedTargets, AppCoreError> {
         let config = self.ton_payload_config.as_ref().ok_or_else(|| {
             AppCoreError::Internal(format!(
                 "No TON LayerZero contracts configured for {dst_chain_name}"
             ))
         })?;
-        let snapshot = self.providers.load();
-        let provider_config = snapshot.provider_config(dst_chain_name)?;
-        if provider_config.uris.is_empty() {
-            return Err(AppCoreError::Internal(format!(
-                "No provider URI for chain {dst_chain_name}"
-            )));
-        }
-
         let src_eid = pathway_extra_u32(sent_event, "srcEid")?;
         let dst_eid = pathway_extra_u32(sent_event, "dstEid")?;
         let sender = pathway_extra_string_value(sent_event, "sender")?;
@@ -106,7 +100,6 @@ where
             .get("guid")
             .and_then(Value::as_str)
             .ok_or_else(|| AppCoreError::Internal("Missing sent_event.extra.guid".to_string()))?;
-        let nonce = sent_event.lz_message_id.nonce;
 
         // Same current-vs-deprecated ULN selection as the DVN verify builder.
         let use_deprecated_uln = uses_deprecated_uln(&receiver);
@@ -119,17 +112,34 @@ where
             (&config.uln_manager_address, &config.code)
         };
 
-        let targets = ton_payload_signed_targets(&TonPayloadSignedRequest {
+        ton_payload_signed_targets(&TonPayloadSignedRequest {
             src_eid,
             dst_eid,
             sender: &sender,
             receiver: &receiver,
             guid,
-            nonce,
+            nonce: sent_event.lz_message_id.nonce,
             message: &sent_event.message,
             uln_manager_address,
             code,
-        })?;
+        })
+    }
+
+    pub(crate) async fn validate_ton_payload_not_signed_with_quorum(
+        &self,
+        sent_event: &LzSentEvent,
+        verifier_address: &str,
+        dst_chain_name: &str,
+    ) -> Result<Option<u64>, AppCoreError> {
+        let targets = self.ton_payload_targets(sent_event, dst_chain_name)?;
+        let snapshot = self.providers.load();
+        let provider_config = snapshot.provider_config(dst_chain_name)?;
+        if provider_config.uris.is_empty() {
+            return Err(AppCoreError::Internal(format!(
+                "No provider URI for chain {dst_chain_name}"
+            )));
+        }
+        let nonce = sent_event.lz_message_id.nonce;
         let verifier_be = ton_address_to_be32(verifier_address)?;
 
         let quorum = required_provider_quorum(provider_config, dst_chain_name)?;
@@ -228,6 +238,11 @@ where
     let Ok(default_receive_config) = uln_default_receive_config(&uln_storage) else {
         return undecodable();
     };
+    let Ok(required_confirmations) =
+        required_receive_confirmations(&connection_storage, &default_receive_config)
+    else {
+        return undecodable();
+    };
     let Ok(default_receive_config_boc) = serialize_default_receive_config(&default_receive_config)
     else {
         return undecodable();
@@ -260,7 +275,9 @@ where
 
     // `hasPayloadSigned`: the committable state wins, otherwise the DVN
     // attestation (including the "not in the receive config" short circuit,
-    // which upstream reports as verified so the request is a no-op).
+    // which upstream reports as verified so the request is a no-op). A hash
+    // match below the required confirmations is the contract's "not verified"
+    // and must stay replaceable.
     let dvn_confirmed = matches!(
         attestation,
         DvnAttestation::Matches | DvnAttestation::NotInReceiveConfig
@@ -268,7 +285,9 @@ where
     let validity = if committable_view_is_signed(state) || dvn_confirmed {
         PayloadSignedValidity::Signed
     } else {
-        PayloadSignedValidity::NotSigned
+        PayloadSignedValidity::NotSigned {
+            required: Some(required_confirmations),
+        }
     };
     Ok((
         format!("{connection_storage_boc}:{uln_storage_boc}:{state}:{attestation:?}"),
@@ -286,7 +305,7 @@ where
 /// `fetchQuorumedStorageCell` then throws on the agreed non-active state. A
 /// provider that cannot answer at all rejects instead, so it never reaches the
 /// quorum function.
-enum TonStorageRead {
+pub(crate) enum TonStorageRead {
     /// Active with data. Upstream fingerprints the storage BOC itself.
     Cell(String, TonStorageCell),
     /// Upstream's `'0'` bucket. Votes.
@@ -299,7 +318,7 @@ enum TonStorageRead {
 
 /// `fetchQuorumedStorageCell` for one provider: toncenter v2
 /// `getAddressInformation`, then the active contract's storage BOC.
-async fn ton_storage_cell<T>(
+pub(crate) async fn ton_storage_cell<T>(
     transport: &T,
     url: &str,
     headers: HashMap<String, String>,
@@ -339,7 +358,7 @@ where
         return Ok(TonStorageRead::Unavailable);
     }
     Ok(
-        match boc_from_base64_with_limits(data, MAX_ACCOUNT_STATE_CELLS, true) {
+        match boc_from_base64_with_limits(data, MAX_ACCOUNT_STATE_CELLS, false) {
             Ok(cell) => TonStorageRead::Cell(data.to_string(), cell),
             Err(_) => TonStorageRead::Unavailable,
         },

@@ -301,6 +301,13 @@ pub async fn kms_signer_assembly_from_raw_factory_with_metrics(
     })
 }
 
+fn azure_client_options() -> azure_core::http::ClientOptions {
+    azure_core::http::ClientOptions {
+        retry: azure_core::http::RetryOptions::none(),
+        ..Default::default()
+    }
+}
+
 pub async fn production_kms_raw_signer_factory_from_options(
     options: &KmsSignerAdapterFactoryOptions,
 ) -> Result<Arc<dyn RawSignerAdapterFactory>, String> {
@@ -348,17 +355,16 @@ pub async fn production_kms_raw_signer_factory_from_options(
                     &tenant_id,
                     client_id,
                     azure_core::credentials::Secret::new(client_secret),
-                    None,
+                    Some(azure_identity::ClientSecretCredentialOptions {
+                        client_options: azure_client_options(),
+                    }),
                 )
                 .map_err(|error| error.to_string())?;
             let client = azure_security_keyvault_keys::KeyClient::new(
                 vault_url,
                 credential,
                 Some(azure_security_keyvault_keys::KeyClientOptions {
-                    client_options: azure_core::http::ClientOptions {
-                        retry: azure_core::http::RetryOptions::none(),
-                        ..Default::default()
-                    },
+                    client_options: azure_client_options(),
                     ..Default::default()
                 }),
             )
@@ -373,6 +379,61 @@ pub async fn production_kms_raw_signer_factory_from_options(
 #[cfg(test)]
 mod tests {
     use super::secrets_manager_region_provider;
+
+    #[tokio::test]
+    async fn azure_identity_retryable_failures_return_after_one_attempt() {
+        use azure_core::credentials::TokenCredential;
+        use azure_core::http::{AsyncRawResponse, HttpClient, Request, StatusCode, Transport};
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        #[derive(Debug)]
+        struct Identity {
+            calls: AtomicUsize,
+            status: StatusCode,
+        }
+        #[async_trait::async_trait]
+        impl HttpClient for Identity {
+            async fn execute_request(&self, _: &Request) -> azure_core::Result<AsyncRawResponse> {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                Ok(AsyncRawResponse::from_bytes(
+                    self.status,
+                    Default::default(),
+                    azure_core::Bytes::from_static(br#"{"error":"temporarily_unavailable"}"#),
+                ))
+            }
+        }
+        for status in [
+            StatusCode::TooManyRequests,
+            StatusCode::InternalServerError,
+            StatusCode::ServiceUnavailable,
+        ] {
+            let identity = Arc::new(Identity {
+                calls: AtomicUsize::new(0),
+                status,
+            });
+            let mut options = super::azure_client_options();
+            options.transport = Some(Transport::new(identity.clone()));
+            let credential = azure_identity::ClientSecretCredential::new(
+                "tenant",
+                "client".into(),
+                "synthetic-secret".into(),
+                Some(azure_identity::ClientSecretCredentialOptions {
+                    client_options: options,
+                }),
+            )
+            .unwrap();
+            let result = tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                credential.get_token(&["https://vault.azure.net/.default"], None),
+            )
+            .await
+            .expect("identity refresh must return before the KMS request deadline");
+            assert!(result.is_err());
+            assert_eq!(identity.calls.load(Ordering::SeqCst), 1);
+        }
+    }
 
     #[tokio::test]
     async fn explicit_secrets_manager_region_takes_precedence() {

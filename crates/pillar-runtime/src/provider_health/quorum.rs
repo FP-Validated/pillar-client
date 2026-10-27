@@ -241,6 +241,14 @@ impl<'a, T> ExactQuorumAccumulator<'a, T> {
         Ok(())
     }
 
+    pub(crate) fn can_reach_quorum(&self) -> bool {
+        self.rule.is_met_by(&self.pending)
+            || self.voters.values().any(|candidate| {
+                self.rule
+                    .is_met_by(candidate.indices.iter().chain(&self.pending))
+            })
+    }
+
     fn candidates(&self) -> Vec<&String> {
         self.voters
             .iter()
@@ -409,6 +417,9 @@ where
         if let Some(result) = accumulator.unambiguous_result() {
             return Ok(result);
         }
+        if !accumulator.can_reach_quorum() {
+            break;
+        }
     }
     let result = accumulator.finish(context);
     if result.is_err() && !matches!(result, Err(AppCoreError::Admission(_))) {
@@ -439,6 +450,9 @@ where
             .map_err(QuorumResolutionFailure::Other)?;
         if let Some(result) = accumulator.unambiguous_result() {
             return Ok(result);
+        }
+        if !accumulator.can_reach_quorum() {
+            break;
         }
     }
     let zero_successful = accumulator.successful_voter_count() == 0;
@@ -476,24 +490,47 @@ pub(crate) struct DispatchEntry<'a> {
     pub(crate) delay: std::time::Duration,
 }
 
-/// Returns the same URL string the chain's actual RPC dispatch AND its
-/// `/provider-health` probe both key off of, so tracker lookups/writes agree.
-/// Aptos/Initia canonicalize away the query string before dispatching
-/// (`aptos_provider_uri_parts`/`initia_provider_uri_parts`, e.g. `?auth=...`
-/// moves into a header) — using the raw URL here would silently never match
-/// the tracker's key for any configured URI that carries query-string auth.
-/// Every other chain currently dispatches on the raw configured URI, so the
-/// generic parser is correct for them (including TON: its v2 surface, which
-/// `ton_v3_builder.rs::resolve_target` actually dispatches to, is keyed by
-/// the raw URI too — only the separate v3 sub-endpoint extracted from a
-/// query param has a different identity, and no call site's *real* request
-/// target is unambiguous enough to canonicalize generically here).
-pub(super) fn rank_key_url(chain_name: &str, uri: &pillar_config::ProviderUri) -> String {
-    match chain_name {
-        "aptos" | "movement" => aptos_provider_uri_parts(uri).0,
-        "initia" => initia_provider_uri_parts(uri).0,
-        _ => provider_uri_parts(uri).0,
+/// The identity a provider entry dials, keying both the probe's rank write and
+/// `plan_dispatch`'s lookup: the URL the chain dispatches to plus a digest of the
+/// headers sent with it. Aptos/Initia canonicalize the query away before
+/// dispatching (`?auth=...` becomes a header), so their key is taken after that
+/// move and both spellings of one credential agree. Two entries that share a URL
+/// but carry different header credentials are different providers: one key per
+/// URL let a dead backup key mark the live one unhealthy (M-19).
+pub(crate) fn provider_rank_key(chain_name: &str, uri: &pillar_config::ProviderUri) -> String {
+    let (url, headers) = match chain_name {
+        "aptos" | "movement" => aptos_provider_uri_parts(uri),
+        "initia" => initia_provider_uri_parts(uri),
+        "ton" => {
+            let (_, url, headers) = ton_v2_provider_uri_parts(uri);
+            (url, headers)
+        }
+        "tron" => tron_json_rpc_provider_uri_parts(uri),
+        _ => provider_uri_parts(uri),
+    };
+    dialled_identity_key(url, headers)
+}
+
+/// `url`, plus a digest of the headers sent with it when there are any.
+pub(crate) fn dialled_identity_key(url: String, headers: HashMap<String, String>) -> String {
+    use sha2::{Digest, Sha256};
+
+    if headers.is_empty() {
+        return url;
     }
+    let mut headers = headers
+        .into_iter()
+        .map(|(name, value)| (name.to_ascii_lowercase(), value))
+        .collect::<Vec<_>>();
+    headers.sort();
+    let mut digest = Sha256::new();
+    for (name, value) in &headers {
+        digest.update((name.len() as u64).to_be_bytes());
+        digest.update(name);
+        digest.update((value.len() as u64).to_be_bytes());
+        digest.update(value);
+    }
+    format!("{url} headers:{:x}", digest.finalize())
 }
 
 /// Orders the pool for one call and staggers it, as upstream's `getProvidersWithQuorum`
@@ -520,12 +557,25 @@ pub(crate) async fn plan_dispatch_for_indices<'a>(
     eligible_indices: impl IntoIterator<Item = usize>,
 ) -> Result<Vec<DispatchEntry<'a>>, AppCoreError> {
     let config = quorum.config();
-    let eligible_indices = eligible_indices.into_iter().collect::<Vec<_>>();
-    let mut ranked = Vec::with_capacity(eligible_indices.len());
-    for index in eligible_indices {
-        let uri = &config.uris[index];
-        let url = rank_key_url(chain_name, uri);
-        let rank = tracker.rank_of(chain_name, &url).await;
+    let keyed = eligible_indices
+        .into_iter()
+        .map(|index| (index, provider_rank_key(chain_name, &config.uris[index])))
+        .collect();
+    plan_dispatch_for_keys(tracker, chain_name, quorum, keyed).await
+}
+
+/// [`plan_dispatch_for_indices`] ranking each provider by the given key, for a call that
+/// dials an endpoint other than the provider's primary one (TON v3).
+pub(crate) async fn plan_dispatch_for_keys<'a>(
+    tracker: &ProviderRankTracker,
+    chain_name: &str,
+    quorum: QuorumRule<'a>,
+    keyed: Vec<(usize, String)>,
+) -> Result<Vec<DispatchEntry<'a>>, AppCoreError> {
+    let config = quorum.config();
+    let mut ranked = Vec::with_capacity(keyed.len());
+    for (index, key) in keyed {
+        let rank = tracker.rank_of(chain_name, &key).await;
         ranked.push((index, rank));
     }
     ranked.sort_by_key(|(_, rank)| *rank);
@@ -627,6 +677,47 @@ mod tests {
 
     fn rule(config: &pillar_config::ProviderConfig) -> QuorumRule<'_> {
         required_provider_quorum(config, "test").unwrap()
+    }
+
+    #[tokio::test]
+    async fn impossible_quorum_cancels_pending_providers_without_waiting() {
+        let config = pool(uris(2), 2);
+        let requests = FuturesUnordered::new();
+        for index in 0..2 {
+            requests.push(async move {
+                if index == 1 {
+                    futures::future::pending::<()>().await;
+                }
+                (index, Ok::<Option<(String, u64)>, RpcError>(None))
+            });
+        }
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            resolve_provider_quorum(requests, 2, rule(&config), "unavailable provider"),
+        )
+        .await
+        .expect("a lost required vote must cancel the pending provider");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn quorum_feasibility_counts_entities_and_existing_agreement() {
+        let config = entity_pool(
+            &[
+                ("external", "a"),
+                ("external", "a"),
+                ("external", "b"),
+                ("external", "c"),
+            ],
+            any(2),
+        );
+        let mut accumulator = ExactQuorumAccumulator::new(rule(&config), 0..4);
+        accumulator.record(0, Some(("yes".to_string(), 1)));
+        accumulator.record(1, Some(("no".to_string(), 2)));
+        accumulator.record(2, None);
+        assert!(accumulator.can_reach_quorum());
+        accumulator.record(3, None);
+        assert!(!accumulator.can_reach_quorum());
     }
 
     #[test]
@@ -765,29 +856,6 @@ mod tests {
 
         assert_eq!(result, "agreed");
         assert!(started.elapsed() < Duration::from_millis(250));
-    }
-
-    #[tokio::test]
-    async fn plan_dispatch_uses_aptos_canonical_url_for_rank_lookup() {
-        // aptos_provider_uri_parts strips the query string before the real
-        // request AND the /provider-health probe both dispatch on it; the
-        // rank key must match that canonical form, not the raw configured
-        // URI, or a recorded Unhealthy rank would never be found here.
-        let tracker = ProviderRankTracker::new();
-        let config = pool(
-            vec![pillar_config::ProviderUri::Uri(
-                "https://aptos.example/v1?auth=secret".to_string(),
-            )],
-            1,
-        );
-        tracker
-            .record("aptos", "https://aptos.example/v1", false, None)
-            .await;
-
-        let error = plan_dispatch(&tracker, "aptos", rule(&config))
-            .await
-            .unwrap_err();
-        assert!(error.to_string().contains("Not enough healthy providers"));
     }
 
     #[tokio::test]
