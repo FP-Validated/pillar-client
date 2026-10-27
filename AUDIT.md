@@ -937,7 +937,7 @@ here and 33 were confirmed by earlier work; the per-finding response is
 | `cargo fmt --all --check` | Passed |
 | `cargo clippy --workspace --all-targets --locked` (`-D warnings`) | Passed; the earlier `gasolina_parity_tests.rs:89` warning is gone |
 | `node scripts/check-generated-config-integrity.mjs`, `build-acceptance-matrix.mjs --check` | Passed |
-| `cargo test --workspace --locked -- --include-ignored` with synthetic PostgreSQL and TLS, plus the CLI process scenarios | 1,249 passed, zero failed (`test result:` totals, child-process summaries not counted), on the final tree; artifacts in `local/reports/full-audit-20261027/runs/20261027T013546.085097Z/` |
+| `cargo test --workspace --locked -- --include-ignored` with synthetic PostgreSQL and TLS, plus the CLI process scenarios | 1,249 passed, zero failed (`test result:` totals, child-process summaries not counted), on the final 2.7.2 tree; artifacts in `local/reports/full-audit-20261027/runs/20261027T020737.459978Z/` |
 
 Four earlier full runs failed and each was fixed and the whole suite rerun. Most failures
 were tests pinning the old behaviour (lowercase EVM addresses, hosts in reports, bare TON
