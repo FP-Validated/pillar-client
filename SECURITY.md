@@ -283,6 +283,10 @@ lookup repeats that binding before evaluating a strictly parsed principal.
 
 Any non-null `walletRestrictions` is refused at startup and signer conversion.
 Omission or null means **no wallet restriction**, not an implemented allowlist.
+Unknown wallet fields are refused, so a misspelled `supportedChainNames` cannot
+widen a key's scope. In KMS mode `LAYERZERO_WALLETS` and
+`LAYERZERO_WALLETS_FILE_PATH` are refused: every `LAYERZERO_KMS_IDS` key signs
+every configured chain, and a chain-scoped wallet file would be silently ignored.
 
 ## Durable signing audit (default disabled)
 
@@ -868,6 +872,22 @@ Addresses live in `stellar_uln_302_for_environment`,
   They preserve the existing Serde formats and optional omission for MESSAGE and READ.
   Closed-schema policy handlers must accept the new fields.
   This forwarding does not replace on-chain state validation and does not change paths where no policy is configured.
+- The extra-context `sentEvent` is rendered for the policy, not copied from the
+  request. `lzMessageId.pathwayId.sender`/`receiver` use each chain's own
+  address form (20-byte hex on EVM, not bytes32). EVM `sendLibrary` and
+  `packetEmitAddress` are EIP-55, except a `SendUln301` library, which is
+  lowercase as upstream sends it. `onChainEvent.txHash` is the resolved
+  transaction's identity: the receipt hash on EVM, the ledger version on
+  Aptos/Movement, the node `txhash` on Initia. `onChainEvent.blockHash` and
+  `blockNumber` come from the agreed source evidence; a source family that
+  cannot supply a real block hash is refused before the policy is called, never
+  sent `0` or an empty string. Canton has no blocks: its hash is the empty string
+  upstream sends, beside the sequencer event nonce. `from` is canonical per family
+  (Aptos/Movement `0x` plus 64 lowercase hex, Starknet a range-checked felt, Initia
+  derived from the signer key type, Canton only a sender the same ledger event's
+  `signatories` or `actingParties` authorize).
+- With a policy configured, a ULNv2 MPT proof is refused: it attests every packet
+  of its source block, so a per-message verdict cannot cover it.
 - An external extra-context policy must answer `true`, and the two transports
   wrap that verdict differently. **The shapes are not interchangeable** - a
   policy service migrated from one form to the other will be refused.

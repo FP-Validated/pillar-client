@@ -120,8 +120,9 @@ PILLAR_API_AUTH_TOKENS="$(openssl rand -hex 24)" \
 ./target/release/pillar
 ```
 
-Startup prints a redacted configuration report (provider URLs, headers and key
-identifiers are masked, tokens are shown only as a count, and an entity label
+Startup prints a redacted configuration report (provider URLs are reduced to their
+scheme, since a vendor can put a key in the host name; headers and key identifiers
+are masked, tokens are shown only as a count, and an entity label
 with characters outside `[A-Za-z0-9._-]` is shown as `<unlisted entity>`) and,
 on mainnet, warns per chain about any provider URI that is neither `https` nor
 literal-loopback `http`. It then binds
@@ -260,7 +261,7 @@ Signer configuration:
 | `LAYERZERO_KMS_IDS` | `KMS` | Comma-separated key identifiers. |
 | `AZURE_KEY_VAULT_URL` | `KMS` + `AZURE` | Key Vault base URL. |
 | `GCP_PROJECT_ID`, `GCP_KEY_RING_ID` | `KMS` + `GCP` | Key ring location. |
-| `LAYERZERO_WALLETS` / `LAYERZERO_WALLETS_FILE_PATH` | all | Wallet definitions per chain type. A wallet serves a chain only when its `byChainType` defines that chain's type and, if set, its `supportedChainNames` names the chain; startup refuses a configured chain that no wallet serves. |
+| `LAYERZERO_WALLETS` / `LAYERZERO_WALLETS_FILE_PATH` | `LOCAL_MNEMONIC`, `MNEMONIC` | Wallet definitions per chain type. A wallet serves a chain only when its `byChainType` defines that chain's type and, if set, its `supportedChainNames` names the chain; startup refuses a configured chain that no wallet serves, and an unknown wallet field. With `SIGNER_TYPE=KMS` startup refuses either variable: each `LAYERZERO_KMS_IDS` key signs every configured chain, so a per-chain scope could not be enforced. |
 | `LAYERZERO_WALLET_MNEMONIC_MAPPING` / `..._FILE_PATH` | `LOCAL_MNEMONIC` | Mnemonic and derivation path per wallet. |
 
 Optional:

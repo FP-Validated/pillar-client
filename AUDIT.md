@@ -922,3 +922,30 @@ starvation by four stalled chains, and the committee-less Canton sequencer - and
 defect's old behaviour is shown in the final run itself rather than by reverting
 commits; see [m22-m25-response.md](audit/m22-m25-response.md). No image was built and
 nothing was deployed.
+
+## 24. Full findings list remediation — 2026-10-27
+
+The report is the Main Review CSV of 100 findings. The work branches from `87bbbda`
+(`public/main`) and carries the H-02 to M-25 branch forward. 67 findings were changed
+here and 33 were confirmed by earlier work; the per-finding response is
+[full-csv-response.md](audit/full-csv-response.md).
+
+### Verification
+
+| Check | Observed result |
+| --- | --- |
+| `cargo fmt --all --check` | Passed |
+| `cargo clippy --workspace --all-targets --locked` (`-D warnings`) | Passed; the earlier `gasolina_parity_tests.rs:89` warning is gone |
+| `node scripts/check-generated-config-integrity.mjs`, `build-acceptance-matrix.mjs --check` | Passed |
+| `cargo test --workspace --locked -- --include-ignored` with synthetic PostgreSQL and TLS, plus the CLI process scenarios | 1,249 passed, zero failed (`test result:` totals, child-process summaries not counted), on the final tree; artifacts in `local/reports/full-audit-20261027/runs/20261027T013546.085097Z/` |
+
+Four earlier full runs failed and each was fixed and the whole suite rerun. Most failures
+were tests pinning the old behaviour (lowercase EVM addresses, hosts in reports, bare TON
+endpoints, two errors after an impossible quorum). Four were regressions in this work:
+health rounds launched every chain at once and serialized each chain's probes; the
+413 size check ran before Express's header-only answers; the early quorum exit hid the
+zero-success signal readiness reports as "not found"; and Sui GraphQL byte decoding
+changed upstream's `Uint8Array.from` errors. A PostgreSQL audit scenario overflowed the
+test thread stack by starting several runtimes in one future and now boxes them.
+`cargo audit` and `cargo deny` were not run locally (tools absent); CI runs both. Live
+providers were not exercised. No image was built and nothing was deployed.
