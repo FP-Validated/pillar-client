@@ -25,7 +25,7 @@ use ton_core::cell::TonCell;
 
 use super::address::{address_to_be32, derive_uln_addresses, TonContractCodeCells, TonPathway};
 use super::builders::{build_lz_packet, build_lz_path};
-use super::cell::{boc_to_base64, map_err, repr_hash_hex};
+use super::cell::{boc_to_base64, map_err, repr_hash_hex, require_ordinary};
 use super::cl_declare::{cl_get_ref, cl_get_uint_be};
 use super::dict::dict256_get_ref;
 use super::payload::hex_to_be32;
@@ -151,6 +151,7 @@ pub fn deserialize_address_list(cell: &TonCell) -> Result<Vec<[u8; 32]>, AppCore
     let mut addresses = Vec::new();
     let mut current = Some(cell.clone());
     while let Some(node) = current {
+        require_ordinary(&node)?;
         let mut parser = node.parser();
         while parser.data_bits_left().map_err(map_err)? >= 256 {
             let mut address = [0u8; 32];

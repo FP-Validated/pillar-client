@@ -34,7 +34,7 @@ async fn provider_health_probes_sui_latest_checkpoint_like_typescript() {
 
     assert!(report["sui"].healthy);
     assert_eq!(report["sui"].checked_at_unix_ms, 3333);
-    assert_eq!(report["sui"].providers[0].url, "https://sui-rpc.example");
+    assert_eq!(report["sui"].providers[0].url, "https://<redacted>");
     assert_eq!(report["sui"].providers[0].response, Value::from("54321"));
     assert_eq!(
         report["sui"].providers[0].numeric_response,
@@ -117,10 +117,7 @@ async fn provider_health_probes_starknet_block_number_like_typescript() {
 
     assert!(report["starknet"].healthy);
     assert_eq!(report["starknet"].checked_at_unix_ms, 4444);
-    assert_eq!(
-        report["starknet"].providers[0].url,
-        "https://starknet-rpc.example"
-    );
+    assert_eq!(report["starknet"].providers[0].url, "https://<redacted>");
     assert_eq!(
         report["starknet"].providers[0].numeric_response,
         Some("7654321".to_string())

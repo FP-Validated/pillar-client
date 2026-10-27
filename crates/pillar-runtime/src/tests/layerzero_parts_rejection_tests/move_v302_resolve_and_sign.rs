@@ -94,7 +94,7 @@ impl E2eTransport {
         if url == self.source_url {
             return match body["method"].as_str().unwrap_or_default() {
                 "eth_getTransactionReceipt" => Ok(json!({ "result": self.receipt })),
-                "eth_getBlockByNumber" => Ok(json!({ "result": { "number": "0x100" } })),
+                "eth_blockNumber" => Ok(json!({ "result": "0x100" })),
                 method => Err(format!("unexpected source RPC method: {method}")),
             };
         }
@@ -432,7 +432,9 @@ async fn evm_v302_to_aptos_and_movement_runs_resolver_validator_builder_and_sign
         let (status, body, signatures, requests) = run_resolve_and_sign(
             chain,
             0,
-            vec![Ok(json!([format!("0x{}", "44".repeat(32))]))],
+            vec![Ok(json!([
+                "0xc33752e0220faf79e45385dd73fb28d681dcd9f1569a1480725507c1f3c3aba9"
+            ]))],
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{chain}: {body}");
@@ -455,7 +457,9 @@ async fn evm_v302_to_aptos_and_movement_runs_resolver_validator_builder_and_sign
         let (status, body, signatures, _) = run_resolve_and_sign(
             chain,
             2,
-            vec![Ok(json!([format!("0x{}", "44".repeat(32))]))],
+            vec![Ok(json!([
+                "0xc33752e0220faf79e45385dd73fb28d681dcd9f1569a1480725507c1f3c3aba9"
+            ]))],
         )
         .await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{chain}: {body}");
@@ -471,6 +475,10 @@ async fn move_v302_receive_library_error_and_malformed_value_refuse_without_sign
             "provider error",
         ),
         (vec![Ok(json!([42]))], "malformed address"),
+        (
+            vec![Ok(json!([format!("0x{}", "44".repeat(32))]))],
+            "unsupported registered library",
+        ),
     ];
     for (index, (responses, label)) in cases.into_iter().enumerate() {
         let (status, body, signatures, requests) =
@@ -492,17 +500,21 @@ async fn move_v302_receive_library_error_and_malformed_value_refuse_without_sign
 
 #[tokio::test]
 async fn move_v302_receive_library_quorum_requires_matching_observations() {
-    let library = |digit: char| Ok(json!([format!("0x{}", digit.to_string().repeat(64))]));
+    let library = || {
+        Ok(json!([
+            "0xc33752e0220faf79e45385dd73fb28d681dcd9f1569a1480725507c1f3c3aba9"
+        ]))
+    };
     let cases = [
         (
-            vec![library('4'), library('4')],
+            vec![library(), library()],
             "matching providers",
             StatusCode::OK,
             1,
         ),
         (
             vec![
-                library('4'),
+                library(),
                 Err("Provider returned HTTP 400 Bad Request".to_string()),
             ],
             "one provider failed",
@@ -510,7 +522,7 @@ async fn move_v302_receive_library_quorum_requires_matching_observations() {
             0,
         ),
         (
-            vec![library('4'), library('5')],
+            vec![library(), Ok(json!([format!("0x{}", "55".repeat(32))]))],
             "providers disagree on library address",
             StatusCode::INTERNAL_SERVER_ERROR,
             0,
@@ -863,7 +875,9 @@ async fn m21_zero_confirmations_are_unsigned_even_when_zero_are_required() {
                     "006-mainnet-endpoint-get_effective_receive_library-registered",
                 ))]
             } else {
-                vec![Ok(json!([format!("0x{}", "44".repeat(32))]))]
+                vec![Ok(json!([
+                    "0xc33752e0220faf79e45385dd73fb28d681dcd9f1569a1480725507c1f3c3aba9"
+                ]))]
             }
         };
         let state = |state: u8| {

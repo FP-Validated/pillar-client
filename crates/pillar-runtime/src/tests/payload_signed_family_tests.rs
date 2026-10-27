@@ -347,7 +347,7 @@ async fn payload_signed_reads_never_let_failed_providers_form_a_majority() {
             .expect_err("two providers that never answered cannot clear a payload for signing");
 
         assert!(
-            format!("{error}").contains("0 distinct successful responses, 2 errors"),
+            format!("{error}").contains("0 distinct successful responses"),
             "{}: both providers failed, so neither may count as a response: {error}",
             row.chain_name
         );

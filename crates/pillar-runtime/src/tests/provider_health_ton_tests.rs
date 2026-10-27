@@ -45,7 +45,7 @@ async fn provider_health_probes_ton_v2_and_v3_masterchain_info_like_typescript()
     let calls = calls.lock().unwrap();
     assert_eq!(
         calls[0].0,
-        "https://ton-rpc.example/api/v2/jsonRPC?api-key=secret-token&timeout=10"
+        "https://ton-rpc.example/api/v2/jsonRPC?timeout=10"
     );
     assert_eq!(
         calls[0].1.get("X-API-Key"),
@@ -98,4 +98,32 @@ async fn provider_health_marks_ton_unhealthy_when_masterchain_info_probe_fails()
         Value::from("masterchain unavailable")
     );
     assert_eq!(report["ton"].providers[0].numeric_response, None);
+}
+
+#[tokio::test]
+async fn ton_destination_rpc_normalizes_both_endpoint_spellings_and_credentials() {
+    for suffix in ["", "/jsonRPC", "/jsonRPC/"] {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let transport = RecordingTransport {
+            calls: calls.clone(),
+            responses: Arc::new(Mutex::new(vec![Ok(
+                json!({"result": {"state": "uninitialized"}}),
+            )])),
+        };
+        crate::provider_health::rpc_scope("ton", transport.post_json_scoped(
+            format!("https://ton-rpc.example/api/v2{suffix}?api-key=secret&v3-endpoint=https%3A%2F%2Fother.example&timeout=10"),
+            HashMap::new(),
+            json!({"jsonrpc": "2.0", "id": 1, "method": "getAddressInformation", "params": {"address": format!("0:{}", "11".repeat(32))}}),
+        )).await.unwrap();
+        let calls = calls.lock().unwrap();
+        assert_eq!(
+            calls[0].0,
+            "https://ton-rpc.example/api/v2/jsonRPC?timeout=10"
+        );
+        assert_eq!(
+            calls[0].1.get("X-API-Key").map(String::as_str),
+            Some("secret")
+        );
+        assert!(!calls[0].0.contains("secret") && !calls[0].0.contains("other.example"));
+    }
 }

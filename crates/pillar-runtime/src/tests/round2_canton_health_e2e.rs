@@ -42,7 +42,7 @@ impl JsonRpcTransport for CantonWire {
             "updateId": "1220abcd",
             "offset": 42,
             "recordTime": "t",
-            "events": [{"CreatedEvent": {"createArgument": {"sender": "Erin::1220"}}}],
+            "events": [{"CreatedEvent": {"createArgument": {"sender": "Erin::1220"}, "signatories": ["Erin::1220"]}}],
         }}}}))
     }
 

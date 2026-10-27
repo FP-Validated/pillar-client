@@ -6,6 +6,7 @@ struct Proxy {
     address: std::net::SocketAddr,
     blackhole: Arc<AtomicBool>,
     connections: Arc<AtomicUsize>,
+    blocked: Arc<tokio::sync::Notify>,
     task: tokio::task::JoinHandle<()>,
 }
 impl Drop for Proxy {
@@ -22,13 +23,15 @@ async fn proxy(upstream: std::net::SocketAddr) -> Proxy {
     let connections = Arc::new(AtomicUsize::new(0));
     let fault = blackhole.clone();
     let count = connections.clone();
+    let blocked = Arc::new(tokio::sync::Notify::new());
+    let observed = blocked.clone();
     let task = tokio::spawn(async move {
         let mut tasks = tokio::task::JoinSet::new();
         loop {
             tokio::select! {
-                incoming=listener.accept()=>{let (mut client,_)=incoming.unwrap();let fault=fault.clone();count.fetch_add(1,Ordering::SeqCst);tasks.spawn(async move {
+                incoming=listener.accept()=>{let (mut client,_)=incoming.unwrap();let fault=fault.clone();let observed=observed.clone();count.fetch_add(1,Ordering::SeqCst);tasks.spawn(async move {
                     let mut server=tokio::net::TcpStream::connect(upstream).await.unwrap();let (mut cr,mut cw)=client.split();let (mut sr,mut sw)=server.split();
-                    let client_to_server=async {let mut bytes=[0;8192];loop {let size=cr.read(&mut bytes).await?;if size==0{return Ok::<_,std::io::Error>(());} else if !fault.load(Ordering::SeqCst){sw.write_all(&bytes[..size]).await?;}}};
+                    let client_to_server=async {let mut bytes=[0;8192];loop {let size=cr.read(&mut bytes).await?;if size==0{return Ok::<_,std::io::Error>(());} else if !fault.load(Ordering::SeqCst){sw.write_all(&bytes[..size]).await?;}else{observed.notify_one();}}};
                     let server_to_client=async {let mut bytes=[0;8192];loop {let size=sr.read(&mut bytes).await?;if size==0{return Ok::<_,std::io::Error>(());} else if !fault.load(Ordering::SeqCst){cw.write_all(&bytes[..size]).await?;}}};
                     tokio::select!{_ = client_to_server=>{},_ = server_to_client=>{}}
                 });},_ = tasks.join_next(),if !tasks.is_empty()=>{}
@@ -40,6 +43,7 @@ async fn proxy(upstream: std::net::SocketAddr) -> Proxy {
         blackhole,
         connections,
         task,
+        blocked,
     }
 }
 #[tokio::test]
@@ -212,6 +216,41 @@ async fn postgres_audit_waiter_timeout_preserves_active_commit_and_session() {
         evidence(&database, &namespace).await,
         vec![("wallet_returned".into(), Some("hash".into()))]
     );
+    for cancel_begin in [true, false] {
+        let connections = proxy.connections.load(Ordering::SeqCst);
+        proxy.blackhole.store(true, Ordering::SeqCst);
+        let active_store = store.clone();
+        let active_intent = intent.clone();
+        let cancelled = tokio::spawn(async move {
+            if cancel_begin {
+                active_store.begin(&active_intent).await.map(|_| ())
+            } else {
+                active_store
+                    .record(attempt, EvidenceKind::OutcomeUnknown, None)
+                    .await
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(1), proxy.blocked.notified())
+            .await
+            .unwrap();
+        cancelled.abort();
+        assert!(cancelled.await.unwrap_err().is_cancelled());
+        proxy.blackhole.store(false, Ordering::SeqCst);
+        let resumed = tokio::time::Instant::now();
+        tokio::time::timeout(Duration::from_millis(500), store.begin(&intent))
+            .await
+            .expect("cancelled write must not leave a wedged session")
+            .unwrap();
+        assert_eq!(proxy.connections.load(Ordering::SeqCst), connections + 1);
+        artifact(
+            if cancel_begin {
+                "cancelled-begin-reconnect"
+            } else {
+                "cancelled-record-reconnect"
+            },
+            &json!({"reconnect_ms":resumed.elapsed().as_millis(),"new_connections":1}),
+        );
+    }
     artifact(
         "waiter-session",
         &json!({"health_answered_while_commit_held":true,"sign_waiter_timed_out":true,"active_commit_succeeded":true,"connections_added_after_gate":proxy.connections.load(Ordering::SeqCst)-before,"retained_attempts":database.count(&namespace,"attempt").await}),

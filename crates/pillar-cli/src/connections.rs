@@ -8,6 +8,8 @@ pub(super) struct ConnectionControl {
     close: watch::Sender<bool>,
     changed: Arc<Notify>,
     request: Mutex<Option<pillar_core::execution::RequestContext>>,
+    body_complete: AtomicBool,
+    write_deadline: Mutex<Option<Instant>>,
     draining: pillar_api::ShutdownSignal,
 }
 #[derive(Clone)]
@@ -49,6 +51,8 @@ impl Connections {
             close,
             changed: self.changed.clone(),
             request: Mutex::new(None),
+            body_complete: AtomicBool::new(false),
+            write_deadline: Mutex::new(None),
             draining: self.draining.clone(),
         });
         self.entries.lock().push(control.clone());
@@ -62,13 +66,10 @@ impl Connections {
         )
     }
     pub(super) fn evict_idle(&self) {
-        if let Some(entry) = self
-            .entries
-            .lock()
-            .iter()
-            .find(|entry| entry.idle.swap(false, Ordering::AcqRel))
-        {
-            let _ = entry.close.send(true);
+        for entry in self.entries.lock().iter() {
+            if entry.idle.swap(false, Ordering::AcqRel) {
+                let _ = entry.close.send(true);
+            }
         }
     }
     pub(super) async fn idle_changed(&self) {
@@ -94,10 +95,26 @@ impl ConnectionControl {
     pub(super) fn start(&self, context: pillar_core::execution::RequestContext) {
         self.idle.store(false, Ordering::Release);
         *self.request.lock() = Some(context);
+        self.body_complete.store(false, Ordering::Release);
+        *self.write_deadline.lock() = None;
     }
-    pub(super) fn idle(&self) {
+    pub(super) fn writing(&self) -> Instant {
+        let deadline = Instant::now() + Duration::from_secs(10);
         *self.request.lock() = None;
-        self.idle.store(true, Ordering::Release);
-        self.changed.notify_one();
+        *self.write_deadline.lock() = Some(deadline);
+        deadline
+    }
+    pub(super) fn write_deadline(&self) -> Option<Instant> {
+        *self.write_deadline.lock()
+    }
+    pub(super) fn body_complete(&self) {
+        self.body_complete.store(true, Ordering::Release);
+    }
+    pub(super) fn flushed(&self) {
+        if self.body_complete.swap(false, Ordering::AcqRel) {
+            *self.write_deadline.lock() = None;
+            self.idle.store(true, Ordering::Release);
+            self.changed.notify_one();
+        }
     }
 }

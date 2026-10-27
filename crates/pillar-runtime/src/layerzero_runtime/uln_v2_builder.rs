@@ -6,6 +6,7 @@ pub(crate) struct RuntimeEvmUlnV2PayloadBuilder<T> {
     transport: T,
     payload_builder: EvmUlnPayloadBuilder,
     rank_tracker: Arc<ProviderRankTracker>,
+    message_policy_enabled: bool,
 }
 
 impl<T> RuntimeEvmUlnV2PayloadBuilder<T>
@@ -22,6 +23,7 @@ where
             transport,
             payload_builder,
             rank_tracker: Arc::new(ProviderRankTracker::new()),
+            message_policy_enabled: false,
         }
     }
 
@@ -29,6 +31,11 @@ where
     /// reprobe loop instead of keeping independent state (see server_app).
     pub(crate) fn with_rank_tracker(mut self, rank_tracker: Arc<ProviderRankTracker>) -> Self {
         self.rank_tracker = rank_tracker;
+        self
+    }
+
+    pub(crate) fn with_message_policy(mut self, enabled: bool) -> Self {
+        self.message_policy_enabled = enabled;
         self
     }
 
@@ -230,6 +237,12 @@ where
                 }
             }
             "1" => {
+                if self.message_policy_enabled {
+                    return Err(AppCoreError::BadRequest(
+                        "ULNv2 MPT authorizes an entire block and cannot enforce a per-message policy"
+                            .to_string(),
+                    ));
+                }
                 self.mpt_hash_info_with_quorum(
                     src_chain_name,
                     &sent_event.tx_hash,

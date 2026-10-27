@@ -376,8 +376,11 @@ impl PostgresAuditStore {
 impl SigningAuditStore for PostgresAuditStore {
     async fn begin(&self, intent: &AttemptIntent) -> Result<i64, String> {
         let mut slot = self.queue().await?;
-        let result = self.bounded(self.begin_inner(&mut slot, intent)).await;
-        self.finish(&mut slot, result)
+        let mut session = slot.take();
+        let result = self.bounded(self.begin_inner(&mut session, intent)).await;
+        let result = self.finish(&mut session, result);
+        *slot = session;
+        result
     }
     async fn record(
         &self,
@@ -386,10 +389,13 @@ impl SigningAuditStore for PostgresAuditStore {
         signature_hash: Option<&str>,
     ) -> Result<(), String> {
         let mut slot = self.queue().await?;
+        let mut session = slot.take();
         let result = self
-            .bounded(self.record_inner(&mut slot, attempt, kind, signature_hash))
+            .bounded(self.record_inner(&mut session, attempt, kind, signature_hash))
             .await;
-        self.finish(&mut slot, result)
+        let result = self.finish(&mut session, result);
+        *slot = session;
+        result
     }
     async fn healthy(&self) -> bool {
         if let Some((checked_at, healthy)) = *self.health_cache.lock().await {

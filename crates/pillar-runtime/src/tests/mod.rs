@@ -143,6 +143,7 @@ mod startup_report_tests;
 mod stellar_source_events_tests;
 mod sui_source_events_tests;
 mod ton_boc_ingress_e2e;
+mod transport_projection_tests;
 mod transport_wire_tests;
 mod uln_v2_receive_route_tests;
 mod uln_v2_refresh_tests;

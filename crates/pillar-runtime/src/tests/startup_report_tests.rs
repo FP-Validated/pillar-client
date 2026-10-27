@@ -53,7 +53,11 @@ fn startup_report_summarizes_runtime_without_raw_secrets() {
     assert!(text.contains(
         r#"ethereum providers=1 quorum={"allOf":[{"any":1}],"oneOf":[]} single-provider-trust-root entities=[internal/ethereum-0]"#
     ));
-    assert!(text.contains("https://eth-mainnet.g.alchemy.com/<redacted>"));
+    assert!(text.contains("https://<redacted>/<redacted>"));
+    assert!(
+        !text.contains("alchemy.com"),
+        "a vendor host can carry a key"
+    );
     assert!(text.contains("Authorization=<redacted>"));
     assert!(text.contains("X-API-Key=<redacted>"));
     assert!(text.contains("x-auth=<redacted>"));

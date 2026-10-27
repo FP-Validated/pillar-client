@@ -113,7 +113,17 @@ where
         }
         let decoded = values
             .iter()
-            .map(decode_solana_account_data)
+            .enumerate()
+            .map(|(index, value)| {
+                decode_solana_account_data(
+                    value,
+                    if index < 2 {
+                        pillar_layerzero::SOLANA_ENDPOINT_PROGRAM_ID
+                    } else {
+                        pillar_layerzero::SOLANA_ULN_PROGRAM_ID
+                    },
+                )
+            })
             .collect::<Result<Vec<_>, _>>()?;
         let required = solana_required_confirmations(decoded[2].as_deref(), decoded[3].as_deref())?;
         let accounts = SolanaFetchedPayloadSignedAccounts {
@@ -158,7 +168,10 @@ fn solana_required_confirmations(
         Some(required) => required,
     })
 }
-fn decode_solana_account_data(value: &Value) -> Result<Option<Vec<u8>>, AppCoreError> {
+fn decode_solana_account_data(
+    value: &Value,
+    expected_owner: &str,
+) -> Result<Option<Vec<u8>>, AppCoreError> {
     if value.is_null() {
         return Ok(None);
     }
@@ -166,6 +179,22 @@ fn decode_solana_account_data(value: &Value) -> Result<Option<Vec<u8>>, AppCoreE
         .pointer("/data/0")
         .and_then(Value::as_str)
         .ok_or_else(|| AppCoreError::Internal("Missing Solana account data".to_string()))?;
+    let owner = value.get("owner").and_then(Value::as_str);
+    if value.pointer("/data/1").and_then(Value::as_str) != Some("base64")
+        || value.get("executable").and_then(Value::as_bool) != Some(false)
+    {
+        return Err(AppCoreError::Internal(
+            "Invalid Solana account encoding or executable flag".to_string(),
+        ));
+    }
+    if encoded.is_empty() && owner == Some("11111111111111111111111111111111") {
+        return Ok(None);
+    }
+    if owner != Some(expected_owner) {
+        return Err(AppCoreError::Internal(
+            "Unexpected Solana account owner".to_string(),
+        ));
+    }
     base64::engine::general_purpose::STANDARD
         .decode(encoded)
         .map(Some)

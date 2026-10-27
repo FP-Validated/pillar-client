@@ -29,7 +29,7 @@ impl JsonRpcTransport for MoveScript {
         }
         let function = body["function"].as_str().unwrap_or_default();
         if function.ends_with("::endpoint::get_effective_receive_library") {
-            Ok(json!([format!("0x{}", "44".repeat(32))]))
+            Ok(json!([ULN_302]))
         } else if function.ends_with("::endpoint::get_config") {
             Ok(json!([format!(
                 "0x{:016x}0001{}00000000",

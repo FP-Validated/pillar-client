@@ -637,7 +637,7 @@ pub enum KmsSignerAdapterFactoryOptions {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WalletSignerConfig {
     pub secret_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -649,7 +649,7 @@ pub struct WalletSignerConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WalletDefinition {
     pub name: String,
     pub by_chain_type: HashMap<String, WalletSignerConfig>,
@@ -1485,13 +1485,8 @@ pub fn redact_url(raw: &str) -> String {
         None => return "<redacted>".to_string(),
     };
     let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
-    let authority = &rest[..authority_end];
     let suffix = &rest[authority_end..];
-    let authority = match authority.rsplit_once('@') {
-        Some((_, host)) => format!("<redacted>@{host}"),
-        None => authority.to_string(),
-    };
-    format!("{prefix}{authority}{}", redact_path_and_query(suffix))
+    format!("{prefix}<redacted>{}", redact_path_and_query(suffix))
 }
 
 /// Redact a name/value pair whose name suggests it carries a secret.
@@ -2262,13 +2257,10 @@ mod tests {
     }
 
     #[test]
-    fn redaction_preserves_url_origin_and_masks_secret_material() {
+    fn redaction_masks_url_credentials() {
         let raw = "https://user:pass@eth-mainnet.g.alchemy.com/v2/redaction-test-key-0123456789abcdef?apiKey=redaction-test-key-0123456789abcdef&debug=true";
         let redacted = redact_url(raw);
 
-        assert!(redacted.starts_with("https://<redacted>@eth-mainnet.g.alchemy.com/"));
-        assert!(redacted.contains("/<redacted>"));
-        assert!(redacted.contains("?<redacted>"));
         assert!(!redacted.contains("redaction-test-key-0123456789abcdef"));
         assert!(!redacted.contains("user:pass"));
     }
@@ -2315,6 +2307,8 @@ mod tests {
             "https://rpc.example/secret",
             "https://rpc.example/%73%65%63%72%65%74",
             "https://rpc.example/public/path#short-secret",
+            "https://short-secret.rpc.vendor.example/",
+            "https://user:password@short-secret.rpc.vendor.example/path",
         ] {
             let redacted = redact_url(raw);
             assert!(!redacted.contains("secret"), "{redacted}");

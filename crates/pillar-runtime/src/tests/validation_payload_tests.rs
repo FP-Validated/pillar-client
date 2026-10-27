@@ -10,6 +10,84 @@ fn policy_message_context() -> SigningContext {
 }
 
 #[tokio::test]
+async fn policy_identity_uses_evidence_and_refuses_unproven_source_blocks() {
+    for lambda in [false, true] {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let lambda_calls = Arc::new(Mutex::new(Vec::new()));
+        let mut responses = vec![transaction_result(
+            "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+        )];
+        if !lambda {
+            responses.push(Ok(json!(true)));
+        }
+        let checks = runtime_rpc_extra_context_checks(
+            RuntimeExtraContextConfig {
+                request_url: (!lambda).then(|| "https://policy.example/extra".to_string()),
+                request_auth_token: None,
+                aws_lambda_name: lambda.then(|| "policy-lambda".to_string()),
+            },
+            responses,
+            calls.clone(),
+        )
+        .with_extra_context_lambda_client(Arc::new(RecordingLambdaClient {
+            calls: lambda_calls.clone(),
+            responses: Arc::new(Mutex::new(vec![Ok(json!({"body": true}))])),
+        }));
+        let mut event = payload_signed_sent_event();
+        event.tx_hash = "0xTX".to_string();
+        event.lz_message_id.pathway_id.extra.insert(
+            "sender".to_string(),
+            json!(format!("0x{}{}", "00".repeat(12), "11".repeat(20))),
+        );
+        checks
+            .validate_extra_context(&event, &policy_message_context())
+            .await
+            .unwrap();
+        let payload = if lambda {
+            lambda_calls.lock().unwrap()[0].1.clone()
+        } else {
+            calls.lock().unwrap().last().unwrap().2.clone()
+        };
+        assert_eq!(payload["sentEvent"]["onChainEvent"]["txHash"], "0xtx");
+        assert_eq!(payload["sentEvent"]["onChainEvent"]["blockNumber"], 96);
+        assert_eq!(
+            payload["sentEvent"]["lzMessageId"]["pathwayId"]["sender"],
+            "0x1111111111111111111111111111111111111111"
+        );
+    }
+    for chain in [
+        "stellar", "aptos", "movement", "initia", "sui", "iotal1", "ton", "solana",
+    ] {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let checks = runtime_rpc_extra_context_checks(
+            RuntimeExtraContextConfig {
+                request_url: Some("https://policy.example/extra".to_string()),
+                request_auth_token: None,
+                aws_lambda_name: None,
+            },
+            Vec::new(),
+            calls.clone(),
+        );
+        let mut event = payload_signed_sent_event();
+        event.source_evidence = None;
+        event.lz_message_id.pathway_id.src_chain_name = chain.to_string();
+        event.extra.insert("blockNumber".to_string(), json!(42));
+        event.extra.insert("blockHash".to_string(), json!("42"));
+        assert!(
+            checks
+                .validate_extra_context(&event, &policy_message_context())
+                .await
+                .is_err(),
+            "{chain}"
+        );
+        assert!(
+            calls.lock().unwrap().is_empty(),
+            "{chain}: policy must not receive fabricated identity"
+        );
+    }
+}
+
+#[tokio::test]
 async fn runtime_rpc_validation_checks_accepts_unsigned_payload() {
     let calls = Arc::new(Mutex::new(Vec::new()));
     let checks = runtime_rpc_payload_checks(
@@ -36,6 +114,16 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_payload() {
 
     let calls = calls.lock().unwrap();
     assert_eq!(calls.len(), 4);
+    assert!(
+        calls.iter().all(|call| {
+            call.2
+                .pointer("/params/0/gas")
+                .and_then(Value::as_str)
+                .and_then(|gas| u64::from_str_radix(gas.strip_prefix("0x")?, 16).ok())
+                .is_some_and(|gas| (1..=1_000_000).contains(&gas))
+        }),
+        "destination views must bound receiver-controlled execution"
+    );
     assert_eq!(calls[0].0, "https://bsc-rpc.example");
     assert_eq!(calls[0].2["method"], "eth_call");
     assert_eq!(calls[0].2["params"][0]["to"], TEST_ENDPOINT_V2);
@@ -240,7 +328,7 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_move_payloads() {
         )
         .with_move_payload_contracts(
             HashMap::from([(chain_name.to_string(), "0xendpoint".to_string())]),
-            HashMap::from([(chain_name.to_string(), "0xuln302".to_string())]),
+            HashMap::from([(chain_name.to_string(), format!("0x{}", "44".repeat(32)))]),
             HashMap::from([(chain_name.to_string(), "0xviews".to_string())]),
         );
         let mut event = payload_signed_sent_event();
@@ -258,10 +346,6 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_move_payloads() {
         );
         assert_eq!(calls[1].2["function"], "0xendpoint::endpoint::get_config");
         assert_eq!(calls[2].2["function"], "0xviews::uln_302::verifiable");
-        assert_eq!(
-            calls[3].2["function"],
-            "0xuln302::msglib::get_verification_confirmations"
-        );
     }
 }
 
@@ -284,7 +368,7 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_initia_payload() {
         RecordingTransport {
             calls: calls.clone(),
             responses: Arc::new(Mutex::new(vec![
-                Ok(json!({"data": "[\"0x0000000000000003\",false]"})),
+                Ok(json!({"data": "[\"0x11\",false]"})),
                 Ok(json!({"data": "\"0000000000000002000000000000\""})),
                 Ok(json!({"data": "0"})),
                 Ok(json!({"data": "\"0\""})),
@@ -357,7 +441,7 @@ async fn runtime_rpc_validation_checks_rejects_confirmed_move_payload() {
     )
     .with_move_payload_contracts(
         HashMap::from([("movement".to_string(), "0xendpoint".to_string())]),
-        HashMap::from([("movement".to_string(), "0xuln302".to_string())]),
+        HashMap::from([("movement".to_string(), format!("0x{}", "44".repeat(32)))]),
         HashMap::from([("movement".to_string(), "0xviews".to_string())]),
     );
     let mut event = payload_signed_sent_event();
@@ -908,6 +992,72 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_solana_payload() {
 }
 
 #[tokio::test]
+async fn solana_optional_accounts_accept_prefunding_but_reject_foreign_owners() {
+    for (index, owner, empty, expected) in [
+        (0, "11111111111111111111111111111111", true, true),
+        (1, "11111111111111111111111111111111", true, true),
+        (2, "11111111111111111111111111111111", true, true),
+        (4, "11111111111111111111111111111111", true, true),
+        (3, "11111111111111111111111111111111", true, false),
+        (2, "foreign-program", true, false),
+        (3, "foreign-program", false, false),
+    ] {
+        let mut response = get_multiple_accounts_result([
+            None,
+            None,
+            None,
+            Some(solana_receive_config_account_bytes(5)),
+            None,
+        ])
+        .unwrap();
+        if empty {
+            response["result"]["value"][index] = json!({
+                "data": ["", "base64"], "owner": owner, "lamports": 1, "executable": false,
+            });
+        } else {
+            response["result"]["value"][index]["owner"] = json!(owner);
+        }
+        let checks =
+            runtime_rpc_solana_payload_checks(vec![Ok(response)], Arc::new(Mutex::new(Vec::new())));
+        let result = checks
+            .validate_payload_not_signed(
+                &payload_signed_solana_sent_event(),
+                Some("4gnov6q1KFcjtwBjepBmQtuf5R4ho4XVkrytY8hk4CTF"),
+                "solana",
+                None,
+            )
+            .await;
+        assert_eq!(
+            result.is_ok(),
+            expected,
+            "index={index} owner={owner}: {result:?}"
+        );
+        if expected {
+            assert_eq!(result.unwrap(), Some(5));
+        }
+    }
+}
+
+#[tokio::test]
+async fn oversized_solana_dvn_is_rejected_before_provider_work() {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let checks = runtime_rpc_solana_payload_checks(Vec::new(), calls.clone());
+    for address in ["z".repeat(45), "z".repeat(100_000), "0".repeat(32)] {
+        let error = checks
+            .validate_payload_not_signed(
+                &payload_signed_solana_sent_event(),
+                Some(&address),
+                "solana",
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(error, AppCoreError::BadRequest(_)), "{error}");
+    }
+    assert!(calls.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn runtime_rpc_validation_checks_rejects_already_signed_solana_payload() {
     let checks = runtime_rpc_solana_payload_checks(
         vec![get_multiple_accounts_result([
@@ -1058,7 +1208,7 @@ async fn runtime_rpc_validation_checks_resolves_move_transaction_from_address() 
             .source_transaction_from_address("movement", "0xtx")
             .await
             .unwrap(),
-        "0xabcdef"
+        "0x0000000000000000000000000000000000000000000000000000000000abcdef"
     );
     let calls = calls.lock().unwrap();
     assert_eq!(
@@ -1101,7 +1251,7 @@ async fn runtime_rpc_validation_checks_reads_aptos_sender_by_ledger_version() {
             .source_transaction_from_address("aptos", "026629")
             .await
             .unwrap(),
-        "0xabcdef"
+        "0x0000000000000000000000000000000000000000000000000000000000abcdef"
     );
     assert_eq!(
         calls.lock().unwrap()[0].0,
@@ -1115,8 +1265,11 @@ async fn runtime_rpc_validation_checks_derives_initia_sender_from_public_key() {
         indexmap::IndexMap::from([(
             "initia".to_string(),
             ProviderConfig::with_distinct_entities(
-                vec![ProviderUri::Uri("https://initia.example/".to_string())],
-                1,
+                vec![
+                    ProviderUri::Uri("https://initia.example/".to_string()),
+                    ProviderUri::Uri("https://initia-b.example/".to_string()),
+                ],
+                2,
             ),
         )]),
         Some(&["initia".to_string()]),
@@ -1127,16 +1280,17 @@ async fn runtime_rpc_validation_checks_derives_initia_sender_from_public_key() {
         &ProviderSnapshotHandle::from_getter(&getter),
         RecordingTransport {
             calls: calls.clone(),
-            responses: Arc::new(Mutex::new(vec![Ok(json!({
-                "tx_response": {
-                    "txhash": "ABC",
-                    "tx": {"auth_info": {"signer_infos": [{"public_key": {
-                        "@type": "/cosmos.crypto.secp256k1.PubKey",
-                        "key": "Anm+Zn753LusVaBilc6HCwcCm/zbLc4o2VnygVsW+BeY"
-                    }}]}},
-                    "events": []
-                }
-            }))])),
+            responses: Arc::new(Mutex::new([json!([]), json!([{"type":"node-specific", "attributes":[{"key":"a","value":"b","index":false}]}])]
+                .into_iter().map(|events| Ok(json!({
+                    "tx_response": {
+                        "txhash": "ABC",
+                        "tx": {"auth_info": {"signer_infos": [{"public_key": {
+                            "@type": "/cosmos.crypto.secp256k1.PubKey",
+                            "key": "Anm+Zn753LusVaBilc6HCwcCm/zbLc4o2VnygVsW+BeY"
+                        }}]}},
+                        "events": events
+                    }
+                }))).collect())),
         },
     );
 
@@ -1151,6 +1305,73 @@ async fn runtime_rpc_validation_checks_derives_initia_sender_from_public_key() {
         calls.lock().unwrap()[0].0,
         "https://initia.example/cosmos/tx/v1beta1/txs/ABC"
     );
+}
+
+#[tokio::test]
+async fn initia_sender_derivation_is_bound_to_the_signer_key_type() {
+    use base64::Engine;
+    let compressed = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
+    let uncompressed = "0479be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8";
+    let getter = StaticProviderConfig::new(
+        IndexMap::from([(
+            "initia".to_string(),
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://initia.example".into())],
+                1,
+            ),
+        )]),
+        Some(&["initia".to_string()]),
+    )
+    .unwrap();
+    let mut evidence = Vec::new();
+    for (key_type, expected) in [
+        (
+            Some("/cosmos.crypto.secp256k1.PubKey"),
+            Some("751e76e8199196d454941c45d1b3a323f1433bd6"),
+        ),
+        (
+            Some("/initia.crypto.v1beta1.ethsecp256k1.PubKey"),
+            Some("7e5f4552091a69125d5dfcb7b8c2659029395bdf"),
+        ),
+        (Some("/unknown.PubKey"), None),
+        (None, None),
+    ] {
+        for (key, valid) in [
+            (compressed.to_string(), true),
+            (uncompressed.to_string(), true),
+            ("00".repeat(33), false),
+            ("02".repeat(100), false),
+        ] {
+            let encoded =
+                base64::engine::general_purpose::STANDARD.encode(hex::decode(&key).unwrap());
+            let checks = RuntimeRpcValidationChecks::from_getter(
+                &ProviderSnapshotHandle::from_getter(&getter),
+                RecordingTransport {
+                    calls: Arc::new(Mutex::new(Vec::new())),
+                    responses: Arc::new(Mutex::new(vec![Ok(json!({"tx_response": {
+                        "txhash": "ABC",
+                        "tx": {"auth_info": {"signer_infos": [{"public_key": {"@type": key_type, "key": encoded}}]}},
+                        "events": []
+                    }}))])),
+                },
+            );
+            let result = checks
+                .source_transaction_from_address("initia", "ABC")
+                .await;
+            if let Some(expected) = expected.filter(|_| valid) {
+                let address = result.unwrap();
+                let (hrp, bytes) = bech32::decode(&address).unwrap();
+                assert_eq!(hrp.as_str(), "init");
+                assert_eq!(hex::encode(bytes), expected);
+                evidence.push(
+                    json!({"keyType": key_type, "keyBytes": key.len() / 2, "sender": address}),
+                );
+            } else {
+                assert!(result.is_err(), "{key_type:?}, {key}");
+            }
+        }
+    }
+    audit_round_artifact("full-audit", "h06-initia-key-type", json!(evidence));
 }
 
 #[tokio::test]
@@ -1285,6 +1506,65 @@ async fn runtime_rpc_validation_checks_resolves_starknet_transaction_from_addres
         calls.lock().unwrap()[0].2["method"],
         "starknet_getTransactionByHash"
     );
+}
+
+#[tokio::test]
+async fn policy_senders_are_canonical_before_provider_quorum() {
+    for chain in ["aptos", "movement", "starknet"] {
+        let getter = StaticProviderConfig::new(
+            IndexMap::from([(
+                chain.to_string(),
+                ProviderConfig::with_distinct_entities(
+                    vec![
+                        ProviderUri::Uri("https://a.example".into()),
+                        ProviderUri::Uri("https://b.example".into()),
+                    ],
+                    2,
+                ),
+            )]),
+            Some(&[chain.to_string()]),
+        )
+        .unwrap();
+        for (first, second, accepted) in [
+            ("0x00ABCDEF", "0xabcdef", true),
+            ("0xabcdef", "0xabcd00", false),
+            ("0xnot-hex", "0xnot-hex", false),
+            (
+                "0x800000000000011000000000000000000000000000000000000000000000001",
+                "0x800000000000011000000000000000000000000000000000000000000000001",
+                chain != "starknet",
+            ),
+        ] {
+            let response = |sender: &str| {
+                if chain == "starknet" {
+                    json!({"result": {"transaction_hash": "0x123", "sender_address": sender}})
+                } else {
+                    json!({"hash": "0x123", "sender": sender, "events": []})
+                }
+            };
+            let checks = RuntimeRpcValidationChecks::from_getter(
+                &ProviderSnapshotHandle::from_getter(&getter),
+                RecordingTransport {
+                    calls: Arc::new(Mutex::new(Vec::new())),
+                    responses: Arc::new(Mutex::new(vec![
+                        Ok(response(first)),
+                        Ok(response(second)),
+                    ])),
+                },
+            );
+            let result = checks.source_transaction_from_address(chain, "0x123").await;
+            if accepted {
+                let expected = if chain == "starknet" {
+                    "0xabcdef".to_string()
+                } else {
+                    format!("0x{:0>64}", second.trim_start_matches("0x"))
+                };
+                assert_eq!(result.unwrap(), expected);
+            } else {
+                assert!(result.is_err(), "{chain}: {first}, {second}");
+            }
+        }
+    }
 }
 
 #[tokio::test]

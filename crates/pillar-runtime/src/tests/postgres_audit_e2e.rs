@@ -183,6 +183,9 @@ impl AzureKmsClient for Sdk {
 }
 fn variables(url: &str, namespace: &str, maximum: usize) -> HashMap<String, String> {
     let mut variables = read_vertical_env_map();
+    // KMS refuses wallet definitions rather than widen their chain scope (M-28).
+    variables.remove(pillar_config::LZ_WALLETS);
+    variables.remove(pillar_config::LZ_WALLET_MNEMONIC_MAPPING);
     for (name, value) in [
         (SIGNER_TYPE, "KMS"),
         (pillar_config::LZ_KMS_CLOUD_TYPE, "AZURE"),
@@ -214,16 +217,16 @@ async fn app(
         receipt: read_vertical_receipt(ReadMarker::BlockNumber),
         chain: ReadChain::Stable,
     };
-    crate::signer_runtime::TEST_KMS_RAW_FACTORY
-        .scope(
-            factory,
-            RuntimeServerApp::from_env_map_with_runtime_core(
-                variables(url, namespace, maximum),
-                transport,
-                || 1_767_323_045_000,
-            ),
-        )
-        .await
+    // Boxed so a scenario that starts several runtimes keeps one pointer per start on its stack.
+    Box::pin(crate::signer_runtime::TEST_KMS_RAW_FACTORY.scope(
+        factory,
+        RuntimeServerApp::from_env_map_with_runtime_core(
+            variables(url, namespace, maximum),
+            transport,
+            || 1_767_323_045_000,
+        ),
+    ))
+    .await
 }
 struct Http {
     address: std::net::SocketAddr,

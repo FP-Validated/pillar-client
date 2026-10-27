@@ -87,14 +87,17 @@ pub(super) fn iota_responses(
     };
     let inspect =
         |bytes: Vec<u8>| Ok(json!({"result":{"results":[{"returnValues":[[bytes,"u8"]]}]}}));
-    let mut responses = vec![normalized(2), shared(8), inspect(address_bytes(channel))];
-    for _ in 0..4 {
-        responses.push(normalized(6));
-        responses.push(shared(635_685_319));
-    }
-    responses.push(inspect(vec![state]));
-    responses.push(normalized(4));
-    responses.push(shared(635_685_319));
+    let mut responses = vec![
+        normalized(2),
+        shared(8),
+        inspect(address_bytes(channel)),
+        normalized(6),
+        Ok(
+            json!({"result": (0..3).map(|_| json!({"data":{"owner":{"Shared":{"initial_shared_version":635_685_319}}}})).collect::<Vec<_>>()}),
+        ),
+        inspect(vec![state]),
+        normalized(4),
+    ];
     let confirmation_results = json!([
         {"returnValues":[[[0],"bytes32"]]},
         {"returnValues":[[[0],"bytes32"]]},
@@ -102,7 +105,6 @@ pub(super) fn iota_responses(
     ]);
     responses.push(Ok(json!({"result":{"results":confirmation_results}})));
     responses.push(normalized(3));
-    responses.push(shared(635_685_319));
     responses.push(inspect(uln_config_bytes(required)));
     responses
 }
@@ -118,11 +120,6 @@ fn address_bytes(hex_value: &str) -> Vec<u8> {
     hex::decode(hex_value.trim_start_matches("0x")).unwrap()
 }
 
-/// The provider call order for one observation:
-/// normalized(endpoint) -> multiGet(endpoint) -> devInspect(messaging channel)
-/// -> [normalized+multiGet] x4 for the `verifiable` objects -> devInspect
-/// -> normalized+multiGet(verification) -> devInspect(get_confirmations)
-/// -> normalized+multiGet(uln) -> devInspect(effective config)
 #[allow(clippy::too_many_arguments)]
 pub(super) fn sui_responses(
     channel: &str,
@@ -134,19 +131,17 @@ pub(super) fn sui_responses(
         normalized_immutable(2),
         shared_object(8),
         dev_inspect_bytes(address_bytes(channel)),
+        normalized_immutable(6),
+        Ok(
+            json!({"data": (0..3).map(|index| (format!("o{index}"), json!({"asMoveObject":{"owner":{"__typename":"Shared","initialSharedVersion":"635685319"}}}))).collect::<serde_json::Map<_, _>>()}),
+        ),
+        dev_inspect_bytes(vec![state]),
+        normalized_immutable(4),
     ];
-    for _ in 0..4 {
-        responses.push(normalized_immutable(6));
-        responses.push(shared_object(635_685_319));
-    }
-    responses.push(dev_inspect_bytes(vec![state]));
-    responses.push(normalized_immutable(4));
-    responses.push(shared_object(635_685_319));
     responses.push(
         confirmations.unwrap_or_else(|| dev_inspect_three_commands(0u64.to_le_bytes().to_vec())),
     );
     responses.push(normalized_immutable(3));
-    responses.push(shared_object(635_685_319));
     responses.push(dev_inspect_bytes(uln_config_bytes(required)));
     responses
 }
@@ -186,7 +181,7 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_sui_payload() {
     let calls: RecordedJsonCalls = Arc::new(Mutex::new(Vec::new()));
     // state 0 (VERIFYING) and 3 of 15 confirmations.
     let mut responses = sui_responses(SUI_RECEIVER, 0, None, 15);
-    responses[14] = dev_inspect_three_commands(3u64.to_le_bytes().to_vec());
+    responses[7] = dev_inspect_three_commands(3u64.to_le_bytes().to_vec());
     let checks = sui_checks("sui", responses, calls.clone());
 
     checks
@@ -218,7 +213,6 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_sui_payload() {
         calls[2].2["variables"]["transaction"]["sender"],
         "0x1234567890123456789012345678901234567890123456789012345678901234"
     );
-    assert_eq!(calls[1].2["query"], "query($address: SuiAddress!) { object(address: $address) { asMoveObject { owner { __typename ... on Shared { initialSharedVersion } } } } }");
 }
 
 #[tokio::test]
@@ -258,7 +252,7 @@ async fn runtime_rpc_validation_checks_accepts_verifiable_sui_payload() {
 #[tokio::test]
 async fn runtime_rpc_validation_checks_rejects_sui_payload_at_required_confirmations() {
     let mut responses = sui_responses(SUI_RECEIVER, 0, None, 15);
-    responses[14] = dev_inspect_three_commands(15u64.to_le_bytes().to_vec());
+    responses[7] = dev_inspect_three_commands(15u64.to_le_bytes().to_vec());
     let checks = sui_checks("sui", responses, Arc::new(Mutex::new(Vec::new())));
 
     let error = checks
@@ -419,8 +413,7 @@ async fn m21_sui_and_iota_missing_confirmations_are_unsigned_even_when_zero_are_
     }
     // IOTA JSON-RPC reports the abort as `result.error`, as `dev_inspect_return` parses it.
     let mut missing = iota_responses(SUI_RECEIVER, 0, 0);
-    let confirmations = missing.len() - 4;
-    missing[confirmations] = Ok(json!({"result": {
+    missing[7] = Ok(json!({"result": {
         "error": "MoveAbort: Move Runtime Abort. Location: 0x042e3bb837e5528e495124542495b9df5016acd011d89838ae529db5a814499e::receive_uln::get_confirmations (function index 10) at offset 22, Abort Code: 1; at command index: 2",
         "results": [],
     }}));
@@ -620,4 +613,133 @@ fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
     haystack
         .windows(needle.len())
         .any(|window| window == needle)
+}
+
+#[tokio::test]
+async fn slow_sui_entity_cannot_occupy_the_entire_destination_lane() {
+    use pillar_core::execution::{BudgetLimits, ExecutionResources, FairBudget, RequestContext};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    #[derive(Clone)]
+    struct Transport {
+        active: Arc<AtomicUsize>,
+        peak: Arc<AtomicUsize>,
+    }
+    struct Active(Arc<AtomicUsize>);
+    impl Drop for Active {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+    #[async_trait]
+    impl JsonRpcTransport for Transport {
+        async fn post_json(
+            &self,
+            url: String,
+            _: HashMap<String, String>,
+            body: Value,
+        ) -> Result<Value, String> {
+            if url.contains("slow") {
+                let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+                self.peak.fetch_max(active, Ordering::SeqCst);
+                let _active = Active(self.active.clone());
+                return futures::future::pending().await;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            if body.pointer("/variables/function").is_some() {
+                return normalized_immutable(6);
+            }
+            if body.pointer("/variables/address").is_some() {
+                return shared_object(8);
+            }
+            if body.pointer("/variables/a0").is_some() {
+                return Ok(
+                    json!({"data": (0..3).map(|index| (format!("o{index}"), json!({"asMoveObject":{"owner":{"__typename":"Shared","initialSharedVersion":"9"}}}))).collect::<serde_json::Map<_, _>>()}),
+                );
+            }
+            let function = body
+                .pointer("/variables/transaction/kind/programmableTransaction/commands")
+                .and_then(Value::as_array)
+                .and_then(|calls| calls.last())
+                .and_then(|call| call.pointer("/moveCall/function"))
+                .and_then(Value::as_str);
+            match function {
+                Some("get_messaging_channel") => dev_inspect_bytes(address_bytes(SUI_RECEIVER)),
+                Some("verifiable") => dev_inspect_bytes(vec![0]),
+                Some("get_confirmations") => {
+                    dev_inspect_three_commands(0u64.to_le_bytes().to_vec())
+                }
+                Some("get_effective_receive_uln_config") => dev_inspect_bytes(uln_config_bytes(15)),
+                _ => Err(format!("unexpected Sui request {body}")),
+            }
+        }
+        async fn get_json(&self, _: String, _: HashMap<String, String>) -> Result<Value, String> {
+            Err("unexpected GET".into())
+        }
+    }
+    let transport = Transport {
+        active: Arc::new(AtomicUsize::new(0)),
+        peak: Arc::new(AtomicUsize::new(0)),
+    };
+    let getter = StaticProviderConfig::new(
+        IndexMap::from([(
+            "sui".to_string(),
+            ProviderConfig::with_distinct_entities(
+                ["slow", "healthy-a", "healthy-b"]
+                    .map(|name| ProviderUri::Uri(format!("https://{name}.example")))
+                    .to_vec(),
+                2,
+            ),
+        )]),
+        Some(&["sui".to_string()]),
+    )
+    .unwrap();
+    let checks = runtime_rpc_validation_checks_from_evm_config(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        transport.clone(),
+        "mainnet",
+        &["sui".to_string()],
+    )
+    .unwrap();
+    let budget = || {
+        FairBudget::new(
+            vec!["sui".to_string()],
+            BudgetLimits {
+                active: 8,
+                per_lane: 8,
+                waiting: 32,
+                per_lane_waiting: 32,
+                wait: std::time::Duration::from_secs(2),
+            },
+        )
+        .unwrap()
+    };
+    let resources = Arc::new(ExecutionResources {
+        signing: budget(),
+        rpc: budget(),
+        kms: budget(),
+        parser: budget(),
+    });
+    let results = futures::future::join_all((0..8).map(|_| {
+        let mut context = RequestContext::new(std::time::Duration::from_secs(5));
+        context.resources = Some(resources.clone());
+        context.source_chain = Some(Arc::from("ethereum"));
+        let checks = &checks;
+        async move {
+            context
+                .scope(checks.validate_payload_not_signed(
+                    &sui_sent_event("sui", 30_350),
+                    Some(VERIFIER),
+                    "sui",
+                    None,
+                ))
+                .await
+        }
+    }))
+    .await;
+    assert!(
+        results.iter().all(|result| *result == Ok(Some(15))),
+        "{results:?}"
+    );
+    assert!(transport.peak.load(Ordering::SeqCst) <= 2);
+    assert_eq!(transport.active.load(Ordering::SeqCst), 0);
 }

@@ -14,6 +14,10 @@ pub fn stellar_contract_id_from_strkey(value: &str) -> Result<[u8; 32], AppCoreE
     stellar_strkey_payload(value, STELLAR_CONTRACT_VERSION)
 }
 
+pub fn stellar_account_id_from_strkey(value: &str) -> Result<[u8; 32], AppCoreError> {
+    stellar_strkey_payload(value, 0x30)
+}
+
 fn stellar_strkey_payload(value: &str, version: u8) -> Result<[u8; 32], AppCoreError> {
     if value.len() != STELLAR_STRKEY_LENGTH {
         return Err(AppCoreError::Internal(format!(
@@ -230,7 +234,7 @@ fn pack_dvn_call(
 
 fn stellar_dvn_address_xdr(value: &str) -> Result<Vec<u8>, AppCoreError> {
     if value.starts_with('G') {
-        let key = stellar_strkey_payload(value, 0x30)?;
+        let key = stellar_account_id_from_strkey(value)?;
         let mut encoded = Vec::with_capacity(44);
         encoded.extend_from_slice(&18_u32.to_be_bytes());
         encoded.extend_from_slice(&0_u32.to_be_bytes());

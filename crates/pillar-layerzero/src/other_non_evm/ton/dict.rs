@@ -26,7 +26,7 @@
 use pillar_core::AppCoreError;
 use ton_core::cell::TonCell;
 
-use super::cell::map_err;
+use super::cell::{map_err, require_ordinary};
 
 /// `Dictionary.Keys.BigUint(256)`.
 pub const DICT_KEY_BITS: usize = 256;
@@ -59,6 +59,7 @@ fn descend(
     remaining: &mut usize,
     consumed: &mut usize,
 ) -> Result<Descent, AppCoreError> {
+    require_ordinary(node)?;
     let mut parser = node.parser();
     let (label_len, same_bit) = if !parser.read_bit().map_err(map_err)? {
         // hml_short$0 len:(Unary ~n) s:(n * Bit)
@@ -122,6 +123,7 @@ fn descend(
 /// from the tree and for a diverging label — the three cases where the upstream
 /// `Dictionary.has(key)` is `false`.
 pub fn dict256_get_ref(root: &TonCell, key_be: &[u8; 32]) -> Result<Option<TonCell>, AppCoreError> {
+    require_ordinary(root)?;
     // `rawCell.bits.length === 0` -> `Dictionary.empty(...)`, which has no keys.
     if root.data_len_bits() == 0 {
         return Ok(None);

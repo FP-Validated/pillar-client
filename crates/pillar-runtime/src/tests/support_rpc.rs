@@ -322,24 +322,21 @@ pub(super) fn runtime_rpc_solana_payload_checks(
     )
 }
 
-/// Builds a `getMultipleAccounts` JSON-RPC response for the 5 accounts in
-/// the fixed order `validate_solana_payload_not_signed_with_quorum` requests
-/// them: nonce, pendingNonce, receiveConfig, defaultReceiveConfig,
-/// confirmations. `None` entries encode as a null account (not yet
-/// initialized on-chain).
+// Account order follows the endpoint nonce PDAs, then the ULN configuration and confirmations.
 pub(super) fn get_multiple_accounts_result(
     accounts: [Option<Vec<u8>>; 5],
 ) -> Result<Value, String> {
     use base64::Engine;
     let value: Vec<Value> = accounts
         .into_iter()
-        .map(|account| match account {
+        .enumerate()
+        .map(|(index, account)| match account {
             None => Value::Null,
             Some(bytes) => json!({
                 "data": [base64::engine::general_purpose::STANDARD.encode(bytes), "base64"],
                 "executable": false,
                 "lamports": 1,
-                "owner": "11111111111111111111111111111111111111111",
+                "owner": if index < 2 { pillar_layerzero::SOLANA_ENDPOINT_PROGRAM_ID } else { pillar_layerzero::SOLANA_ULN_PROGRAM_ID },
                 "rentEpoch": 0,
             }),
         })

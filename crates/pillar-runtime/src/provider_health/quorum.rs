@@ -241,6 +241,14 @@ impl<'a, T> ExactQuorumAccumulator<'a, T> {
         Ok(())
     }
 
+    pub(crate) fn can_reach_quorum(&self) -> bool {
+        self.rule.is_met_by(&self.pending)
+            || self.voters.values().any(|candidate| {
+                self.rule
+                    .is_met_by(candidate.indices.iter().chain(&self.pending))
+            })
+    }
+
     fn candidates(&self) -> Vec<&String> {
         self.voters
             .iter()
@@ -409,6 +417,9 @@ where
         if let Some(result) = accumulator.unambiguous_result() {
             return Ok(result);
         }
+        if !accumulator.can_reach_quorum() {
+            break;
+        }
     }
     let result = accumulator.finish(context);
     if result.is_err() && !matches!(result, Err(AppCoreError::Admission(_))) {
@@ -439,6 +450,9 @@ where
             .map_err(QuorumResolutionFailure::Other)?;
         if let Some(result) = accumulator.unambiguous_result() {
             return Ok(result);
+        }
+        if !accumulator.can_reach_quorum() {
+            break;
         }
     }
     let zero_successful = accumulator.successful_voter_count() == 0;
@@ -487,6 +501,11 @@ pub(crate) fn provider_rank_key(chain_name: &str, uri: &pillar_config::ProviderU
     let (url, headers) = match chain_name {
         "aptos" | "movement" => aptos_provider_uri_parts(uri),
         "initia" => initia_provider_uri_parts(uri),
+        "ton" => {
+            let (_, url, headers) = ton_v2_provider_uri_parts(uri);
+            (url, headers)
+        }
+        "tron" => tron_json_rpc_provider_uri_parts(uri),
         _ => provider_uri_parts(uri),
     };
     dialled_identity_key(url, headers)
@@ -658,6 +677,47 @@ mod tests {
 
     fn rule(config: &pillar_config::ProviderConfig) -> QuorumRule<'_> {
         required_provider_quorum(config, "test").unwrap()
+    }
+
+    #[tokio::test]
+    async fn impossible_quorum_cancels_pending_providers_without_waiting() {
+        let config = pool(uris(2), 2);
+        let requests = FuturesUnordered::new();
+        for index in 0..2 {
+            requests.push(async move {
+                if index == 1 {
+                    futures::future::pending::<()>().await;
+                }
+                (index, Ok::<Option<(String, u64)>, RpcError>(None))
+            });
+        }
+        let result = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            resolve_provider_quorum(requests, 2, rule(&config), "unavailable provider"),
+        )
+        .await
+        .expect("a lost required vote must cancel the pending provider");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn quorum_feasibility_counts_entities_and_existing_agreement() {
+        let config = entity_pool(
+            &[
+                ("external", "a"),
+                ("external", "a"),
+                ("external", "b"),
+                ("external", "c"),
+            ],
+            any(2),
+        );
+        let mut accumulator = ExactQuorumAccumulator::new(rule(&config), 0..4);
+        accumulator.record(0, Some(("yes".to_string(), 1)));
+        accumulator.record(1, Some(("no".to_string(), 2)));
+        accumulator.record(2, None);
+        assert!(accumulator.can_reach_quorum());
+        accumulator.record(3, None);
+        assert!(!accumulator.can_reach_quorum());
     }
 
     #[test]

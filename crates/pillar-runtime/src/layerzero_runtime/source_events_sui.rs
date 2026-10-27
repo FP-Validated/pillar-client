@@ -22,11 +22,7 @@ fn normalize_sui_address(address: &str) -> String {
     format!("0x{value:0>64}")
 }
 
-/// Upstream's Sui `getPacketSentEvents` (`lz-v2-sdk/src/endpoint/sui/index.ts:197-227`): the
-/// events whose type is exactly `{package}::messaging_channel::PacketSentEvent`
-/// (`sui-contracts/src/accountResources.ts:38,55`) and whose `parsedJson` is truthy, each
-/// through the Aptos-family extractor with `Uint8Array.from` byte fields; none is its throw,
-/// and so is the first extraction that throws.
+// Decode byte fields only after the exact trusted package/type match.
 pub(crate) fn decode_sui_packet_sent_events(
     response: &Value,
     trusted_endpoints: &HashSet<String>,
@@ -51,15 +47,39 @@ pub(crate) fn decode_sui_packet_sent_events(
             let event_type = event.get("type").and_then(Value::as_str)?;
             let (endpoint, _) = event_types.iter().find(|(_, known)| known == event_type)?;
             let data = event.get("parsedJson").filter(|data| js_truthy(data))?;
-            Some((endpoint, data))
+            let fields = if event.get("byteEncoding").and_then(Value::as_str) == Some("base64") {
+                MoveByteFields::GraphqlBytes
+            } else {
+                MoveByteFields::JsUint8Array
+            };
+            Some((endpoint, data, fields))
         })
         .collect::<Vec<_>>();
     if matched.is_empty() {
         return Err("Packet sent event not found or not valid".to_string());
     }
+    let mut decoded_bytes = 0usize;
+    for (_, data, fields) in &matched {
+        for field in ["encoded_packet", "options"] {
+            let bytes = match data.get(field) {
+                Some(Value::Array(values)) => values.len(),
+                Some(Value::String(value))
+                    if *fields == MoveByteFields::GraphqlBytes && !value.starts_with("0x") =>
+                {
+                    value.len().div_ceil(4) * 3
+                }
+                Some(Value::String(value)) => value.len(),
+                _ => 0,
+            };
+            decoded_bytes = decoded_bytes
+                .checked_add(bytes)
+                .filter(|total| *total <= 16 * 1024 * 1024)
+                .ok_or_else(|| "PacketSent decoded byte budget exceeded".to_string())?;
+        }
+    }
     matched
         .into_iter()
-        .map(|(endpoint, data)| decode_event_data(endpoint, data, MoveByteFields::JsUint8Array))
+        .map(|(endpoint, data, fields)| decode_event_data(endpoint, data, fields))
         .collect()
 }
 

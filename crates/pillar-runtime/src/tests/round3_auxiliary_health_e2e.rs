@@ -268,3 +268,86 @@ async fn round3_l04_aptos_readiness_ignores_indexer_but_not_primary_failure() {
         pillar_api::ReadinessStatus::NotReady
     );
 }
+
+#[tokio::test]
+async fn stalled_chain_does_not_withdraw_an_observable_healthy_chain() {
+    use pillar_core::execution::{BudgetLimits, ExecutionResources, FairBudget};
+    #[derive(Clone)]
+    struct Transport;
+    #[async_trait]
+    impl JsonRpcTransport for Transport {
+        async fn post_json(
+            &self,
+            url: String,
+            _: HashMap<String, String>,
+            _: Value,
+        ) -> Result<Value, String> {
+            if url.contains("slow") {
+                return futures::future::pending().await;
+            }
+            Ok(json!({"result": 100}))
+        }
+        async fn get_json(&self, _: String, _: HashMap<String, String>) -> Result<Value, String> {
+            Err("unexpected GET".into())
+        }
+    }
+    let getter = StaticProviderConfig::new(
+        IndexMap::from([
+            (
+                "slow".into(),
+                ProviderConfig::with_distinct_entities(
+                    vec![
+                        ProviderUri::Uri("https://slow-a".into()),
+                        ProviderUri::Uri("https://slow-b".into()),
+                    ],
+                    1,
+                ),
+            ),
+            (
+                "healthy".into(),
+                ProviderConfig::with_distinct_entities(
+                    vec![ProviderUri::Uri("https://healthy".into())],
+                    1,
+                ),
+            ),
+        ]),
+        None,
+    )
+    .unwrap();
+    let budget = || {
+        FairBudget::new(
+            vec!["background".into()],
+            BudgetLimits {
+                active: 2,
+                per_lane: 2,
+                waiting: 8,
+                per_lane_waiting: 8,
+                wait: std::time::Duration::from_millis(50),
+            },
+        )
+        .unwrap()
+    };
+    let source = RpcProviderHealthSource::from_getter_with_chain_types(
+        &getter,
+        Transport,
+        || 1,
+        HashMap::from([
+            ("slow".into(), "SOLANA".into()),
+            ("healthy".into(), "SOLANA".into()),
+        ]),
+    )
+    .with_execution_resources(Arc::new(ExecutionResources {
+        signing: budget(),
+        rpc: budget(),
+        kms: budget(),
+        parser: budget(),
+    }));
+    let report = source.get_provider_health_report().await.unwrap();
+    assert!(report["healthy"].healthy);
+    assert!(report["healthy"].providers[0].observed);
+    assert!(!report["slow"].healthy);
+    super::round1_artifact(
+        "health-chain-fairness",
+        serde_json::to_value(&report).unwrap(),
+    );
+}

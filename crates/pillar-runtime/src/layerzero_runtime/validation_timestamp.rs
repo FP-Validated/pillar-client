@@ -369,7 +369,7 @@ where
         .post_json_scoped(
             url.clone(),
             headers.clone(),
-            json!({"method":"getLatestLedger","params":{},"id":1,"jsonrpc":"2.0"}),
+            json!({"method":"getLatestLedger","id":1,"jsonrpc":"2.0"}),
         )
         .await?;
     let sequence = latest

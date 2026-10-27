@@ -341,7 +341,7 @@ async fn m22_ton_confirmation_floor_refuses_below_requirement_before_source_read
         assert!(
             recorded
                 .iter()
-                .all(|call| call["url"] == "https://ton.example"),
+                .all(|call| call["url"] == "https://ton.example/jsonRPC"),
             "{name}: payload validation does not issue source readiness reads"
         );
         rows.push(json!({

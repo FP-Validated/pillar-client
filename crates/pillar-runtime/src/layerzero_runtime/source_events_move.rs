@@ -39,6 +39,7 @@ pub(crate) struct MovePacketSentEvent {
 pub(crate) enum MoveByteFields {
     Hex,
     JsUint8Array,
+    GraphqlBytes,
 }
 
 fn normalize_move_account(address: &str) -> String {
@@ -67,6 +68,20 @@ fn decode_bytes(value: &Value) -> Option<String> {
             ))
         }
         _ => None,
+    }
+}
+
+fn decode_graphql_bytes(value: Option<&Value>) -> Result<String, String> {
+    use base64::Engine;
+    match value {
+        // GraphQL renders `vector<u8>` as base64; anything else reads as upstream's `Uint8Array.from`.
+        Some(Value::String(value)) if !value.starts_with("0x") => {
+            base64::engine::general_purpose::STANDARD
+                .decode(value)
+                .map(|bytes| format!("0x{}", hex::encode(bytes)))
+                .map_err(|_| "PacketSent GraphQL byte field is not base64".to_string())
+        }
+        _ => js_uint8_array_from(value).map(|bytes| format!("0x{}", hex::encode(bytes))),
     }
 }
 
@@ -143,6 +158,7 @@ pub(crate) fn decode_event_data(
             "0x{}",
             hex::encode(js_uint8_array_from(data.get("encoded_packet"))?)
         ),
+        MoveByteFields::GraphqlBytes => decode_graphql_bytes(data.get("encoded_packet"))?,
     };
     let packet = decode_lz_packet_v1(&encoded_packet).map_err(|error| error.to_string())?;
     let send_library = data
@@ -157,6 +173,7 @@ pub(crate) fn decode_event_data(
             .ok_or_else(|| "PacketSent event carries no options".to_string()),
         MoveByteFields::JsUint8Array => js_uint8_array_from(data.get("options"))
             .map(|bytes| format!("0x{}", hex::encode(bytes))),
+        MoveByteFields::GraphqlBytes => decode_graphql_bytes(data.get("options")),
     };
     Ok(MovePacketSentEvent {
         endpoint_address: normalize_move_account(endpoint),
@@ -205,25 +222,22 @@ fn aptos_event_matches(event: &Value, endpoint: &str) -> Option<(Value, &'static
     Some((data.clone(), version))
 }
 
-/// An Initia `move` event whose `type_tag` names the endpoint's token, with its `data`
-/// attribute parsed; a `data` that is not JSON is upstream's `JSON.parse` throw.
+// Initia appends payload fields after the canonical type_tag and data attributes.
 fn initia_event_matches(event: &Value, endpoint: &str) -> Option<Result<Value, String>> {
     if event.get("type").and_then(Value::as_str) != Some("move") {
         return None;
     }
     let attributes = event.get("attributes")?.as_array()?;
-    let values = |key: &'static str| {
-        attributes
-            .iter()
-            .filter(move |attribute| attribute.get("key").and_then(Value::as_str) == Some(key))
-            .filter_map(|attribute| attribute.get("value").and_then(Value::as_str))
+    let [type_tag, data, ..] = attributes.as_slice() else {
+        return None;
     };
-    if !values("type_tag")
-        .any(|type_tag| packet_sent_token_version(type_tag, endpoint) == Some("V302"))
+    if type_tag.get("key")?.as_str()? != "type_tag"
+        || data.get("key")?.as_str()? != "data"
+        || packet_sent_token_version(type_tag.get("value")?.as_str()?, endpoint) != Some("V302")
     {
         return None;
     }
-    let data = values("data").next()?;
+    let data = data.get("value")?.as_str()?;
     Some(
         crate::provider_health::parse_json_with_limits(data.as_bytes(), false)
             .map_err(|error| format!("Invalid JSON in event data: {error}")),
@@ -396,6 +410,9 @@ pub(crate) fn aptos_ledger_version(src_tx_hash: &str) -> Result<String, AppCoreE
 }
 
 fn unwrap_initia_tx(mut response: Value) -> Value {
+    let outer_tx = response
+        .as_object_mut()
+        .and_then(|object| object.remove("tx"));
     let mut transaction = match response
         .as_object_mut()
         .and_then(|object| object.remove("tx_response"))
@@ -403,8 +420,10 @@ fn unwrap_initia_tx(mut response: Value) -> Value {
         Some(tx_response) => tx_response,
         None => response,
     };
-    // An attribute's `index` flag comes from the node's own `index-events` setting, not
-    // consensus, so honest providers differ on it; readers use only `key` and `value`.
+    if let (Some(tx), Some(transaction)) = (outer_tx, transaction.as_object_mut()) {
+        transaction.entry("tx").or_insert(tx);
+    }
+    // ABCI index flags are node-local, not consensus evidence.
     if let Some(events) = transaction.get_mut("events").and_then(Value::as_array_mut) {
         for attributes in events
             .iter_mut()

@@ -1160,8 +1160,7 @@ fn requested_message_id_json(lz_message_id: &LzMessageId) -> String {
     )
 }
 
-/// `EndpointV2CantonSdk.getLZSentEvent`: every PacketSent of the commitment transaction,
-/// each decoded, then the one matching the request.
+// Authenticate the commitment before independently converting its packet events.
 pub(crate) async fn resolve_canton_packet_sent<T: JsonRpcTransport>(
     transport: &T,
     sequencer: &CantonSequencer,
@@ -1182,20 +1181,34 @@ pub(crate) async fn resolve_canton_packet_sent<T: JsonRpcTransport>(
         SequencerAnswer::Ok(response) => response.events,
         SequencerAnswer::Error(message) => return Err(AppCoreError::Internal(message)),
     };
+    select_canton_packet(&events, src_tx_hash, lz_message_id)
+}
+
+fn select_canton_packet(
+    events: &[Value],
+    src_tx_hash: &str,
+    lz_message_id: &LzMessageId,
+) -> Result<LzSentEvent, AppCoreError> {
     if events.is_empty() {
         return Err(AppCoreError::Internal(
             "Packet sent event not found or not valid".to_string(),
         ));
     }
-    let decoded = events
-        .iter()
-        .map(packet_sent_event)
-        .collect::<Result<Vec<_>, _>>()?;
-    if let Some(found) = decoded
-        .iter()
-        .find(|event| lz_message_id_matches(lz_message_id, &event.lz_message_id))
-    {
-        return Ok(found.clone());
+    let mut decoded = Vec::new();
+    let mut first_error = None;
+    for event in events {
+        match packet_sent_event(event) {
+            Ok(event) if lz_message_id_matches(lz_message_id, &event.lz_message_id) => {
+                return Ok(event);
+            }
+            Ok(event) => decoded.push(event),
+            Err(error) => {
+                first_error.get_or_insert(error);
+            }
+        }
+    }
+    if let Some(error) = first_error {
+        return Err(error);
     }
     Err(AppCoreError::Internal(format!(
         "Did not find correct PacketSent() event in tx {src_tx_hash}: matched {} packet(s) by \
@@ -1385,6 +1398,42 @@ fn verification_state_is_verified(state: f64) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canton_selection_ignores_rejected_siblings_but_not_selected_packet_errors() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../tests/gasolina_parity/canton_sequencer.json"
+        ))
+        .unwrap();
+        let scenario = fixture["scenarios"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|scenario| scenario["kind"] == "resolve" && scenario["name"] == "one match")
+            .unwrap();
+        let body: Value =
+            serde_json::from_str(scenario["exchanges"][0]["text"].as_str().unwrap()).unwrap();
+        let valid = body["events"][0].clone();
+        let request: LzMessageId = serde_json::from_value(scenario["lzMessageId"].clone()).unwrap();
+        let mut unknown = valid.clone();
+        let mut bytes = hex::decode(
+            valid["data"]["encodedPayload"]
+                .as_str()
+                .unwrap()
+                .trim_start_matches("0x"),
+        )
+        .unwrap();
+        bytes[45..49].copy_from_slice(&u32::MAX.to_be_bytes());
+        unknown["data"]["encodedPayload"] = Value::from(format!("0x{}", hex::encode(bytes)));
+        for invalid in [unknown, json!({"data":{"encodedPayload":"0xbroken"}})] {
+            let selected =
+                select_canton_packet(&[invalid.clone(), valid.clone()], "commitment", &request)
+                    .unwrap();
+            assert_eq!(selected.lz_message_id.nonce, 7);
+            assert_eq!(selected.message, "0xdeadbeef");
+            assert!(select_canton_packet(&[invalid], "commitment", &request).is_err());
+        }
+    }
 
     #[test]
     fn js_number_conversions_follow_ecmascript() {

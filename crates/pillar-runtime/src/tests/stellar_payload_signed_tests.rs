@@ -229,3 +229,82 @@ async fn stellar_payload_signed_refuses_an_invalid_override_library() {
     .await;
     assert_eq!(outcome, Ok(Some(15)));
 }
+
+#[tokio::test]
+async fn stellar_account_dvn_uses_account_xdr_without_allowing_account_receivers() {
+    let fixture = fixture();
+    let dvn = "GARCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCEIRCFRVX";
+    let mut calls = fixture["calls"].clone();
+    let encoded = calls["confirmations"].as_str().unwrap();
+    let mut bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .unwrap();
+    let mut contract_address = vec![0, 0, 0, 18, 0, 0, 0, 1];
+    contract_address.extend([0x22; 32]);
+    let position = bytes
+        .windows(contract_address.len())
+        .position(|bytes| bytes == contract_address)
+        .unwrap();
+    let mut account_address = vec![0, 0, 0, 18, 0, 0, 0, 0, 0, 0, 0, 0];
+    account_address.extend([0x22; 32]);
+    bytes.splice(position..position + contract_address.len(), account_address);
+    calls["confirmations"] = json!(base64::engine::general_purpose::STANDARD.encode(bytes));
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let transport = SorobanReplay {
+        calls,
+        returns: [
+            ("get_receive_library", "defaultLibrary"),
+            ("effective_receive_uln_config", "config15"),
+            ("confirmations", "noConfirmations"),
+            ("uln_verifiable", "verifying"),
+        ]
+        .into_iter()
+        .map(|(method, name)| {
+            (
+                method,
+                Ok(fixture["returns"][name]["xdr"]
+                    .as_str()
+                    .unwrap()
+                    .to_string()),
+            )
+        })
+        .collect(),
+        seen: seen.clone(),
+    };
+    let getter = StaticProviderConfig::new(
+        IndexMap::from([(
+            "stellar".to_string(),
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://stellar.example".to_string())],
+                1,
+            ),
+        )]),
+        Some(&["stellar".to_string()]),
+    )
+    .unwrap();
+    let checks = runtime_rpc_validation_checks_from_evm_config(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        transport,
+        "mainnet",
+        &["stellar".to_string()],
+    )
+    .unwrap();
+    let mut event = stellar_event(&fixture["inputs"]);
+    assert_eq!(
+        checks
+            .validate_payload_not_signed(&event, Some(dvn), "stellar", None)
+            .await,
+        Ok(Some(15))
+    );
+    seen.lock().unwrap().clear();
+    event
+        .lz_message_id
+        .pathway_id
+        .extra
+        .insert("receiver".to_string(), json!(dvn));
+    assert!(checks
+        .validate_payload_not_signed(&event, Some(dvn), "stellar", None)
+        .await
+        .is_err());
+    assert!(seen.lock().unwrap().is_empty());
+}

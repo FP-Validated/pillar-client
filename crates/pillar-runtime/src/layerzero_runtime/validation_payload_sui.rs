@@ -10,27 +10,7 @@
 //! `dvnConfirmed` is `getConfirmation(...) >= inboundUlnConfig.confirmations`
 //! (TS: `:475-499`).
 //!
-//! Every view is a `devInspect` of a programmable transaction. Per provider:
-//! 1. `endpoint_v2::get_messaging_channel(endpoint, receiver)` -> channel id
-//!    (TS: `packages/sdks/lz-v2-sdk/src/utils/suimove/index.ts:47-76`)
-//! 2. `uln_302_views::verifiable(uln, verification, endpoint, channel,
-//!    packetHeader, payloadHash)` -> `u8` state (TS: `:540-568`)
-//! 3. `bytes32::from_bytes` x2 then
-//!    `uln_302::get_confirmations(verification, dvn, r0, r1)` -> `u64`; a Move
-//!    abort with code 1 (`EConfirmationsNotFound`) raised by the ULN package's
-//!    `receive_uln::get_confirmations` means no record, which the chain's
-//!    `verified` treats as unverified whatever is required (TS: `:583-632` reads
-//!    it as 0 from the code alone; abort parsing in
-//!    `packages/common-suimove/src/utils.ts:17-48`)
-//! 4. `uln_302::get_effective_receive_uln_config(uln, receiver, srcEid)` ->
-//!    `UlnConfig`, for the required confirmations (TS: `:889-944`)
-//!
-//! Object inputs must carry each shared object's `initial_shared_version` and
-//! whether the Move signature takes it mutably, so the SDK's resolver steps are
-//! reproduced: `getNormalizedMoveFunction` per target, then `multiGetObjects`
-//! with `showOwner: true` (TS: the published resolver's `normalizeInputs` ->
-//! `resolveObjectReferences`; `Reference` means immutable, anything else
-//! mutable).
+//! Shared-object versions and function signatures are resolved once per provider observation.
 
 use super::validation_payload::payload_signed_validation_result;
 use super::*;
@@ -140,10 +120,18 @@ where
             let contracts = contracts.clone();
             let packet_header = packet_header.clone();
             let payload_hash = payload_hash.clone();
+            let budget = self.sui_observation_budget.clone();
+            let voter = &provider_config.voters[index];
+            let entity = serde_json::to_string(&(dst_chain_name, &voter.category, &voter.entity))
+                .expect("provider entity strings serialize");
             requests.push(async move {
                 if !delay.is_zero() {
                     tokio::time::sleep(delay).await;
                 }
+                let _entity_permit = match budget.acquire_for(&chain_name, Some(&entity)).await {
+                    Ok(permit) => permit,
+                    Err(error) => return (index, Err(RpcError::Admission(error))),
+                };
                 let observation = provider_response(
                     observe_sui_payload_signed(
                         &transport,
@@ -234,6 +222,7 @@ where
         0,
     )
     .await?;
+    let endpoint_version = endpoint_object.initial_shared_version;
     let channel_bytes = dev_inspect_return(
         transport,
         url,
@@ -254,55 +243,44 @@ where
     .map_err(|_| RpcError::Unavailable)?;
     let channel_id = decode_sui_address(&channel_bytes).map_err(|_| RpcError::Unavailable)?;
 
-    // 2. verification state.
-    let uln_object = resolve_shared_object(
+    let view_parameters = normalized_parameters(
         transport,
         url,
         headers.clone(),
         chain_name,
-        &contracts.uln_302_object,
         views_package,
         MODULE_ULN_302_VIEWS,
         "verifiable",
-        0,
     )
     .await?;
-    let verification_object = resolve_shared_object(
+    let channel_address = format!("0x{}", hex::encode(channel_id));
+    let versions = shared_object_initial_versions(
         transport,
         url,
         headers.clone(),
         chain_name,
+        &[
+            &contracts.uln_302_object,
+            &contracts.uln_302_verification_object,
+            &channel_address,
+        ],
+    )
+    .await?;
+    let uln_object =
+        shared_object_input(&contracts.uln_302_object, versions[0], &view_parameters, 0)?;
+    let verification_object = shared_object_input(
         &contracts.uln_302_verification_object,
-        views_package,
-        MODULE_ULN_302_VIEWS,
-        "verifiable",
+        versions[1],
+        &view_parameters,
         1,
-    )
-    .await?;
-    let endpoint_for_views = resolve_shared_object(
-        transport,
-        url,
-        headers.clone(),
-        chain_name,
+    )?;
+    let endpoint_for_views = shared_object_input(
         &contracts.endpoint_v2_object,
-        views_package,
-        MODULE_ULN_302_VIEWS,
-        "verifiable",
+        endpoint_version,
+        &view_parameters,
         2,
-    )
-    .await?;
-    let channel_object = resolve_shared_object_id(
-        transport,
-        url,
-        headers.clone(),
-        chain_name,
-        &format!("0x{}", hex::encode(channel_id)),
-        views_package,
-        MODULE_ULN_302_VIEWS,
-        "verifiable",
-        3,
-    )
-    .await?;
+    )?;
+    let channel_object = shared_object_input(&channel_address, versions[2], &view_parameters, 3)?;
 
     let state_bytes = dev_inspect_return(
         transport,
@@ -331,18 +309,22 @@ where
     // 3. this DVN's confirmations. Abort code 1 is "no confirmations recorded" only
     //    when `receive_uln::get_confirmations` raised it: `bytes32::from_bytes` aborts
     //    with the same code.
-    let confirmations_verification = resolve_shared_object(
+    let confirmation_parameters = normalized_parameters(
         transport,
         url,
         headers.clone(),
         chain_name,
-        &contracts.uln_302_verification_object,
         uln_package,
         MODULE_ULN_302,
         "get_confirmations",
-        0,
     )
     .await?;
+    let confirmations_verification = shared_object_input(
+        &contracts.uln_302_verification_object,
+        versions[1],
+        &confirmation_parameters,
+        0,
+    )?;
     let confirmations_result = dev_inspect_return(
         transport,
         url,
@@ -397,18 +379,22 @@ where
     };
 
     // 4. the pathway's required confirmations.
-    let config_uln_object = resolve_shared_object(
+    let config_parameters = normalized_parameters(
         transport,
         url,
         headers.clone(),
         chain_name,
-        &contracts.uln_302_object,
         uln_package,
         MODULE_ULN_302,
         "get_effective_receive_uln_config",
-        0,
     )
     .await?;
+    let config_uln_object = shared_object_input(
+        &contracts.uln_302_object,
+        versions[0],
+        &config_parameters,
+        0,
+    )?;
     let config_bytes = dev_inspect_return(
         transport,
         url,
@@ -472,10 +458,8 @@ impl MoveAbortSite {
     }
 }
 
-/// Resolve one shared object input: read `initial_shared_version` from the
-/// chain and take mutability from the target's normalized Move signature.
 #[allow(clippy::too_many_arguments)]
-async fn resolve_shared_object<T>(
+async fn resolve_shared_object<T: JsonRpcTransport>(
     transport: &T,
     url: &str,
     headers: HashMap<String, String>,
@@ -485,40 +469,8 @@ async fn resolve_shared_object<T>(
     module: &str,
     function: &str,
     parameter_index: usize,
-) -> Result<SuiSharedObject, RpcError>
-where
-    T: JsonRpcTransport,
-{
-    resolve_shared_object_id(
-        transport,
-        url,
-        headers,
-        chain_name,
-        object_id,
-        package,
-        module,
-        function,
-        parameter_index,
-    )
-    .await
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn resolve_shared_object_id<T>(
-    transport: &T,
-    url: &str,
-    headers: HashMap<String, String>,
-    chain_name: &str,
-    object_id: &str,
-    package: [u8; 32],
-    module: &str,
-    function: &str,
-    parameter_index: usize,
-) -> Result<SuiSharedObject, RpcError>
-where
-    T: JsonRpcTransport,
-{
-    let mutable = normalized_parameter_is_mutable(
+) -> Result<SuiSharedObject, RpcError> {
+    let parameters = normalized_parameters(
         transport,
         url,
         headers.clone(),
@@ -526,24 +478,27 @@ where
         package,
         module,
         function,
-        parameter_index,
     )
     .await?;
-    let initial_shared_version =
-        shared_object_initial_version(transport, url, headers, chain_name, object_id).await?;
+    let versions =
+        shared_object_initial_versions(transport, url, headers, chain_name, &[object_id]).await?;
+    shared_object_input(object_id, versions[0], &parameters, parameter_index)
+}
+
+fn shared_object_input(
+    object_id: &str,
+    initial_shared_version: u64,
+    parameters: &[bool],
+    index: usize,
+) -> Result<SuiSharedObject, RpcError> {
     Ok(SuiSharedObject {
         object_id: sui_address_from_hex(object_id).map_err(|_| RpcError::Unavailable)?,
         initial_shared_version,
-        mutable,
+        mutable: *parameters.get(index).ok_or(RpcError::Unavailable)?,
     })
 }
 
-/// `getNormalizedMoveFunction` -> is `parameters[index]` taken mutably?
-///
-/// A `Reference` is immutable; `MutableReference` and a by-value parameter are
-/// both mutable, matching the SDK resolver's `isUsedAsMutable`.
-#[allow(clippy::too_many_arguments)]
-async fn normalized_parameter_is_mutable<T>(
+async fn normalized_parameters<T: JsonRpcTransport>(
     transport: &T,
     url: &str,
     headers: HashMap<String, String>,
@@ -551,76 +506,65 @@ async fn normalized_parameter_is_mutable<T>(
     package: [u8; 32],
     module: &str,
     function: &str,
-    parameter_index: usize,
-) -> Result<bool, RpcError>
-where
-    T: JsonRpcTransport,
-{
-    let body = json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": sui_rpc_method(chain_name, "getNormalizedMoveFunction"),
-        "params": [format!("0x{}", hex::encode(package)), module, function],
-    });
+) -> Result<Vec<bool>, RpcError> {
     let response = transport
-        .post_json_scoped(url.to_string(), headers, body)
+        .post_json_scoped(
+            url.to_string(),
+            headers,
+            json!({
+                "jsonrpc": "2.0", "id": 1,
+                "method": sui_rpc_method(chain_name, "getNormalizedMoveFunction"),
+                "params": [format!("0x{}", hex::encode(package)), module, function],
+            }),
+        )
         .await?;
-    let parameter = response
-        .get("result")
-        .ok_or(RpcError::Unavailable)?
-        .get("parameters")
-        .ok_or(RpcError::Unavailable)?
-        .as_array()
-        .ok_or(RpcError::Unavailable)?
-        .get(parameter_index)
+    let parameters = response
+        .pointer("/result/parameters")
+        .and_then(Value::as_array)
         .ok_or(RpcError::Unavailable)?;
-    // A `Reference` parameter is an immutable borrow; anything else is mutable.
-    Ok(parameter.get("Reference").is_none())
+    Ok(parameters
+        .iter()
+        .map(|parameter| parameter.get("Reference").is_none())
+        .collect())
 }
 
-/// `multiGetObjects` with `showOwner: true` -> the shared object's
-/// `initial_shared_version`. A non-shared object is refused: the encoder only
-/// supports shared inputs.
-async fn shared_object_initial_version<T>(
+async fn shared_object_initial_versions<T: JsonRpcTransport>(
     transport: &T,
     url: &str,
     headers: HashMap<String, String>,
     chain_name: &str,
-    object_id: &str,
-) -> Result<u64, RpcError>
-where
-    T: JsonRpcTransport,
-{
-    let body = json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": sui_rpc_method(chain_name, "multiGetObjects"),
-        "params": [[object_id], { "showOwner": true }],
-    });
+    object_ids: &[&str],
+) -> Result<Vec<u64>, RpcError> {
     let response = transport
-        .post_json_scoped(url.to_string(), headers, body)
+        .post_json_scoped(
+            url.to_string(),
+            headers,
+            json!({
+                "jsonrpc": "2.0", "id": 1,
+                "method": sui_rpc_method(chain_name, "multiGetObjects"),
+                "params": [object_ids, { "showOwner": true }],
+            }),
+        )
         .await?;
-    let shared = response
+    let objects = response
         .get("result")
-        .ok_or(RpcError::Unavailable)?
-        .as_array()
-        .ok_or(RpcError::Unavailable)?
-        .first()
-        .ok_or(RpcError::Unavailable)?
-        .get("data")
-        .ok_or(RpcError::Unavailable)?
-        .get("owner")
-        .ok_or(RpcError::Unavailable)?
-        .get("Shared")
+        .and_then(Value::as_array)
         .ok_or(RpcError::Unavailable)?;
-    let version = shared
-        .get("initial_shared_version")
-        .ok_or(RpcError::Unavailable)?;
-    match version {
-        Value::Number(number) => number.as_u64().ok_or(RpcError::Unavailable),
-        Value::String(text) => text.parse().map_err(|_| RpcError::Unavailable),
-        _ => Err(RpcError::Unavailable),
+    if objects.len() != object_ids.len() {
+        return Err(RpcError::Unavailable);
     }
+    objects
+        .iter()
+        .map(|object| {
+            let version = object
+                .pointer("/data/owner/Shared/initial_shared_version")
+                .ok_or(RpcError::Unavailable)?;
+            version
+                .as_u64()
+                .or_else(|| version.as_str()?.parse().ok())
+                .ok_or(RpcError::Unavailable)
+        })
+        .collect()
 }
 
 /// `devInspectTransactionBlock` -> the last command's first return value.

@@ -30,7 +30,6 @@ where
         let chain_name_by_eid =
             runtime_chain_name_by_endpoint_id(&environment, &available_chain_names)
                 .map_err(|error| error.to_string())?;
-        let rank_tracker = Arc::new(ProviderRankTracker::new());
         // One registry for the whole process: the signer, the packet resolver,
         // the provider-config refresh loop and the `/metrics` endpoint all
         // record into this object. Anything that builds its own would count
@@ -48,6 +47,7 @@ where
             metrics.clone(),
         )
         .await?;
+        let rank_tracker = providers.rank_tracker.clone();
         let canton_ledger_auth =
             crate::layerzero_runtime::CantonLedgerAuth::from_env_map(&environment, &vars);
         let mut validation_checks = runtime_rpc_validation_checks_from_evm_config(
@@ -83,7 +83,11 @@ where
             runtime_evm_uln_payload_builder(&environment, &available_chain_names)
                 .map_err(|error| error.to_string())?,
         )
-        .with_rank_tracker(rank_tracker.clone());
+        .with_rank_tracker(rank_tracker.clone())
+        .with_message_policy(
+            runtime_config.extra_context_request_url.is_some()
+                || runtime_config.extra_context_aws_lambda_name.is_some(),
+        );
         let read_payload_resolver =
             RuntimeEvmReadPayloadResolver::new(&providers, transport.clone(), chain_name_by_eid);
         let dependencies = runtime_core_dependencies_from_layerzero_parts(

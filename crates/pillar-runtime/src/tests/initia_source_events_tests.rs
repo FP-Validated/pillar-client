@@ -190,6 +190,82 @@ async fn initia_unmapped_destination_event_does_not_mask_later_match() {
 }
 
 #[tokio::test]
+async fn initia_payload_attributes_cannot_impersonate_the_event_type() {
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let matching = fixture["scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|scenario| scenario["name"] == "match")
+        .unwrap();
+    let request: LzMessageId = serde_json::from_value(matching["request"].clone()).unwrap();
+    let canonical = matching["transaction"]["events"][0]["attributes"]
+        .as_array()
+        .unwrap();
+    let trusted = canonical[0].clone();
+    let data = canonical[1].clone();
+    let attacker = json!({"key": "type_tag", "value": "0x123::fake::PacketSent"});
+    let cases = [
+        ("canonical", vec![trusted.clone(), data.clone()], true),
+        (
+            "payload-type-tag",
+            vec![attacker.clone(), data.clone(), trusted.clone()],
+            false,
+        ),
+        (
+            "canonical-with-payload-duplicates",
+            vec![
+                trusted.clone(),
+                data.clone(),
+                attacker,
+                json!({"key": "data", "value": "{}"}),
+            ],
+            true,
+        ),
+        ("reordered", vec![data.clone(), trusted.clone()], false),
+        (
+            "missing-canonical-data",
+            vec![
+                trusted.clone(),
+                json!({"key": "other", "value": "{}"}),
+                data,
+            ],
+            false,
+        ),
+        (
+            "malformed-canonical-type",
+            vec![
+                json!({"key": "type_tag", "value": 1}),
+                canonical[1].clone(),
+                trusted,
+            ],
+            false,
+        ),
+    ];
+    let mut evidence = Vec::new();
+    for (name, attributes, accepted) in cases {
+        let mut transaction = matching["transaction"].clone();
+        transaction["events"][0]["attributes"] = json!(attributes);
+        let result = scripted_resolver(fixture["environment"].as_str().unwrap(), &transaction)
+            .get_lz_sent_event(fixture["txHash"].as_str().unwrap(), &request)
+            .await;
+        if accepted {
+            let event = result.as_ref().unwrap();
+            assert!(lz_message_identity_matches(&request, &event.lz_message_id));
+            assert_eq!(event.message, "0xdeadbeefcafe");
+        } else {
+            assert!(result.is_err(), "{name}: {result:?}");
+        }
+        evidence.push(json!({"case": name, "accepted": result.is_ok()}));
+    }
+    audit_round_artifact(
+        "full-audit",
+        "c01-initia-canonical-attributes",
+        json!(evidence),
+    );
+}
+
+#[tokio::test]
 async fn initia_missing_source_eid_returns_exact_internal_fault() {
     let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
     let scenario = fixture["scenarios"]

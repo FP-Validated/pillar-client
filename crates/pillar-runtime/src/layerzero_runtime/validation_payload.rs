@@ -947,6 +947,9 @@ where
     .as_str()
     .and_then(aptos_address_bytes32)
     .ok_or(RpcError::Unavailable)?;
+    if aptos_address_bytes32(uln_302).as_deref() != Some(receive_library.as_str()) {
+        return Err(RpcError::Remote("Unsupported Move receive library".into()));
+    }
     let config = move_view_value(
         &transport,
         chain_name,

@@ -50,12 +50,33 @@ pub(super) fn request(body: &Value, after: Option<&str>) -> Option<(String, Valu
         }
         "sui_multiGetObjects" => {
             let ids = params.first()?.as_array()?;
-            let address = ids.first()?.as_str()?;
-            (
-                "query($address: SuiAddress!) { object(address: $address) { asMoveObject { owner { __typename ... on Shared { initialSharedVersion } } } } }".to_string(),
-                json!({"address": address}),
-                method,
-            )
+            if ids.len() == 1 {
+                (
+                    "query($address: SuiAddress!) { object(address: $address) { asMoveObject { owner { __typename ... on Shared { initialSharedVersion } } } } }".to_string(),
+                    json!({"address": ids[0].as_str()?}),
+                    method,
+                )
+            } else {
+                if ids.is_empty() || ids.len() > 16 {
+                    return None;
+                }
+                use std::fmt::Write;
+                let mut query = String::from("query(");
+                let mut fields = String::new();
+                let mut variables = serde_json::Map::new();
+                for (index, id) in ids.iter().enumerate() {
+                    if index != 0 {
+                        query.push(',');
+                    }
+                    write!(query, "$a{index}:SuiAddress!").ok()?;
+                    write!(fields, "o{index}:object(address:$a{index}){{asMoveObject{{owner{{__typename ... on Shared{{initialSharedVersion}}}}}}}}").ok()?;
+                    variables.insert(format!("a{index}"), Value::from(id.as_str()?));
+                }
+                query.push_str("){");
+                query.push_str(&fields);
+                query.push('}');
+                (query, Value::Object(variables), method)
+            }
         }
         _ => return None,
     };
@@ -69,7 +90,7 @@ fn error_response(message: &str) -> Value {
     json!({"jsonrpc":"2.0", "id":1, "error":{"code":-32000,"message":message}})
 }
 
-pub(super) fn response(method: &str, graphql: Value) -> Value {
+pub(super) fn response(method: &str, mut graphql: Value) -> Value {
     if let Some(error) = graphql.get("error") {
         let message = error
             .get("message")
@@ -86,17 +107,11 @@ pub(super) fn response(method: &str, graphql: Value) -> Value {
             .unwrap_or("Sui GraphQL request failed");
         return error_response(message);
     }
-    let Some(data) = graphql.get("data").filter(|data| data.is_object()) else {
+    let Some(data) = graphql.get_mut("data").filter(|data| data.is_object()) else {
         return error_response("Sui GraphQL response has no data object");
     };
     let result = match method {
         "suix_queryEvents" => {
-            let Some(events) = data
-                .pointer("/transaction/effects/events/nodes")
-                .and_then(Value::as_array)
-            else {
-                return error_response("Sui GraphQL response has no event page");
-            };
             let Some(has_next_page) = data
                 .pointer("/transaction/effects/events/pageInfo/hasNextPage")
                 .and_then(Value::as_bool)
@@ -104,18 +119,26 @@ pub(super) fn response(method: &str, graphql: Value) -> Value {
                 return error_response("Sui GraphQL event page has no pagination state");
             };
             let _ = has_next_page;
-            let Some(mapped) = events
-                .iter()
-                .map(|event| {
-                    let event_type = event.pointer("/contents/type/repr")?.as_str()?;
-                    let mut parsed = event.pointer("/contents/json")?.clone();
-                    normalize_graphql_event_json(event_type, &mut parsed)
-                        .then(|| json!({"type":event_type,"parsedJson":parsed}))
-                })
-                .collect::<Option<Vec<_>>>()
+            let Some(events) = data
+                .pointer_mut("/transaction/effects/events/nodes")
+                .and_then(Value::as_array_mut)
             else {
-                return error_response("Sui GraphQL event contents are malformed");
+                return error_response("Sui GraphQL response has no event page");
             };
+            let mapped = events
+                .iter_mut()
+                .map(|event| {
+                    let event_type = event
+                        .pointer_mut("/contents/type/repr")
+                        .map(Value::take)
+                        .unwrap_or(Value::Null);
+                    let parsed = event
+                        .pointer_mut("/contents/json")
+                        .map(Value::take)
+                        .unwrap_or(Value::Null);
+                    json!({"type":event_type,"parsedJson":parsed,"byteEncoding":"base64"})
+                })
+                .collect::<Vec<_>>();
             json!({"data": mapped, "hasNextPage": false, "nextCursor": null})
         }
         "sui_getTransactionBlock" => {
@@ -193,30 +216,44 @@ pub(super) fn response(method: &str, graphql: Value) -> Value {
             json!({"parameters":parameters})
         }
         "sui_multiGetObjects" => {
-            let Some(object) = data.get("object").filter(|object| object.is_object()) else {
-                return error_response("Sui GraphQL object is missing");
-            };
-            let Some(owner) = object
-                .pointer("/asMoveObject/owner")
-                .filter(|owner| owner.is_object())
-            else {
-                return error_response("Sui GraphQL object owner is missing");
-            };
-            let shared = if owner.get("__typename").and_then(Value::as_str) == Some("Shared") {
-                let Some(version) = owner.get("initialSharedVersion").filter(|value| {
-                    value.as_u64().is_some()
-                        || value
-                            .as_str()
-                            .and_then(|text| text.parse::<u64>().ok())
-                            .is_some()
-                }) else {
-                    return error_response("Sui GraphQL shared-object version is invalid");
+            let map = data.as_object().expect("data object checked above");
+            let count = map.len();
+            if count == 0 || count > 16 {
+                return error_response("Sui GraphQL object batch size is invalid");
+            }
+            let mut objects = Vec::with_capacity(count);
+            for index in 0..count {
+                let object = if count == 1 && map.contains_key("object") {
+                    &map["object"]
+                } else {
+                    let Some(object) = map.get(&format!("o{index}")) else {
+                        return error_response("Sui GraphQL object batch is incomplete");
+                    };
+                    object
                 };
-                json!({"initial_shared_version":version})
-            } else {
-                Value::Null
-            };
-            json!([{"data":{"owner":{"Shared":shared}}}])
+                let Some(owner) = object
+                    .pointer("/asMoveObject/owner")
+                    .filter(|owner| owner.is_object())
+                else {
+                    return error_response("Sui GraphQL object owner is missing");
+                };
+                let shared = if owner.get("__typename").and_then(Value::as_str) == Some("Shared") {
+                    let Some(version) = owner.get("initialSharedVersion").filter(|value| {
+                        value.as_u64().is_some()
+                            || value
+                                .as_str()
+                                .and_then(|text| text.parse::<u64>().ok())
+                                .is_some()
+                    }) else {
+                        return error_response("Sui GraphQL shared-object version is invalid");
+                    };
+                    json!({"initial_shared_version":version})
+                } else {
+                    Value::Null
+                };
+                objects.push(json!({"data":{"owner":{"Shared":shared}}}));
+            }
+            Value::Array(objects)
         }
         _ => return error_response("Unsupported Sui GraphQL response method"),
     };
@@ -302,35 +339,6 @@ fn timestamp_millis(value: &str) -> Option<i64> {
     )
 }
 
-fn normalize_graphql_event_json(event_type: &str, parsed: &mut Value) -> bool {
-    if !event_type.ends_with("::messaging_channel::PacketSentEvent") {
-        return true;
-    }
-    if parsed.is_null() {
-        return true;
-    }
-    let Some(object) = parsed.as_object_mut() else {
-        return false;
-    };
-    for field in ["encoded_packet", "options"] {
-        let Some(encoded) = object.get(field).and_then(Value::as_str) else {
-            continue;
-        };
-        if encoded.starts_with("0x") {
-            continue;
-        }
-        use base64::Engine;
-        let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(encoded) else {
-            return false;
-        };
-        object.insert(
-            field.to_string(),
-            Value::Array(bytes.into_iter().map(Value::from).collect()),
-        );
-    }
-    true
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -338,6 +346,28 @@ mod tests {
     const CAPTURE: &str = include_str!(
         "../../tests/gasolina_parity/transport/sui-mainnet-graphql-source-transaction.json"
     );
+
+    #[test]
+    fn unrelated_packet_named_events_cannot_poison_a_trusted_sui_send() {
+        let capture: Value = serde_json::from_str(CAPTURE).unwrap();
+        let mut response_body = capture["response"].clone();
+        response_body.pointer_mut("/data/transaction/effects/events/nodes").unwrap().as_array_mut().unwrap().insert(0, json!({
+            "contents": {
+                "type": {"repr": format!("0x{}::messaging_channel::PacketSentEvent", "99".repeat(32))},
+                "json": {"encoded_packet": "!".repeat(1024 * 1024), "options": "!invalid-base64"},
+            },
+        }));
+        let mapped = response("suix_queryEvents", response_body);
+        let events = crate::layerzero_runtime::decode_sui_packet_sent_events(
+            &mapped,
+            &HashSet::from([
+                "0x31beaef889b08b9c3b37d19280fc1f8b75bae5b2de2410fc3120f403e9a36dac".to_string(),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].packet.src_eid, 30_378);
+    }
 
     #[test]
     fn captured_packet_uses_trusted_emitter_and_decodes() {
@@ -424,11 +454,7 @@ mod tests {
     }
 
     #[test]
-    fn packet_event_base64_and_checkpoint_timestamps_are_strict() {
-        let malformed = json!({"data":{"transaction":{"effects":{"events":{"nodes":[{"contents":{"type":{"repr":"0x1::messaging_channel::PacketSentEvent"},"json":{"encoded_packet":"%%%"}}}],"pageInfo":{"hasNextPage":false}}}}}});
-        assert!(response("suix_queryEvents", malformed)
-            .get("error")
-            .is_some());
+    fn checkpoint_timestamps_are_strict() {
         assert_eq!(
             timestamp_millis("2026-10-09T00:00:00.000Z"),
             Some(1_791_504_000_000)
@@ -441,15 +467,5 @@ mod tests {
         ] {
             assert_eq!(timestamp_millis(bad), None);
         }
-    }
-
-    #[test]
-    fn packet_options_decode_hex_looking_text_as_base64() {
-        let mut parsed = json!({"options":"AAAA"});
-        assert!(normalize_graphql_event_json(
-            "0x1::messaging_channel::PacketSentEvent",
-            &mut parsed
-        ));
-        assert_eq!(parsed["options"], json!([0, 0, 0]));
     }
 }

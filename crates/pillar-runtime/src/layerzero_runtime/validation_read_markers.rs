@@ -134,147 +134,118 @@ where
         sent_event: &LzSentEvent,
         markers: &[ResolvedTimestampTimeMarker],
     ) -> Result<Vec<ReadBlockPin>, AppCoreError> {
-        let mut pins = Vec::new();
+        use futures::{stream::FuturesOrdered, TryStreamExt};
+        self.validate_read_markers_preflight(sent_event, markers)?;
+        // Keyed by pinned block; the strictest requirement names the marker kind it came from.
+        let mut requirements = indexmap::IndexMap::<(&str, i64), (i64, &str)>::new();
         if sent_event.lz_message_id.uln_send_version.as_str() == Some(ULN_VERSION_READ_V1002) {
-            let command_markers = extract_evm_read_resolved_time_markers(&sent_event.message)?;
-            self.validate_read_command_markers(&command_markers, markers, &mut pins)
-                .await?;
+            for marker in extract_evm_read_resolved_time_markers(&sent_event.message)? {
+                if let ReadTimeMarker::BlockNumber { block_number } = marker.marker {
+                    let chain_name = self
+                        .evm_chain_name_by_eid
+                        .get(&marker.target_eid)
+                        .ok_or_else(|| {
+                            AppCoreError::BadRequest(format!(
+                                "No chainName found for read command endpointId {}",
+                                marker.target_eid
+                            ))
+                        })?;
+                    let height = i64::try_from(block_number).map_err(|_| {
+                        AppCoreError::BadRequest("read command block number exceeds i64".into())
+                    })?;
+                    let required = height
+                        .checked_add(i64::from(marker.block_confirmation))
+                        .ok_or_else(|| {
+                            AppCoreError::BadRequest("block confirmation range overflow".into())
+                        })?;
+                    let current = requirements
+                        .entry((chain_name.as_str(), height))
+                        .or_insert((required, "read command block marker"));
+                    if required > current.0 {
+                        *current = (required, "read command block marker");
+                    }
+                }
+            }
         }
-        let mut seen_markers = HashSet::new();
         for marker in markers {
-            if !seen_markers.insert((
-                marker.chain_name.as_str(),
-                marker.timestamp,
-                marker.block_number,
-                marker.block_confirmation,
-            )) {
-                continue;
-            }
-            if marker.is_block_number {
-                return Err(AppCoreError::BadRequest(
-                    "resolvedTimestampTimeMarkers must contain timestamp markers".to_string(),
-                ));
-            }
-            if marker.block_confirmation < 0 {
-                return Err(AppCoreError::BadRequest(
-                    "blockConfirmation cannot be negative".to_string(),
-                ));
-            }
-            if marker.block_number < 1 {
-                return Err(AppCoreError::BadRequest(format!(
-                    "Invalid resolved time marker for chainName {}: blockNumber {} must be >= 1",
-                    marker.chain_name, marker.block_number
-                )));
-            }
-
-            let block = self
-                .block_time_with_quorum(&marker.chain_name, marker.block_number)
-                .await?;
-            push_read_block_pin(&mut pins, &marker.chain_name, &block)?;
-            let previous_block = if marker.block_number == 1 {
-                None
-            } else {
-                Some(
-                    self.block_time_with_quorum(&marker.chain_name, marker.block_number - 1)
-                        .await?,
-                )
-            };
-            if !block_matches_resolved_timestamp(&block, previous_block.as_ref(), marker.timestamp)
-            {
-                return Err(AppCoreError::BadRequest(format!(
-                    "Invalid resolved time marker for chainName {}: blockNumber {} with resolved timestamp {} does not meet actual timestamp for blockNumber {} and previous blockNumber {}",
-                    marker.chain_name,
-                    marker.block_number,
-                    marker.timestamp,
-                    block.timestamp,
-                    previous_block
-                        .as_ref()
-                        .map(|block| block.timestamp.to_string())
-                        .unwrap_or_else(|| "null".to_string())
-                )));
-            }
-
-            let required_block_number = marker
+            let required = marker
                 .block_number
                 .checked_add(marker.block_confirmation)
                 .ok_or_else(|| {
-                    AppCoreError::BadRequest("block confirmation range overflow".to_string())
+                    AppCoreError::BadRequest("block confirmation range overflow".into())
                 })?;
-            let (confirmation_satisfied, latest_block_number) = self
-                .block_confirmation_satisfied_with_quorum(&marker.chain_name, required_block_number)
-                .await?;
-            if !confirmation_satisfied {
+            let current = requirements
+                .entry((marker.chain_name.as_str(), marker.block_number))
+                .or_insert((required, "time marker"));
+            if required > current.0 {
+                *current = (required, "time marker");
+            }
+        }
+        let mut headers = indexmap::IndexSet::new();
+        for key in requirements.keys() {
+            headers.insert(*key);
+        }
+        for marker in markers {
+            if marker.block_number > 1 {
+                headers.insert((marker.chain_name.as_str(), marker.block_number - 1));
+            }
+        }
+        let mut blocks = HashMap::with_capacity(headers.len());
+        let mut headers = headers.into_iter();
+        loop {
+            let mut pending = FuturesOrdered::new();
+            for (chain, height) in headers.by_ref().take(4) {
+                pending.push_back(async move {
+                    self.block_time_with_quorum(chain, height)
+                        .await
+                        .map(|block| ((chain, height), block))
+                });
+            }
+            if pending.is_empty() {
+                break;
+            }
+            while let Some((key, block)) = pending.try_next().await? {
+                blocks.insert(key, block);
+            }
+        }
+        for marker in markers {
+            let block = &blocks[&(marker.chain_name.as_str(), marker.block_number)];
+            let previous = if marker.block_number == 1 {
+                None
+            } else {
+                blocks.get(&(marker.chain_name.as_str(), marker.block_number - 1))
+            };
+            if !block_matches_resolved_timestamp(block, previous, marker.timestamp) {
                 return Err(AppCoreError::BadRequest(format!(
-                    "Block confirmation for chainName {} for time marker is greater than current block number: {} > {}",
-                    marker.chain_name, required_block_number, latest_block_number
+                    "Invalid resolved time marker for chainName {}: blockNumber {} does not cover timestamp {}",
+                    marker.chain_name, marker.block_number, marker.timestamp
                 )));
             }
         }
-        Ok(pins)
-    }
-
-    async fn validate_read_command_markers(
-        &self,
-        command_markers: &[ReadResolvedTimeMarker],
-        resolved_markers: &[ResolvedTimestampTimeMarker],
-        pins: &mut Vec<ReadBlockPin>,
-    ) -> Result<(), AppCoreError> {
-        for marker in command_markers {
-            let chain_name = self
-                .evm_chain_name_by_eid
-                .get(&marker.target_eid)
-                .ok_or_else(|| {
-                    AppCoreError::BadRequest(format!(
-                        "No chainName found for read command endpointId {}",
-                        marker.target_eid
-                    ))
-                })?;
-            match marker.marker {
-                ReadTimeMarker::Timestamp { timestamp } => {
-                    let Some(_resolved) = resolved_markers.iter().find(|resolved| {
-                        !resolved.is_block_number
-                            && resolved.chain_name == *chain_name
-                            && resolved.timestamp == timestamp as i64
-                            && resolved.block_confirmation == marker.block_confirmation as i64
-                    }) else {
+        let mut pins = Vec::with_capacity(requirements.len());
+        let mut requirements = requirements.into_iter();
+        loop {
+            let mut pending = FuturesOrdered::new();
+            for ((chain, height), (required, kind)) in requirements.by_ref().take(4) {
+                let block = &blocks[&(chain, height)];
+                pending.push_back(async move {
+                    let (sufficient, latest) = self.block_confirmation_satisfied_with_quorum(chain, block, required).await?;
+                    if !sufficient {
                         return Err(AppCoreError::BadRequest(format!(
-                            "Missing resolved timestamp time marker for chainName {chain_name} timestamp {timestamp} and blockConfirmation {}", marker.block_confirmation
-                        )));
-                    };
-                }
-                ReadTimeMarker::BlockNumber { block_number } => {
-                    if block_number > i64::MAX as u64 {
-                        return Err(AppCoreError::BadRequest(format!(
-                            "Invalid read command block number for chainName {chain_name}: {block_number}"
+                            "Block confirmation for chainName {chain} for {kind} is greater than current block number: {required} > {latest}"
                         )));
                     }
-                    // Upstream never looks this block up at all; the hash is
-                    // needed so the read cannot drift to a sibling. Pinned
-                    // before the depth check, as timestamp markers are, so the
-                    // depth is measured after the block it vouches for.
-                    let block = self
-                        .block_time_with_quorum(chain_name, block_number as i64)
-                        .await?;
-                    push_read_block_pin(pins, chain_name, &block)?;
-                    let required_block_number = (block_number as i64)
-                        .checked_add(i64::from(marker.block_confirmation))
-                        .ok_or_else(|| {
-                            AppCoreError::BadRequest(
-                                "block confirmation range overflow".to_string(),
-                            )
-                        })?;
-                    let (confirmation_satisfied, latest_block_number) = self
-                        .block_confirmation_satisfied_with_quorum(chain_name, required_block_number)
-                        .await?;
-                    if !confirmation_satisfied {
-                        return Err(AppCoreError::BadRequest(format!(
-                            "Block confirmation for chainName {chain_name} for read command block marker is greater than current block number: {required_block_number} > {latest_block_number}"
-                        )));
-                    }
-                }
+                    Ok::<_, AppCoreError>((chain, block))
+                });
+            }
+            if pending.is_empty() {
+                break;
+            }
+            while let Some((chain, block)) = pending.try_next().await? {
+                push_read_block_pin(&mut pins, chain, block)?;
             }
         }
-        Ok(())
+        Ok(pins)
     }
 
     async fn block_time_with_quorum(
@@ -289,6 +260,7 @@ where
     async fn block_confirmation_satisfied_with_quorum(
         &self,
         chain_name: &str,
+        pinned_block: &BlockTime,
         required_block_number: i64,
     ) -> Result<(bool, i64), AppCoreError> {
         crate::provider_health::rpc_scope(chain_name, async {
@@ -313,10 +285,21 @@ where
                     if !delay.is_zero() {
                         tokio::time::sleep(delay).await;
                     }
-                    let vote = provider_response(
-                        observe_block_time(transport, url, headers, "latest").await,
-                    )
-                    .map(|result| {
+                    let observation = async {
+                        let latest = observe_block_time(
+                            transport.clone(), url.clone(), headers.clone(), "latest",
+                        ).await?;
+                        let canonical = observe_block_time(
+                            transport, url, headers, &format!("0x{:x}", pinned_block.number),
+                        ).await?;
+                        if canonical.block.number != pinned_block.number
+                            || !canonical.block.hash.eq_ignore_ascii_case(&pinned_block.hash)
+                        {
+                            return Err(AppCoreError::Internal("READ confirmation does not extend the pinned block".to_string()));
+                        }
+                        Ok(latest)
+                    }.await;
+                    let vote = provider_response(observation).map(|result| {
                         result.map(|block| {
                             let latest_block_number = block.block.number;
                             let sufficient = latest_block_number >= required_block_number;

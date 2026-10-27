@@ -358,7 +358,7 @@ where
         return Ok(TonStorageRead::Unavailable);
     }
     Ok(
-        match boc_from_base64_with_limits(data, MAX_ACCOUNT_STATE_CELLS, true) {
+        match boc_from_base64_with_limits(data, MAX_ACCOUNT_STATE_CELLS, false) {
             Ok(cell) => TonStorageRead::Cell(data.to_string(), cell),
             Err(_) => TonStorageRead::Unavailable,
         },

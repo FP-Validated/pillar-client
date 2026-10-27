@@ -77,31 +77,31 @@ pub(crate) fn ton_v2_provider_uri_parts(
         .map(|(key, value)| (key.into_owned(), value.into_owned()))
         .collect::<Vec<_>>();
     if let Some((_, api_key)) = query_pairs.iter().find(|(key, _)| key == "api-key") {
-        if !api_key.is_empty() {
-            headers
-                .entry("X-API-Key".to_string())
-                .or_insert_with(|| api_key.clone());
+        if !api_key.is_empty()
+            && !headers
+                .keys()
+                .any(|key| key.eq_ignore_ascii_case("x-api-key"))
+        {
+            headers.insert("X-API-Key".to_string(), api_key.clone());
         }
     }
 
-    let mut endpoint_url = parsed_url;
-    endpoint_url.set_query(None);
-    let endpoint_base = endpoint_url.as_str().trim_end_matches('/').to_string();
-    let request_url = match reqwest::Url::parse(&format!("{endpoint_base}/jsonRPC")) {
-        Ok(mut request_url) => {
-            {
-                let mut query = request_url.query_pairs_mut();
-                for (key, value) in query_pairs
-                    .iter()
-                    .filter(|(key, _)| key.as_str() != "v3-endpoint")
-                {
-                    query.append_pair(key, value);
-                }
-            }
-            request_url.to_string()
-        }
-        Err(_) => format!("{endpoint_base}/jsonRPC"),
+    let mut request_url = parsed_url;
+    let path = request_url.path().trim_end_matches('/');
+    let path = if path.ends_with("/jsonRPC") {
+        path.to_string()
+    } else {
+        format!("{path}/jsonRPC")
     };
+    request_url.set_path(&path);
+    request_url.set_query(None);
+    for (key, value) in query_pairs
+        .iter()
+        .filter(|(key, _)| !matches!(key.as_str(), "v3-endpoint" | "api-key"))
+    {
+        request_url.query_pairs_mut().append_pair(key, value);
+    }
+    let request_url = request_url.to_string();
 
     (report_url, request_url, headers)
 }

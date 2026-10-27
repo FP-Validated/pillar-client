@@ -13,7 +13,7 @@ use crate::types::{
     UlnReadV1PayloadBuilder, UlnV2PayloadBuilder, UlnV3PayloadBuilder, ULN_VERSION_V302,
 };
 
-pub(crate) const SOLANA_ULN_PROGRAM_ID: &str = "7a4WjyR8VZ7yZz5XJAKm39BUGn5iT9CKcv2pmG9tdXVH";
+pub const SOLANA_ULN_PROGRAM_ID: &str = "7a4WjyR8VZ7yZz5XJAKm39BUGn5iT9CKcv2pmG9tdXVH";
 pub(crate) const VERIFY_DISCRIMINATOR: [u8; 8] = [133, 161, 141, 48, 120, 198, 88, 150];
 const PDA_MARKER: &[u8] = b"ProgramDerivedAddress";
 
@@ -264,17 +264,20 @@ pub fn solana_message_library_address(program_id: &str) -> Result<String, AppCor
 }
 
 pub(crate) fn public_key_bytes(value: &str) -> Result<[u8; 32], AppCoreError> {
-    let bytes = bs58::decode(value)
-        .into_vec()
-        .map_err(|error| AppCoreError::Internal(error.to_string()))?;
-    if bytes.len() != 32 {
-        return Err(AppCoreError::Internal(format!(
-            "invalid Solana public key length: {}",
-            bytes.len()
-        )));
+    if !(32..=44).contains(&value.len()) {
+        return Err(AppCoreError::BadRequest(
+            "Invalid Solana public key length".to_string(),
+        ));
     }
     let mut out = [0u8; 32];
-    out.copy_from_slice(&bytes);
+    let length = bs58::decode(value)
+        .onto(&mut out)
+        .map_err(|error| AppCoreError::BadRequest(format!("Invalid Solana public key: {error}")))?;
+    if length != out.len() {
+        return Err(AppCoreError::BadRequest(
+            "Invalid Solana public key length".to_string(),
+        ));
+    }
     Ok(out)
 }
 pub(crate) struct TransactionAccount {
@@ -283,7 +286,7 @@ pub(crate) struct TransactionAccount {
     pub(crate) is_writable: bool,
 }
 
-pub(crate) const SOLANA_ENDPOINT_PROGRAM_ID: &str = "76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6";
+pub const SOLANA_ENDPOINT_PROGRAM_ID: &str = "76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6";
 
 const NONCE_ACCOUNT_DISCRIMINATOR: [u8; 8] = [143, 197, 147, 95, 106, 165, 50, 43];
 const PENDING_INBOUND_NONCE_ACCOUNT_DISCRIMINATOR: [u8; 8] =

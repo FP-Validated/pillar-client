@@ -182,6 +182,94 @@ async fn round1_solana_source_resolver_quorums_only_consumed_projection() {
     );
     assert_eq!(result.unwrap().lz_message_id.nonce, 3826);
 }
+
+#[tokio::test]
+async fn solana_sibling_options_do_not_poison_the_selected_packet() {
+    let original: Value = serde_json::from_str(include_str!(
+        "../../tests/gasolina_parity/source_replay/solana-getTransaction-jsonParsed.response.json"
+    ))
+    .unwrap();
+    for unrelated in [true, false] {
+        let mut response = original.clone();
+        let groups = response
+            .pointer_mut("/result/meta/innerInstructions")
+            .unwrap()
+            .as_array_mut()
+            .unwrap();
+        let (instructions, index, mut bytes) = groups
+            .iter_mut()
+            .find_map(|group| {
+                let instructions = group["instructions"].as_array_mut()?;
+                let found = instructions
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, instruction)| {
+                        let bytes = bs58::decode(instruction["data"].as_str()?)
+                            .into_vec()
+                            .ok()?;
+                        (bytes.get(8..16)
+                            == Some(&[0, 0x5c, 0xa7, 0xc9, 0x8b, 0x2e, 0xab, 0x52][..]))
+                        .then_some((index, bytes))
+                    })?;
+                Some((instructions, found.0, found.1))
+            })
+            .unwrap();
+        let packet_len = u32::from_le_bytes(bytes[16..20].try_into().unwrap()) as usize;
+        let options_at = 20 + packet_len;
+        let options_len =
+            u32::from_le_bytes(bytes[options_at..options_at + 4].try_into().unwrap()) as usize;
+        if unrelated {
+            let nonce = u64::from_be_bytes(bytes[21..29].try_into().unwrap());
+            bytes[21..29].copy_from_slice(&(nonce + 1).to_be_bytes());
+        }
+        // Type-3 options whose lzReceive option has no gas bytes: upstream's decoder throws.
+        bytes.splice(
+            options_at..options_at + 4 + options_len,
+            [6, 0, 0, 0, 0, 3, 1, 0, 1, 1],
+        );
+        let mut malformed = instructions[index].clone();
+        malformed["data"] = Value::from(bs58::encode(bytes).into_string());
+        if unrelated {
+            instructions.insert(index, malformed);
+        } else {
+            instructions[index] = malformed;
+        }
+        let getter = StaticProviderConfig::new(
+            IndexMap::from([(
+                "solana".into(),
+                ProviderConfig::with_distinct_entities(
+                    vec![ProviderUri::Uri("https://solana.example".into())],
+                    1,
+                ),
+            )]),
+            None,
+        )
+        .unwrap();
+        let resolver = EvmPacketSentResolver::new(
+            &ProviderSnapshotHandle::from_getter(&getter),
+            RecordingTransport {
+                calls: Arc::new(Mutex::new(Vec::new())),
+                responses: Arc::new(Mutex::new(vec![Ok(response)])),
+            },
+            runtime_evm_layerzero_config("mainnet", &["solana".into(), "bsc".into()])
+                .unwrap()
+                .packet_sent_resolver_config,
+        );
+        let tx_hash = original
+            .pointer("/result/transaction/signatures/0")
+            .unwrap()
+            .as_str()
+            .unwrap();
+        let result = resolver
+            .get_lz_sent_event(tx_hash, &recorded_solana_request())
+            .await;
+        if unrelated {
+            assert_eq!(result.unwrap().lz_message_id.nonce, 3826);
+        } else {
+            assert!(result.unwrap_err().to_string().contains("options decode"));
+        }
+    }
+}
 fn recorded_ton_events() -> Value {
     serde_json::from_str(include_str!(
         "../../tests/gasolina_parity/source_replay/ton-v3-events.response.json"
@@ -757,6 +845,7 @@ async fn round1_ton_malformed_root_wallet_fails_before_policy_request() {
     let mut sent_event = readiness_sent_event();
     sent_event.lz_message_id.pathway_id.src_chain_name = "ton".to_string();
     sent_event.tx_hash = requested_tx_hash;
+    with_policy_block_identity(&mut sent_event);
     let result = checks
         .validate_extra_context_request(
             &sent_event,
@@ -810,6 +899,7 @@ async fn round1_ton_policy_cannot_switch_to_a_trace_for_another_transaction() {
     let mut sent_event = readiness_sent_event();
     sent_event.lz_message_id.pathway_id.src_chain_name = "ton".to_string();
     sent_event.tx_hash = format!("0x{}", "11".repeat(32));
+    with_policy_block_identity(&mut sent_event);
     let result = checks
         .validate_extra_context_request(
             &sent_event,
@@ -828,6 +918,30 @@ async fn round1_ton_policy_cannot_switch_to_a_trace_for_another_transaction() {
     );
     assert!(result.is_err());
     assert_eq!(calls.lock().unwrap().len(), 1);
+}
+
+/// Passes the M-38 identity gate so the TON principal checks behind it are what refuse.
+fn with_policy_block_identity(sent_event: &mut LzSentEvent) {
+    let pathway = &mut sent_event.lz_message_id.pathway_id.extra;
+    pathway.insert(
+        "sender".to_string(),
+        json!(format!("0x{}", "22".repeat(32))),
+    );
+    pathway.insert(
+        "receiver".to_string(),
+        json!(format!("0x{}", "33".repeat(20))),
+    );
+    sent_event.extra.insert(
+        "onChainTxHash".to_string(),
+        json!(sent_event.tx_hash.clone()),
+    );
+    sent_event.extra.insert(
+        "blockHash".to_string(),
+        json!(format!("0x{}", "ab".repeat(32))),
+    );
+    sent_event
+        .extra
+        .insert("blockNumber".to_string(), json!(96_828_301));
 }
 
 #[test]

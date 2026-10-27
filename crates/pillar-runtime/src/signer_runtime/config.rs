@@ -65,6 +65,13 @@ pub fn runtime_signer_config_from_env_map(
             )
         }
         SignerSdkFactoryType::Kms => {
+            for source in [pillar_config::LZ_WALLETS, LZ_WALLETS_FILE_PATH] {
+                if vars.contains_key(source) {
+                    return Err(format!(
+                        "{source} is unsupported in KMS mode; refusing to discard wallet-to-chain scope",
+                    ));
+                }
+            }
             let wallet_definitions =
                 kms_wallet_definitions_from_env_map(vars, chain_names, chain_type_by_chain_name)
                     .map_err(|error| error.to_string())?;

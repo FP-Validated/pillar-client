@@ -454,9 +454,9 @@ pub(crate) fn canton_transaction_from_update<'a>(
         .ok_or_else(|| AppCoreError::Internal("Canton update transaction has no value".into()))
 }
 
-/// `getFromAddress`: the first truthy `sender` of an exercise's `choiceArgument` or a
-/// create's `createArgument`, else `''`. Stricter than upstream: a truthy sender that is
-/// not a string, and an event wrapper that is not an object, are refused.
+const MAX_CANTON_TRANSACTION_EVENTS: usize = 4096;
+const MAX_CANTON_FINGERPRINT_BYTES: usize = 4 * 1024 * 1024;
+
 pub(crate) fn canton_transaction_sender(transaction: &Value) -> Result<String, AppCoreError> {
     let events = match transaction.get("events") {
         None | Some(Value::Null) => return Ok(String::new()),
@@ -467,14 +467,19 @@ pub(crate) fn canton_transaction_sender(transaction: &Value) -> Result<String, A
             ))
         }
     };
+    if events.len() > MAX_CANTON_TRANSACTION_EVENTS {
+        return Err(AppCoreError::Internal(
+            "Canton transaction event limit exceeded".into(),
+        ));
+    }
     for event in events {
         let event = event.as_object().ok_or_else(|| {
             AppCoreError::Internal("Canton transaction event is not an object".into())
         })?;
-        let (wrapper, argument) = if let Some(exercised) = event.get("ExercisedEvent") {
-            (exercised, "choiceArgument")
+        let (wrapper, argument, authority) = if let Some(exercised) = event.get("ExercisedEvent") {
+            (exercised, "choiceArgument", "actingParties")
         } else if let Some(created) = event.get("CreatedEvent") {
-            (created, "createArgument")
+            (created, "createArgument", "signatories")
         } else {
             continue;
         };
@@ -488,7 +493,24 @@ pub(crate) fn canton_transaction_sender(transaction: &Value) -> Result<String, A
             None | Some(Value::Null) | Some(Value::Bool(false)) => {}
             Some(Value::String(sender)) if sender.is_empty() => {}
             Some(Value::Number(number)) if number.as_f64() == Some(0.0) => {}
-            Some(Value::String(sender)) => return Ok(sender.clone()),
+            Some(Value::String(sender)) => {
+                let parties = wrapper
+                    .get(authority)
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| {
+                        AppCoreError::Internal(
+                            "Canton sender has no authenticated authority".into(),
+                        )
+                    })?;
+                if !parties.iter().all(Value::is_string)
+                    || !parties.iter().any(|party| party.as_str() == Some(sender))
+                {
+                    return Err(AppCoreError::Internal(
+                        "Canton sender is not authorized by its ledger event".into(),
+                    ));
+                }
+                return Ok(sender.clone());
+            }
             Some(_) => {
                 return Err(AppCoreError::Internal(
                     "Canton transaction sender is not a string".into(),
@@ -499,8 +521,8 @@ pub(crate) fn canton_transaction_sender(transaction: &Value) -> Result<String, A
     Ok(String::new())
 }
 
-/// `cantonTransactionQuorumFn` (`multiprovider/src/canton.ts:33-43`).
-pub(crate) fn canton_transaction_fingerprint(transaction: &Value) -> String {
+pub(crate) fn canton_transaction_fingerprint(transaction: &Value) -> Result<String, AppCoreError> {
+    use sha2::{Digest, Sha256};
     let field = |key: &str| match transaction.get(key) {
         None | Some(Value::Null) => "EMPTY".to_string(),
         Some(Value::String(value)) => value.clone(),
@@ -510,35 +532,51 @@ pub(crate) fn canton_transaction_fingerprint(transaction: &Value) -> String {
         Some(Value::Array(events)) => events.as_slice(),
         _ => &[],
     };
-    let event_digests: Vec<String> = events
-        .iter()
-        .map(|event| hash_fields(std::iter::once(sort_keys_deep(event).to_string().as_str())))
-        .collect();
-    let events_digest = hash_fields(event_digests.iter().map(String::as_str));
+    if events.len() > MAX_CANTON_TRANSACTION_EVENTS {
+        return Err(AppCoreError::Internal(
+            "Canton transaction event limit exceeded".into(),
+        ));
+    }
+    struct EventHash {
+        digest: Sha256,
+        remaining: usize,
+    }
+    impl std::io::Write for EventHash {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.remaining = self
+                .remaining
+                .checked_sub(bytes.len())
+                .ok_or_else(|| std::io::Error::other("Canton fingerprint byte limit exceeded"))?;
+            self.digest.update(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut writer = EventHash {
+        digest: Sha256::new(),
+        remaining: MAX_CANTON_FINGERPRINT_BYTES,
+    };
+    let mut events_hash = Sha256::new();
+    for (index, event) in events.iter().enumerate() {
+        serde_json::to_writer(&mut writer, event)
+            .map_err(|error| AppCoreError::Internal(error.to_string()))?;
+        let event_hash = hex::encode(writer.digest.finalize_reset());
+        let event_digest = hex::encode(Sha256::digest(event_hash.as_bytes()));
+        if index != 0 {
+            events_hash.update(b"|");
+        }
+        events_hash.update(hex::encode(Sha256::digest(event_digest.as_bytes())));
+    }
+    let events_digest = hex::encode(events_hash.finalize());
     let fields = [
         field("updateId"),
         field("offset"),
         field("recordTime"),
         events_digest,
     ];
-    hash_fields(fields.iter().map(String::as_str))
-}
-
-/// `sortKeysDeep` (`common-utils/src/encoding.ts:171-180`).
-fn sort_keys_deep(value: &Value) -> Value {
-    match value {
-        Value::Array(items) => Value::Array(items.iter().map(sort_keys_deep).collect()),
-        Value::Object(object) => {
-            let mut keys: Vec<&String> = object.keys().collect();
-            keys.sort();
-            Value::Object(
-                keys.into_iter()
-                    .map(|key| (key.clone(), sort_keys_deep(&object[key])))
-                    .collect(),
-            )
-        }
-        other => other.clone(),
-    }
+    Ok(hash_fields(fields.iter().map(String::as_str)))
 }
 
 async fn observe_canton_transaction_from<T>(
@@ -571,7 +609,7 @@ where
     let transaction = canton_transaction_from_update(&response, &update_id)?;
     Ok(TransactionFromObservation {
         from: canton_transaction_sender(transaction)?,
-        fingerprint: canton_transaction_fingerprint(transaction),
+        fingerprint: canton_transaction_fingerprint(transaction)?,
     })
 }
 

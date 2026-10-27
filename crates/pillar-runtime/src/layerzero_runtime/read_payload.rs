@@ -243,6 +243,9 @@ where
             if let Some(result) = accumulator.unambiguous_result() {
                 return read_observation_result(result);
             }
+            if !accumulator.can_reach_quorum() {
+                break;
+            }
         }
         read_observation_result(accumulator.finish("ReadV1002 eth_call")?)
         })

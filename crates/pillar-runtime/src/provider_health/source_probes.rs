@@ -295,22 +295,48 @@ where
     }
 }
 
+tokio::task_local! { static PROBE_SHARE: usize; }
+
+pub(super) fn background_probe_capacity() -> Option<usize> {
+    pillar_core::execution::current()
+        .and_then(|context| context.resources)
+        .and_then(|resources| resources.rpc.lane_capacity("background"))
+}
+
+pub(super) async fn with_probe_share<F: Future>(share: Option<usize>, future: F) -> F::Output {
+    match share {
+        Some(share) => PROBE_SHARE.scope(share, future).await,
+        None => future.await,
+    }
+}
+
 async fn collect_health_probes<I, F>(probes: I) -> Result<Vec<ProviderHealthEntry>, RpcError>
 where
     I: IntoIterator<Item = F> + Send,
     I::IntoIter: Send,
     F: Future<Output = Result<ProviderHealthEntry, RpcError>> + Send,
 {
-    let capacity = pillar_core::execution::current()
-        .and_then(|context| context.resources)
-        .and_then(|resources| resources.rpc.lane_capacity("background"));
-    match capacity {
-        Some(capacity) => {
-            futures::stream::iter(probes)
-                .buffered(capacity)
-                .try_collect()
-                .await
-        }
-        None => futures::future::try_join_all(probes).await,
-    }
+    let share = PROBE_SHARE
+        .try_with(|share| *share)
+        .ok()
+        .or_else(background_probe_capacity)
+        .unwrap_or(usize::MAX);
+    let probes = probes
+        .into_iter()
+        .enumerate()
+        .map(|(index, probe)| indexed_probe(index, probe))
+        .collect::<Vec<_>>();
+    let mut entries = futures::stream::iter(probes)
+        .buffer_unordered(share)
+        .try_collect::<Vec<_>>()
+        .await?;
+    entries.sort_unstable_by_key(|(index, _)| *index);
+    Ok(entries.into_iter().map(|(_, entry)| entry).collect())
+}
+
+async fn indexed_probe<F>(index: usize, probe: F) -> Result<(usize, ProviderHealthEntry), RpcError>
+where
+    F: Future<Output = Result<ProviderHealthEntry, RpcError>>,
+{
+    probe.await.map(|entry| (index, entry))
 }

@@ -57,13 +57,13 @@ pub use other_non_evm::{
     canton_key_fingerprint, canton_party_namespace, committable_view_is_signed,
     decode_proxy_admin_target, decode_ton_relayer_options, derive_uln_addresses, dvn_attestation,
     effective_receive_confirmations, required_receive_confirmations,
-    stellar_contract_id_from_strkey, ton_address_to_be32, ton_boc_from_hex, ton_boc_to_base64,
-    ton_payload_signed_targets, ton_state_init_address, uln_default_receive_config,
-    CantonUlnPayloadBuilder, CantonVerifyDigestInput, DerivedAddresses, DvnAttestation,
-    StarknetUlnPayloadBuilder, StellarUlnPayloadBuilder, TonContractCodeCells, TonDvnVerifyOutput,
-    TonDvnVerifyRequest, TonPathway, TonPayloadSignedRequest, TonPayloadSignedTargets,
-    TonStorageCell, TonUlnPayloadBuilder, LIVE_TON_PACKET_BOC, MAX_ACCOUNT_STATE_CELLS,
-    MAX_MESSAGE_CELLS,
+    stellar_account_id_from_strkey, stellar_contract_id_from_strkey, ton_address_to_be32,
+    ton_boc_from_hex, ton_boc_to_base64, ton_payload_signed_targets, ton_state_init_address,
+    uln_default_receive_config, CantonUlnPayloadBuilder, CantonVerifyDigestInput, DerivedAddresses,
+    DvnAttestation, StarknetUlnPayloadBuilder, StellarUlnPayloadBuilder, TonContractCodeCells,
+    TonDvnVerifyOutput, TonDvnVerifyRequest, TonPathway, TonPayloadSignedRequest,
+    TonPayloadSignedTargets, TonStorageCell, TonUlnPayloadBuilder, LIVE_TON_PACKET_BOC,
+    MAX_ACCOUNT_STATE_CELLS, MAX_MESSAGE_CELLS,
 };
 pub use packet::{
     build_evm_feather_proof, build_evm_lz_v1_packet_payload_v2,
@@ -82,7 +82,8 @@ pub use router::DestinationUlnPayloadBuilderRouter;
 pub use solana::{
     solana_message_library_address, solana_payload_is_signed, solana_payload_signed_accounts,
     solana_payload_signed_request, SolanaFetchedPayloadSignedAccounts, SolanaPayloadSignedAccounts,
-    SolanaPayloadSignedRequest, SolanaUlnPayloadBuilder,
+    SolanaPayloadSignedRequest, SolanaUlnPayloadBuilder, SOLANA_ENDPOINT_PROGRAM_ID,
+    SOLANA_ULN_PROGRAM_ID,
 };
 pub use sui::{SuiReceiveContracts, SuiUlnPayloadBuilder};
 pub use sui_bcs::{

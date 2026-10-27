@@ -117,7 +117,7 @@ async fn provider_ordering_preserves_solana_primary_then_fallback_visibility() {
     let mut urls: Vec<_> = report["solana"]
         .providers
         .iter()
-        .map(|entry| entry.url.as_str())
+        .map(|entry| entry.rank_key.as_str())
         .collect();
     urls.sort_unstable();
     assert_eq!(

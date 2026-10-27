@@ -20,11 +20,7 @@ pub(super) fn readiness_sent_event() -> LzSentEvent {
 }
 
 pub(super) fn latest_block(number: &str) -> Value {
-    json!({
-        "result": {
-            "number": number
-        }
-    })
+    json!({"result": number})
 }
 
 fn solana_readiness_sent_event() -> LzSentEvent {
@@ -291,8 +287,6 @@ async fn runtime_rpc_validation_checks_validates_message_readiness_with_quorum()
     assert_eq!(calls[0].1["x-api-key"], "a");
     assert_eq!(calls[0].2["method"], "eth_getTransactionReceipt");
     assert_eq!(calls[0].2["params"], json!(["0xtx"]));
-    assert_eq!(calls[1].2["method"], "eth_getBlockByNumber");
-    assert_eq!(calls[1].2["params"], json!(["latest", false]));
 }
 
 fn bound_receipt(block_hash: &str, block_number: &str, status: &str, log_index: &str) -> Value {
@@ -674,13 +668,13 @@ impl JsonRpcTransport for UrlMappedReadinessTransport {
             ("https://eth-a.example" | "https://eth-b.example", "eth_getTransactionReceipt") => {
                 Ok(bound_receipt("0xaaa", "0x64", "0x1", "0x0"))
             }
-            ("https://eth-a.example" | "https://eth-b.example", "eth_getBlockByNumber") => {
+            ("https://eth-a.example" | "https://eth-b.example", "eth_blockNumber") => {
                 Ok(latest_block("0x67"))
             }
             ("https://eth-c.example" | "https://eth-d.example", "eth_getTransactionReceipt") => {
                 Err("timeout".to_string())
             }
-            ("https://eth-c.example" | "https://eth-d.example", "eth_getBlockByNumber") => {
+            ("https://eth-c.example" | "https://eth-d.example", "eth_blockNumber") => {
                 Ok(latest_block("0x67"))
             }
             _ => Err(format!("unexpected request {url} {method}")),

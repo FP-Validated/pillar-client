@@ -130,31 +130,41 @@ where
         let snapshot = self.providers.load();
         let generation = snapshot.generation();
         let probe_started_at_unix_ms = (self.now_unix_ms)();
+        let chains = snapshot.provider_configs().len().max(1);
+        let capacity = super::source_probes::background_probe_capacity();
+        let concurrent = capacity.map_or(chains, |capacity| capacity.clamp(1, chains));
+        // Each running chain owns a fixed share, so a stalled pool cannot wait out another chain's admission.
+        let share = capacity.map(|capacity| (capacity / concurrent).max(1));
         let requests = snapshot
             .provider_configs()
             .iter()
             .map(|(chain_name, config)| async move {
                 let checked_at_unix_ms = (self.now_unix_ms)();
-                let providers = crate::provider_health::rpc_scope(chain_name, async {
-                    match self.chain_type_for_provider_health(chain_name) {
-                        "EVM" => self.probe_evm_provider_health(chain_name, config).await,
-                        "APTOS" => self.probe_aptos_provider_health(chain_name, config).await,
-                        "SOLANA" => self.probe_solana_provider_health(chain_name, config).await,
-                        "SUI" | "IOTAMOVE" => {
-                            self.probe_sui_provider_health(chain_name, config).await
+                let providers = crate::provider_health::rpc_scope(
+                    chain_name,
+                    super::source_probes::with_probe_share(share, async {
+                        match self.chain_type_for_provider_health(chain_name) {
+                            "EVM" => self.probe_evm_provider_health(chain_name, config).await,
+                            "APTOS" => self.probe_aptos_provider_health(chain_name, config).await,
+                            "SOLANA" => self.probe_solana_provider_health(chain_name, config).await,
+                            "SUI" | "IOTAMOVE" => {
+                                self.probe_sui_provider_health(chain_name, config).await
+                            }
+                            "STARKNET" => {
+                                self.probe_starknet_provider_health(chain_name, config)
+                                    .await
+                            }
+                            "STELLAR" => {
+                                self.probe_stellar_provider_health(chain_name, config).await
+                            }
+                            "TON" => self.probe_ton_provider_health(chain_name, config).await,
+                            "INITIA" => self.probe_initia_provider_health(chain_name, config).await,
+                            "TRON" => self.probe_tron_provider_health(chain_name, config).await,
+                            "CANTON" => self.probe_canton_provider_health(chain_name, config).await,
+                            _ => Ok(non_evm_provider_health_entries(chain_name, config)),
                         }
-                        "STARKNET" => {
-                            self.probe_starknet_provider_health(chain_name, config)
-                                .await
-                        }
-                        "STELLAR" => self.probe_stellar_provider_health(chain_name, config).await,
-                        "TON" => self.probe_ton_provider_health(chain_name, config).await,
-                        "INITIA" => self.probe_initia_provider_health(chain_name, config).await,
-                        "TRON" => self.probe_tron_provider_health(chain_name, config).await,
-                        "CANTON" => self.probe_canton_provider_health(chain_name, config).await,
-                        _ => Ok(non_evm_provider_health_entries(chain_name, config)),
-                    }
-                })
+                    }),
+                )
                 .await?;
                 let primary_count = providers.iter().filter(|entry| !entry.diagnostic).count();
                 let observed = primary_count > 0
@@ -203,12 +213,7 @@ where
             })
             .collect::<Vec<_>>();
         let report: ProviderHealthReport = futures::stream::iter(requests)
-            .buffered(
-                pillar_core::execution::current()
-                    .and_then(|context| context.resources)
-                    .and_then(|resources| resources.rpc.lane_capacity("background"))
-                    .unwrap_or(snapshot.provider_configs().len().max(1)),
-            )
+            .buffer_unordered(concurrent)
             .try_collect::<Vec<_>>()
             .await?
             .into_iter()

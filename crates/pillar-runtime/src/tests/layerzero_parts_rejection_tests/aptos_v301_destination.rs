@@ -431,7 +431,7 @@ async fn sign_v301_to_aptos(environment: &str, dvn: Option<&str>, state: AptosSt
         if url.starts_with(&src_rpc) {
             return match body["method"].as_str()? {
                 "eth_getTransactionReceipt" => Some(Ok(json!({ "result": receipt }))),
-                "eth_getBlockByNumber" => {
+                "eth_blockNumber" => {
                     let provider_index = url
                         .rsplit('/')
                         .next()
@@ -446,7 +446,7 @@ async fn sign_v301_to_aptos(environment: &str, dvn: Option<&str>, state: AptosSt
                             .copied()
                             .unwrap_or(state.source_head)
                     };
-                    Some(Ok(json!({ "result": { "number": format!("0x{head:x}") } })))
+                    Some(Ok(json!({ "result": format!("0x{head:x}") })))
                 }
                 _ => None,
             };

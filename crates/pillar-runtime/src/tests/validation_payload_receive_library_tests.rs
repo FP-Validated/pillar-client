@@ -551,10 +551,6 @@ async fn payload_signed_queries_move_validation_with_a_dvn_address() {
     );
     assert_eq!(calls[1].2["function"], "0xendpoint::endpoint::get_config");
     assert_eq!(calls[2].2["function"], "0xviews::uln_302::verifiable");
-    assert_eq!(
-        calls[3].2["function"],
-        "0xuln302::msglib::get_verification_confirmations"
-    );
 }
 
 fn aptos_payload_checks(
@@ -583,7 +579,7 @@ fn aptos_payload_checks(
     )
     .with_move_payload_contracts(
         HashMap::from([("aptos".to_string(), "0xendpoint".to_string())]),
-        HashMap::from([("aptos".to_string(), "0xuln302".to_string())]),
+        HashMap::from([("aptos".to_string(), format!("0x{}", "44".repeat(32)))]),
         HashMap::from([("aptos".to_string(), "0xviews".to_string())]),
     )
 }

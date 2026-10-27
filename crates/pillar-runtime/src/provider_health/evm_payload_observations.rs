@@ -411,6 +411,7 @@ where
                 "params": [{
                     "to": to,
                     "data": data,
+                    "gas": "0xf4240",
                 }, block],
                 "id": 1,
                 "jsonrpc": "2.0",

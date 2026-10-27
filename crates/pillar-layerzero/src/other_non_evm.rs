@@ -8,7 +8,9 @@ pub use canton::{
     canton_party_namespace, CantonUlnPayloadBuilder, CantonVerifyDigestInput,
 };
 pub use starknet::StarknetUlnPayloadBuilder;
-pub use stellar::{stellar_contract_id_from_strkey, StellarUlnPayloadBuilder};
+pub use stellar::{
+    stellar_account_id_from_strkey, stellar_contract_id_from_strkey, StellarUlnPayloadBuilder,
+};
 pub use ton::{
     boc_from_base64, boc_from_base64_with_limits, boc_from_bytes, boc_from_bytes_with_limits,
     build_ton_dvn_verify, committable_view_is_signed, decode_proxy_admin_target,

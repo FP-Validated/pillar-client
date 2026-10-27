@@ -37,10 +37,6 @@ async fn provider_health_probes_stellar_latest_ledger_like_typescript() {
 
     assert!(report["stellar"].healthy);
     assert_eq!(report["stellar"].checked_at_unix_ms, 5555);
-    assert_eq!(
-        report["stellar"].providers[0].url,
-        "https://stellar-rpc.example"
-    );
     assert_eq!(report["stellar"].providers[0].response, Value::from(112233));
     assert_eq!(
         report["stellar"].providers[0].numeric_response,
@@ -53,7 +49,8 @@ async fn provider_health_probes_stellar_latest_ledger_like_typescript() {
         Some(&"Bearer stellar-token".to_string())
     );
     assert_eq!(calls[0].2["method"], "getLatestLedger");
-    assert_eq!(calls[0].2["params"], json!({}));
+    // Older Stellar RPC releases refuse any `params` on a parameterless method (M-82).
+    assert!(calls[0].2.get("params").is_none(), "{}", calls[0].2);
 }
 
 #[tokio::test]
@@ -127,10 +124,7 @@ async fn provider_health_probes_solana_confirmed_slot_like_typescript() {
 
     assert!(report["solana"].healthy);
     assert_eq!(report["solana"].checked_at_unix_ms, 2222);
-    assert_eq!(
-        report["solana"].providers[0].url,
-        "https://solana-rpc.example"
-    );
+    assert_eq!(report["solana"].providers[0].url, "https://<redacted>");
     assert_eq!(
         report["solana"].providers[0].response,
         Value::from(987654321)
