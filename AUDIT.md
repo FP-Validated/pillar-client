@@ -981,3 +981,66 @@ job passed on the PR, main and tag runs. Live providers were not exercised by th
   `408` after 2.1 s on one Pod. No signing request was sent.
 - Rollback is a narrow revert of the image commit followed by the same Deployment-only
   sync, back to `sha256:d4733afe62e39a73c8eb2e01d2a08ced1f0770e036ae80ce6a6fc79931b7a86c`.
+
+## 25. M-89 to M-95 remediation and 2.7.4 rollout — 2026-10-29
+
+The report's seven open findings were checked against `1c44815` (2.7.3) and all were
+present; I-01 was already refused and needed no change. The fixes are PR #8
+(`574ce42`), released as `v2.7.4` (PR #9, `0369145`). The per-finding response is
+[m89-m95-response.md](audit/m89-m95-response.md).
+
+### Verification
+
+| Check | Observed result |
+| --- | --- |
+| `cargo +1.98.1 fmt --all --check`, `clippy --workspace --all-targets --locked -- -D warnings` | Passed |
+| `cargo +1.94.1 check --workspace --locked --all-targets` | Passed |
+| `tests::m89_m95_remediation_e2e` (one test, every scenario) | 1 passed, 32.18 s; the first run failed on a child-output parsing bug in the test itself and the whole test was rerun |
+| Hosted CI on PR #8 | The first run failed on one existing test that pinned the old Solana behaviour (`solana_v1_tests`); after the fix all six jobs passed |
+| Hosted CI on PR #9, main and tag `v2.7.4` | All six jobs passed |
+
+### Published image and mainnet rollout
+
+- Source `0369145a7fdc217a748ad0c6360a653eee53204e` is tagged `v2.7.4`. Tag CI
+  [40805002429](https://github.com/FP-Validated/pillar-client/actions/runs/40805002429)
+  passed all six jobs. The attested tar (SHA-256
+  `67d20f1d42d3461e336ad0e7d04072e6396bb7358f2f8bae1abc61f35461c289`) was pushed without
+  rebuilding; `gh attestation verify` passes against the release's Sigstore bundle. The tar,
+  checksum, bundle and CI diagnostics are attached to the
+  [release](https://github.com/FP-Validated/pillar-client/releases/tag/v2.7.4).
+- Published image:
+  `ghcr.io/fp-validated/pillar-dvn-client:ci-0369145a7fdc-r40805002429-a1@sha256:7bcddb3b941cc759a5f15848e08827655b62916b02bed477ae939ecf913b0002`.
+  The remote config SHA-256 equals CI image ID
+  `1e3ce3a18efa0dc438bda1ebbaf2fda9c39ccfc69ab08ecf2adf84a7c2d73129`; revision, `v2.7.4`
+  label and `linux/amd64` platform match.
+- An isolated, non-serving Pod of the digest, built from the live Deployment's spec, started
+  with the production signer configuration and zero restarts; its Ethereum and Solana signer
+  info and `/available-chains` equal production's. Its labels are outside the
+  `pillar-dvn-client-mainnet` NetworkPolicy's selector, so it could not reach providers and
+  its `/ready` stayed 503: provider health was not compared there. It was removed after the
+  check.
+- Private GitOps commit `c180bbb` (PR #71, merged without admin override; that repository's
+  `validate` check did not start because of a GitHub billing failure) changes only the image
+  tag, `PILLAR_IMAGE_VERSION` and the config-revision annotation. Only the Deployment was
+  synced, without pruning, by the operator: the Argo control plane (`aks-cluster`,
+  namespace `argocd`) is not reachable from the machine that ran the rollout. Helm-rendering
+  the chart at `c180bbb` with the values file and `kubectl diff` against the live namespace
+  shows no difference for any resource except a NetworkPolicy `generation` bump the dry-run
+  itself causes.
+- The rolling update completed (revision 24, `maxSurge 1`, `maxUnavailable 0`): all three
+  Pods Ready on the new digest, zero restarts, no ERROR-level log lines. `/`, `/ready`,
+  `/version`, `/available-chains`, `/provider-health` and `/signer-info` (Ethereum, Solana)
+  returned 200 through the Service; version is `v2.7.4`, every response except
+  `/version` equals the pre-rollout capture (`/provider-health` differs only in key order,
+  30 chains, no per-chain difference), and the Ethereum address and public key match:
+  `0x06bb41FE76F41429f55aC8C355ac8669769A1ba1`.
+- Two production requests were sent to a Pod through a port-forward without producing a
+  signature. A real Solana→BSC message (`srcTxHash` `5QzP7mB1…`, nonce 23676) and a real
+  Optimism→Ethereum message each resolved through the production providers and, with a
+  correct `messageHash` and `blockConfirmation` of 1,000,000,000, were refused at readiness
+  with `block confirmations not met, current block confirmation: 337` and `: 66`. The Solana
+  case passes the new slot comparison before that refusal; the EVM case runs the changed
+  quorum key. READ, Stellar, the MPT re-read and the loopback proxy paths were exercised only
+  by the E2E test: reaching them in production means a request that signs.
+- Rollback is a narrow revert of `c180bbb` followed by the same Deployment-only sync, back to
+  `sha256:4c482d28ead3ecd752b4fc078aadf7a6e3a8c6c93215d84fbf59503117147d24`.
