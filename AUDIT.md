@@ -1040,7 +1040,23 @@ present; I-01 was already refused and needed no change. The fixes are PR #8
   correct `messageHash` and `blockConfirmation` of 1,000,000,000, were refused at readiness
   with `block confirmations not met, current block confirmation: 337` and `: 66`. The Solana
   case passes the new slot comparison before that refusal; the EVM case runs the changed
-  quorum key. READ, Stellar, the MPT re-read and the loopback proxy paths were exercised only
-  by the E2E test: reaching them in production means a request that signs.
+  quorum key.
+- Which findings this deployment can meet. Its `LAYERZERO_AVAILABLE_CHAIN_NAMES` has no
+  `stellar`, so M-90 cannot occur here; `PROVIDER_CONFIG_TYPE` is `LOCAL`, so the remote
+  refresh behind M-92 does not run; the Pod environment and both mounted Secrets carry no
+  proxy variable and the providers are internal HTTP endpoints, so M-94 has nothing to
+  intercept. M-91 and M-95 need READ traffic: none of the latest 2,000 messages on
+  LayerZero Scan (several hours) was a READ message.
+- M-90 against the real Stellar mainnet contracts, without Pillar: `inbound_nonce` and
+  `inbound_payload_hash` simulate successfully on the mainnet EndpointV2
+  (`CCQLLRE5…ZGK`) with the encoding the fixture was generated from, and return `u64` and
+  `Option<BytesN<32>>`. For six delivered packets `uln_verifiable` answers `Verified` and
+  the new rule agrees the packet is done. For one real path (`inbound_nonce` 70) with an
+  unused payload hash, nonces 71, 72 and 326 (`inbound_nonce` + 1, 2, 256) answer
+  `Verifying`, and 327 and 370 (+257, +300) answer `Verified` with nothing stored: the
+  reported false positive, which the new rule does not treat as signed.
+- Only the E2E test exercises READ (M-91, M-95), the ULNv2 MPT re-read and the loopback
+  proxy bypass: reaching them in production or on mainnet means a request that signs, or a
+  READ send that does not currently exist on the network.
 - Rollback is a narrow revert of `c180bbb` followed by the same Deployment-only sync, back to
   `sha256:4c482d28ead3ecd752b4fc078aadf7a6e3a8c6c93215d84fbf59503117147d24`.
