@@ -126,3 +126,18 @@ both HTTP paths, a host name still proxied), and M-95 (a splicing provider). Run
 tree: 1 passed, 32.18 s. The PR's CI (all six jobs) ran the rest of the workspace suite. One
 existing test pinned the old Solana behaviour and was changed; the READ and timestamp fixtures
 gained parent hashes.
+
+### Against live systems
+
+Version `v2.7.4` runs on the `layerzero-mainnet` Deployment (see `AUDIT.md` §25). Two
+production requests, without a signature, resolved a real Solana→BSC and a real
+Optimism→Ethereum message and were refused at readiness (M-89's slot comparison passed; M-93's
+quorum key ran). M-90 was checked against the real Stellar mainnet contracts: the two new
+endpoint reads succeed, six delivered packets are still refused as already signed, and a nonce
+257 past `inbound_nonce` with nothing stored answers `Verified` in `uln_verifiable` yet is no
+longer treated as signed.
+
+Not observed live: READ (M-91, M-95), the ULNv2 MPT re-read and the loopback bypass, which
+only the end-to-end test exercises. The production deployment has no Stellar chain (M-90), no
+remote provider refresh (M-92) and no proxy variable (M-94), so it cannot meet those three; no
+READ message appeared in the latest 2,000 on LayerZero Scan.
