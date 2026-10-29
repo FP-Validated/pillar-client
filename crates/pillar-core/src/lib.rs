@@ -281,10 +281,17 @@ pub struct StarknetSourceEvidence {
     pub event: Value,
 }
 
+/// The slot the Solana transaction was finalized in when the packet was resolved.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SolanaSourceEvidence {
+    pub slot: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum SourceEvidence {
     Evm(EvmSourceEvidence),
     Starknet(StarknetSourceEvidence),
+    Solana(SolanaSourceEvidence),
 }
 
 /// The block a READ time marker was validated against, agreed on by provider

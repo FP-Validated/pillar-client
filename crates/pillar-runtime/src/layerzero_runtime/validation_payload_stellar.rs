@@ -42,6 +42,7 @@ impl StellarAddress {
 enum ScArg<'a> {
     Address(StellarAddress),
     U32(u32),
+    U64(u64),
     Bytes(&'a [u8]),
 }
 
@@ -145,6 +146,10 @@ fn invoke_contract_envelope(contract: &[u8; 32], function: &str, args: &[ScArg<'
             ScArg::U32(value) => {
                 xdr_i32(&mut out, SCV_U32);
                 xdr_u32(&mut out, *value);
+            }
+            ScArg::U64(value) => {
+                xdr_i32(&mut out, SCV_U64);
+                out.extend_from_slice(&value.to_be_bytes());
             }
             ScArg::Bytes(bytes) => {
                 xdr_i32(&mut out, SCV_BYTES);
@@ -475,15 +480,92 @@ where
             }
         }
     };
-    Ok(StellarPayloadOutcome::Validity(
-        if verified || dvn_confirmed {
-            PayloadSignedValidity::Signed
+    let signed = if dvn_confirmed {
+        true
+    } else if verified {
+        match packet_is_committed(&transport, &url, &headers, &endpoint, &query).await? {
+            Committed::Yes => true,
+            Committed::No => false,
+            Committed::Failed(error) => return Ok(simulation_failed(&error)),
+        }
+    } else {
+        false
+    };
+    Ok(StellarPayloadOutcome::Validity(if signed {
+        PayloadSignedValidity::Signed
+    } else {
+        PayloadSignedValidity::NotSigned {
+            required: Some(required),
+        }
+    }))
+}
+
+enum Committed {
+    Yes,
+    No,
+    Failed(String),
+}
+
+/// `uln_verifiable` answers `Verified` whenever the endpoint will not take a new verify for the
+/// packet, which includes a nonce more than 256 past `inbound_nonce` that nothing has verified
+/// (`LayerZeroView.__endpoint_verifiable`, `EndpointV2.verifiable`). Only a nonce already
+/// consumed or this payload's hash already stored means the packet is done.
+async fn packet_is_committed<T>(
+    transport: &T,
+    url: &str,
+    headers: &HashMap<String, String>,
+    endpoint: &[u8; 32],
+    query: &StellarPayloadQuery<'_>,
+) -> Result<Committed, RpcError>
+where
+    T: JsonRpcTransport,
+{
+    // PacketV1 header: version(1) nonce(8) srcEid(4) sender(32) dstEid(4) receiver(32).
+    let header: &[u8; 81] = query
+        .packet_header
+        .try_into()
+        .map_err(|_| RpcError::Unavailable)?;
+    let nonce = u64::from_be_bytes(header[1..9].try_into().expect("8 bytes"));
+    let sender = &header[13..45];
+    let channel = [
+        ScArg::Address(query.receiver),
+        ScArg::U32(query.src_eid),
+        ScArg::Bytes(sender),
+    ];
+    let inbound_nonce =
+        match simulate(transport, url, headers, endpoint, "inbound_nonce", &channel).await? {
+            Simulated::Value(ScValue::U64(inbound_nonce)) => inbound_nonce,
+            Simulated::Value(_) => return Err(RpcError::Unavailable),
+            Simulated::Failed(error) => return Ok(Committed::Failed(error)),
+        };
+    if nonce <= inbound_nonce {
+        return Ok(Committed::Yes);
+    }
+    let stored = [
+        ScArg::Address(query.receiver),
+        ScArg::U32(query.src_eid),
+        ScArg::Bytes(sender),
+        ScArg::U64(nonce),
+    ];
+    match simulate(
+        transport,
+        url,
+        headers,
+        endpoint,
+        "inbound_payload_hash",
+        &stored,
+    )
+    .await?
+    {
+        Simulated::Value(ScValue::Void) => Ok(Committed::No),
+        Simulated::Value(ScValue::Bytes(hash)) => Ok(if hash == query.payload_hash {
+            Committed::Yes
         } else {
-            PayloadSignedValidity::NotSigned {
-                required: Some(required),
-            }
-        },
-    ))
+            Committed::No
+        }),
+        Simulated::Value(_) => Err(RpcError::Unavailable),
+        Simulated::Failed(error) => Ok(Committed::Failed(error)),
+    }
 }
 
 impl<T> RuntimeRpcValidationChecks<T>

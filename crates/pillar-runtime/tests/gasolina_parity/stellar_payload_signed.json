@@ -26,7 +26,9 @@
   "is_valid_receive_library": "AAAAAaC1xJ1IQWwK21Ts5FlsKOjlRdCuWyAuDDOldttkjR1pAAAAGGlzX3ZhbGlkX3JlY2VpdmVfbGlicmFyeQAAAAMAAAASAAAAARERERERERERERERERERERERERERERERERERERERERERAAAAAwAAdZUAAAASAAAAATMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMz",
   "effective_receive_uln_config": "AAAAAavDkQjdBe7M9jSizQ6oSsPjy9hlDjnM9CCvqJ5v6UGjAAAAHGVmZmVjdGl2ZV9yZWNlaXZlX3Vsbl9jb25maWcAAAACAAAAEgAAAAEREREREREREREREREREREREREREREREREREREREREREQAAAAMAAHWV",
   "confirmations": "AAAAAavDkQjdBe7M9jSizQ6oSsPjy9hlDjnM9CCvqJ5v6UGjAAAADWNvbmZpcm1hdGlvbnMAAAAAAAADAAAAEgAAAAEiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIgAAAA0AAAAg9R2I91J3jSP2vK5oydNuEWq113N9YUzM6gy1UggP590AAAANAAAAIIcgWEoPCRP8iwkv+4vN/LCW3Gvd3g/nlAS3gB4GJt0J",
-  "uln_verifiable": "AAAAAUR/XWIFcaU+xk4HjgJjOxImrRJDVB6kDjvAC+brmFlOAAAADnVsbl92ZXJpZmlhYmxlAAAAAAACAAAADQAAAFEBAAAAAAAAAAcAAHWVqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqoAAHeIEREREREREREREREREREREREREREREREREREREREREREAAAAAAAANAAAAIIcgWEoPCRP8iwkv+4vN/LCW3Gvd3g/nlAS3gB4GJt0J"
+  "uln_verifiable": "AAAAAUR/XWIFcaU+xk4HjgJjOxImrRJDVB6kDjvAC+brmFlOAAAADnVsbl92ZXJpZmlhYmxlAAAAAAACAAAADQAAAFEBAAAAAAAAAAcAAHWVqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqoAAHeIEREREREREREREREREREREREREREREREREREREREREREAAAAAAAANAAAAIIcgWEoPCRP8iwkv+4vN/LCW3Gvd3g/nlAS3gB4GJt0J",
+  "inbound_nonce": "AAAAAaC1xJ1IQWwK21Ts5FlsKOjlRdCuWyAuDDOldttkjR1pAAAADWluYm91bmRfbm9uY2UAAAAAAAADAAAAEgAAAAEREREREREREREREREREREREREREREREREREREREREREQAAAAMAAHWVAAAADQAAACCqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqg==",
+  "inbound_payload_hash": "AAAAAaC1xJ1IQWwK21Ts5FlsKOjlRdCuWyAuDDOldttkjR1pAAAAFGluYm91bmRfcGF5bG9hZF9oYXNoAAAABAAAABIAAAABEREREREREREREREREREREREREREREREREREREREREREAAAADAAB1lQAAAA0AAAAgqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqoAAAAFAAAAAAAAAAc="
  },
  "returns": {
   "defaultLibrary": {
@@ -85,6 +87,98 @@
    "native": [
     "Verified"
    ]
+  },
+  "inboundNonce6": {
+   "xdr": "AAAABQAAAAAAAAAG",
+   "native": "6"
+  },
+  "inboundNonce7": {
+   "xdr": "AAAABQAAAAAAAAAH",
+   "native": "7"
+  },
+  "noStoredHash": {
+   "xdr": "AAAAAQ==",
+   "native": null
+  },
+  "storedPayloadHash": {
+   "xdr": "AAAADQAAACCHIFhKDwkT/IsJL/uLzfywltxr3d4P55QEt4AeBibdCQ==",
+   "native": {
+    "type": "Buffer",
+    "data": [
+     135,
+     32,
+     88,
+     74,
+     15,
+     9,
+     19,
+     252,
+     139,
+     9,
+     47,
+     251,
+     139,
+     205,
+     252,
+     176,
+     150,
+     220,
+     107,
+     221,
+     222,
+     15,
+     231,
+     148,
+     4,
+     183,
+     128,
+     30,
+     6,
+     38,
+     221,
+     9
+    ]
+   }
+  },
+  "otherStoredHash": {
+   "xdr": "AAAADQAAACCZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmQ==",
+   "native": {
+    "type": "Buffer",
+    "data": [
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153,
+     153
+    ]
+   }
   }
  },
  "overrideLibraryStrkey": "CAZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGMZTGGJH"

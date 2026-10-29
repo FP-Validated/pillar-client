@@ -565,6 +565,9 @@ impl AwsLambdaInvokeClient for AwsSdkLambdaInvokeClient {
 #[derive(Clone, Debug)]
 pub struct ReqwestJsonRpcTransport {
     client: reqwest::Client,
+    /// For literal loopback targets only. The environment's proxy settings would otherwise carry a
+    /// request the config validation treats as local, and its bearer token, through a third party.
+    loopback_client: reqwest::Client,
     read_http: read_http::ReadHttp,
 }
 
@@ -579,15 +582,29 @@ pub const DEFAULT_RPC_TIMEOUT: std::time::Duration = std::time::Duration::from_m
 
 impl ReqwestJsonRpcTransport {
     pub fn new() -> Result<Self, String> {
-        let client = reqwest::Client::builder()
-            .timeout(DEFAULT_RPC_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|error| error.to_string())?;
+        let build = |client: reqwest::ClientBuilder| {
+            client
+                .timeout(DEFAULT_RPC_TIMEOUT)
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .map_err(|error| error.to_string())
+        };
         Ok(Self {
-            client,
+            client: build(reqwest::Client::builder())?,
+            loopback_client: build(reqwest::Client::builder().no_proxy())?,
             read_http: read_http::ReadHttp::new()?,
         })
+    }
+
+    fn client_for(&self, url: &str) -> &reqwest::Client {
+        let loopback = reqwest::Url::parse(url)
+            .map(|url| pillar_config::is_literal_loopback(&url))
+            .unwrap_or(false);
+        if loopback {
+            &self.loopback_client
+        } else {
+            &self.client
+        }
     }
 }
 
@@ -600,7 +617,7 @@ impl JsonRpcTransport for ReqwestJsonRpcTransport {
         body: Value,
     ) -> Result<Value, String> {
         let projection = projection::for_post(&body);
-        let mut request = self.client.post(url).json(&body);
+        let mut request = self.client_for(&url).post(url).json(&body);
         for (key, value) in headers {
             request = request.header(key, value);
         }
@@ -626,7 +643,7 @@ impl JsonRpcTransport for ReqwestJsonRpcTransport {
         headers: HashMap<String, String>,
     ) -> Result<Value, String> {
         let projection = projection::for_get(&url);
-        let mut request = self.client.get(url);
+        let mut request = self.client_for(&url).get(url);
         for (key, value) in headers {
             request = request.header(key, value);
         }
@@ -644,7 +661,7 @@ impl JsonRpcTransport for ReqwestJsonRpcTransport {
         url: String,
         headers: HashMap<String, String>,
     ) -> Result<Value, String> {
-        let mut request = self.client.get(url);
+        let mut request = self.client_for(&url).get(url);
         for (key, value) in headers {
             request = request.header(key, value);
         }
@@ -661,7 +678,7 @@ impl JsonRpcTransport for ReqwestJsonRpcTransport {
         headers: HashMap<String, String>,
         body: Value,
     ) -> Result<(u16, String), String> {
-        let mut request = self.client.post(url).json(&body);
+        let mut request = self.client_for(&url).post(url).json(&body);
         for (key, value) in headers {
             request = request.header(key, value);
         }
@@ -673,7 +690,7 @@ impl JsonRpcTransport for ReqwestJsonRpcTransport {
         url: String,
         headers: HashMap<String, String>,
     ) -> Result<(u16, String), String> {
-        let mut request = self.client.get(url);
+        let mut request = self.client_for(&url).get(url);
         for (key, value) in headers {
             request = request.header(key, value);
         }
@@ -687,7 +704,7 @@ impl JsonRpcTransport for ReqwestJsonRpcTransport {
         body: String,
     ) -> Result<(u16, String), String> {
         let mut request = self
-            .client
+            .client_for(&url)
             .post(url)
             .header("Content-Type", "application/x-www-form-urlencoded")
             .body(body);

@@ -225,23 +225,28 @@ where
             .await?;
             decode_evm_uln_config_confirmations(&config_result)?
         };
-        let dvn_confirmed = if let Some(verifier_address) = observation.verifier_address {
-            let hash_lookup_call_data =
-                build_evm_hash_lookup_call_data(observation.proof, verifier_address)?;
-            let hash_lookup_result = eth_call(
-                transport.clone(),
-                url.clone(),
-                headers.clone(),
-                receive_contract,
-                &hash_lookup_call_data,
-            )
-            .await?;
-            let hash_lookup = decode_evm_hash_lookup_result(receive_version, &hash_lookup_result)?;
-            evm_hash_lookup_is_confirmed(inbound_confirmations, &hash_lookup)
-        } else {
+        let dvn_confirmed = match observation.verifier_address {
+            // ReadLib1002 lets a DVN overwrite its stored hash and commits only when every required
+            // DVN stores the expected one, so a stale hash must not stop the replacement; `Verified`
+            // below is the state where re-verifying cannot help.
+            Some(_) if receive_version == "ReadV1002" => false,
+            Some(verifier_address) => {
+                let hash_lookup_call_data =
+                    build_evm_hash_lookup_call_data(observation.proof, verifier_address)?;
+                let hash_lookup_result = eth_call(
+                    transport.clone(),
+                    url.clone(),
+                    headers.clone(),
+                    receive_contract,
+                    &hash_lookup_call_data,
+                )
+                .await?;
+                let hash_lookup = decode_evm_hash_lookup_result(&hash_lookup_result)?;
+                evm_hash_lookup_is_confirmed(inbound_confirmations, &hash_lookup)
+            }
             // Library resolution above is mandatory without a DVN address; only
             // this duplicate-signature lookup needs the caller-supplied address.
-            false
+            None => false,
         };
         let verifiable_result = eth_call(
             transport,

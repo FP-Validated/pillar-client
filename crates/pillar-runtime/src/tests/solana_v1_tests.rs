@@ -66,25 +66,6 @@ fn parsed_account_keys() -> Value {
     ])
 }
 
-fn solana_sent_event() -> LzSentEvent {
-    LzSentEvent {
-        lz_message_id: LzMessageId {
-            pathway_id: PathwayId {
-                src_chain_name: "solana".to_string(),
-                dst_chain_name: "base".to_string(),
-                extra: IndexMap::new(),
-            },
-            nonce: 7,
-            uln_send_version: Value::from("V302"),
-        },
-        message: "0xdeadbeef".to_string(),
-        tx_hash: SIGNATURE.to_string(),
-        source_evidence: None,
-        read_block_pins: Vec::new(),
-        extra: IndexMap::new(),
-    }
-}
-
 /// Every Solana read path asks for `maxSupportedTransactionVersion: 1`, so each
 /// one now receives v1 bodies: a `version` of `1` and a `transactionConfig`
 /// object the v0 projection never carried. None of the three consumers may
@@ -137,7 +118,7 @@ async fn solana_v1_transaction_bodies_read_like_v0_on_every_solana_read_path() {
         },
     )
     .validate_readiness(
-        &solana_sent_event(),
+        &sent_event,
         &SigningContext::Message {
             expiration: 1,
             skip_v_id: None,

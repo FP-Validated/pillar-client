@@ -58,7 +58,14 @@ impl ReadHttp {
             http::HeaderValue::from_str(authority.as_str())
                 .map_err(|_| "Invalid READ RPC authority")?,
         );
-        let proxy = self.proxies.intercept(&target);
+        let loopback = reqwest::Url::parse(&target.to_string())
+            .map(|url| pillar_config::is_literal_loopback(&url))
+            .unwrap_or(false);
+        let proxy = if loopback {
+            None
+        } else {
+            self.proxies.intercept(&target)
+        };
         let connection_uri = proxy.as_ref().map_or(&target, |proxy| proxy.uri());
         if !matches!(connection_uri.scheme_str(), Some("http" | "https")) {
             return Err("Unsupported READ HTTP proxy scheme".into());

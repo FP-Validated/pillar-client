@@ -87,7 +87,7 @@ fn stellar_event(inputs: &Value) -> LzSentEvent {
 }
 
 pub(super) async fn run(
-    returns: [(&'static str, Result<&str, &str>); 5],
+    returns: impl IntoIterator<Item = (&'static str, Result<&'static str, &'static str>)>,
 ) -> (Result<Option<u64>, AppCoreError>, Vec<String>) {
     let fixture = fixture();
     let xdr = |name: &str| {
@@ -139,9 +139,10 @@ pub(super) async fn run(
     (outcome, seen)
 }
 
-/// The already-signed verdict is `Verified || confirmations >= required`, with
-/// `Verifying`-or-`NotInitializable` views and a missing confirmation both
-/// counting as not signed (TS 1.2.66: `uln/stellar/index.ts:110-206`).
+/// The already-signed verdict is `confirmations >= required`, or a `Verified` view for a packet
+/// the endpoint has consumed or already holds this payload for (`m89_m95_remediation_e2e` covers
+/// the `Verified` branches); `Verifying`-or-`NotInitializable` views and a missing confirmation
+/// count as not signed (TS 1.2.66: `uln/stellar/index.ts:110-206`).
 #[tokio::test]
 async fn stellar_payload_signed_follows_upstreams_reads_and_verdict() {
     let base = |confirmations: Result<&'static str, &'static str>,
@@ -175,16 +176,11 @@ async fn stellar_payload_signed_follows_upstreams_reads_and_verdict() {
         run(base(Ok("confirmations14"), Ok("verifying"))).await.0,
         Ok(Some(15))
     );
-    for (confirmations, verifiable) in [
-        (Ok("confirmations15"), Ok("verifying")),
-        (Ok("noConfirmations"), Ok("verified")),
-    ] {
-        let (outcome, _) = run(base(confirmations, verifiable)).await;
-        assert!(
-            matches!(&outcome, Err(AppCoreError::BadRequest(message)) if message.starts_with(PAYLOAD_ALREADY_SIGNED_ERROR_PREFIX)),
-            "{outcome:?}"
-        );
-    }
+    let (outcome, _) = run(base(Ok("confirmations15"), Ok("verifying"))).await;
+    assert!(
+        matches!(&outcome, Err(AppCoreError::BadRequest(message)) if message.starts_with(PAYLOAD_ALREADY_SIGNED_ERROR_PREFIX)),
+        "{outcome:?}"
+    );
     assert_eq!(
         run(base(
             Ok("noConfirmations"),

@@ -80,18 +80,21 @@ where
                         )
                         .await,
                     );
-                    let observation = observation.map(|observation| {
-                        observation
-                            .map(|observation| (observation.fingerprint.clone(), observation))
-                    });
+                    let observation =
+                        observation.map(|vote| vote.map(|vote| (vote.fingerprint(), vote)));
                     (index, observation)
                 });
             }
             let context = format!("ULN V2 derived-hash for chain {src_chain_name}");
-            let observation =
+            let vote =
                 resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
                     .await?;
-            Ok(observation.hash_info)
+            match vote {
+                UlnV2MptVote::HashInfo(observation) => Ok(observation.hash_info),
+                UlnV2MptVote::SourceChanged(reason) => Err(AppCoreError::BadRequest(format!(
+                    "source receipt binding changed: {reason}"
+                ))),
+            }
         })
         .await
     }

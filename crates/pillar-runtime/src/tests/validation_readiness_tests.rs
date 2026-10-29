@@ -23,7 +23,7 @@ pub(super) fn latest_block(number: &str) -> Value {
     json!({"result": number})
 }
 
-fn solana_readiness_sent_event() -> LzSentEvent {
+pub(super) fn solana_readiness_sent_event() -> LzSentEvent {
     LzSentEvent {
         lz_message_id: LzMessageId {
             pathway_id: PathwayId {
@@ -36,17 +36,36 @@ fn solana_readiness_sent_event() -> LzSentEvent {
         },
         message: "0xdeadbeef".to_string(),
         tx_hash: "solana-signature".to_string(),
-        source_evidence: None,
+        source_evidence: Some(pillar_core::SourceEvidence::Solana(
+            pillar_core::SolanaSourceEvidence { slot: 1_000 },
+        )),
         read_block_pins: Vec::new(),
         extra: IndexMap::new(),
     }
 }
 
+/// A header whose parent is the block at the previous height, as `format!("0x{height:064x}")`
+/// names it; tests that name hashes themselves use `block_time_with_parent`.
 pub(super) fn block_time(number: i64, hash: &str, timestamp: i64) -> Value {
+    block_time_with_parent(
+        number,
+        hash,
+        &format!("0x{:064x}", number.saturating_sub(1)),
+        timestamp,
+    )
+}
+
+pub(super) fn block_time_with_parent(
+    number: i64,
+    hash: &str,
+    parent_hash: &str,
+    timestamp: i64,
+) -> Value {
     json!({
         "result": {
             "number": format!("0x{number:x}"),
             "hash": hash,
+            "parentHash": parent_hash,
             "timestamp": format!("0x{timestamp:x}")
         }
     })
@@ -289,7 +308,12 @@ async fn runtime_rpc_validation_checks_validates_message_readiness_with_quorum()
     assert_eq!(calls[0].2["params"], json!(["0xtx"]));
 }
 
-fn bound_receipt(block_hash: &str, block_number: &str, status: &str, log_index: &str) -> Value {
+pub(super) fn bound_receipt(
+    block_hash: &str,
+    block_number: &str,
+    status: &str,
+    log_index: &str,
+) -> Value {
     json!({
         "result": {
             "transactionHash": "0xtx",
@@ -322,7 +346,7 @@ fn reverted_receipt(block_hash: &str, block_number: &str) -> Value {
     })
 }
 
-fn readiness_sent_event_bound_to(
+pub(super) fn readiness_sent_event_bound_to(
     block_hash: &str,
     block_number: i64,
     log_index: u64,

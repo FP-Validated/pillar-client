@@ -48,7 +48,7 @@ use crate::provider_health::{
     AwsLambdaInvokeClient, BlockConfirmationObservation, BlockConfirmationValidity, BlockTime,
     DispatchEntry, EvmPayloadSignedObservation, EvmTransactionReceipt, ExactQuorumAccumulator,
     JsonRpcTransport, PayloadSignedValidity, ProviderRankTracker, QuorumResolutionFailure,
-    ReceiveUlnVersion, RpcError, TimestampValidity,
+    ReceiveUlnVersion, RpcError, TimestampValidity, UlnV2MptVote,
 };
 use crate::provider_snapshot::ChainDispatch;
 use crate::validation::{ExpirationValidRange, RuntimeAppValidator, RuntimeValidationChecks};

@@ -4,6 +4,19 @@ All notable changes to this project are documented here. This project follows
 semantic versioning for the HTTP surface, the environment-variable contract and
 the Prometheus metric names.
 
+## Unreleased
+
+### Security
+
+- M-89: Solana readiness compares the slot of the re-fetched transaction with the slot resolution recorded (`SolanaSourceEvidence`) and refuses a different one before counting confirmations. A request whose event carries no Solana evidence is refused.
+- M-90: a Stellar `Verified` view is "already signed" only when the endpoint has consumed the nonce (`inbound_nonce`) or already holds this payload hash (`inbound_payload_hash`), or this DVN's own confirmation is enough. `uln_verifiable` also answers `Verified` for a nonce more than 256 past `inbound_nonce` that nothing has verified, which was refused as "Payload already signed" until the window moved. The two endpoint reads happen only for a `Verified` view without this DVN's confirmation. This departs from upstream, which refuses on `Verified` alone.
+- M-91: a stored ReadLib1002 `hashLookup` no longer counts as this DVN having signed. `verify` overwrites it and the chain commits only when every required DVN stores the expected hash, so a stale hash made Pillar refuse the replacement forever. The READ already-signed verdict rests on the view's `Verified` state; READ no longer issues the `hashLookup` call. A `dvnAddress` on a READ request is not validated.
+- M-92: a provider configuration refresh that leaves the providers, rosters and strategy unchanged keeps the serving generation, so the 60-second remote poll no longer discards the health cache and the recent-healthy fallback that `/ready` leans on when probes are refused admission under signing load. When a chain's providers do change, only that chain's recent verdict is dropped.
+- M-93: the readiness quorum key for a changed source no longer carries diagnostic prose. Two providers that saw a reorg differently (moved receipt, missing receipt) used to vote as two groups, so under `any: 2` the two providers still on the old receipt settled the quorum alone. The ULNv2 MPT re-read counts a changed or vanished receipt as that same vote instead of dropping the provider.
+- M-94: requests to a literal loopback address (`127.0.0.0/8`, `::1`) bypass `HTTP_PROXY`/`HTTPS_PROXY` on both HTTP paths, so a process-wide proxy cannot answer provider or policy requests addressed to the local host or read their bearer token. Other hosts keep using the environment's proxy.
+- M-95: READ timestamp resolution requires the block before the marker's block to be its parent (`parentHash`), not merely the block at the previous height. Block N and N-1 come from separate quorum rounds and could settle on different forks.
+- I-01: no change needed. A TON policy `from` that is missing or unparseable is already refused.
+
 ## 2.7.3 - 2026-10-27
 
 ### Fixed

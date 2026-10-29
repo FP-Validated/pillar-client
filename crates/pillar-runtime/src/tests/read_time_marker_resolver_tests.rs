@@ -28,7 +28,7 @@ impl JsonRpcTransport for FunctionBlockTransport {
         }
         Ok(block_time(
             number,
-            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            &format!("0x{number:064x}"),
             (self.timestamp_for_block)(number),
         ))
     }

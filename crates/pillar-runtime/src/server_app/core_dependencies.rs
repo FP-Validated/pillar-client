@@ -11,12 +11,8 @@ fn warn_mainnet_provider_uris(provider_config: &impl ProviderConfigGetter, chain
                         | pillar_config::ProviderUri::UriWithHeaders { uri, .. } => uri,
                     };
                     reqwest::Url::parse(uri).map_or(true, |url| {
-                        let literal_loopback = match url.host() {
-                            Some(url::Host::Ipv4(address)) => address.is_loopback(),
-                            Some(url::Host::Ipv6(address)) => address.is_loopback(),
-                            _ => false,
-                        };
-                        url.scheme() != "https" && !(url.scheme() == "http" && literal_loopback)
+                        url.scheme() != "https"
+                            && !(url.scheme() == "http" && pillar_config::is_literal_loopback(&url))
                     })
                 })
             })
