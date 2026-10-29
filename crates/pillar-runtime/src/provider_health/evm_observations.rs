@@ -386,19 +386,29 @@ pub(crate) fn parse_block_time_observation(
         .and_then(Value::as_str)
         .map(str::to_ascii_lowercase)
         .ok_or_else(|| AppCoreError::Internal("Missing block hash".to_string()))?;
+    let parent_hash = result
+        .get("parentHash")
+        .and_then(Value::as_str)
+        .map(str::to_ascii_lowercase)
+        .ok_or_else(|| AppCoreError::Internal("Missing block parentHash".to_string()))?;
     let timestamp = parse_block_timestamp_seconds(response).map_err(AppCoreError::Internal)?;
     let block = BlockTime {
         number,
         hash,
-
+        parent_hash,
         timestamp,
     };
     Ok(BlockTimeObservation {
-        fingerprint: format!("{}|{}|{}", block.number, block.hash, block.timestamp),
+        fingerprint: format!(
+            "{}|{}|{}|{}",
+            block.number, block.hash, block.parent_hash, block.timestamp
+        ),
         block,
     })
 }
 
+/// `previous_block` must be `block`'s parent, not merely the block at the previous height: the
+/// two come from separate quorum rounds, and during a fork each round can settle on another fork.
 pub(crate) fn block_matches_resolved_timestamp(
     block: &BlockTime,
     previous_block: Option<&BlockTime>,
@@ -408,7 +418,10 @@ pub(crate) fn block_matches_resolved_timestamp(
         block.timestamp == target_timestamp
     } else {
         block.timestamp >= target_timestamp
-            && previous_block
-                .is_some_and(|previous_block| previous_block.timestamp < target_timestamp)
+            && previous_block.is_some_and(|previous_block| {
+                previous_block.number + 1 == block.number
+                    && previous_block.hash == block.parent_hash
+                    && previous_block.timestamp < target_timestamp
+            })
     }
 }

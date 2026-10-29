@@ -23,6 +23,26 @@ pub(crate) enum BlockConfirmationValidity {
     Missing,
 }
 
+impl BlockConfirmationValidity {
+    /// The quorum key. `SourceChanged` carries diagnostic prose that differs between providers
+    /// observing the same reorg, so it must not split the vote.
+    pub(crate) fn fingerprint(&self) -> String {
+        match self {
+            Self::Sufficient {
+                receipt_block_hash,
+                receipt_block_number,
+            } => format!("sufficient:{receipt_block_hash}:{receipt_block_number}"),
+            Self::Insufficient {
+                receipt_block_hash,
+                receipt_block_number,
+            } => format!("insufficient:{receipt_block_hash}:{receipt_block_number}"),
+            Self::InvalidRange => "invalid-range".to_string(),
+            Self::SourceChanged(_) => "source-changed".to_string(),
+            Self::Missing => "missing".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BlockConfirmationObservation {
     pub(crate) validity: BlockConfirmationValidity,
@@ -33,6 +53,7 @@ pub(crate) struct BlockConfirmationObservation {
 pub(crate) struct BlockTime {
     pub(crate) number: i64,
     pub(crate) hash: String,
+    pub(crate) parent_hash: String,
     pub(crate) timestamp: i64,
 }
 
@@ -52,6 +73,23 @@ pub(crate) struct TransactionFromObservation {
 pub(crate) struct UlnV2HashInfoObservation {
     pub(crate) fingerprint: String,
     pub(crate) hash_info: UlnV2HashInfo,
+}
+
+/// One provider's reading of the source receipt for a ULNv2 MPT proof. A changed or vanished
+/// receipt is a vote against the resolved source, not an absent vote.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum UlnV2MptVote {
+    HashInfo(UlnV2HashInfoObservation),
+    SourceChanged(String),
+}
+
+impl UlnV2MptVote {
+    pub(crate) fn fingerprint(&self) -> String {
+        match self {
+            Self::HashInfo(observation) => format!("hash-info:{}", observation.fingerprint),
+            Self::SourceChanged(_) => "source-changed".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

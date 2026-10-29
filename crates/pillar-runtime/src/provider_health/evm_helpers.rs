@@ -96,7 +96,8 @@ pub(crate) fn extra_context_sent_event_payload(
                 .and_then(Value::as_i64)
                 .ok_or_else(missing_identity)?,
         ),
-        None => (
+        // Solana evidence only binds readiness; the policy body reads `extra` for it.
+        Some(pillar_core::SourceEvidence::Solana(_)) | None => (
             sent_event
                 .extra
                 .get("onChainTxHash")

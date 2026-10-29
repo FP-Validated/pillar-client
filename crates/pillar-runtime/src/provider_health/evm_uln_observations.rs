@@ -7,7 +7,7 @@ pub(crate) async fn observe_uln_v2_mpt_hash_info<T>(
     headers: HashMap<String, String>,
     tx_hash: &str,
     source_evidence: Option<&EvmSourceEvidence>,
-) -> Result<UlnV2HashInfoObservation, AppCoreError>
+) -> Result<UlnV2MptVote, AppCoreError>
 where
     T: JsonRpcTransport,
 {
@@ -30,10 +30,19 @@ where
         )
         .await
         .map_err(AppCoreError::from)?;
-    let receipt_result = receipt
-        .get("result")
-        .filter(|result| !result.is_null())
-        .ok_or_else(|| AppCoreError::Internal("Missing transaction receipt".to_string()))?;
+    let receipt_result = match receipt.get("result") {
+        Some(result) if !result.is_null() => result,
+        Some(_) => {
+            return Ok(UlnV2MptVote::SourceChanged(
+                "source receipt disappeared".to_string(),
+            ))
+        }
+        None => {
+            return Err(AppCoreError::Internal(
+                "Missing transaction receipt".to_string(),
+            ))
+        }
+    };
     let receipt_tx_hash = receipt_result
         .get("transactionHash")
         .and_then(Value::as_str)
@@ -46,9 +55,9 @@ where
     let evidence = source_evidence.ok_or_else(|| {
         AppCoreError::Internal("Missing source evidence for MPT proof".to_string())
     })?;
-    validate_receipt_binding(&receipt, evidence, tx_hash).map_err(|reason| {
-        AppCoreError::BadRequest(format!("source receipt binding changed: {reason}"))
-    })?;
+    if let Err(reason) = validate_receipt_binding(&receipt, evidence, tx_hash) {
+        return Ok(UlnV2MptVote::SourceChanged(reason));
+    }
     let block_hash = receipt_result
         .get("blockHash")
         .and_then(Value::as_str)
@@ -76,7 +85,7 @@ where
             "Returned MPT block hash differs from receipt blockHash".to_string(),
         ));
     }
-    parse_uln_v2_mpt_hash_info_observation(&block)
+    parse_uln_v2_mpt_hash_info_observation(&block).map(UlnV2MptVote::HashInfo)
 }
 pub(crate) async fn observe_uln_v2_inbound_proof_type<T>(
     transport: T,

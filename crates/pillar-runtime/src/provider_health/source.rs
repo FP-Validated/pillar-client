@@ -3,8 +3,16 @@ use std::time::Duration;
 
 #[derive(Default)]
 struct HealthObservations {
+    chains: HashMap<String, ChainObservation>,
+}
+
+/// The last fully observed verdict for a chain. It is valid only for the provider configuration
+/// it was measured against, so a refresh that leaves a chain's providers alone keeps it.
+struct ChainObservation {
     generation: u64,
-    chains: HashMap<String, (u64, bool)>,
+    at_unix_ms: u64,
+    healthy: bool,
+    config: pillar_config::ProviderConfig,
 }
 
 struct RetainedProviderHealthReport {
@@ -173,34 +181,40 @@ where
                         .filter(|entry| !entry.diagnostic)
                         .all(|entry| entry.observed);
                 let mut observations = self.observations.lock().await;
-                if observations.generation != generation {
-                    observations.generation = generation;
-                    observations.chains.clear();
-                }
                 let measured_healthy = primary_count > 0
                     && providers
                         .iter()
                         .filter(|entry| !entry.diagnostic && entry.observed)
                         .all(|entry| entry.healthy);
+                let previous = observations.chains.get(chain_name);
                 let healthy = measured_healthy
                     && (observed
-                        || observations
-                            .chains
-                            .get(chain_name)
-                            .is_some_and(|(at, healthy)| {
-                                *healthy
-                                    && checked_at_unix_ms.saturating_sub(*at)
-                                        <= pillar_core::PROVIDER_HEALTH_CACHE_STALE_MS
-                            }));
+                        || previous.is_some_and(|previous| {
+                            previous.config == *config
+                                && previous.healthy
+                                && checked_at_unix_ms.saturating_sub(previous.at_unix_ms)
+                                    <= pillar_core::PROVIDER_HEALTH_CACHE_STALE_MS
+                        }));
+                // Overlapping rounds can finish out of order: the newer generation, then the
+                // later probe, wins.
                 if observed
-                    && observations
-                        .chains
-                        .get(chain_name)
-                        .is_none_or(|(at, _)| checked_at_unix_ms >= *at)
+                    && previous.is_none_or(|previous| {
+                        if previous.config == *config {
+                            checked_at_unix_ms >= previous.at_unix_ms
+                        } else {
+                            generation > previous.generation
+                        }
+                    })
                 {
-                    observations
-                        .chains
-                        .insert(chain_name.clone(), (checked_at_unix_ms, healthy));
+                    observations.chains.insert(
+                        chain_name.clone(),
+                        ChainObservation {
+                            generation,
+                            at_unix_ms: checked_at_unix_ms,
+                            healthy,
+                            config: config.clone(),
+                        },
+                    );
                 }
                 Ok::<_, RpcError>((
                     chain_name.clone(),
@@ -371,7 +385,10 @@ mod tests {
     }
     #[tokio::test]
     async fn retained_report_is_unavailable_after_provider_generation_changes() {
-        let providers = ProviderSnapshotHandle::new(ProviderConfigs::new(), Vec::new());
+        // The roster serving differs from the empty candidate, so the publish is a real change
+        // while the probe still has no provider to dial.
+        let providers =
+            ProviderSnapshotHandle::new(ProviderConfigs::new(), vec!["bsc".to_string()]);
         let source = RpcProviderHealthSource::from_serving_snapshot(
             providers.clone(),
             NoopTransport,

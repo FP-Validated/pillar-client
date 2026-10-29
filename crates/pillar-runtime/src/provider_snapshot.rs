@@ -289,7 +289,9 @@ impl ProviderSnapshotHandle {
         }
     }
 
-    /// Publishes an admitted candidate as the next generation.
+    /// Publishes an admitted candidate as the next generation, unless it is what is already
+    /// serving. A generation change discards what consumers cached for the old one, so the
+    /// unchanged refresh every minute would otherwise erase it.
     ///
     /// Returns what is now serving. Chains outside the startup set were dropped
     /// from the map by [`candidate`], not merely hidden from the roster, so a
@@ -306,6 +308,11 @@ impl ProviderSnapshotHandle {
             .current
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if current.provider_configs == provider_configs
+            && current.available_chain_names == available_chain_names
+        {
+            return current.clone();
+        }
         let next = Arc::new(RuntimeProviderSnapshot {
             generation: current.generation + 1,
             provider_configs,

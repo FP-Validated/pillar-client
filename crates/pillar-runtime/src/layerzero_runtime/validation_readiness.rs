@@ -40,10 +40,17 @@ where
         )));
     }
     if src_chain_name == "solana" {
+        let Some(pillar_core::SourceEvidence::Solana(evidence)) = sent_event.source_evidence.as_ref()
+        else {
+            return Err(AppCoreError::Internal(
+                "Missing Solana source evidence for readiness".to_string(),
+            ));
+        };
         return self
             .validate_solana_readiness_with_quorum(
                 src_chain_name,
                 &sent_event.tx_hash,
+                evidence.slot,
                 block_confirmation,
                 provider_config,
             )
@@ -88,7 +95,7 @@ where
                 (
                     index,
                     observation.map(|observation| {
-                        Some((format!("{:?}", observation.validity), observation))
+                        Some((observation.validity.fingerprint(), observation))
                     }),
                 )
             });
@@ -143,7 +150,7 @@ where
                     required_confirmations,
                 )
                 .await;
-                (index, observation.map(|observation| Some((format!("{:?}", observation.validity), observation))))
+                (index, observation.map(|observation| Some((observation.validity.fingerprint(), observation))))
             });
         }
         let context = format!("block confirmation for chain {src_chain_name}");
@@ -217,7 +224,7 @@ where
                 BlockConfirmationObservation { validity,
                 current_confirmations: observation.current_confirmations }
                 });
-                (index, observation.map(|observation| Some((format!("{:?}", observation.validity), observation))))
+                (index, observation.map(|observation| Some((observation.validity.fingerprint(), observation))))
             });
         }
         let context = format!("block confirmation for chain {src_chain_name}");
@@ -299,7 +306,7 @@ where
                     required_confirmations,
                 )
                 .await;
-                (index, observation.map(|observation| Some((format!("{:?}", observation.validity), observation))))
+                (index, observation.map(|observation| Some((observation.validity.fingerprint(), observation))))
             });
         }
         let context = format!("block confirmation for chain {src_chain_name}");
@@ -349,7 +356,7 @@ where
                     required_confirmations,
                 )
                 .await;
-                (index, observation.map(|observation| Some((format!("{:?}", observation.validity), observation))))
+                (index, observation.map(|observation| Some((observation.validity.fingerprint(), observation))))
             });
         }
         let context = format!("block confirmation for chain {src_chain_name}");
@@ -408,7 +415,7 @@ where
                 matches!(src_chain_name.as_str(), "polygon" | "tron"),
             )
             .await;
-            (index, observation.map(|observation| Some((format!("{:?}", observation.validity), observation))))
+            (index, observation.map(|observation| Some((observation.validity.fingerprint(), observation))))
         });
     }
     let context = format!("block confirmation for chain {src_chain_name}");
@@ -455,6 +462,7 @@ where
         &self,
         src_chain_name: &str,
         tx_hash: &str,
+        resolved_slot: u64,
         required_confirmations: i64,
         provider_config: &pillar_config::ProviderConfig,
     ) -> Result<(), AppCoreError> {
@@ -474,15 +482,15 @@ where
                     url,
                     headers,
                     &tx_hash,
+                    resolved_slot,
                     required_confirmations,
                 )
                 .await;
 
                 (
                     index,
-                    observation.map(|observation| {
-                        Some((format!("{:?}", observation.validity), observation))
-                    }),
+                    observation
+                        .map(|observation| Some((observation.validity.fingerprint(), observation))),
                 )
             });
         }
@@ -591,6 +599,7 @@ async fn observe_solana_slot_confirmations<T>(
     url: String,
     headers: HashMap<String, String>,
     tx_hash: &str,
+    resolved_slot: u64,
     required_confirmations: i64,
 ) -> Result<BlockConfirmationObservation, RpcError>
 where
@@ -636,6 +645,14 @@ json!({
         });
     }
     let tx_slot = parse_solana_transaction_slot(&transaction_response).map_err(RpcError::Remote)?;
+    if u64::try_from(tx_slot) != Ok(resolved_slot) {
+        return Ok(BlockConfirmationObservation {
+            validity: BlockConfirmationValidity::SourceChanged(format!(
+                "Solana transaction slot changed from {resolved_slot} to {tx_slot}"
+            )),
+            current_confirmations: None,
+        });
+    }
     let current_slot = parse_solana_current_slot(&slot_response).map_err(RpcError::Remote)?;
 
     let (Some(current_confirmations), Some(required_slot)) = (

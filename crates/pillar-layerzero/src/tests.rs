@@ -1369,40 +1369,19 @@ fn evm_receive_lookup_call_data_and_decoders_match_abi_shapes() {
         hex::encode(solidity_uint256(64))
     );
     assert_eq!(
-        decode_evm_hash_lookup_result(ULN_VERSION_V302, &message_result).unwrap(),
-        EvmHashLookupResult::Message {
+        decode_evm_hash_lookup_result(&message_result).unwrap(),
+        EvmHashLookupResult {
             submitted: true,
             confirmations: 64
         }
     );
     assert!(evm_hash_lookup_is_confirmed(
         64,
-        &decode_evm_hash_lookup_result(ULN_VERSION_V302, &message_result).unwrap()
+        &decode_evm_hash_lookup_result(&message_result).unwrap()
     ));
     assert!(!evm_hash_lookup_is_confirmed(
         65,
-        &decode_evm_hash_lookup_result(ULN_VERSION_V302, &message_result).unwrap()
-    ));
-
-    let read_result = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-    assert_eq!(
-        decode_evm_hash_lookup_result(ULN_VERSION_READ_V1002, read_result).unwrap(),
-        EvmHashLookupResult::Read {
-            payload_hash: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-                .to_string()
-        }
-    );
-    assert!(evm_hash_lookup_is_confirmed(
-        0,
-        &decode_evm_hash_lookup_result(ULN_VERSION_READ_V1002, read_result).unwrap()
-    ));
-    assert!(!evm_hash_lookup_is_confirmed(
-        0,
-        &decode_evm_hash_lookup_result(
-            ULN_VERSION_READ_V1002,
-            "0x0000000000000000000000000000000000000000000000000000000000000000"
-        )
-        .unwrap()
+        &decode_evm_hash_lookup_result(&message_result).unwrap()
     ));
 
     assert_eq!(

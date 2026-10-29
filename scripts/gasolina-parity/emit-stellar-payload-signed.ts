@@ -110,6 +110,21 @@ const out = {
             xdr.ScVal.scvBytes(packetHeader),
             xdr.ScVal.scvBytes(payloadHash),
         ]),
+        // Not upstream calls: Pillar asks the endpoint these two when `uln_verifiable` says
+        // `Verified` and this DVN has no confirmation, to tell a packet that is done from one
+        // the endpoint will not take yet (`endpoint-v2/src/interfaces/messaging_channel.rs`,
+        // `@layerzerolabs/protocol-stellar-v2` 1.2.66).
+        inbound_nonce: call(contracts.endpoint, 'inbound_nonce', [
+            address(receiver),
+            u32(srcEid),
+            xdr.ScVal.scvBytes(sender),
+        ]),
+        inbound_payload_hash: call(contracts.endpoint, 'inbound_payload_hash', [
+            address(receiver),
+            u32(srcEid),
+            xdr.ScVal.scvBytes(sender),
+            xdr.ScVal.scvU64(new xdr.Uint64(nonce)),
+        ]),
     },
     returns: {
         defaultLibrary: value(struct([['is_default', xdr.ScVal.scvBool(true)], ['lib', address(hex('55'))]])),
@@ -122,6 +137,11 @@ const out = {
         confirmations15: value(xdr.ScVal.scvU64(new xdr.Uint64(15n))),
         verifying: value(xdr.ScVal.scvVec([symbol('Verifying')])),
         verified: value(xdr.ScVal.scvVec([symbol('Verified')])),
+        inboundNonce6: value(xdr.ScVal.scvU64(new xdr.Uint64(6n))),
+        inboundNonce7: value(xdr.ScVal.scvU64(new xdr.Uint64(7n))),
+        noStoredHash: value(xdr.ScVal.scvVoid()),
+        storedPayloadHash: value(xdr.ScVal.scvBytes(payloadHash)),
+        otherStoredHash: value(xdr.ScVal.scvBytes(Buffer.alloc(32, 0x99))),
     },
     overrideLibraryStrkey: StrKey.encodeContract(otherLibrary),
 }

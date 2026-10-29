@@ -917,7 +917,8 @@ where
             "packetEmitAddress".to_string(),
             Value::from(event.endpoint_program_id),
         );
-        if let Some(slot) = transaction.get("slot").and_then(Value::as_u64) {
+        let slot = transaction.get("slot").and_then(Value::as_u64);
+        if let Some(slot) = slot {
             extra.insert("slot".to_string(), Value::from(slot));
             extra.insert("blockNumber".to_string(), Value::from(slot));
         }
@@ -928,7 +929,9 @@ where
             lz_message_id,
             message: packet.message,
             tx_hash: src_tx_hash.to_string(),
-            source_evidence: None,
+            source_evidence: slot.map(|slot| {
+                pillar_core::SourceEvidence::Solana(pillar_core::SolanaSourceEvidence { slot })
+            }),
             read_block_pins: Vec::new(),
             extra,
         }))
@@ -2096,7 +2099,8 @@ where
                     .as_ref()
                     .and_then(|evidence| match evidence {
                         pillar_core::SourceEvidence::Evm(evidence) => Some(evidence.block_number),
-                        pillar_core::SourceEvidence::Starknet(_) => None,
+                        pillar_core::SourceEvidence::Starknet(_)
+                        | pillar_core::SourceEvidence::Solana(_) => None,
                     })
             })
             .ok_or_else(|| AppCoreError::Internal("Invalid receipt block number".to_string()))?;

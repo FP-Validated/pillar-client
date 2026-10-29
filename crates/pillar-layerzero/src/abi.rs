@@ -317,18 +317,9 @@ pub fn decode_evm_uln_v2_app_config(result: &str) -> Result<EvmUlnV2AppConfig, A
     })
 }
 
-pub fn decode_evm_hash_lookup_result(
-    uln_version: &str,
-    result: &str,
-) -> Result<EvmHashLookupResult, AppCoreError> {
+pub fn decode_evm_hash_lookup_result(result: &str) -> Result<EvmHashLookupResult, AppCoreError> {
     let bytes = decode_hex_bytes(result)?;
-    if uln_version == ULN_VERSION_READ_V1002 {
-        let payload_hash = abi_word(&bytes, 0)?;
-        return Ok(EvmHashLookupResult::Read {
-            payload_hash: format!("0x{}", hex::encode(payload_hash)),
-        });
-    }
-    Ok(EvmHashLookupResult::Message {
+    Ok(EvmHashLookupResult {
         submitted: abi_bool(&bytes, 0)?,
         confirmations: abi_word_u64(&bytes, 1)?,
     })
@@ -338,15 +329,7 @@ pub fn evm_hash_lookup_is_confirmed(
     inbound_confirmations: u64,
     result: &EvmHashLookupResult,
 ) -> bool {
-    match result {
-        EvmHashLookupResult::Message {
-            submitted,
-            confirmations,
-        } => *submitted && *confirmations >= inbound_confirmations,
-        EvmHashLookupResult::Read { payload_hash } => {
-            payload_hash != "0x0000000000000000000000000000000000000000000000000000000000000000"
-        }
-    }
+    result.submitted && result.confirmations >= inbound_confirmations
 }
 
 pub fn decode_evm_verification_state(

@@ -18,9 +18,10 @@ async fn runtime_rpc_validation_checks_validates_read_resolved_time_markers() {
     let transport = RecordingTransport {
         calls: calls.clone(),
         responses: Arc::new(Mutex::new(vec![
-            Ok(block_time(
+            Ok(block_time_with_parent(
                 10,
                 "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
                 100,
             )),
             Ok(block_time(
@@ -69,9 +70,10 @@ async fn runtime_rpc_validation_checks_cross_checks_read_command_timestamp_marke
     let calls = Arc::new(Mutex::new(Vec::new()));
     let checks = runtime_rpc_read_command_checks(
         vec![
-            Ok(block_time(
+            Ok(block_time_with_parent(
                 10,
                 "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
                 1_700_000_000,
             )),
             Ok(block_time(
@@ -236,7 +238,12 @@ async fn runtime_rpc_validation_checks_rejects_a_block_that_changed_hash_during_
     let calls = Arc::new(Mutex::new(Vec::new()));
     let checks = runtime_rpc_read_command_checks(
         vec![
-            Ok(block_time(64, BSC_BLOCK_64_HASH, 1_700_000_000)),
+            Ok(block_time_with_parent(
+                64,
+                BSC_BLOCK_64_HASH,
+                "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                1_700_000_000,
+            )),
             Ok(block_time(
                 63,
                 "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
@@ -358,9 +365,10 @@ async fn runtime_rpc_validation_checks_rejects_unconfirmed_read_time_marker() {
     let transport = RecordingTransport {
         calls: Arc::new(Mutex::new(Vec::new())),
         responses: Arc::new(Mutex::new(vec![
-            Ok(block_time(
+            Ok(block_time_with_parent(
                 10,
                 "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
                 100,
             )),
             Ok(block_time(
@@ -470,7 +478,12 @@ impl JsonRpcTransport for ReadinessLatestTransport {
                 "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
                 1_700_000_101,
             ),
-            "0x40" => block_time(64, BSC_BLOCK_64_HASH, 1_700_000_000),
+            "0x40" => block_time_with_parent(
+                64,
+                BSC_BLOCK_64_HASH,
+                "0x3333333333333333333333333333333333333333333333333333333333333333",
+                1_700_000_000,
+            ),
             "0x3f" => block_time(
                 63,
                 "0x3333333333333333333333333333333333333333333333333333333333333333",

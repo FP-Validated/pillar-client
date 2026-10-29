@@ -238,16 +238,19 @@ impl JsonRpcTransport for ReadVerticalTransport {
                 Some("latest") => Ok(json!({"result": {
                     "number": "0x80",
                     "hash": format!("0x{}", "80".repeat(32)),
+                    "parentHash": format!("0x{}", "7f".repeat(32)),
                     "timestamp": "0x6862d3a5",
                 }})),
                 Some(READ_BLOCK_TAG) => Ok(json!({"result": {
                     "number": READ_BLOCK_TAG,
                     "hash": self.canonical_hash(false),
+                    "parentHash": format!("0x{}", "3f".repeat(32)),
                     "timestamp": READ_BLOCK_TIMESTAMP,
                 }})),
                 Some(READ_PREVIOUS_BLOCK_TAG) => Ok(json!({"result": {
                     "number": READ_PREVIOUS_BLOCK_TAG,
                     "hash": format!("0x{}", "3f".repeat(32)),
+                    "parentHash": format!("0x{}", "3e".repeat(32)),
                     "timestamp": READ_PREVIOUS_BLOCK_TIMESTAMP,
                 }})),
                 other => Err(format!("unstubbed target block {other:?}: {body}")),

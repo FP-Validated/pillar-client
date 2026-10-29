@@ -566,15 +566,21 @@ fn validate_service_url(
     if !parsed.username().is_empty() || parsed.password().is_some() {
         return Err(ConfigError::ServiceUrlUserinfo(name));
     }
-    let literal_loopback = match parsed.host() {
-        Some(Host::Ipv4(address)) => address.is_loopback(),
-        Some(Host::Ipv6(address)) => address.is_loopback(),
-        _ => false,
-    };
+    let literal_loopback = is_literal_loopback(&parsed);
     match parsed.scheme() {
         "https" => Ok(()),
         "http" if literal_loopback && environment != "mainnet" => Ok(()),
         _ => Err(ConfigError::InsecureServiceUrl(name)),
+    }
+}
+
+/// Whether the URL names a loopback address by literal IP, which is the only form this service
+/// treats as local: a host name resolves through name services and is not.
+pub fn is_literal_loopback(url: &Url) -> bool {
+    match url.host() {
+        Some(Host::Ipv4(address)) => address.is_loopback(),
+        Some(Host::Ipv6(address)) => address.is_loopback(),
+        _ => false,
     }
 }
 

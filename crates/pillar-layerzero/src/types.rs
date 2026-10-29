@@ -23,9 +23,9 @@ pub(crate) const RECEIVE_ULN_302_VERIFY_SELECTOR: [u8; 4] = [0x02, 0x23, 0x53, 0
 pub(crate) const READ_LIB_1002_VERIFY_SELECTOR: [u8; 4] = [0xab, 0x75, 0x0e, 0x75];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EvmHashLookupResult {
-    Message { submitted: bool, confirmations: u64 },
-    Read { payload_hash: String },
+pub struct EvmHashLookupResult {
+    pub submitted: bool,
+    pub confirmations: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
