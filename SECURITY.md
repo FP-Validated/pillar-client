@@ -197,7 +197,7 @@ accepted.
 
 | Boundary | Limit |
 | --- | --- |
-| One HTTP JSON/text response, including embedded JSON | 4 MiB |
+| One HTTP JSON/text response, including embedded JSON | 4 MiB, except TON `getAddressInformation` at 32 MiB |
 | Sui/IotaL1 event pagination | 16 MiB cumulative serialized bytes, 1,024 events and 131,072 structural units across all pages; individual pages also obey response limits |
 | JSON pre-allocation scan | 131,072 structural parse-cost units; 524,288 for TON responses. A cost estimate, not an exact element/heap-byte count |
 | JSON container nesting | 128 normally; 512 for TON responses |
@@ -227,6 +227,8 @@ Measured on a debug build (macOS `/usr/bin/time -l`, single process): a payload 
 single-key objects just under each limit raised peak RSS by about 19 MB (general)
 and 80 MB (TON), and the worst admissible mix (three TON parses plus one general
 parse, held to arrive together) peaked at 286 MB against a 38 MB idle baseline.
+These historical measurements used the 4 MiB response limit; peak memory for the
+32 MiB TON account-state limit has not been measured.
 The mainnet pod requests 512 MiB and is limited to 2 GiB. Payloads one unit over
 either limit are refused before allocation.
 
@@ -815,7 +817,7 @@ Addresses live in `stellar_uln_302_for_environment`,
   Canonical header binding is a stricter fail-closed policy than upstream.
   Transaction hash comparisons normalize an optional `0x` prefix and letter case. RPC request values are unchanged.
   The validation audit hash cannot be compared byte-for-byte with the previous version because the Evidence fields were extended.
-- The TON-specific decoder allows responses up to 4 MiB and JSON container nesting up to 512.
+- The TON-specific decoder allows `getAddressInformation` responses up to 32 MiB, other responses up to 4 MiB, and JSON container nesting up to 512.
   Trace conversion rejects duplicate transaction hashes and invalid topology before assembly.
   Converted trees cannot exceed 512 nodes or a JSON container depth of 512.
   Projection retains only scalar fields needed for signing and confirmation.
@@ -884,8 +886,11 @@ Addresses live in `stellar_uln_302_for_environment`,
   sent `0` or an empty string. Canton has no blocks: its hash is the empty string
   upstream sends, beside the sequencer event nonce. `from` is canonical per family
   (Aptos/Movement `0x` plus 64 lowercase hex, Starknet a range-checked felt, Initia
-  derived from the signer key type, Canton only a sender the same ledger event's
-  `signatories` or `actingParties` authorize).
+  derived from the signer key, a signed message, or authenticated ante evidence,
+  Canton only a sender the same ledger event's `signatories` or `actingParties`
+  authorize). Initia omitted-key transactions with an unknown first message and
+  no applicable ordered-sequence or default-fee-payer evidence fail closed; an
+  explicit payer or granter is not evidence of the first signer.
 - With a policy configured, a ULNv2 MPT proof is refused: it attests every packet
   of its source block, so a per-message verdict cannot cover it.
 - An external extra-context policy must answer `true`, and the two transports

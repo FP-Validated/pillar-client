@@ -178,13 +178,15 @@ fn decode_relayer_options(
         Some((gas, value))
     };
 
-    let mut drops: Vec<(Vec<u8>, BigUint)> = Vec::new();
+    let mut drops: indexmap::IndexMap<Vec<u8>, BigUint> = indexmap::IndexMap::new();
     for params in executor_options(&options, 2) {
         let amount = big(js_slice(params, 0, 16))?;
-        let receiver = js_slice(params, 16, 48).to_vec();
-        match drops.iter_mut().find(|(known, _)| *known == receiver) {
-            Some((_, total)) => *total += amount,
-            None => drops.push((receiver, amount)),
+        let receiver = js_slice(params, 16, 48);
+        match drops.get_mut(receiver) {
+            Some(total) => *total += amount,
+            None => {
+                drops.insert(receiver.to_vec(), amount);
+            }
         }
     }
 

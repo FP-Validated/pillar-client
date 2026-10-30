@@ -94,28 +94,16 @@ where
                 });
             }
             let context = format!("TON DVN proxy storage for chain {dst_chain_name}");
-            let storage_data: Option<String> =
+            let target: Option<String> =
                 resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
                     .await?;
-
-            match storage_data {
-                Some(data_base64) => match decode_proxy_admin_target(&data_base64)? {
-                    Some(target) => Ok(target),
-                    // Present but not a Proxy contract -> fall back to the DVN address.
-                    None => Ok(dvn_address.to_string()),
-                },
-                // Not active / not deployed -> fall back to the DVN address.
-                None => Ok(dvn_address.to_string()),
-            }
+            Ok(target.unwrap_or_else(|| dvn_address.to_string()))
         })
         .await
     }
 }
 
-/// Observe a TON contract state via toncenter v2 `getAddressInformation`.
-/// Returns `(fingerprint, agreed value)` where the value is the base64 storage
-/// data for an active contract, or `None` (fingerprint `"0"`) otherwise, matching
-/// `tonContractStateQuorumFn`.
+/// Observe and validate one TON contract state before it votes in the quorum.
 async fn observe_ton_contract_state<T>(
     transport: T,
     url: String,
@@ -125,27 +113,19 @@ async fn observe_ton_contract_state<T>(
 where
     T: JsonRpcTransport,
 {
-    let body = json!({
-        "id": 1,
-        "jsonrpc": "2.0",
-        "method": "getAddressInformation",
-        "params": { "address": address },
-    });
-    let response = transport.post_json_scoped(url, headers, body).await?;
-    let result = response.get("result").ok_or(RpcError::Unavailable)?;
+    use super::validation_payload_ton::{ton_storage_cell, TonStorageRead};
+    use sha2::{Digest, Sha256};
 
-    let state = result.get("state").and_then(Value::as_str);
-    let data = result
-        .get("data")
-        .and_then(Value::as_str)
-        .filter(|d| !d.is_empty());
-
-    // Active contract with storage data -> agree on the data; otherwise a single
-    // "0" bucket (uninit/frozen/no-data) that drives the not-a-proxy fallback.
-    let active = matches!(state, Some("active")) || (state.is_none() && data.is_some());
-    match (active, data) {
-        (true, Some(data)) => Ok((data.to_string(), Some(data.to_string()))),
-        _ => Ok(("0".to_string(), None)),
+    match ton_storage_cell(&transport, &url, headers, address).await? {
+        TonStorageRead::Cell(data, _) => {
+            let target = decode_proxy_admin_target(&data).map_err(|_| RpcError::Unavailable)?;
+            Ok((
+                format!("active:{:x}", Sha256::digest(data.as_bytes())),
+                target,
+            ))
+        }
+        TonStorageRead::Inactive => Ok(("inactive".to_string(), None)),
+        TonStorageRead::Unavailable => Err(RpcError::Unavailable),
     }
 }
 

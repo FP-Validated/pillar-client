@@ -63,19 +63,41 @@ const INITIA_EVENT: Node = Node::Object(&[
     ("type", Node::All),
     ("attributes", Node::Array(&INITIA_ATTRIBUTE, 2)),
 ]);
-const INITIA_TX_BODY: Node = Node::Object(&[(
-    "auth_info",
-    Node::Object(&[(
-        "signer_infos",
-        Node::Array(
-            &Node::Object(&[(
-                "public_key",
-                Node::Object(&[("@type", Node::All), ("key", Node::All)]),
-            )]),
-            1,
-        ),
-    )]),
-)]);
+const INITIA_TX_BODY: Node = Node::Object(&[
+    (
+        "body",
+        Node::Object(&[
+            ("unordered", Node::All),
+            (
+                "messages",
+                Node::Array(
+                    &Node::Object(&[
+                        ("@type", Node::All),
+                        ("sender", Node::All),
+                        ("authority", Node::All),
+                    ]),
+                    1,
+                ),
+            ),
+        ]),
+    ),
+    (
+        "auth_info",
+        Node::Object(&[
+            (
+                "signer_infos",
+                Node::Array(
+                    &Node::Object(&[("public_key", Node::All), ("sequence", Node::All)]),
+                    1,
+                ),
+            ),
+            (
+                "fee",
+                Node::Object(&[("payer", Node::All), ("granter", Node::All)]),
+            ),
+        ]),
+    ),
+]);
 const INITIA_TX_RESPONSE: Node = Node::Object(&[
     ("txhash", Node::All),
     ("hash", Node::All),
