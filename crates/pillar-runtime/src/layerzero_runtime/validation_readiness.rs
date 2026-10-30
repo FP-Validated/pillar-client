@@ -720,7 +720,7 @@ where
         headers.clone(),
         json!({
             "method": "starknet_getTransactionReceipt",
-            "params": [tx_hash],
+            "params": { "transaction_hash": tx_hash },
             "id": 1,
             "jsonrpc": "2.0",
         }),

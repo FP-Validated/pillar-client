@@ -25,6 +25,7 @@ bech32.workspace = true
 bs58.workspace = true
 bytes.workspace = true
 futures.workspace = true
+percent-encoding = "2"
 pillar-api = { path = "../pillar-api" }
 pillar-config = { path = "../pillar-config" }
 pillar-core = { path = "../pillar-core" }
@@ -62,6 +63,8 @@ rustls.workspace = true
 webpki-roots.workspace = true
 
 [dev-dependencies]
+pillar-client = { path = "../pillar-client" }
+pillar-signer = { path = "../pillar-signer", features = ["test-support"] }
 pillar-config = { path = "../pillar-config", features = ["test-support"] }
 axum.workspace = true
 url.workspace = true

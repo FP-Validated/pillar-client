@@ -126,6 +126,8 @@ mod validation_payload_solana;
 mod validation_payload_stellar;
 mod validation_payload_sui;
 mod validation_payload_ton;
+#[cfg(test)]
+pub(crate) use validation_payload_ton::{ton_storage_cell, TonStorageRead};
 mod validation_read_markers;
 mod validation_readiness;
 mod validation_timestamp;

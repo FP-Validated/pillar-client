@@ -382,12 +382,16 @@ where
         let uln_version = effective_receive_version
             .or_else(|| uln_version_value(&sent_event.lz_message_id))
             .ok_or_else(|| AppCoreError::Internal("ulnSendVersion must be a string".to_string()))?;
-        if uln_version == "V301" && dst_chain_name == "aptos" {
+        let aptos_v301_to_v2 = uln_version == "V301"
+            && dst_chain_name == "aptos"
+            && pathway_extra_u64(sent_event, "dstEid")?
+                >= crate::provider_health::EVM_ENDPOINT_V2_ID_BASE;
+        if uln_version == "V301" && dst_chain_name == "aptos" && !aptos_v301_to_v2 {
             return self
                 .validate_aptos_v301_payload_not_signed_with_quorum(sent_event, verifier_address)
                 .await;
         }
-        if uln_version != "V302" {
+        if uln_version != "V302" && !aptos_v301_to_v2 {
             return Err(AppCoreError::BadRequest(format!(
                 "Unsupported {dst_chain_name} payload-signed validation for {uln_version}"
             )));
@@ -775,8 +779,24 @@ where
                 .await?,
             )
         };
-        let verified =
-            nonce <= inbound_nonce || stored_hash.as_ref().is_some_and(|hash| hash != "");
+        let hash_matches = match stored_hash.as_ref() {
+            None => false,
+            Some(value) => {
+                let hash = value.as_str().ok_or(RpcError::Unavailable)?;
+                if hash.is_empty() {
+                    false
+                } else {
+                    let mut bytes = [0u8; 32];
+                    let mut expected = [0u8; 32];
+                    hex::decode_to_slice(hash.trim_start_matches("0x"), &mut bytes)
+                        .map_err(|_| RpcError::Unavailable)?;
+                    hex::decode_to_slice(payload_hash.trim_start_matches("0x"), &mut expected)
+                        .map_err(|_| RpcError::Unavailable)?;
+                    bytes == expected
+                }
+            }
+        };
+        let verified = nonce <= inbound_nonce || hash_matches;
         Some((inbound_nonce, stored_hash, verified))
     };
     let signed = dvn_confirmed || verified.as_ref().is_some_and(|(_, _, verified)| *verified);

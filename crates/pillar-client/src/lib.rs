@@ -25,6 +25,7 @@ pub enum ChainType {
     Starknet,
     Stellar,
     Ton,
+    Canton,
 }
 
 impl ChainType {
@@ -39,7 +40,8 @@ impl ChainType {
             | ChainType::Tron
             | ChainType::Starknet
             | ChainType::Stellar
-            | ChainType::Ton => "address",
+            | ChainType::Ton
+            | ChainType::Canton => "address",
         }
     }
 }

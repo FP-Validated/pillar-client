@@ -4,6 +4,24 @@ All notable changes to this project are documented here. This project follows
 semantic versioning for the HTTP surface, the environment-variable contract and
 the Prometheus metric names.
 
+## Unreleased
+
+### Security
+
+- M-96: KMS completion evidence uses the configured audit persistence timeout instead of a fixed two-second cap.
+- M-97: TON proxy storage must decode before voting; active storage and inactive contracts have distinct quorum fingerprints.
+- M-98: `PillarClient` reads Canton signer identities from `address`.
+- M-99: Aptos V301 treats a stored payload as signed only when its 32-byte hash matches the requested payload; malformed hashes are refused.
+- M-100: Aptos-family health probes select the query and credentials belonging to the selected indexer URL.
+- M-101: TON `getAddressInformation` responses have a separate 32 MiB cap for account code and storage; other responses retain their existing caps.
+- M-102: Aptos V301 sends to an EndpointV2 destination use the V302 receive contract for destination validation.
+- M-103: GCP KMS uses a ten-second HTTP connection deadline, including TLS establishment, and bounded responses.
+- M-104: Initia policy sender resolution supports structured Legacy Amino multisig keys and authenticated omitted-key evidence; unresolved identities fail closed.
+- M-105: Starknet transaction and receipt reads use named `transaction_hash` parameters.
+- M-106: `oneOf` dispatch prioritizes a satisfiable provider group before optional providers.
+- M-107: Tron health probes percent-decode URL credentials before constructing Basic authentication.
+- M-108: native-drop receivers are aggregated in insertion order without quadratic searches.
+
 ## 2.7.4 - 2026-10-29
 
 ### Security

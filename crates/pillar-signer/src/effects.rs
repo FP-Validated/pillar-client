@@ -130,10 +130,8 @@ pub(crate) fn owned_digest(digest: &[u8]) -> Result<[u8; 32], SignerError> {
         SignerError::Audit("durable audit: expected a 32-byte transformed signing input".into())
     })
 }
-async fn evidence<F: Future>(future: F) -> F::Output {
-    RequestContext::new(Duration::from_secs(2))
-        .scope(future)
-        .await
+async fn evidence<F: Future>(timeout: Duration, future: F) -> F::Output {
+    RequestContext::new(timeout).scope(future).await
 }
 pub(crate) async fn sign_owned_effect<F>(
     reference: &str,
@@ -184,7 +182,7 @@ where
         reservation,
         audit::scope_external_effect(audit::provider_generation(), async move {
             if sender.is_closed() {
-                let _ = evidence(record.unknown()).await;
+                let _ = evidence(record.completion_timeout(), record.unknown()).await;
                 return;
             }
             let mut caller_lost = false;
@@ -208,7 +206,7 @@ where
                     result = &mut effect => result,
                     _ = sender.closed() => {
                         caller_lost = true;
-                        let _ = evidence(record.unknown()).await;
+                        let _ = evidence(record.completion_timeout(), record.unknown()).await;
                         effect.await
                     }
                 }
@@ -218,15 +216,19 @@ where
                 _ => Outcome::Unknown,
             };
             let result = match result {
-                Ok(Ok(signature)) => evidence(record.returned(&signature))
-                    .await
-                    .map(|()| signature)
-                    .map_err(SignerError::Audit),
+                Ok(Ok(signature)) => {
+                    evidence(record.completion_timeout(), record.returned(&signature))
+                        .await
+                        .map(|()| signature)
+                        .map_err(SignerError::Audit)
+                }
                 Ok(Err(error)) => {
                     let recorded = if caller_lost {
                         Ok(())
                     } else {
-                        evidence(record.unknown()).await.map_err(SignerError::Audit)
+                        evidence(record.completion_timeout(), record.unknown())
+                            .await
+                            .map_err(SignerError::Audit)
                     };
                     recorded.and(Err(error))
                 }
@@ -234,7 +236,9 @@ where
                     let recorded = if caller_lost {
                         Ok(())
                     } else {
-                        evidence(record.unknown()).await.map_err(SignerError::Audit)
+                        evidence(record.completion_timeout(), record.unknown())
+                            .await
+                            .map_err(SignerError::Audit)
                     };
                     recorded.and(Err(SignerError::Admission(
                         pillar_core::execution::BudgetError::Deadline,
@@ -243,7 +247,7 @@ where
             };
             if sender.send(result).is_err() {
                 if !caller_lost {
-                    let _ = evidence(record.unknown()).await;
+                    let _ = evidence(record.completion_timeout(), record.unknown()).await;
                 }
             } else if let Some(permit) = &mut permit {
                 permit.finish(outcome);

@@ -312,12 +312,12 @@ where
             .map_err(AppCoreError::from)?
     };
     let from = if chain_name == "initia" {
-        let public_key = transaction
-            .pointer("/tx/auth_info/signer_infos/0/public_key")
-            .ok_or_else(|| {
-                AppCoreError::Internal("Missing initia transaction signer public key".to_string())
-            })?;
-        initia_address_from_public_key(public_key)?
+        match transaction.pointer("/tx/auth_info/signer_infos/0/public_key") {
+            Some(public_key) if !public_key.is_null() => {
+                initia_address_from_public_key(public_key)?
+            }
+            _ => initia_omitted_key_signer(&transaction)?,
+        }
     } else {
         let sender = transaction
             .get("sender")
@@ -351,6 +351,16 @@ fn initia_address_from_public_key(public_key: &Value) -> Result<String, AppCoreE
     use k256::elliptic_curve::sec1::ToSec1Point;
     use ripemd::Ripemd160;
     use sha2::{Digest, Sha256};
+    if public_key.get("@type").and_then(Value::as_str)
+        == Some("/cosmos.crypto.multisig.LegacyAminoPubKey")
+    {
+        let encoded = initia_amino_public_key(public_key, 0)?;
+        let digest = Sha256::digest(encoded);
+        let hrp = bech32::Hrp::parse("init")
+            .map_err(|error| AppCoreError::Internal(error.to_string()))?;
+        return bech32::encode::<bech32::Bech32>(hrp, &digest[..20])
+            .map_err(|error| AppCoreError::Internal(error.to_string()));
+    }
 
     let ethereum = match public_key.get("@type").and_then(Value::as_str) {
         Some("/cosmos.crypto.secp256k1.PubKey") => false,
@@ -385,6 +395,178 @@ fn initia_address_from_public_key(public_key: &Value) -> Result<String, AppCoreE
         bech32::Hrp::parse("init").map_err(|error| AppCoreError::Internal(error.to_string()))?;
     bech32::encode::<bech32::Bech32>(hrp, &account_id)
         .map_err(|error| AppCoreError::Internal(error.to_string()))
+}
+
+fn initia_amino_public_key(key: &Value, depth: usize) -> Result<Vec<u8>, AppCoreError> {
+    use base64::Engine;
+    let invalid = || AppCoreError::Internal("Invalid Initia multisig public key".into());
+    if depth > 32 {
+        return Err(invalid());
+    }
+    match key.get("@type").and_then(Value::as_str) {
+        Some("/cosmos.crypto.multisig.LegacyAminoPubKey") => {
+            let value = key
+                .get("key")
+                .filter(|value| value.is_object())
+                .unwrap_or(key);
+            let keys = value
+                .get("public_keys")
+                .or_else(|| value.get("pubkeys"))
+                .and_then(Value::as_array)
+                .filter(|keys| !keys.is_empty())
+                .ok_or_else(invalid)?;
+            let threshold = value
+                .get("threshold")
+                .and_then(|value| value.as_u64().or_else(|| value.as_str()?.parse().ok()))
+                .filter(|threshold| *threshold > 0 && *threshold <= keys.len() as u64)
+                .ok_or_else(invalid)?;
+            let mut result = vec![0x22, 0xc1, 0xf7, 0xe2, 0x08];
+            append_uvarint(&mut result, threshold);
+            for key in keys {
+                let nested = initia_amino_public_key(key, depth + 1)?;
+                result.push(0x12);
+                append_uvarint(&mut result, nested.len() as u64);
+                result.extend_from_slice(&nested);
+                if result.len() > 4 * 1024 * 1024 {
+                    return Err(invalid());
+                }
+            }
+            Ok(result)
+        }
+        Some("/cosmos.crypto.secp256k1.PubKey") | Some("/cosmos.crypto.ed25519.PubKey") => {
+            let secp = key["@type"] == "/cosmos.crypto.secp256k1.PubKey";
+            let encoded = key.get("key").and_then(Value::as_str).ok_or_else(invalid)?;
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .map_err(|_| invalid())?;
+            let prefix: &[u8] = if secp {
+                if bytes.len() != 33 || k256::PublicKey::from_sec1_bytes(&bytes).is_err() {
+                    return Err(invalid());
+                }
+                &[0xeb, 0x5a, 0xe9, 0x87, 0x21]
+            } else {
+                if bytes.len() != 32 {
+                    return Err(invalid());
+                }
+                &[0x16, 0x24, 0xde, 0x64, 0x20]
+            };
+            let mut result = Vec::with_capacity(prefix.len() + bytes.len());
+            result.extend_from_slice(prefix);
+            result.extend_from_slice(&bytes);
+            Ok(result)
+        }
+        _ => Err(invalid()),
+    }
+}
+
+fn append_uvarint(out: &mut Vec<u8>, mut value: u64) {
+    while value >= 0x80 {
+        out.push((value as u8) | 0x80);
+        value >>= 7;
+    }
+    out.push(value as u8);
+}
+
+fn initia_omitted_key_signer(transaction: &Value) -> Result<String, AppCoreError> {
+    let invalid = || AppCoreError::Internal("Cannot establish Initia transaction signer".into());
+    if transaction
+        .get("code")
+        .is_some_and(|code| code.as_u64() != Some(0))
+    {
+        return Err(invalid());
+    }
+    if !transaction
+        .pointer("/tx/body")
+        .is_some_and(Value::is_object)
+    {
+        return Err(invalid());
+    }
+    let message = transaction.pointer("/tx/body/messages/0");
+    let from_message = message.and_then(|message| {
+        let field = match message.get("@type")?.as_str()? {
+            "/initia.move.v1.MsgPublish"
+            | "/initia.move.v1.MsgExecute"
+            | "/initia.move.v1.MsgExecuteJSON"
+            | "/initia.move.v1.MsgScript"
+            | "/initia.move.v1.MsgScriptJSON" => "sender",
+            "/initia.move.v1.MsgGovPublish"
+            | "/initia.move.v1.MsgGovExecute"
+            | "/initia.move.v1.MsgGovExecuteJSON"
+            | "/initia.move.v1.MsgGovScript"
+            | "/initia.move.v1.MsgGovScriptJSON" => "authority",
+            _ => return None,
+        };
+        message.get(field)?.as_str()
+    });
+    let ordered = transaction
+        .pointer("/tx/body/unordered")
+        .and_then(Value::as_bool)
+        != Some(true);
+    let sequence = transaction
+        .pointer("/tx/auth_info/signer_infos/0/sequence")
+        .and_then(|value| value.as_u64().or_else(|| value.as_str()?.parse().ok()));
+    let from_ante = if ordered {
+        transaction
+            .get("events")
+            .and_then(Value::as_array)
+            .and_then(|events| {
+                events
+                    .iter()
+                    .filter(|event| event.get("type").and_then(Value::as_str) == Some("tx"))
+                    .filter_map(|event| event.get("attributes")?.as_array())
+                    .flat_map(|attributes| attributes.iter())
+                    .find(|attribute| {
+                        attribute.get("key").and_then(Value::as_str) == Some("acc_seq")
+                    })
+                    .and_then(|attribute| attribute.get("value")?.as_str())
+                    .and_then(|value| value.rsplit_once('/'))
+                    .filter(|(_, value)| {
+                        sequence.is_some_and(|sequence| value.parse::<u64>().ok() == Some(sequence))
+                    })
+                    .map(|(address, _)| address)
+            })
+    } else {
+        None
+    };
+    let from_fee = transaction
+        .pointer("/tx/auth_info/fee")
+        .and_then(Value::as_object)
+        .filter(|fee| {
+            ["payer", "granter"].iter().all(|field| {
+                fee.get(*field)
+                    .is_none_or(|value| value.as_str() == Some(""))
+            })
+        })
+        .and_then(|_| transaction.get("events")?.as_array())
+        .and_then(|events| {
+            events
+                .iter()
+                .find(|event| event.get("type").and_then(Value::as_str) == Some("tx"))?
+                .get("attributes")?
+                .as_array()?
+                .iter()
+                .find(|attribute| {
+                    attribute.get("key").and_then(Value::as_str) == Some("fee_payer")
+                })?
+                .get("value")?
+                .as_str()
+        });
+    let address = from_ante
+        .or(from_message)
+        .or(from_fee)
+        .ok_or_else(invalid)?;
+    if [from_ante, from_message, from_fee]
+        .into_iter()
+        .flatten()
+        .any(|candidate| candidate != address)
+    {
+        return Err(invalid());
+    }
+    let (hrp, bytes) = bech32::decode(address).map_err(|_| invalid())?;
+    if hrp.as_str() != "init" || bytes.len() != 20 {
+        return Err(invalid());
+    }
+    bech32::encode::<bech32::Bech32>(hrp, &bytes).map_err(|_| invalid())
 }
 
 async fn observe_sui_transaction_from<T>(
@@ -462,7 +644,7 @@ where
             headers,
             json!({
                 "method": "starknet_getTransactionByHash",
-                "params": [tx_hash],
+                "params": { "transaction_hash": tx_hash },
                 "id": 1,
                 "jsonrpc": "2.0",
             }),
