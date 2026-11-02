@@ -587,6 +587,15 @@ impl<I: AsyncWrite + Unpin> AsyncWrite for IdleTimeoutIo<I> {
     }
 }
 
+/// The AWS SDK formats whole requests at TRACE, and its header redaction omits the SSO bearer token.
+fn without_credential_dumps(filter: EnvFilter) -> EnvFilter {
+    filter.add_directive(
+        "aws_smithy_runtime::client::orchestrator=info"
+            .parse()
+            .expect("static directive parses"),
+    )
+}
+
 fn init_tracing() {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         // `pillar` is this binary's own target: without it the operator never
@@ -596,7 +605,7 @@ fn init_tracing() {
         )
     });
     let _ = fmt()
-        .with_env_filter(filter)
+        .with_env_filter(without_credential_dumps(filter))
         .with_target(true)
         .compact()
         .try_init();
@@ -1109,3 +1118,42 @@ mod tests {
 mod drain_tests;
 #[cfg(test)]
 mod phase1_review_e2e;
+
+#[cfg(test)]
+mod tracing_filter_tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone, Default)]
+    struct Buffer(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Buffer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_trace_level_filter_cannot_print_the_aws_request_dump() {
+        let buffer = Buffer::default();
+        let writer = buffer.clone();
+        let subscriber = fmt()
+            .with_env_filter(without_credential_dumps(EnvFilter::new("trace")))
+            .with_writer(move || writer.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::trace!(
+                target: "aws_smithy_runtime::client::orchestrator",
+                "transmitting request x-amz-sso_bearer_token=SSOSECRET"
+            );
+            tracing::trace!(target: "pillar_runtime", "still visible");
+        });
+        let log = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
+        assert!(!log.contains("SSOSECRET"), "{log}");
+        assert!(log.contains("still visible"), "{log}");
+    }
+}

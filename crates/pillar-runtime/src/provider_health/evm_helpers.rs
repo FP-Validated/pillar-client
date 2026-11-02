@@ -247,8 +247,20 @@ impl EvmTransactionReceipt {
     }
 }
 
+/// Providers number logs from 0 or 1 and list them in their own order, so the vote keeps the logs in
+/// index order and not the indexes themselves.
 pub(crate) fn evm_receipt_fingerprint(receipt: &EvmTransactionReceipt) -> Result<String, String> {
-    super::canonical_json_fingerprint(receipt).map_err(|error| error.to_string())
+    let mut logs = receipt.logs.clone();
+    logs.sort_by_key(|log| log.log_index.parse::<u128>().unwrap_or(u128::MAX));
+    let mut value = serde_json::to_value(receipt).map_err(|error| error.to_string())?;
+    let mut logs = serde_json::to_value(logs).map_err(|error| error.to_string())?;
+    for log in logs.as_array_mut().into_iter().flatten() {
+        if let Some(log) = log.as_object_mut() {
+            log.remove("logIndex");
+        }
+    }
+    value["logs"] = logs;
+    super::canonical_json_fingerprint(&value).map_err(|error| error.to_string())
 }
 
 pub(crate) fn normalize_address_map(map: HashMap<String, String>) -> HashMap<String, String> {
@@ -360,4 +372,50 @@ pub(crate) fn unix_time_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod receipt_fingerprint_tests {
+    use super::*;
+
+    fn log(index: &str, data: &str) -> Value {
+        json!({
+            "address": "0x01", "topics": ["0x02"], "data": data,
+            "transactionHash": "0x03", "blockHash": "0x04", "blockNumber": "0x5",
+            "logIndex": index,
+        })
+    }
+
+    fn fingerprint(logs: Vec<Value>) -> String {
+        let receipt: EvmTransactionReceipt = serde_json::from_value(json!({
+            "transactionHash": "0x03", "blockHash": "0x04", "blockNumber": "0x5",
+            "status": "0x1", "logs": logs,
+        }))
+        .unwrap();
+        evm_receipt_fingerprint(&receipt.normalize("0x03").unwrap()).unwrap()
+    }
+
+    #[test]
+    fn providers_numbering_the_same_logs_from_zero_or_one_cast_the_same_vote() {
+        assert_eq!(
+            fingerprint(vec![log("0x0", "0xaa"), log("0x1", "0xbb")]),
+            fingerprint(vec![log("0x1", "0xaa"), log("0x2", "0xbb")]),
+        );
+    }
+
+    #[test]
+    fn log_order_is_the_index_order_whatever_order_the_provider_lists_them() {
+        assert_eq!(
+            fingerprint(vec![log("0x0", "0xaa"), log("0x1", "0xbb")]),
+            fingerprint(vec![log("0x1", "0xbb"), log("0x0", "0xaa")]),
+        );
+    }
+
+    #[test]
+    fn different_logs_are_different_votes() {
+        assert_ne!(
+            fingerprint(vec![log("0x0", "0xaa"), log("0x1", "0xbb")]),
+            fingerprint(vec![log("0x0", "0xbb"), log("0x1", "0xaa")]),
+        );
+    }
 }

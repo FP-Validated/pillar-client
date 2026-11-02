@@ -105,7 +105,14 @@ impl ProviderRankTracker {
                 if !entry.observed || entry.diagnostic {
                     continue;
                 }
-                self.record(chain_name, &entry.rank_key, entry.healthy, entry.latency_ms)
+                // The probe's 2 s cap is shorter than the 55.2 s signing allows, so a timeout is slow, not down.
+                let timed_out = entry.response.as_str() == Some(PROVIDER_RESPONSE_TIMED_OUT);
+                let (healthy, latency_ms) = if timed_out {
+                    (true, Some(HIGH_LATENCY_THRESHOLD_MS + 1))
+                } else {
+                    (entry.healthy, entry.latency_ms)
+                };
+                self.record(chain_name, &entry.rank_key, healthy, latency_ms)
                     .await;
             }
         }
@@ -231,6 +238,41 @@ mod tests {
             tracker.rank_of("bsc", dialled).await,
             ProviderRank::Unhealthy,
             "dispatch looks the provider up by the URL it dials"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_probe_that_only_timed_out_ranks_slow_not_unhealthy() {
+        let entry = |response: &str| {
+            crate::provider_health::normalize_provider_health_entry(
+                format!("https://{response}.example"),
+                serde_json::Value::String(response.to_string()),
+                Some(2_000),
+            )
+        };
+        let report = ProviderHealthReport::from([(
+            "bsc".to_string(),
+            pillar_core::ChainProviderHealthReport {
+                healthy: false,
+                checked_at_unix_ms: 0,
+                providers: vec![
+                    entry(crate::provider_health::PROVIDER_RESPONSE_TIMED_OUT),
+                    entry("boom"),
+                ],
+            },
+        )]);
+        let tracker = ProviderRankTracker::new();
+        tracker.seed_from_report(&report).await;
+        assert_eq!(
+            tracker
+                .rank_of("bsc", "https://provider response timed out.example")
+                .await,
+            ProviderRank::HighLatency,
+            "a 2 s probe cap says nothing about a provider signing allows 55 s"
+        );
+        assert_eq!(
+            tracker.rank_of("bsc", "https://boom.example").await,
+            ProviderRank::Unhealthy
         );
     }
 }

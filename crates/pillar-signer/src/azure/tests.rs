@@ -213,19 +213,39 @@ async fn azure_kms_factory_accepts_key_url_and_rejects_other_providers() {
     assert_eq!(err, SignerError::UnsupportedKmsProvider(KmsProvider::Aws));
 }
 
+/// A real secp256k1 point whose x coordinate has a leading zero byte, so it arrives as 31 bytes.
+fn point_with_short_x() -> (Vec<u8>, Vec<u8>) {
+    (0u16..4096)
+        .find_map(|seed| {
+            let mut bytes = [1u8; 32];
+            bytes[..2].copy_from_slice(&seed.to_be_bytes());
+            let key = EcdsaSigningKey::from_slice(&bytes).ok()?;
+            let point = key.verifying_key().to_sec1_point(false);
+            (point.x()?[0] == 0).then(|| {
+                (
+                    point.x().unwrap()[1..].to_vec(),
+                    point.y().unwrap().to_vec(),
+                )
+            })
+        })
+        .expect("about one key in 256 has a short x")
+}
+
 #[tokio::test]
 async fn azure_kms_adapter_left_pads_short_ec_coordinates_to_32_bytes() {
     let key_id = AzureKmsKeyId {
         name: "padded-key".to_string(),
         version: None,
     };
+    let (x, y) = point_with_short_x();
+    assert_eq!(x.len(), 31);
     let client = Arc::new(MockAzureKmsClient {
         key_id,
         ecdsa_signing_key: EcdsaSigningKey::from_slice(&[19u8; 32]).unwrap(),
         signature_encoding: MockAzureSignatureEncoding::Raw,
         sign_digests: Mutex::new(Vec::new()),
         public_key_calls: Mutex::new(0),
-        coordinates: Some((vec![0xca; 31], vec![0x11; 30])),
+        coordinates: Some((x.clone(), y.clone())),
     });
     let adapter = AzureKmsRawSignerAdapter::new("padded-key".to_string(), client).unwrap();
 
@@ -241,10 +261,90 @@ async fn azure_kms_adapter_left_pads_short_ec_coordinates_to_32_bytes() {
     assert_eq!(public_key.len(), 65);
     assert_eq!(public_key[0], 0x04);
     assert_eq!(public_key[1], 0);
-    assert_eq!(public_key[2], 0xca);
-    assert_eq!(public_key[33], 0);
-    assert_eq!(public_key[34], 0);
-    assert_eq!(public_key[35], 0x11);
+    assert_eq!(&public_key[2..33], &x[..]);
+    assert_eq!(&public_key[33..], &y[..]);
+}
+
+#[tokio::test]
+async fn azure_kms_adapter_rejects_coordinates_that_are_not_a_secp256k1_point() {
+    let client = Arc::new(MockAzureKmsClient {
+        key_id: AzureKmsKeyId {
+            name: "off-curve-key".to_string(),
+            version: None,
+        },
+        ecdsa_signing_key: EcdsaSigningKey::from_slice(&[19u8; 32]).unwrap(),
+        signature_encoding: MockAzureSignatureEncoding::Raw,
+        sign_digests: Mutex::new(Vec::new()),
+        public_key_calls: Mutex::new(0),
+        coordinates: Some((vec![0xca; 32], vec![0x11; 32])),
+    });
+    let adapter = AzureKmsRawSignerAdapter::new("off-curve-key".to_string(), client).unwrap();
+    let error = adapter
+        .get_public_key(PublicKeyRequest {
+            signature_type: SignatureType::Ecdsa,
+            private_key_signature_type: SignatureType::Ecdsa,
+            seed_kind: SeedKind::Bip39,
+        })
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("secp256k1"), "{error}");
+}
+
+struct InVault(MockAzureKmsClient, &'static str);
+
+#[async_trait]
+impl AzureKmsClient for InVault {
+    async fn sign_es256k_digest(
+        &self,
+        key_id: &AzureKmsKeyId,
+        digest: &[u8],
+    ) -> Result<Vec<u8>, SignerError> {
+        self.0.sign_es256k_digest(key_id, digest).await
+    }
+
+    async fn get_ec_public_key_coordinates(
+        &self,
+        key_id: &AzureKmsKeyId,
+    ) -> Result<AzureEcPublicKey, SignerError> {
+        self.0.get_ec_public_key_coordinates(key_id).await
+    }
+
+    fn vault_origin(&self) -> Option<String> {
+        Some(self.1.to_string())
+    }
+}
+
+#[tokio::test]
+async fn azure_kms_adapter_refuses_a_key_url_that_names_another_vault() {
+    let client = Arc::new(InVault(
+        MockAzureKmsClient {
+            key_id: AzureKmsKeyId {
+                name: "key-a".to_string(),
+                version: Some("ver-1".to_string()),
+            },
+            ecdsa_signing_key: EcdsaSigningKey::from_slice(&[16u8; 32]).unwrap(),
+            signature_encoding: MockAzureSignatureEncoding::Raw,
+            sign_digests: Mutex::new(Vec::new()),
+            public_key_calls: Mutex::new(0),
+            coordinates: None,
+        },
+        "https://vault-b.vault.azure.net",
+    ));
+    let adapter = AzureKmsRawSignerAdapter::new(
+        "https://vault-a.vault.azure.net/keys/key-a/ver-1".to_string(),
+        client.clone(),
+    )
+    .unwrap();
+    let error = adapter
+        .get_public_key(PublicKeyRequest {
+            signature_type: SignatureType::Ecdsa,
+            private_key_signature_type: SignatureType::Ecdsa,
+            seed_kind: SeedKind::Bip39,
+        })
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("different vault"), "{error}");
+    assert_eq!(*client.0.public_key_calls.lock().await, 0);
 }
 
 #[tokio::test]

@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use std::{sync::Arc, time::Duration};
 
-use crate::azure::{parse_azure_kms_key_id, AzureKmsClient, AzureKmsKeyId};
-use crate::kms_signature::{kms_ecdsa_signature_to_recoverable, KmsEcdsaSignatureEncoding};
+use crate::azure::{azure_key_vault_origin, parse_azure_kms_key_id, AzureKmsClient, AzureKmsKeyId};
+use crate::kms_signature::kms_ecdsa_signature_of_either_encoding_to_recoverable;
 use crate::types::{
     KmsProvider, PublicKeyRequest, RawSignerAdapter, SignRequest, SignatureType, SignerError,
 };
@@ -85,6 +85,7 @@ where
 pub struct AzureKmsRawSignerAdapter<C> {
     original_key_id: String,
     parsed_key_id: AzureKmsKeyId,
+    vault: Option<String>,
     client: Arc<C>,
     public_key: tokio::sync::Mutex<Option<Arc<ResolvedAzureKey>>>,
 }
@@ -101,6 +102,7 @@ where
     pub fn new(key_id: String, client: Arc<C>) -> Result<Self, SignerError> {
         let parsed_key_id = parse_azure_kms_key_id(&key_id)?;
         Ok(Self {
+            vault: azure_key_vault_origin(&key_id),
             original_key_id: key_id,
             parsed_key_id,
             client,
@@ -111,6 +113,14 @@ where
         let mut cached = self.public_key.lock().await;
         if let Some(key) = cached.as_ref() {
             return Ok(key.clone());
+        }
+        if let (Some(named), Some(serving)) = (&self.vault, self.client.vault_origin()) {
+            if *named != serving {
+                return Err(SignerError::Message(
+                    "Azure Key Vault: the key URL names a different vault than the one configured"
+                        .into(),
+                ));
+            }
         }
         let key = crate::effects::kms_operation(
             &self.original_key_id,
@@ -136,6 +146,9 @@ where
         public_key.push(0x04);
         public_key.extend_from_slice(&x);
         public_key.extend_from_slice(&y);
+        k256::PublicKey::from_sec1_bytes(&public_key).map_err(|_| {
+            SignerError::Message("Azure Key Vault: public key is not a secp256k1 point".into())
+        })?;
         let key = Arc::new(ResolvedAzureKey {
             id: key.key_id,
             reference: key.reference,
@@ -192,14 +205,8 @@ where
             )
             .await?
         };
-        let encoding = if signature.len() == 64 {
-            KmsEcdsaSignatureEncoding::Raw
-        } else {
-            KmsEcdsaSignatureEncoding::Der
-        };
-        kms_ecdsa_signature_to_recoverable(
+        kms_ecdsa_signature_of_either_encoding_to_recoverable(
             &signature,
-            encoding,
             &request.data,
             &key.public_key,
             request.transform_recovery_id,

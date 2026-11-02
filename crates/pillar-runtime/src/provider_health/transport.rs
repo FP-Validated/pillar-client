@@ -6,6 +6,8 @@ mod read_http;
 
 const MAX_JSON_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_TON_ACCOUNT_RESPONSE_BYTES: usize = 32 * 1024 * 1024;
+// Canton has no query for one packet or one sender, so a scan or a ledger update is read whole.
+const MAX_CANTON_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_PAGINATED_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 // Non-TON responses: ~60x the largest recorded one (Solana 2,150), ~3,000 EVM logs.
 const MAX_JSON_PARSE_NODES: usize = 128 * 1024;
@@ -444,6 +446,31 @@ fn rpc_target_for_call() -> Result<Arc<str>, RpcError> {
     }
 }
 
+/// Sets configured headers over the client's own, once each however their names are spelled.
+fn apply_headers(
+    request: reqwest::RequestBuilder,
+    headers: HashMap<String, String>,
+) -> Result<reqwest::RequestBuilder, String> {
+    use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+    let mut map = HeaderMap::new();
+    for (name, value) in headers {
+        let name = HeaderName::try_from(name.as_str())
+            .map_err(|_| "invalid provider header name".to_string())?;
+        let value = HeaderValue::try_from(value.as_str())
+            .map_err(|_| format!("invalid value for provider header {name}"))?;
+        match map.get(&name) {
+            Some(existing) if *existing != value => {
+                return Err(format!("conflicting values for provider header {name}"))
+            }
+            Some(_) => {}
+            None => {
+                map.insert(name, value);
+            }
+        }
+    }
+    Ok(request.headers(map))
+}
+
 async fn limited_rpc<T, F: Future<Output = Result<T, String>>>(
     chain: &str,
     future: F,
@@ -492,7 +519,7 @@ async fn limited_rpc<T, F: Future<Output = Result<T, String>>>(
         });
     }
     result
-        .map_err(|_| RpcError::Remote("provider response timed out".into()))?
+        .map_err(|_| RpcError::Remote(super::PROVIDER_RESPONSE_TIMED_OUT.into()))?
         .map_err(|error| json_parser_local_error(&error).unwrap_or(RpcError::Remote(error)))
 }
 
@@ -515,7 +542,7 @@ pub struct AwsSdkLambdaInvokeClient {
 
 impl AwsSdkLambdaInvokeClient {
     pub async fn from_region(region: Option<String>) -> Result<Self, String> {
-        let mut loader = aws_config::defaults(aws_config::BehaviorVersion::latest());
+        let mut loader = crate::aws_client::defaults();
         if let Some(region) = region {
             loader = loader.region(aws_config::Region::new(region));
         }
@@ -621,9 +648,7 @@ impl JsonRpcTransport for ReqwestJsonRpcTransport {
             && body.get("method").and_then(Value::as_str) == Some("getAddressInformation");
         let projection = projection::for_post(&body);
         let mut request = self.client_for(&url).post(url).json(&body);
-        for (key, value) in headers {
-            request = request.header(key, value);
-        }
+        request = apply_headers(request, headers)?;
         if super::rpc_context::in_read_target_scope() {
             let request = request
                 .build()
@@ -635,7 +660,10 @@ impl JsonRpcTransport for ReqwestJsonRpcTransport {
             .await
             .map_err(|error| error.without_url().to_string())?;
         if ton_account {
-            return bounded_ton_account_response(response).await;
+            return bounded_large_json_response(response, MAX_TON_ACCOUNT_RESPONSE_BYTES).await;
+        }
+        if super::rpc_context::rpc_target().as_deref() == Some("canton") {
+            return bounded_large_json_response(response, MAX_CANTON_RESPONSE_BYTES).await;
         }
         match projection {
             Some(projection) => projection::response(response, projection).await,
@@ -650,9 +678,7 @@ impl JsonRpcTransport for ReqwestJsonRpcTransport {
     ) -> Result<Value, String> {
         let projection = projection::for_get(&url);
         let mut request = self.client_for(&url).get(url);
-        for (key, value) in headers {
-            request = request.header(key, value);
-        }
+        request = apply_headers(request, headers)?;
         let response = request
             .send()
             .await
@@ -668,9 +694,7 @@ impl JsonRpcTransport for ReqwestJsonRpcTransport {
         headers: HashMap<String, String>,
     ) -> Result<Value, String> {
         let mut request = self.client_for(&url).get(url);
-        for (key, value) in headers {
-            request = request.header(key, value);
-        }
+        request = apply_headers(request, headers)?;
         let response = request
             .send()
             .await
@@ -685,9 +709,7 @@ impl JsonRpcTransport for ReqwestJsonRpcTransport {
         body: Value,
     ) -> Result<(u16, String), String> {
         let mut request = self.client_for(&url).post(url).json(&body);
-        for (key, value) in headers {
-            request = request.header(key, value);
-        }
+        request = apply_headers(request, headers)?;
         bounded_text_response(request.send().await.map_err(|_| FETCH_FAILED.to_string())?).await
     }
 
@@ -697,9 +719,7 @@ impl JsonRpcTransport for ReqwestJsonRpcTransport {
         headers: HashMap<String, String>,
     ) -> Result<(u16, String), String> {
         let mut request = self.client_for(&url).get(url);
-        for (key, value) in headers {
-            request = request.header(key, value);
-        }
+        request = apply_headers(request, headers)?;
         bounded_text_response(request.send().await.map_err(|_| FETCH_FAILED.to_string())?).await
     }
 
@@ -714,9 +734,7 @@ impl JsonRpcTransport for ReqwestJsonRpcTransport {
             .post(url)
             .header("Content-Type", "application/x-www-form-urlencoded")
             .body(body);
-        for (key, value) in headers {
-            request = request.header(key, value);
-        }
+        request = apply_headers(request, headers)?;
         bounded_text_response(request.send().await.map_err(|_| FETCH_FAILED.to_string())?).await
     }
 }
@@ -725,6 +743,12 @@ impl JsonRpcTransport for ReqwestJsonRpcTransport {
 /// for a resource or table item that does not exist.
 pub(crate) fn is_http_not_found(error: &RpcError) -> bool {
     matches!(error, RpcError::Remote(message) if message.starts_with("Provider returned HTTP 404 "))
+}
+
+/// A provider refusing the credential it was sent.
+pub(crate) fn is_http_unauthorized(error: &RpcError) -> bool {
+    matches!(error, RpcError::Remote(message)
+        if message.starts_with("Provider returned HTTP 401 ") || message.starts_with("Provider returned HTTP 403 "))
 }
 
 /// This service's own refusal of a response body over the transport limit, as opposed to
@@ -742,7 +766,12 @@ async fn bounded_text_response(response: reqwest::Response) -> Result<(u16, Stri
     let mut permit = acquire_json_parse_slot().await?;
     let result = async {
         let status = response.status().as_u16();
-        let bytes = bounded_response_bytes(response).await?;
+        let limit = if super::rpc_context::rpc_target().as_deref() == Some("canton") {
+            MAX_CANTON_RESPONSE_BYTES
+        } else {
+            MAX_JSON_RESPONSE_BYTES
+        };
+        let bytes = bounded_response_bytes_with_limit(response, limit).await?;
         let text = String::from_utf8_lossy(&bytes);
         Ok((
             status,
@@ -785,16 +814,18 @@ async fn bounded_ton_json_response(response: reqwest::Response) -> Result<Value,
     permit.finish(&result);
     result
 }
-async fn bounded_ton_account_response(response: reqwest::Response) -> Result<Value, String> {
+async fn bounded_large_json_response(
+    response: reqwest::Response,
+    limit: usize,
+) -> Result<Value, String> {
     let mut permit = acquire_json_parse_slot().await?;
     let result = async {
         let status = response.status();
         if !status.is_success() {
             return Err(format!("Provider returned HTTP {status}"));
         }
-        let bytes =
-            bounded_response_bytes_with_limit(response, MAX_TON_ACCOUNT_RESPONSE_BYTES).await?;
-        parse_json_with_limit(&bytes, true, MAX_TON_ACCOUNT_RESPONSE_BYTES)
+        let bytes = bounded_response_bytes_with_limit(response, limit).await?;
+        parse_json_with_limit(&bytes, true, limit)
     }
     .await;
     permit.finish(&result);
@@ -957,6 +988,14 @@ async fn acquire_json_parse_slot() -> Result<JsonParsePermit, String> {
 pub(crate) async fn parse_bounded_json(bytes: &[u8], ton: bool) -> Result<Value, String> {
     let mut permit = acquire_json_parse_slot().await?;
     let result = parse_json_with_limits(bytes, ton);
+    permit.finish(&result);
+    result
+}
+
+/// A Canton body read under `MAX_CANTON_RESPONSE_BYTES`, parsed under the same.
+pub(crate) async fn parse_bounded_large_json(bytes: &[u8]) -> Result<Value, String> {
+    let mut permit = acquire_json_parse_slot().await?;
+    let result = parse_json_with_limit(bytes, true, MAX_CANTON_RESPONSE_BYTES);
     permit.finish(&result);
     result
 }
@@ -1253,5 +1292,102 @@ mod tests {
         assert!(
             matches!(result, Err(RpcError::Remote(message)) if message.contains("digest mismatch"))
         );
+    }
+}
+
+#[cfg(test)]
+mod header_tests {
+    use super::*;
+
+    fn request(headers: &[(&str, &str)]) -> Result<reqwest::Request, String> {
+        let headers = headers
+            .iter()
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect();
+        apply_headers(
+            reqwest::Client::new()
+                .post("https://rpc.example")
+                .json(&json!({})),
+            headers,
+        )?
+        .build()
+        .map_err(|error| error.to_string())
+    }
+
+    #[test]
+    fn a_configured_content_type_replaces_the_one_the_client_sets() {
+        let request = request(&[("Content-Type", "application/json")]).unwrap();
+        assert_eq!(request.headers().get_all("content-type").iter().count(), 1);
+    }
+
+    #[test]
+    fn one_header_spelled_two_ways_is_sent_once() {
+        let request =
+            request(&[("Authorization", "Bearer a"), ("authorization", "Bearer a")]).unwrap();
+        assert_eq!(request.headers().get_all("authorization").iter().count(), 1);
+    }
+
+    #[test]
+    fn one_header_with_two_values_is_refused() {
+        let error =
+            request(&[("Authorization", "Bearer a"), ("authorization", "Bearer b")]).unwrap_err();
+        assert!(error.contains("authorization"), "{error}");
+        assert!(!error.contains("Bearer"), "{error}");
+    }
+}
+
+#[cfg(test)]
+mod canton_budget_tests {
+    use super::*;
+
+    const FIVE_MIB: usize = 5 * 1024 * 1024;
+
+    fn response(body: String) -> reqwest::Response {
+        reqwest::Response::from(http::Response::new(body))
+    }
+
+    fn big_json(bytes: usize) -> String {
+        format!(r#"{{"events":["{}"]}}"#, "a".repeat(bytes))
+    }
+
+    #[tokio::test]
+    async fn a_canton_scan_above_the_default_cap_is_read_whole_and_other_chains_still_refuse_it() {
+        let body = big_json(FIVE_MIB);
+        let (_, text) = super::super::rpc_context::rpc_scope(
+            "canton",
+            bounded_text_response(response(body.clone())),
+        )
+        .await
+        .unwrap();
+        assert_eq!(text.len(), body.len());
+        let error =
+            super::super::rpc_context::rpc_scope("evm", bounded_text_response(response(body)))
+                .await
+                .unwrap_err();
+        assert!(error.contains("exceeds"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn a_canton_ledger_update_above_the_default_cap_is_parsed_and_the_canton_cap_still_holds()
+    {
+        let value =
+            bounded_large_json_response(response(big_json(FIVE_MIB)), MAX_CANTON_RESPONSE_BYTES)
+                .await
+                .unwrap();
+        assert_eq!(value["events"][0].as_str().unwrap().len(), FIVE_MIB);
+        let error = bounded_large_json_response(
+            response(big_json(MAX_CANTON_RESPONSE_BYTES)),
+            MAX_CANTON_RESPONSE_BYTES,
+        )
+        .await
+        .unwrap_err();
+        assert!(error.contains("exceeds"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn the_canton_parser_takes_what_the_default_parser_refuses() {
+        let body = big_json(FIVE_MIB);
+        assert!(parse_bounded_json(body.as_bytes(), false).await.is_err());
+        assert!(parse_bounded_large_json(body.as_bytes()).await.is_ok());
     }
 }

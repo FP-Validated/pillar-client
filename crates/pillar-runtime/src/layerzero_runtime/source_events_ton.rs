@@ -248,6 +248,21 @@ fn clone_ton_scalar(value: &Value) -> Option<Value> {
     }
 }
 
+/// `endpoint/path?key=value`, the endpoint's own query kept ahead of the pair; `value` must already be encoded.
+fn ton_v3_url(endpoint: &str, path: &str, key: &str, value: &str) -> String {
+    match crate::provider_health::append_url_path(endpoint, &[path]) {
+        Some(mut url) => {
+            let query = match url.query().filter(|query| !query.is_empty()) {
+                Some(own) => format!("{own}&{key}={value}"),
+                None => format!("{key}={value}"),
+            };
+            url.set_query(Some(&query));
+            url.into()
+        }
+        None => format!("{}/{path}?{key}={value}", endpoint.trim_end_matches('/')),
+    }
+}
+
 /// Upstream `TonClient3.getTransactionTrace`: `/events`, then `/traces`, then
 /// `/transactionTrace`, taking the first that answers with a trace. `encoded_tx_hash`
 /// must already have passed `encode_path_segment`.
@@ -257,13 +272,13 @@ pub(crate) async fn fetch_ton_transaction_trace<T: JsonRpcTransport>(
     headers: &HashMap<String, String>,
     encoded_tx_hash: &str,
 ) -> Result<Option<Value>, RpcError> {
-    let base = endpoint.trim_end_matches('/');
+    let urls = [
+        ton_v3_url(endpoint, "events", "tx_hash", encoded_tx_hash),
+        ton_v3_url(endpoint, "traces", "tx_hash", encoded_tx_hash),
+        ton_v3_url(endpoint, "transactionTrace", "hash", encoded_tx_hash),
+    ];
     let mut observation = Ok(None);
-    for url in [
-        format!("{base}/events?tx_hash={encoded_tx_hash}"),
-        format!("{base}/traces?tx_hash={encoded_tx_hash}"),
-        format!("{base}/transactionTrace?hash={encoded_tx_hash}"),
-    ] {
+    for url in urls {
         observation = provider_response(transport.get_ton_json_scoped(url, headers.clone()).await)
             .map(|response| {
                 response.and_then(|value| {
@@ -331,11 +346,11 @@ fn ton_message_digest(transaction: &Value, message: &Value) -> Option<String> {
     };
     Some(hash_fields(
         [
-            js_string(message.get("destination")),
+            address_string(message.get("destination")),
             js_string(transaction.get("mc_block_seqno")),
             js_string(body),
             bounced,
-            js_string(message.get("source")),
+            address_string(message.get("source")),
             js_string(message.get("hash")),
             subtopic.unwrap_or_else(|| "EMPTY".to_string()),
             topic,
@@ -343,6 +358,14 @@ fn ton_message_digest(transaction: &Value, message: &Value) -> Option<String> {
         .iter()
         .map(String::as_str),
     ))
+}
+
+/// An address field of a trace; providers spell the same address in different cases and forms.
+fn address_string(value: Option<&Value>) -> String {
+    match value {
+        Some(Value::String(text)) => normalize_ton_address(text),
+        other => js_string(other),
+    }
 }
 
 /// `String(value ?? 'EMPTY')` for the JSON shapes a TON v3 trace carries.
@@ -1286,5 +1309,59 @@ mod tests {
         root_builder.write_ref(leaf).unwrap();
         let root = root_builder.build().unwrap();
         assert_eq!(flatten_cell_bytes(&root).unwrap(), vec![0b1101_0000]);
+    }
+}
+
+#[cfg(test)]
+mod v3_url_tests {
+    use super::*;
+
+    #[test]
+    fn a_trace_path_and_hash_go_after_the_endpoint_path_and_before_its_own_query() {
+        assert_eq!(
+            ton_v3_url(
+                "https://v3.example/api?key=secret",
+                "events",
+                "tx_hash",
+                "a%2Bb"
+            ),
+            "https://v3.example/api/events?key=secret&tx_hash=a%2Bb"
+        );
+        assert_eq!(
+            ton_v3_url("https://v3.example/api/", "traces", "tx_hash", "abc"),
+            "https://v3.example/api/traces?tx_hash=abc"
+        );
+    }
+}
+
+#[cfg(test)]
+mod address_case_tests {
+    use super::*;
+
+    fn tree(destination: &str, source: &str) -> Value {
+        let body = ton_core::cell::BoC::new(ton_core::cell::TonCell::empty().clone())
+            .to_base64(true)
+            .unwrap();
+        serde_json::json!({
+            "transaction": {
+                "hash": format!("{:064x}", 7),
+                "in_msg": {
+                    "destination": destination,
+                    "source": source,
+                    "message_content": { "body": body }
+                }
+            },
+            "children": []
+        })
+    }
+
+    #[test]
+    fn one_address_spelled_in_two_cases_is_one_trace() {
+        let hash = "0:ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789";
+        let lower = hash.to_ascii_lowercase();
+        assert_eq!(
+            ton_trace_quorum_fingerprint(&tree(hash, hash)).unwrap(),
+            ton_trace_quorum_fingerprint(&tree(&lower, &lower)).unwrap(),
+        );
     }
 }

@@ -54,20 +54,23 @@ enum ScValue {
     U64(u64),
     Bytes(Vec<u8>),
     Text(String),
+    Symbol(String),
     Vec(Vec<ScValue>),
     Map(Vec<(ScValue, ScValue)>),
     Address(StellarAddress),
 }
 
 impl ScValue {
+    /// The value under a symbol key; a name that also appears under another tag is malformed.
     fn field(&self, name: &str) -> Option<&ScValue> {
         let ScValue::Map(entries) = self else {
             return None;
         };
-        entries
-            .iter()
-            .find(|(key, _)| matches!(key, ScValue::Text(key) if key == name))
-            .map(|(_, value)| value)
+        let mut named = entries.iter().filter(
+            |(key, _)| matches!(key, ScValue::Text(key) | ScValue::Symbol(key) if key == name),
+        );
+        let (key, value) = named.next()?;
+        (named.next().is_none() && matches!(key, ScValue::Symbol(_))).then_some(value)
     }
 }
 
@@ -224,9 +227,8 @@ impl<'a> XdrReader<'a> {
             SCV_U32 => ScValue::U32(self.u32()?),
             SCV_U64 => ScValue::U64(self.u64()?),
             SCV_BYTES => ScValue::Bytes(self.opaque()?.to_vec()),
-            SCV_STRING | SCV_SYMBOL => {
-                ScValue::Text(String::from_utf8(self.opaque()?.to_vec()).ok()?)
-            }
+            SCV_STRING => ScValue::Text(String::from_utf8(self.opaque()?.to_vec()).ok()?),
+            SCV_SYMBOL => ScValue::Symbol(String::from_utf8(self.opaque()?.to_vec()).ok()?),
             SCV_VEC => {
                 if self.u32()? == 0 {
                     return None;
@@ -396,6 +398,13 @@ where
         }
     }
 
+    // The reads below are of the pinned ULN302; a receiver on another library is not covered by them.
+    if *library != StellarAddress::Contract(uln) {
+        return Ok(StellarPayloadOutcome::Validity(
+            PayloadSignedValidity::UnsupportedReceiveLibrary,
+        ));
+    }
+
     let config = match simulate(
         &transport,
         &url,
@@ -451,7 +460,7 @@ where
     };
     let verified = match state? {
         Simulated::Value(ScValue::Vec(variant)) => match variant.first() {
-            Some(ScValue::Text(name)) => match name.as_str() {
+            Some(ScValue::Symbol(name)) => match name.as_str() {
                 "Verified" => true,
                 "Verifying" | "Verifiable" | "NotInitializable" => false,
                 other => {
@@ -641,6 +650,54 @@ where
                 payload_signed_validation_result(validity, sent_event, dst_chain_name)
             }
             StellarPayloadOutcome::Refused(message) => Err(AppCoreError::Internal(message)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod key_tag_tests {
+    use super::*;
+
+    fn map(entries: &[(i32, &str, u64)]) -> ScValue {
+        let mut out = Vec::new();
+        xdr_i32(&mut out, SCV_MAP);
+        xdr_u32(&mut out, 1);
+        xdr_u32(&mut out, entries.len() as u32);
+        for (tag, key, value) in entries {
+            xdr_i32(&mut out, *tag);
+            xdr_opaque(&mut out, key.as_bytes());
+            xdr_i32(&mut out, SCV_U64);
+            out.extend_from_slice(&value.to_be_bytes());
+        }
+        decode_sc_value(&base64::engine::general_purpose::STANDARD.encode(out)).unwrap()
+    }
+
+    #[test]
+    fn only_a_symbol_key_names_a_field() {
+        let confirmations = ScValue::U64(15);
+        assert_eq!(
+            map(&[(SCV_SYMBOL, "confirmations", 15)]).field("confirmations"),
+            Some(&confirmations)
+        );
+        assert_eq!(
+            map(&[(SCV_STRING, "confirmations", 15)]).field("confirmations"),
+            None
+        );
+    }
+
+    #[test]
+    fn a_same_named_key_of_the_other_tag_makes_the_field_malformed_whatever_its_order() {
+        for entries in [
+            [
+                (SCV_STRING, "confirmations", 99),
+                (SCV_SYMBOL, "confirmations", 15),
+            ],
+            [
+                (SCV_SYMBOL, "confirmations", 15),
+                (SCV_STRING, "confirmations", 99),
+            ],
+        ] {
+            assert_eq!(map(&entries).field("confirmations"), None);
         }
     }
 }

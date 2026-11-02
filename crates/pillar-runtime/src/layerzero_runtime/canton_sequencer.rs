@@ -30,7 +30,6 @@ const PACKET_SENT_EVENT_NAME: &str = "EndpointV2_PacketSentEvent";
 const MAX_CANTON_SIGNATURES: usize = 64;
 const MAX_CANTON_SIGNATURE_HEX_BYTES: usize = 130;
 const MAX_JS_BIGINT_INPUT_BYTES: usize = 1024;
-const ERROR_TEXT_MAX_LENGTH: usize = 500;
 
 /// The `sequencer` provider entry turned into the two clients upstream builds from it.
 #[derive(Debug, Clone)]
@@ -55,7 +54,7 @@ struct Committee {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum SequencerAnswer<T> {
     Ok(T),
-    Error(String),
+    Error,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -155,9 +154,7 @@ fn parse_canton_sequencer_uri(uri: &str) -> Result<(String, Option<Committee>), 
         .host_str()
         .is_some_and(|host| host == "localhost" || host == "[::1]" || is_loopback_ipv4(host));
     if !(url.scheme() == "https" || (url.scheme() == "http" && loopback)) {
-        return Err(format!(
-            "Canton sequencer provider URI must use HTTPS or a loopback host: {uri}"
-        ));
+        return Err("Canton sequencer provider URI must use HTTPS or a loopback host".to_string());
     }
     let param = |name: &str| {
         url.query_pairs()
@@ -284,8 +281,8 @@ impl CantonSequencer {
         let unexpected = || AppCoreError::Internal("Unexpected sequencer response".to_string());
         let signatures = signatures(&raw).ok_or_else(unexpected)?;
         self.verify("contract", &request, &raw, &signatures)?;
-        let answer = if let Some(message) = error_response(&raw) {
-            SequencerAnswer::Error(message)
+        let answer = if error_response(&raw) {
+            SequencerAnswer::Error
         } else if raw.get("value").is_some() && hex_string(raw.get("stateRoot")) {
             SequencerAnswer::Ok(raw["value"].clone())
         } else {
@@ -357,11 +354,12 @@ impl CantonSequencer {
                 .collect(),
         );
         self.verify("scan", &request, &raw, &signatures)?;
-        let answer = match error_response(&raw) {
-            Some(message) => SequencerAnswer::Error(message),
-            None => shape(raw)
+        let answer = if error_response(&raw) {
+            SequencerAnswer::Error
+        } else {
+            shape(raw)
                 .map(SequencerAnswer::Ok)
-                .ok_or_else(unexpected_scan)?,
+                .ok_or_else(unexpected_scan)?
         };
         Ok(answer)
     }
@@ -411,6 +409,11 @@ fn unexpected_scan() -> AppCoreError {
     AppCoreError::Internal("Unexpected sequencer scan response".to_string())
 }
 
+/// The sequencer's own message is not repeated: a misbehaving one could put anything in it.
+fn sequencer_refusal() -> AppCoreError {
+    AppCoreError::Internal("Sequencer refused the request".to_string())
+}
+
 /// undici's abort message replaces this service's own timeout text; every other
 /// transport failure already carries undici's wording.
 fn fetch_error(error: RpcError) -> AppCoreError {
@@ -424,36 +427,24 @@ fn fetch_error(error: RpcError) -> AppCoreError {
 
 /// `HttpClient.fetch`: any status, a body that must be JSON.
 async fn parse_body(method: &str, status: u16, text: &str) -> Result<Value, AppCoreError> {
-    match crate::provider_health::parse_bounded_json(text.as_bytes(), false).await {
+    match crate::provider_health::parse_bounded_large_json(text.as_bytes()).await {
         Ok(value) => Ok(value),
         Err(error) => {
             if let Some(error) = crate::provider_health::json_parser_local_error(&error) {
                 return Err(error.into());
             }
-            let mut units = 0;
-            let prefix: String = text
-                .chars()
-                .take_while(|character| {
-                    units += character.len_utf16();
-                    units <= ERROR_TEXT_MAX_LENGTH
-                })
-                .collect();
             Err(AppCoreError::Internal(format!(
-                "HTTP {method} failed with {status}: {prefix}"
+                "HTTP {method} failed with {status}"
             )))
         }
     }
 }
 
 /// The error branch of the response union, which is tried first.
-fn error_response(raw: &Value) -> Option<String> {
-    (raw.get("error") == Some(&Value::Bool(true)) && hex_string(raw.get("stateRoot")))
-        .then(|| {
-            raw.get("message")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        })
-        .flatten()
+fn error_response(raw: &Value) -> bool {
+    raw.get("error") == Some(&Value::Bool(true))
+        && hex_string(raw.get("stateRoot"))
+        && raw.get("message").is_some_and(Value::is_string)
 }
 
 /// `z.array(hexStringSchema)`, decoded to its canonical lowercase `0x` form.
@@ -1179,7 +1170,7 @@ pub(crate) async fn resolve_canton_packet_sent<T: JsonRpcTransport>(
         .await?
     {
         SequencerAnswer::Ok(response) => response.events,
-        SequencerAnswer::Error(message) => return Err(AppCoreError::Internal(message)),
+        SequencerAnswer::Error => return Err(sequencer_refusal()),
     };
     select_canton_packet(&events, src_tx_hash, lz_message_id)
 }
@@ -1244,7 +1235,7 @@ pub(crate) async fn canton_block_confirmations<T: JsonRpcTransport>(
             .await?
         {
             SequencerAnswer::Ok(response) => response,
-            SequencerAnswer::Error(_) => continue,
+            SequencerAnswer::Error => continue,
         };
         latest_nonce = Some(response.latest_nonce);
         for event in response.events {
@@ -1275,7 +1266,7 @@ pub(crate) async fn canton_block_confirmations<T: JsonRpcTransport>(
                 "Canton: no scan request found for requestId {request_id} (nonce {from})"
             ))
         })?,
-        SequencerAnswer::Error(message) => return Err(AppCoreError::Internal(message)),
+        SequencerAnswer::Error => return Err(sequencer_refusal()),
     };
     let emitted = (timestamp.to_f64() / 1000.0).floor();
     Ok((now_unix_seconds - emitted).max(0.0))
@@ -1295,8 +1286,8 @@ pub(crate) async fn canton_payload_signed<T: JsonRpcTransport>(
             .await?
         {
             SequencerAnswer::Ok(value) => Ok(value),
-            SequencerAnswer::Error(message) => Err(AppCoreError::Internal(format!(
-                "Sequencer read Uln302.{function} failed: {message}"
+            SequencerAnswer::Error => Err(AppCoreError::Internal(format!(
+                "Sequencer read Uln302.{function} failed"
             ))),
         }
     };
@@ -1491,5 +1482,26 @@ mod tests {
         );
         assert!(body.len() < 4 * 1024 * 1024);
         assert!(parse_body("GET", 200, &body).await.is_err());
+    }
+}
+
+#[cfg(test)]
+mod error_text_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_body_that_is_not_json_is_reported_by_status_alone() {
+        let error = parse_body("GET", 502, "Authorization: Bearer SECRET")
+            .await
+            .unwrap_err();
+        assert_eq!(error.to_string(), "HTTP GET failed with 502");
+    }
+
+    #[test]
+    fn a_refused_sequencer_scheme_does_not_repeat_the_uri() {
+        let error = parse_canton_sequencer_uri("ftp://user:SECRET@sequencer.example/?token=SECRET")
+            .err()
+            .unwrap();
+        assert!(!error.contains("SECRET"), "{error}");
     }
 }

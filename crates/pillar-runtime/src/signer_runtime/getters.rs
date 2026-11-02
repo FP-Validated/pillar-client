@@ -250,16 +250,13 @@ impl SignerGetter for KmsSignerGetter {
             .signer_factory
             .get_adapter(chain_type, wallet_name)
             .await
-            .map_err(|error| AppCoreError::Internal(error.to_string()))?;
+            .map_err(signer_failure)?;
         let signer = PillarSignerAdapterKind::for_chain_type(chain_type, raw_signer, true)
-            .map_err(|error| AppCoreError::Internal(error.to_string()))?;
+            .map_err(signer_failure)?;
         let data = decode_hex_data(data_hex)?;
         self.observe(signer.pillar_sign(&data).await, "sign")
             .await
-            .map_err(|error| match error {
-                pillar_signer::SignerError::Admission(error) => AppCoreError::Admission(error),
-                other => AppCoreError::Internal(other.to_string()),
-            })
+            .map_err(signer_failure)
     }
 }
 
@@ -279,20 +276,50 @@ impl SignerGetter for LocalMnemonicSignerGetter {
             .signer_factory
             .get_adapter(chain_type, wallet_name)
             .await
-            .map_err(|error| AppCoreError::Internal(error.to_string()))?;
+            .map_err(signer_failure)?;
         let signer = PillarSignerAdapterKind::for_chain_type(chain_type, raw_signer, false)
-            .map_err(|error| AppCoreError::Internal(error.to_string()))?;
+            .map_err(signer_failure)?;
         let data = decode_hex_data(data_hex)?;
         self.observe(signer.pillar_sign(&data).await, "sign")
             .await
-            .map_err(|error| match error {
-                pillar_signer::SignerError::Admission(error) => AppCoreError::Admission(error),
-                other => AppCoreError::Internal(other.to_string()),
-            })
+            .map_err(signer_failure)
+    }
+}
+
+/// What a caller may read of a signer failure: the backend's own text names accounts, vaults and keys.
+fn signer_failure(error: pillar_signer::SignerError) -> AppCoreError {
+    match error {
+        pillar_signer::SignerError::Admission(error) => AppCoreError::Admission(error),
+        pillar_signer::SignerError::Message(message) => {
+            tracing::error!(target: "pillar_runtime", error = ?message, "signer operation failed");
+            AppCoreError::Internal("Signer operation failed".to_string())
+        }
+        other => AppCoreError::Internal(other.to_string()),
     }
 }
 
 pub(crate) fn decode_hex_data(value: &str) -> Result<Vec<u8>, AppCoreError> {
     hex::decode(value.strip_prefix("0x").unwrap_or(value))
         .map_err(|error| AppCoreError::Internal(error.to_string()))
+}
+
+#[cfg(test)]
+mod failure_tests {
+    use super::*;
+
+    #[test]
+    fn a_backend_message_is_not_returned_to_the_caller() {
+        let error = signer_failure(pillar_signer::SignerError::Message(
+            "Caller: appid=1111;oid=2222;iss=tenant Vault: prod-vault".to_string(),
+        ));
+        assert_eq!(error.to_string(), "Signer operation failed");
+    }
+
+    #[test]
+    fn the_services_own_audit_refusal_is_kept() {
+        let error = signer_failure(pillar_signer::SignerError::Audit(
+            "durable audit: completion worker stopped; outcome remains unknown".to_string(),
+        ));
+        assert!(error.to_string().starts_with("durable audit:"));
+    }
 }

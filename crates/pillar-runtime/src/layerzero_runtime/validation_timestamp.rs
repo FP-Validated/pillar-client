@@ -295,7 +295,7 @@ where
 {
     let response = transport
         .get_json_scoped(
-            format!("{}/masterchainInfo", endpoint.trim_end_matches('/')),
+            crate::provider_health::ton_v3_masterchain_info_url(&endpoint),
             headers,
         )
         .await?;

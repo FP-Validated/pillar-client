@@ -95,7 +95,11 @@ impl StartupReport {
                             })
                             .collect(),
                         single_provider_trust_root: config.single_entity_trust_root(),
-                        providers: config.uris.iter().map(redact_provider_uri).collect(),
+                        providers: config
+                            .uris
+                            .iter()
+                            .map(|uri| redact_provider_uri(chain_name, uri))
+                            .collect(),
                     })
                 })
                 .collect::<Result<Vec<_>, String>>()?;
@@ -241,8 +245,8 @@ fn startup_mode(vars: &HashMap<String, String>, runtime_config: &RuntimeConfig) 
     }
 }
 
-fn redact_provider_uri(provider_uri: &ProviderUri) -> String {
-    match provider_uri {
+fn redact_provider_uri(chain_name: &str, provider_uri: &ProviderUri) -> String {
+    let redacted = match provider_uri {
         ProviderUri::Uri(uri) => redact_url(uri),
         ProviderUri::UriWithHeaders { uri, headers } => {
             let mut header_pairs = headers
@@ -252,7 +256,25 @@ fn redact_provider_uri(provider_uri: &ProviderUri) -> String {
             header_pairs.sort();
             format!("{} headers=[{}]", redact_url(uri), header_pairs.join(", "))
         }
+    };
+    match ton_v3_origin(chain_name, provider_uri) {
+        Some(origin) => format!("{redacted} v3={origin}"),
+        None => redacted,
     }
+}
+
+/// TON source data is read from the `v3-endpoint` host, which the entity label has to cover.
+fn ton_v3_origin(chain_name: &str, provider_uri: &ProviderUri) -> Option<String> {
+    if chain_name != "ton" {
+        return None;
+    }
+    let (endpoint, _, _) = crate::provider_health::ton_v3_provider_uri_parts(provider_uri)?;
+    Some(
+        reqwest::Url::parse(&endpoint)
+            .ok()?
+            .origin()
+            .ascii_serialization(),
+    )
 }
 
 fn signer_provider_type(
@@ -324,5 +346,39 @@ mod tests {
         let output = report.to_string();
         assert!(!output.contains("unsafe entity label"), "{output}");
         assert!(output.contains("<unlisted entity>"), "{output}");
+    }
+
+    #[test]
+    fn a_ton_provider_shows_the_v3_host_it_reads_source_data_from_and_nothing_more() {
+        let vars = HashMap::from([
+            (pillar_config::SERVER_PORT.to_string(), "3000".to_string()),
+            (
+                pillar_config::PILLAR_API_AUTH_TOKENS.to_string(),
+                "test-token-0123456789abcdef0123456789".to_string(),
+            ),
+            (
+                pillar_config::LZ_PROVIDER_CONFIG_TYPE.to_string(),
+                "LOCAL".to_string(),
+            ),
+            (pillar_config::LZ_ENV.to_string(), "testnet".to_string()),
+        ]);
+        let runtime = load_from_map(vars.clone()).unwrap();
+        let providers = pillar_config::StaticProviderConfig::from_v2(
+            r#"{"entities":["ops"],"chains":{"ton":{"rpc":[{"uri":"https://v2.example/api/v2?v3-endpoint=https%3A%2F%2Fv3.example%2Fsecret-path%2Fapi%2Fv3","category":"internal","entity":"ops"}]}}}"#,
+            r#"{"default":{"allOf":[{"any":1}]}}"#,
+            None,
+        )
+        .unwrap();
+        let report = StartupReport::from_parts(
+            &vars,
+            &runtime,
+            &providers,
+            &["ton".to_string()],
+            RuntimeMode::Development,
+        )
+        .unwrap();
+        let output = report.to_string();
+        assert!(output.contains("v3=https://v3.example"), "{output}");
+        assert!(!output.contains("secret-path"), "{output}");
     }
 }

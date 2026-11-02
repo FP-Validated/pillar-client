@@ -22,31 +22,39 @@ where
         )
         .await
     {
-        Ok(response) => response.get("result").cloned().unwrap_or(Value::Null),
+        Ok(response) if response.get("error").is_none() => {
+            response.get("result").cloned().unwrap_or(Value::Null)
+        }
         Err(error @ (RpcError::Admission(_) | RpcError::Configuration(_))) => {
             health_error_response(error)?
         }
-        Err(chain_id_error) => match transport
-            .post_json_scoped(
-                url.clone(),
-                headers,
-                json!({
-                    "method": "net_version",
-                    "params": [],
-                    "id": 1,
-                    "jsonrpc": "2.0",
-                }),
-            )
-            .await
-        {
-            Ok(response) => response.get("result").cloned().unwrap_or(Value::Null),
-            Err(error @ (RpcError::Admission(_) | RpcError::Configuration(_))) => {
-                health_error_response(error)?
+        refused => {
+            let chain_id_error = match refused {
+                Err(error) => error.to_string(),
+                Ok(_) => "JSON-RPC error".to_string(),
+            };
+            match transport
+                .post_json_scoped(
+                    url.clone(),
+                    headers,
+                    json!({
+                        "method": "net_version",
+                        "params": [],
+                        "id": 1,
+                        "jsonrpc": "2.0",
+                    }),
+                )
+                .await
+            {
+                Ok(response) => response.get("result").cloned().unwrap_or(Value::Null),
+                Err(error @ (RpcError::Admission(_) | RpcError::Configuration(_))) => {
+                    health_error_response(error)?
+                }
+                Err(net_version_error) => Value::String(format!(
+                    "eth_chainId error: {chain_id_error}; net_version error: {net_version_error}"
+                )),
             }
-            Err(net_version_error) => Value::String(format!(
-                "eth_chainId error: {chain_id_error}; net_version error: {net_version_error}"
-            )),
-        },
+        }
     };
 
     Ok(normalize_provider_health_entry(
@@ -127,4 +135,53 @@ where
     );
     entry.diagnostic = true;
     Ok(entry)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone, Default)]
+    struct ChainIdRefused(Arc<Mutex<Vec<String>>>);
+
+    #[async_trait]
+    impl JsonRpcTransport for ChainIdRefused {
+        async fn post_json(
+            &self,
+            _url: String,
+            _headers: HashMap<String, String>,
+            body: Value,
+        ) -> Result<Value, String> {
+            let method = body["method"].as_str().unwrap_or_default().to_string();
+            self.0.lock().unwrap().push(method.clone());
+            Ok(match method.as_str() {
+                "eth_chainId" => json!({"error": {"code": -32601, "message": "method not found"}}),
+                "net_version" => json!({"result": "56"}),
+                _ => return Err("unexpected method".to_string()),
+            })
+        }
+
+        async fn get_json(
+            &self,
+            _url: String,
+            _headers: HashMap<String, String>,
+        ) -> Result<Value, String> {
+            Err("unexpected GET".to_string())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_json_rpc_error_from_eth_chain_id_falls_back_to_net_version() {
+        let transport = ChainIdRefused::default();
+        let entry = probe_json_rpc_provider(
+            transport.clone(),
+            "https://rpc.example".to_string(),
+            HashMap::new(),
+        )
+        .await
+        .unwrap();
+        assert!(entry.healthy);
+        assert_eq!(*transport.0.lock().unwrap(), ["eth_chainId", "net_version"]);
+    }
 }

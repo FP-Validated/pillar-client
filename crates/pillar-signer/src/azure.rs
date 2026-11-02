@@ -6,6 +6,7 @@ mod key_id;
 pub use adapter::AzureKmsRawSignerAdapter;
 pub use client::{AzureEcPublicKey, AzureKeyVaultKmsClient, AzureKmsClient};
 pub use factory::AzureKmsRawSignerAdapterFactory;
+pub(crate) use key_id::azure_key_vault_origin;
 pub use key_id::{parse_azure_kms_key_id, AzureKmsKeyId};
 
 #[cfg(test)]

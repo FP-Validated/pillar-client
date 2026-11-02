@@ -82,6 +82,24 @@ The following are deployment-side controls the software cannot enforce for you:
   under two entity names are counted twice. Differing answers never merge: if two
   answers could each meet the strategy the call fails closed, which is stricter
   than upstream's first-satisfied resolution.
+- A TON `rpc` entry names two hosts. The URI itself is the v2 JSON-RPC endpoint;
+  every source read (events, traces, transactions) goes to the host in its
+  `v3-endpoint` query parameter, for example
+  `https://v2.example/api/v2?v3-endpoint=https%3A%2F%2Fv3.example&api-key=KEY`
+  (`api-key` is also sent as `X-API-Key`). An entry without `v3-endpoint` cannot
+  serve those reads. The entity label must describe the v3 host: two entries that
+  share a v3 host are one operator for source reads whatever their v2 hosts.
+  Startup shows the v3 origin of each TON entry as `v3=<origin>`, without its path
+  or query.
+- An S3 or GCS configuration is two objects, and no bucket operation replaces both
+  atomically. A rollout that writes `providers-v2.json` and `quorum-strategy.json`
+  one after the other can be read half-way: the pair validates, yet it can put a
+  different set of providers in the required quorum than either final state does.
+  Set `_providersSha256` in `quorum-strategy.json` to the lowercase hex SHA-256 of
+  the exact bytes of the `providers-v2.json` it is written for. A pair that does
+  not match, or a malformed digest, is refused: startup fails, and a refresh keeps
+  the serving configuration and retries, so the writes can happen in either order.
+  Without the key the pair is loaded as before and one warning is logged.
 - Provider configuration differs from upstream `213cd500` where it would
   otherwise weaken or silently misread a quorum: unknown fields are refused, except
   the `_`-prefixed top-level documentation keys upstream passes through in
@@ -103,8 +121,11 @@ The following are deployment-side controls the software cannot enforce for you:
   GraphQL errors, null data and JSON-RPC error envelopes are provider failures:
   they never vote on events, transactions, objects or readiness, and in timestamp
   checks they count as `Missing`, as any unavailable
-  provider does. Providers observed unhealthy are dispatched last instead of
-  dropped. A live mainnet capture showed that `simulateTransaction` still succeeds
+  provider does. A provider whose probe failed is dispatched after the healthy
+  ones instead of dropped, and one whose probe only timed out ranks as slow, not
+  unhealthy. A request is refused before any provider is called when fewer healthy
+  providers than the quorum needs remain. A live mainnet capture showed that
+  `simulateTransaction` still succeeds
   with a wrong shared `version`, so that field is advisory (fixture:
   `sui-mainnet-graphql-shared-version.json`).
   Event `vector<u8>` fields are read as base64, as GraphQL renders them, or as an
@@ -197,10 +218,10 @@ accepted.
 
 | Boundary | Limit |
 | --- | --- |
-| One HTTP JSON/text response, including embedded JSON | 4 MiB, except TON `getAddressInformation` at 32 MiB |
+| One HTTP JSON/text response, including embedded JSON | 4 MiB, except TON `getAddressInformation` at 32 MiB and Canton packet scans and ledger updates at 16 MiB (the Canton APIs cannot select one packet or one sender) |
 | Sui/IotaL1 event pagination | 16 MiB cumulative serialized bytes, 1,024 events and 131,072 structural units across all pages; individual pages also obey response limits |
-| JSON pre-allocation scan | 131,072 structural parse-cost units; 524,288 for TON responses. A cost estimate, not an exact element/heap-byte count |
-| JSON container nesting | 128 normally; 512 for TON responses |
+| JSON pre-allocation scan | 131,072 structural parse-cost units; 524,288 for TON and Canton responses. A cost estimate, not an exact element/heap-byte count |
+| JSON container nesting | 128 normally; 512 for TON and Canton responses |
 | Retained JSON quorum candidate | 8 MiB estimated per representative, 64 MiB estimated shared pool |
 | READ returned data | 1 MiB per request result, per decoded lzMap/lzReduce result, per command for all request results and for all lzMap results; READ calls in flight: 4 per target chain and per command phase, 16 per process, chain permits granted in arrival order, each holding its providers' votes until its quorum resolves |
 | Configured parser waiting | Eight shared registrations plus quiet-lane reservations (at most eight plus the fixed lane count); two queued per lane; two-second admission wait |
@@ -228,7 +249,7 @@ single-key objects just under each limit raised peak RSS by about 19 MB (general
 and 80 MB (TON), and the worst admissible mix (three TON parses plus one general
 parse, held to arrive together) peaked at 286 MB against a 38 MB idle baseline.
 These historical measurements used the 4 MiB response limit; peak memory for the
-32 MiB TON account-state limit has not been measured.
+32 MiB TON account-state limit and the 16 MiB Canton limit has not been measured.
 The mainnet pod requests 512 MiB and is limited to 2 GiB. Payloads one unit over
 either limit are refused before allocation.
 
@@ -891,6 +912,20 @@ Addresses live in `stellar_uln_302_for_environment`,
   authorize). Initia omitted-key transactions with an unknown first message and
   no applicable ordered-sequence or default-fee-payer evidence fail closed; an
   explicit payer or granter is not evidence of the first signer.
+- The extra-context `sentEvent` is the resolver's own event, not a projection onto
+  upstream's per-family key set, so its keys depend on the source family. Beyond
+  upstream's keys it carries `packetEmitAddress` on the EVM V3, Move, Initia, Sui,
+  Starknet, Stellar and Canton families (upstream sends it only for EVM V1/V2 and
+  Aptos V1 events), `slot` and `blockTimestamp` on Solana, and top-level
+  `blockNumber` and `blockHash` on TON. The V2 to V3 hydrate path keeps
+  `packetEmitAddress`, which upstream's hydrated event drops. A policy that
+  validates `sentEvent` against a closed schema must accept these keys.
+- The count in `block confirmations not met, current block confirmation: N` is the
+  depth one provider observed, the lowest configured index among those that
+  answered `Insufficient`, not a value the quorum agreed on: honest providers read
+  different chain heads, so the quorum agrees on the verdict only. Treat it as
+  informational; the caller's own `blockConfirmation` is the threshold that was
+  not met.
 - With a policy configured, a ULNv2 MPT proof is refused: it attests every packet
   of its source block, so a per-message verdict cannot cover it.
 - An external extra-context policy must answer `true`, and the two transports

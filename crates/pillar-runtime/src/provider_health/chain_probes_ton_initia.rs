@@ -158,4 +158,52 @@ pub(crate) fn initia_indexer_block_height_response(response: &Value) -> Option<V
         .and_then(|aggregate| aggregate.get("max"))
         .and_then(|max| max.get("block_height"))
         .cloned()
+        .filter(|height| numeric_response(height).is_some())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Clone)]
+    struct EmptyAggregate;
+
+    #[async_trait]
+    impl JsonRpcTransport for EmptyAggregate {
+        async fn post_json(
+            &self,
+            _url: String,
+            _headers: HashMap<String, String>,
+            _body: Value,
+        ) -> Result<Value, String> {
+            Ok(
+                json!({"data": {"move_events_aggregate": {"aggregate": {"max": {"block_height": null}}}}}),
+            )
+        }
+
+        async fn get_json(
+            &self,
+            _url: String,
+            _headers: HashMap<String, String>,
+        ) -> Result<Value, String> {
+            Ok(json!({"block": {"header": {"height": "10"}}}))
+        }
+    }
+
+    #[tokio::test]
+    async fn an_empty_index_aggregate_is_checked_against_the_rest_endpoint() {
+        let entry = probe_initia_indexer_provider_health(
+            EmptyAggregate,
+            InitiaIndexerProviderHealthRequest {
+                report_url: "https://indexer.example".to_string(),
+                indexer_request_url: "https://indexer.example/".to_string(),
+                base_url: "https://initia.example".to_string(),
+                headers: HashMap::new(),
+                body: json!({}),
+            },
+        )
+        .await
+        .unwrap();
+        assert!(entry.healthy);
+    }
 }

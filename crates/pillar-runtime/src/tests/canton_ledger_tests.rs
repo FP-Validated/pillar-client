@@ -505,7 +505,7 @@ async fn canton_oauth2_failures_are_not_cached() {
     );
     assert_eq!(
         tokens.get_token().await.unwrap_err().to_string(),
-        "Client credentials token request failed: 401 Unauthorized — denied"
+        "Client credentials token request failed: 401 Unauthorized"
     );
     // Stricter: upstream would send the ledger request with no token.
     assert!(tokens.get_token().await.is_err());
@@ -527,7 +527,7 @@ fn canton_token_provider_is_chosen_like_create_token_provider() {
     let required = "Canton provider requires OAuth2 credentials (token-url, client-id, \
                     client-secret in URI or CANTON_CLIENT_SECRET)";
     let refusal = |auth: &CantonLedgerAuth, raw: &str| {
-        auth.token_provider(raw, &parse_canton_chain_uri(raw).unwrap(), &ledger)
+        auth.token_provider(&parse_canton_chain_uri(raw).unwrap(), &ledger)
             .err()
             .map(|error| error.to_string())
     };
@@ -570,11 +570,11 @@ fn canton_token_provider_is_chosen_like_create_token_provider() {
         );
     }
     let auth = CantonLedgerAuth::for_environment("mainnet", Some("not-a-secret".to_string()));
-    let first = auth.token_provider(&without_secret, &uri, &ledger).unwrap();
-    let again = auth.token_provider(&without_secret, &uri, &ledger).unwrap();
+    let first = auth.token_provider(&uri, &ledger).unwrap();
+    let again = auth.token_provider(&uri, &ledger).unwrap();
     assert!(
         Arc::ptr_eq(&first, &again),
-        "one token provider per rpc entry"
+        "one token provider per identity-provider client"
     );
     assert!(
         ledger.form_calls.lock().unwrap().is_empty(),
@@ -631,6 +631,118 @@ async fn canton_sender_is_read_with_an_oauth2_token_through_the_production_path(
             Some("Bearer tok-1")
         );
     }
+}
+
+/// The ledger answers 401 to one bearer token and serves the rest.
+#[derive(Clone)]
+struct RejectsToken {
+    inner: Ledger,
+    rejected: &'static str,
+}
+
+#[async_trait]
+impl JsonRpcTransport for RejectsToken {
+    async fn post_json(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+        body: Value,
+    ) -> Result<Value, String> {
+        if headers.get("Authorization").map(String::as_str)
+            == Some(format!("Bearer {}", self.rejected).as_str())
+        {
+            return Err("Provider returned HTTP 401 Unauthorized".to_string());
+        }
+        self.inner.post_json(url, headers, body).await
+    }
+
+    async fn get_json(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+    ) -> Result<Value, String> {
+        self.inner.get_json(url, headers).await
+    }
+
+    async fn post_form(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+        body: String,
+    ) -> Result<(u16, String), String> {
+        self.inner.post_form(url, headers, body).await
+    }
+}
+
+#[tokio::test]
+async fn a_token_the_ledger_rejects_is_dropped_and_the_read_retried_once_with_a_new_one() {
+    let base = "https://a.example";
+    let answers = HashMap::from([(
+        (base.to_string(), "P1::1220".to_string()),
+        transaction(
+            json!([{"CreatedEvent": {"createArgument": {"sender": "Erin::1220"}, "signatories": ["Erin::1220"]}}]),
+            "t",
+        ),
+    )]);
+    let ledger = Ledger {
+        answers: Arc::new(answers),
+        ..Ledger::default()
+    };
+    ledger.form_answers.lock().unwrap().extend([
+        (200, TOKEN_ANSWER.to_string()),
+        (
+            200,
+            r#"{"access_token":"tok-2","token_type":"Bearer","expires_in":3600}"#.to_string(),
+        ),
+    ]);
+    let rpc = vec![ProviderUri::Uri(format!(
+        "{}{OAUTH_QUERY}",
+        ledger_uri(base, "P1::1220")
+    ))];
+    let checks = checks(
+        RejectsToken {
+            inner: ledger.clone(),
+            rejected: "tok-1",
+        },
+        rpc,
+        1,
+    )
+    .with_canton_ledger_auth(CantonLedgerAuth::for_environment(
+        "mainnet",
+        Some("not-a-secret".to_string()),
+    ));
+    assert_eq!(
+        checks
+            .source_transaction_from_address("canton", "1220abcd")
+            .await
+            .unwrap(),
+        "Erin::1220"
+    );
+    assert_eq!(ledger.form_calls.lock().unwrap().len(), 2);
+    // The replacement is cached: the next read does not ask the identity provider again.
+    checks
+        .source_transaction_from_address("canton", "1220abcd")
+        .await
+        .unwrap();
+    assert_eq!(ledger.form_calls.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn a_rotated_client_secret_replaces_the_provider_instead_of_adding_one() {
+    let auth = CantonLedgerAuth::for_environment("mainnet", None);
+    let ledger = Ledger::default();
+    let entry = |secret: &str| {
+        format!(
+            "{}{OAUTH_QUERY}&client-secret={secret}",
+            ledger_uri("https://a.example", "P1::1220")
+        )
+    };
+    for secret in ["first-secret", "second-secret"] {
+        let entry_uri = entry(secret);
+        let uri = parse_canton_chain_uri(&entry_uri).unwrap();
+        auth.token_provider(&uri, &ledger).unwrap();
+    }
+    assert_eq!(auth.provider_count(), 1);
 }
 
 /// The real JSON Ledger API behind a synthetic identity provider: every token request is

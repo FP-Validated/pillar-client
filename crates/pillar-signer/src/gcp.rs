@@ -42,18 +42,25 @@ pub trait GcpKmsClient: Send + Sync + 'static {
     async fn get_public_key_pem(&self, version_name: &str) -> Result<String, SignerError>;
 }
 
+type CredentialSource = Arc<dyn Fn() -> Result<Credentials, SignerError> + Send + Sync>;
+
+fn default_credentials() -> Result<Credentials, SignerError> {
+    google_cloud_auth::credentials::Builder::default()
+        .build()
+        .map_err(|error| SignerError::Message(error.to_string()))
+}
+
 #[derive(Clone)]
 pub struct GoogleCloudKmsClient {
     client: reqwest::Client,
-    credentials: Credentials,
+    credentials: Arc<tokio::sync::Mutex<Credentials>>,
+    rebuild: CredentialSource,
     endpoint: reqwest::Url,
 }
 
 impl GoogleCloudKmsClient {
     pub async fn from_default_credentials() -> Result<Self, SignerError> {
-        let credentials = google_cloud_auth::credentials::Builder::default()
-            .build()
-            .map_err(|error| SignerError::Message(error.to_string()))?;
+        let credentials = default_credentials()?;
         let credential_domain = credentials
             .universe_domain()
             .await
@@ -74,11 +81,12 @@ impl GoogleCloudKmsClient {
         }
         let endpoint = reqwest::Url::parse(&format!("https://cloudkms.{domain}/"))
             .map_err(|error| SignerError::Message(error.to_string()))?;
-        Ok(Self {
-            client: Self::http_client(false)?,
-            credentials,
+        Ok(Self::assemble(
+            Self::http_client(false)?,
             endpoint,
-        })
+            credentials,
+            Arc::new(default_credentials),
+        ))
     }
 
     fn http_client(no_proxy: bool) -> Result<reqwest::Client, SignerError> {
@@ -96,6 +104,34 @@ impl GoogleCloudKmsClient {
             .map_err(|error| SignerError::Message(error.to_string()))
     }
 
+    fn assemble(
+        client: reqwest::Client,
+        endpoint: reqwest::Url,
+        credentials: Credentials,
+        rebuild: CredentialSource,
+    ) -> Self {
+        Self {
+            client,
+            credentials: Arc::new(tokio::sync::Mutex::new(credentials)),
+            rebuild,
+            endpoint,
+        }
+    }
+
+    #[cfg(test)]
+    fn with_credentials(
+        endpoint: reqwest::Url,
+        credentials: Credentials,
+        rebuild: CredentialSource,
+    ) -> Result<Self, SignerError> {
+        Ok(Self::assemble(
+            Self::http_client(false)?,
+            endpoint,
+            credentials,
+            rebuild,
+        ))
+    }
+
     #[cfg(feature = "test-support")]
     pub fn for_local_e2e(endpoint: &str) -> Result<Self, SignerError> {
         let endpoint = reqwest::Url::parse(endpoint)
@@ -110,11 +146,12 @@ impl GoogleCloudKmsClient {
                 "GCP E2E endpoint must be literal loopback".into(),
             ));
         }
-        Ok(Self {
-            client: Self::http_client(true)?,
-            credentials: google_cloud_auth::credentials::anonymous::Builder::new().build(),
+        Ok(Self::assemble(
+            Self::http_client(true)?,
             endpoint,
-        })
+            google_cloud_auth::credentials::anonymous::Builder::new().build(),
+            Arc::new(|| Ok(google_cloud_auth::credentials::anonymous::Builder::new().build())),
+        ))
     }
 
     fn resource_url(&self, name: &str, sign: bool) -> Result<reqwest::Url, SignerError> {
@@ -154,21 +191,36 @@ impl GoogleCloudKmsClient {
         Ok(url)
     }
 
+    /// A credential worker that hit a permanent error (a token file read that failed once) caches
+    /// it for good, so a failing one is replaced by a freshly built one.
+    async fn credential_headers(&self) -> Result<http::HeaderMap, SignerError> {
+        let current = self.credentials.lock().await.clone();
+        let first = match current.headers(http::Extensions::new()).await {
+            Ok(CacheableResource::New { data, .. }) => return Ok(data),
+            Ok(CacheableResource::NotModified) => {
+                return Err(SignerError::Message(
+                    "GCP credential headers unavailable".into(),
+                ))
+            }
+            Err(error) => error,
+        };
+        let fresh = (self.rebuild)()?;
+        match fresh.headers(http::Extensions::new()).await {
+            Ok(CacheableResource::New { data, .. }) => {
+                *self.credentials.lock().await = fresh;
+                Ok(data)
+            }
+            _ => Err(SignerError::Message(first.to_string())),
+        }
+    }
+
     async fn request(
         &self,
         name: &str,
         body: Option<&AsymmetricSignRequest>,
     ) -> Result<serde_json::Value, SignerError> {
         let url = self.resource_url(name, body.is_some())?;
-        let headers = match self.credentials.headers(http::Extensions::new()).await {
-            Ok(CacheableResource::New { data, .. }) => data,
-            Ok(CacheableResource::NotModified) => {
-                return Err(SignerError::Message(
-                    "GCP credential headers unavailable".into(),
-                ))
-            }
-            Err(error) => return Err(SignerError::Message(error.to_string())),
-        };
+        let headers = self.credential_headers().await?;
         let request = if let Some(body) = body {
             self.client.post(url).headers(headers).json(body)
         } else {

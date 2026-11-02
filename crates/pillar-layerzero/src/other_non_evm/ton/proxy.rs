@@ -15,6 +15,9 @@ use pillar_core::AppCoreError;
 /// `tonObjects.Proxy.name`.
 const PROXY_NAME: &str = "pfProxy";
 
+/// Empty list-head cells followed before the address is read.
+const MAX_ADDRESS_LIST_HOPS: usize = 4;
+
 /// Decode the implementation (admin) target address from a DVN proxy storage
 /// cell (base64 BOC). Returns `None` when the cell is not a `Proxy` (the caller
 /// then falls back to the original DVN address, like `getImplementationContract`).
@@ -25,7 +28,14 @@ pub fn decode_proxy_admin_target(storage_boc_base64: &str) -> Result<Option<Stri
     }
     // Proxy field 0 = workerCoreStorage; WorkerCoreStorage field 0 = admins.
     let worker_core_storage = cl_get_ref(&cell, 0)?;
-    let admins = cl_get_ref(&worker_core_storage, 0)?;
+    let mut admins = cl_get_ref(&worker_core_storage, 0)?;
+    // An address list may be headed by an empty cell whose single reference holds the address.
+    for _ in 0..MAX_ADDRESS_LIST_HOPS {
+        match admins.refs() {
+            [inner] if admins.data_len_bits() == 0 => admins = inner.clone(),
+            _ => break,
+        }
+    }
 
     let mut parser = admins.parser();
     let admin: BigUint = parser.read_num(256).map_err(map_err)?;
@@ -55,8 +65,10 @@ mod tests {
         admins_b
             .write_num(&BigUint::from_bytes_be(admin), 256)
             .unwrap();
-        let admins = build(admins_b).unwrap();
+        proxy_storage_with(build(admins_b).unwrap())
+    }
 
+    fn proxy_storage_with(admins: TonCell) -> TonCell {
         let worker_core_storage = cl_declare(
             "wrkCorStor",
             vec![
@@ -81,6 +93,20 @@ mod tests {
     fn decodes_proxy_admin() {
         let admin = addr_be(0x42);
         let proxy = build_proxy_storage(&admin);
+        let target = decode_proxy_admin_target(&to_base64(&proxy)).unwrap();
+        assert_eq!(target, Some(format!("0:{}", hex::encode(admin))));
+    }
+
+    #[test]
+    fn decodes_an_admin_held_behind_an_empty_list_cell() {
+        let admin = addr_be(0x42);
+        let mut address = builder();
+        address
+            .write_num(&BigUint::from_bytes_be(&admin), 256)
+            .unwrap();
+        let mut head = builder();
+        head.write_ref(build(address).unwrap()).unwrap();
+        let proxy = proxy_storage_with(build(head).unwrap());
         let target = decode_proxy_admin_target(&to_base64(&proxy)).unwrap();
         assert_eq!(target, Some(format!("0:{}", hex::encode(admin))));
     }

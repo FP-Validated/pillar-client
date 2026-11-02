@@ -808,7 +808,7 @@ where
         }
     };
     Ok((
-        format!("{required_confirmations}:{confirmations:?}:{verification_state}:{verified:?}"),
+        format!("{required_confirmations}:{confirmations:?}:{verification_state}:{signed}"),
         validity,
     ))
 }
@@ -1436,4 +1436,82 @@ fn starknet_selector(name: &str) -> String {
     let mut hash: [u8; 32] = Keccak256::digest(name.as_bytes()).into();
     hash[0] &= 0x03;
     normalize_starknet_felt(&hex::encode(hash))
+}
+
+#[cfg(test)]
+mod aptos_v301_tests {
+    use super::*;
+
+    const VERIFIER: &str = "0x00000000000000000000000000000000000000000000000000000000000000d1";
+
+    #[derive(Clone)]
+    struct Node {
+        inbound_nonce: u64,
+    }
+
+    #[async_trait]
+    impl JsonRpcTransport for Node {
+        async fn post_json(
+            &self,
+            _url: String,
+            _headers: HashMap<String, String>,
+            body: Value,
+        ) -> Result<Value, String> {
+            let function = body["function"].as_str().unwrap_or_default();
+            Ok(match function.rsplit("::").next() {
+                Some("get_receive_msglib") => json!(["2", "0"]),
+                Some("get_config") => {
+                    json!([format!("0x{:016x}0001{}00000000", 2, &VERIFIER[2..])])
+                }
+                Some("get_verification_confirmations") => json!(["0"]),
+                Some("verifiable") => json!([0]),
+                Some("inbound_nonce") => json!([self.inbound_nonce.to_string()]),
+                _ => return Err(format!("unexpected view {function}")),
+            })
+        }
+
+        async fn get_json(
+            &self,
+            _url: String,
+            _headers: HashMap<String, String>,
+        ) -> Result<Value, String> {
+            Err("unexpected GET".to_string())
+        }
+    }
+
+    async fn vote(inbound_nonce: u64) -> (String, PayloadSignedValidity) {
+        let contracts = AptosV301Contracts {
+            uln_301: "0x1".to_string(),
+            layerzero: "0x2".to_string(),
+            view: "0x3".to_string(),
+            view_uln301: "0x4".to_string(),
+        };
+        observe_aptos_v301_payload_signed(
+            Node { inbound_nonce },
+            "https://aptos.example".to_string(),
+            HashMap::new(),
+            AptosV301Observation {
+                contracts: &contracts,
+                receiver: "0x5",
+                receiver_bytes32: "0x5",
+                src_eid: 101,
+                sender: "0x6",
+                nonce: 5,
+                verifier_address: VERIFIER,
+                packet_header: "0x01",
+                payload_hash: "0x07",
+            },
+        )
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn providers_that_agree_on_the_verdict_cast_one_vote_whatever_the_nonce_cursor() {
+        let (first, first_verdict) = vote(7).await;
+        let (second, second_verdict) = vote(8).await;
+        assert!(matches!(first_verdict, PayloadSignedValidity::Signed));
+        assert!(matches!(second_verdict, PayloadSignedValidity::Signed));
+        assert_eq!(first, second);
+    }
 }

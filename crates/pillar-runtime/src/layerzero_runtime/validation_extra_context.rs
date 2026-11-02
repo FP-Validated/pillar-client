@@ -129,9 +129,8 @@ where
                 ));
             }
             return self
-                .canton_transaction_from_address(&parties, tx_hash, |entry, uri| {
-                    self.canton_ledger_auth
-                        .token_provider(entry, uri, &self.transport)
+                .canton_transaction_from_address(&parties, tx_hash, |_, uri| {
+                    self.canton_ledger_auth.token_provider(uri, &self.transport)
                 })
                 .await;
         }

@@ -249,43 +249,35 @@ where
                         "AWS KMS Ed25519 signing requires an Ed25519 key".to_string(),
                     ));
                 }
-                let cached = self
-                    .public_key_by_signature_type
-                    .lock()
-                    .await
-                    .get(&SignatureType::Ed25519)
-                    .cloned();
-                let key = if pillar_core::audit::enabled() {
-                    Some(self.resolved_key(SignatureType::Ed25519).await?)
-                } else {
-                    cached
-                };
-                let reference = key
-                    .as_ref()
-                    .map(|key| key.id.as_str())
-                    .unwrap_or(&self.key_id);
-                if pillar_core::audit::enabled() {
+                let key = self.resolved_key(SignatureType::Ed25519).await?;
+                let signature = if pillar_core::audit::enabled() {
                     let digest = crate::effects::owned_digest(&request.data)?;
                     let client = self.client.clone();
-                    let owned_key = key.as_ref().expect("audit resolved key").clone();
+                    let owned_key = key.clone();
                     crate::effects::sign_owned_effect(
-                        reference,
-                        key.as_ref().and_then(|key| key.identity()),
+                        &key.id,
+                        key.identity(),
                         &request.data,
                         "ed25519",
                         async move { client.sign_ed25519_raw(&owned_key.id, &digest).await },
                     )
-                    .await
+                    .await?
                 } else {
                     crate::effects::sign_effect(
-                        reference,
+                        &key.id,
                         None,
                         &request.data,
                         "ed25519",
-                        self.client.sign_ed25519_raw(reference, &request.data),
+                        self.client.sign_ed25519_raw(&key.id, &request.data),
                     )
-                    .await
+                    .await?
+                };
+                if signature.len() != 64 {
+                    return Err(SignerError::Message(
+                        "AWS KMS: unexpected Ed25519 signature length".to_string(),
+                    ));
                 }
+                Ok(signature)
             }
         }
     }

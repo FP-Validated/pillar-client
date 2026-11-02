@@ -44,7 +44,17 @@ where
         transport: T,
         now_unix_ms: impl Fn() -> u64 + Send + Sync + 'static,
     ) -> Self {
-        Self::from_getter_with_chain_types(getter, transport, now_unix_ms, HashMap::new())
+        let chain_types = getter
+            .get_provider_configs()
+            .keys()
+            .filter_map(|chain_name| {
+                pillar_config::static_chain_type_by_chain_name(std::slice::from_ref(chain_name))
+                    .ok()?
+                    .remove(chain_name)
+                    .map(|chain_type| (chain_name.clone(), chain_type))
+            })
+            .collect();
+        Self::from_getter_with_chain_types(getter, transport, now_unix_ms, chain_types)
     }
 
     pub fn from_getter_with_chain_types(
@@ -114,7 +124,7 @@ where
         let retained = self.retained_report.lock().await;
         let retained = retained.as_ref()?;
         (retained.generation == generation
-            && now_unix_ms.saturating_sub(retained.completed_at_unix_ms)
+            && pillar_core::elapsed_ms(now_unix_ms, retained.completed_at_unix_ms)
                 <= pillar_core::PROVIDER_HEALTH_CACHE_STALE_MS)
             .then(|| retained.report.clone())
     }
@@ -192,7 +202,7 @@ where
                         || previous.is_some_and(|previous| {
                             previous.config == *config
                                 && previous.healthy
-                                && checked_at_unix_ms.saturating_sub(previous.at_unix_ms)
+                                && pillar_core::elapsed_ms(checked_at_unix_ms, previous.at_unix_ms)
                                     <= pillar_core::PROVIDER_HEALTH_CACHE_STALE_MS
                         }));
                 // Overlapping rounds can finish out of order: the newer generation, then the
@@ -382,6 +392,52 @@ mod tests {
 
         let snapshot = source.get_provider_health().await.unwrap();
         assert!(snapshot["unsupported-chain"]);
+    }
+
+    #[derive(Clone, Default)]
+    struct MethodRecorder(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+
+    #[async_trait]
+    impl JsonRpcTransport for MethodRecorder {
+        async fn post_json(
+            &self,
+            _url: String,
+            _headers: HashMap<String, String>,
+            body: Value,
+        ) -> Result<Value, String> {
+            self.0
+                .lock()
+                .unwrap()
+                .push(body["method"].as_str().unwrap_or_default().to_string());
+            Ok(serde_json::json!({"result": 1}))
+        }
+
+        async fn get_json(
+            &self,
+            _url: String,
+            _headers: HashMap<String, String>,
+        ) -> Result<Value, String> {
+            Err("unexpected GET".to_string())
+        }
+    }
+
+    #[tokio::test]
+    async fn the_generic_constructor_probes_a_chain_by_its_own_family() {
+        let getter = EmptyProbeGetter {
+            configs: indexmap::IndexMap::from([(
+                "solana".to_string(),
+                ProviderConfig::with_distinct_entities(
+                    vec![pillar_config::ProviderUri::Uri(
+                        "https://solana.example".into(),
+                    )],
+                    1,
+                ),
+            )]),
+        };
+        let transport = MethodRecorder::default();
+        let source = RpcProviderHealthSource::from_getter(&getter, transport.clone(), || 42);
+        source.get_provider_health_report().await.unwrap();
+        assert_eq!(*transport.0.lock().unwrap(), ["getSlot"]);
     }
     #[tokio::test]
     async fn retained_report_is_unavailable_after_provider_generation_changes() {

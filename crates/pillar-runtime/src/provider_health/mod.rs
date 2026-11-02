@@ -75,8 +75,8 @@ pub(crate) use source::provider_health_snapshot_from_report;
 pub use source::RpcProviderHealthSource;
 pub(crate) use ton::*;
 pub(crate) use transport::{
-    is_http_not_found, is_response_size_refusal, json_parser_local_error, parse_bounded_json,
-    parse_json_with_limits, provider_response,
+    is_http_not_found, is_http_unauthorized, is_response_size_refusal, json_parser_local_error,
+    parse_bounded_json, parse_bounded_large_json, parse_json_with_limits, provider_response,
 };
 pub use transport::{
     AwsLambdaInvokeClient, AwsSdkLambdaInvokeClient, JsonRpcTransport, ReqwestJsonRpcTransport,

@@ -1,11 +1,14 @@
 use async_trait::async_trait;
 use azure_core::http::RequestContent;
 use azure_security_keyvault_keys::{
-    models::{KeyClientGetKeyOptions, KeyClientSignOptions, SignParameters, SignatureAlgorithm},
+    models::{
+        CurveName, KeyClientGetKeyOptions, KeyClientSignOptions, KeyType, SignParameters,
+        SignatureAlgorithm,
+    },
     KeyClient as AzureKeyClient,
 };
 
-use crate::azure::{parse_azure_kms_key_id, AzureKmsKeyId};
+use crate::azure::{azure_key_vault_origin, parse_azure_kms_key_id, AzureKmsKeyId};
 use crate::types::SignerError;
 
 pub struct AzureEcPublicKey {
@@ -26,6 +29,11 @@ pub trait AzureKmsClient: Send + Sync + 'static {
         &self,
         key_id: &AzureKmsKeyId,
     ) -> Result<AzureEcPublicKey, SignerError>;
+
+    /// The vault this client talks to, when it knows; a key URL naming another vault is refused.
+    fn vault_origin(&self) -> Option<String> {
+        None
+    }
 }
 
 pub struct AzureKeyVaultKmsClient {
@@ -35,6 +43,11 @@ pub struct AzureKeyVaultKmsClient {
 impl AzureKeyVaultKmsClient {
     pub fn new(client: AzureKeyClient) -> Self {
         Self { client }
+    }
+
+    fn in_this_vault(&self, reference: &str) -> bool {
+        azure_key_vault_origin(reference)
+            .is_none_or(|origin| self.vault_origin().is_none_or(|own| origin == own))
     }
 }
 
@@ -67,7 +80,7 @@ impl AzureKmsClient for AzureKeyVaultKmsClient {
             .into_model()
             .map_err(|error| SignerError::Message(error.to_string()))?;
         if let Some(reference) = response.kid.as_deref() {
-            if parse_azure_kms_key_id(reference)? != *key_id {
+            if parse_azure_kms_key_id(reference)? != *key_id || !self.in_this_vault(reference) {
                 return Err(SignerError::Message(
                     "Azure Key Vault: signing key identity changed".into(),
                 ));
@@ -110,6 +123,7 @@ impl AzureKmsClient for AzureKeyVaultKmsClient {
         })?;
         let resolved = parse_azure_kms_key_id(&reference)?;
         if resolved.version.is_none()
+            || !self.in_this_vault(&reference)
             || resolved.name != key_id.name
             || key_id
                 .version
@@ -119,6 +133,14 @@ impl AzureKmsClient for AzureKeyVaultKmsClient {
             return Err(SignerError::Message(
                 "Azure Key Vault: public key identity changed".into(),
             ));
+        }
+        if !matches!(jwk.kty, Some(KeyType::Ec | KeyType::EcHsm))
+            || !matches!(jwk.crv, Some(CurveName::P256K))
+        {
+            return Err(SignerError::Message(format!(
+                "Azure Key Vault: {} is not an EC P-256K key",
+                key_id.display()
+            )));
         }
         let x = jwk.x.ok_or_else(|| {
             SignerError::Message(format!(
@@ -138,5 +160,9 @@ impl AzureKmsClient for AzureKeyVaultKmsClient {
             x,
             y,
         })
+    }
+
+    fn vault_origin(&self) -> Option<String> {
+        Some(self.client.endpoint().origin().ascii_serialization())
     }
 }

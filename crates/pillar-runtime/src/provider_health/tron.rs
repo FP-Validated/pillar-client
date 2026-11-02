@@ -8,25 +8,7 @@ pub(crate) fn tron_json_rpc_provider_uri_parts(
         return (url, headers);
     };
 
-    if !parsed_url.username().is_empty() {
-        let mut credentials =
-            percent_encoding::percent_decode_str(parsed_url.username()).collect::<Vec<_>>();
-        credentials.push(b':');
-        credentials.extend(percent_encoding::percent_decode_str(
-            parsed_url.password().unwrap_or(""),
-        ));
-        if !headers
-            .keys()
-            .any(|key| key.eq_ignore_ascii_case("authorization"))
-        {
-            headers.insert(
-                "Authorization".to_string(),
-                format!("Basic {}", base64_encode(&credentials)),
-            );
-        }
-        let _ = parsed_url.set_username("");
-        let _ = parsed_url.set_password(None);
-    }
+    strip_userinfo_into_authorization(&mut parsed_url, &mut headers);
 
     let query_pairs = parsed_url
         .query_pairs()
@@ -99,19 +81,7 @@ pub(crate) fn tron_web_endpoint_parts(
     mut headers: HashMap<String, String>,
 ) -> Option<(String, String, HashMap<String, String>)> {
     let mut parsed_url = reqwest::Url::parse(tron_web_url).ok()?;
-    if !parsed_url.username().is_empty() {
-        let mut credentials =
-            percent_encoding::percent_decode_str(parsed_url.username()).collect::<Vec<_>>();
-        credentials.push(b':');
-        credentials.extend(percent_encoding::percent_decode_str(
-            parsed_url.password().unwrap_or(""),
-        ));
-        headers
-            .entry("Authorization".to_string())
-            .or_insert_with(|| format!("Basic {}", base64_encode(&credentials)));
-        let _ = parsed_url.set_username("");
-        let _ = parsed_url.set_password(None);
-    }
+    strip_userinfo_into_authorization(&mut parsed_url, &mut headers);
 
     let query_pairs = parsed_url
         .query_pairs()
@@ -119,9 +89,7 @@ pub(crate) fn tron_web_endpoint_parts(
         .collect::<Vec<_>>();
     if let Some((_, api_key)) = query_pairs.iter().find(|(key, _)| key == "tron-api-key") {
         if !api_key.is_empty() {
-            headers
-                .entry("TRON-PRO-API-KEY".to_string())
-                .or_insert_with(|| api_key.clone());
+            insert_header_if_absent(&mut headers, "TRON-PRO-API-KEY", api_key.clone());
         }
     }
 
@@ -140,8 +108,34 @@ pub(crate) fn tron_web_endpoint_parts(
     }
 
     let report_url = parsed_url.to_string();
-    let request_url = format!("{}/wallet/getblock", report_url.trim_end_matches('/'));
+    let request_url = append_url_path(&report_url, &["wallet", "getblock"]).map_or_else(
+        || format!("{}/wallet/getblock", report_url.trim_end_matches('/')),
+        String::from,
+    );
     Some((report_url, request_url, headers))
+}
+
+/// Moves URL userinfo, a password alone included, into a Basic header the provider has not configured itself.
+fn strip_userinfo_into_authorization(
+    parsed_url: &mut reqwest::Url,
+    headers: &mut HashMap<String, String>,
+) {
+    if parsed_url.username().is_empty() && parsed_url.password().is_none() {
+        return;
+    }
+    let mut credentials =
+        percent_encoding::percent_decode_str(parsed_url.username()).collect::<Vec<_>>();
+    credentials.push(b':');
+    credentials.extend(percent_encoding::percent_decode_str(
+        parsed_url.password().unwrap_or(""),
+    ));
+    insert_header_if_absent(
+        headers,
+        "Authorization",
+        format!("Basic {}", base64_encode(&credentials)),
+    );
+    let _ = parsed_url.set_username("");
+    let _ = parsed_url.set_password(None);
 }
 
 pub(crate) fn base64_encode(bytes: &[u8]) -> String {
@@ -166,4 +160,43 @@ pub(crate) fn base64_encode(bytes: &[u8]) -> String {
         }
     }
     encoded
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_password_only_authority_becomes_basic_auth_and_leaves_the_url() {
+        let uri = ProviderUri::Uri("https://:secret@tron.example/jsonrpc".to_string());
+        let (url, headers) = tron_json_rpc_provider_uri_parts(&uri);
+        assert_eq!(url, "https://tron.example/jsonrpc");
+        assert_eq!(headers["Authorization"], "Basic OnNlY3JldA==");
+    }
+
+    #[test]
+    fn an_explicit_authorization_is_not_repeated_by_a_derived_one_in_another_case() {
+        let headers = HashMap::from([("authorization".to_string(), "Bearer explicit".to_string())]);
+        let (_, _, headers) =
+            tron_web_endpoint_parts("https://user:pass@web.example/?tron-api-key=k", headers)
+                .unwrap();
+        assert_eq!(headers["authorization"], "Bearer explicit");
+        assert_eq!(
+            headers
+                .keys()
+                .filter(|name| name.eq_ignore_ascii_case("authorization"))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn the_block_path_follows_the_endpoint_path_not_its_query() {
+        let (_, request_url, _) =
+            tron_web_endpoint_parts("https://web.example/v1?key=secret", HashMap::new()).unwrap();
+        assert_eq!(
+            request_url,
+            "https://web.example/v1/wallet/getblock?key=secret"
+        );
+    }
 }

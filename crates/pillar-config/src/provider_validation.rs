@@ -4,6 +4,7 @@
 use crate::{ConfigError, ProviderConfig, ProviderConfigs, ProviderUri};
 use indexmap::IndexMap;
 use serde::Deserialize;
+use sha2::Digest;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 pub const PROVIDER_CATEGORY_INTERNAL: &str = "internal";
@@ -266,28 +267,69 @@ fn check_requirement_set(
             }
         }
     }
-    pool >= any_quorum.max(categories.len())
-        && assign_entities(counts, &categories, 0, &mut BTreeSet::new())
+    pool >= any_quorum.max(categories.len()) && assign_entities(counts, &categories)
 }
 
-fn assign_entities(
-    counts: &BTreeMap<String, BTreeSet<String>>,
-    categories: &[String],
-    at: usize,
-    used: &mut BTreeSet<String>,
-) -> bool {
-    if at == categories.len() {
-        return true;
+/// Whether every category slot can hold its own entity, by augmenting paths so the depth does not grow with the policy.
+fn assign_entities(counts: &BTreeMap<String, BTreeSet<String>>, categories: &[String]) -> bool {
+    let mut owner: BTreeMap<&str, &str> = BTreeMap::new();
+    let mut lists: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    let mut owned_prefix: BTreeMap<&str, usize> = BTreeMap::new();
+    for category in categories {
+        let Some(candidates) = counts.get(category) else {
+            return false;
+        };
+        let list = lists
+            .entry(category)
+            .or_insert_with(|| candidates.iter().map(String::as_str).collect());
+        // An entity is only ever handed from one category to another, so a prefix found owned stays owned.
+        let prefix = owned_prefix.entry(category).or_default();
+        while list
+            .get(*prefix)
+            .is_some_and(|entity| owner.contains_key(entity))
+        {
+            *prefix += 1;
+        }
+        if let Some(&entity) = list.get(*prefix) {
+            owner.insert(entity, category);
+        } else if !augment(counts, &mut owner, category) {
+            return false;
+        }
     }
-    let Some(candidates) = counts.get(&categories[at]) else {
-        return false;
-    };
-    for entity in candidates {
-        if used.insert(entity.clone()) {
-            if assign_entities(counts, categories, at + 1, used) {
-                return true;
+    true
+}
+
+/// Gives `start` one more entity, moving entities between categories along a shortest path when none is free.
+fn augment<'a>(
+    counts: &'a BTreeMap<String, BTreeSet<String>>,
+    owner: &mut BTreeMap<&'a str, &'a str>,
+    start: &'a str,
+) -> bool {
+    let mut via: BTreeMap<&str, (&str, &str)> = BTreeMap::new();
+    let mut queue = std::collections::VecDeque::from([start]);
+    let mut seen = BTreeSet::from([start]);
+    while let Some(category) = queue.pop_front() {
+        let Some(candidates) = counts.get(category) else {
+            continue;
+        };
+        for entity in candidates {
+            match owner.get(entity.as_str()).copied() {
+                None => {
+                    owner.insert(entity, category);
+                    let mut at = category;
+                    while at != start {
+                        let (previous, taken) = via[at];
+                        owner.insert(taken, previous);
+                        at = previous;
+                    }
+                    return true;
+                }
+                Some(holder) if seen.insert(holder) => {
+                    via.insert(holder, (category, entity));
+                    queue.push_back(holder);
+                }
+                Some(_) => {}
             }
-            used.remove(entity);
         }
     }
     false
@@ -468,41 +510,9 @@ pub fn order_providers_for_quorum(
             all_of: strategy.all_of.clone(),
             one_of: vec![alternative.clone()],
         };
-        let mut counts = BTreeMap::<(String, String), usize>::new();
-        let mut entities = BTreeMap::<String, BTreeSet<String>>::new();
-        for provider in &output {
-            *counts
-                .entry((provider.category.clone(), provider.entity.clone()))
-                .or_default() += 1;
-            entities
-                .entry(provider.category.clone())
-                .or_default()
-                .insert(provider.entity.clone());
-        }
-        if !is_strategy_satisfiable(&entities, &candidate) {
+        let Some(selected) = minimal_satisfying_selection(&output, &candidate) else {
             continue;
-        }
-        let mut selected = vec![true; output.len()];
-        for (index, provider) in output.iter().enumerate().rev() {
-            let key = (provider.category.clone(), provider.entity.clone());
-            let count = counts.get_mut(&key).expect("provider counted");
-            *count -= 1;
-            if *count == 0 {
-                entities
-                    .get_mut(&provider.category)
-                    .expect("category counted")
-                    .remove(&provider.entity);
-            }
-            if is_strategy_satisfiable(&entities, &candidate) {
-                selected[index] = false;
-            } else {
-                *count += 1;
-                entities
-                    .get_mut(&provider.category)
-                    .expect("category counted")
-                    .insert(provider.entity.clone());
-            }
-        }
+        };
         let count = selected.iter().filter(|selected| **selected).count();
         let rank = output
             .iter()
@@ -518,18 +528,79 @@ pub fn order_providers_for_quorum(
             best = Some((count, rank, selected));
         }
     }
-    if let Some((_, _, selected)) = best {
-        let (first, rest): (Vec<_>, Vec<_>) = output
-            .into_iter()
-            .zip(selected)
-            .partition(|(_, selected)| *selected);
-        return first
-            .into_iter()
-            .chain(rest)
-            .map(|(provider, _)| provider)
-            .collect();
+    match best {
+        Some((_, _, selected)) => selected_first(output, selected),
+        None => output,
     }
-    output
+}
+
+/// Puts a minimal `allOf`-only quorum first; upstream's ordering, kept by `order_providers_for_quorum`, does not.
+pub fn prioritize_minimal_quorum(
+    ordered: Vec<OrderableProvider>,
+    strategy: &QuorumStrategy,
+) -> Vec<OrderableProvider> {
+    if !strategy.one_of.is_empty() {
+        return ordered;
+    }
+    match minimal_satisfying_selection(&ordered, strategy) {
+        Some(selected) => selected_first(ordered, selected),
+        None => ordered,
+    }
+}
+
+/// The providers a minimal satisfying set keeps, dropping from the back; `None` when `candidate` cannot be met.
+fn minimal_satisfying_selection(
+    output: &[OrderableProvider],
+    candidate: &QuorumStrategy,
+) -> Option<Vec<bool>> {
+    let mut counts = BTreeMap::<(String, String), usize>::new();
+    let mut entities = BTreeMap::<String, BTreeSet<String>>::new();
+    for provider in output {
+        *counts
+            .entry((provider.category.clone(), provider.entity.clone()))
+            .or_default() += 1;
+        entities
+            .entry(provider.category.clone())
+            .or_default()
+            .insert(provider.entity.clone());
+    }
+    if !is_strategy_satisfiable(&entities, candidate) {
+        return None;
+    }
+    let mut selected = vec![true; output.len()];
+    for (index, provider) in output.iter().enumerate().rev() {
+        let key = (provider.category.clone(), provider.entity.clone());
+        let count = counts.get_mut(&key).expect("provider counted");
+        *count -= 1;
+        if *count == 0 {
+            entities
+                .get_mut(&provider.category)
+                .expect("category counted")
+                .remove(&provider.entity);
+        }
+        if is_strategy_satisfiable(&entities, candidate) {
+            selected[index] = false;
+        } else {
+            *count += 1;
+            entities
+                .get_mut(&provider.category)
+                .expect("category counted")
+                .insert(provider.entity.clone());
+        }
+    }
+    Some(selected)
+}
+
+fn selected_first(output: Vec<OrderableProvider>, selected: Vec<bool>) -> Vec<OrderableProvider> {
+    let (first, rest): (Vec<_>, Vec<_>) = output
+        .into_iter()
+        .zip(selected)
+        .partition(|(_, selected)| *selected);
+    first
+        .into_iter()
+        .chain(rest)
+        .map(|(provider, _)| provider)
+        .collect()
 }
 
 pub fn min_providers_for_strategy(
@@ -717,6 +788,41 @@ pub fn reject_legacy_provider_config(raw: &str) -> Result<(), ConfigError> {
     Ok(())
 }
 
+/// The `_`-prefixed strategy key holding the SHA-256 of the exact `providers-v2.json` text it was written for.
+pub const PROVIDERS_BINDING_KEY: &str = "_providersSha256";
+
+/// A strategy that names its providers file is only valid with that file, so a bucket
+/// holding the two objects from different rollouts is refused instead of served.
+fn check_providers_binding(
+    providers_raw: &str,
+    bound_to: Option<&serde_json::Value>,
+) -> Result<(), ConfigError> {
+    let Some(bound_to) = bound_to else {
+        static UNBOUND: std::sync::Once = std::sync::Once::new();
+        UNBOUND.call_once(|| {
+            tracing::warn!(
+                "quorum-strategy.json has no `{PROVIDERS_BINDING_KEY}`; replacing the two files one at a time can briefly pair documents from different rollouts"
+            );
+        });
+        return Ok(());
+    };
+    let expected = bound_to
+        .as_str()
+        .filter(|text| text.len() == 64 && text.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .ok_or_else(|| {
+            ConfigError::ProviderValidation(format!(
+                "quorum-strategy.json: `{PROVIDERS_BINDING_KEY}` must be the SHA-256 of providers-v2.json as 64 hex digits"
+            ))
+        })?;
+    let actual = hex::encode(sha2::Sha256::digest(providers_raw.as_bytes()));
+    if !actual.eq_ignore_ascii_case(expected) {
+        return Err(ConfigError::ProviderValidation(format!(
+            "quorum-strategy.json: `{PROVIDERS_BINDING_KEY}` does not match providers-v2.json; the two files are from different rollouts"
+        )));
+    }
+    Ok(())
+}
+
 fn parse_providers_file(raw: &str) -> Result<RawProvidersFile, ConfigError> {
     reject_legacy_provider_config(raw)?;
     // From the text: a `serde_json::Value` object is sorted, which would lose the file's
@@ -731,7 +837,14 @@ fn parse_providers_file(raw: &str) -> Result<RawProvidersFile, ConfigError> {
 
 fn parse_strategy_file(
     raw: &str,
-) -> Result<(QuorumStrategyFileContent, StrategyRestrictions), ConfigError> {
+) -> Result<
+    (
+        QuorumStrategyFileContent,
+        StrategyRestrictions,
+        Option<serde_json::Value>,
+    ),
+    ConfigError,
+> {
     let raw = pillar_core::json::from_str::<RawStrategyFile>(raw).map_err(|error| {
         ConfigError::Json(format!(
             "quorum-strategy.json: {}",
@@ -745,6 +858,7 @@ fn parse_strategy_file(
                 .to_string(),
         ));
     }
+    let bound_to = raw.extra.get(PROVIDERS_BINDING_KEY).cloned();
     Ok((
         QuorumStrategyFileContent {
             default: raw.default.map(Into::into),
@@ -765,6 +879,7 @@ fn parse_strategy_file(
         StrategyRestrictions {
             minimum_max_entities: raw.restrictions.minimum_max_entities,
         },
+        bound_to,
     ))
 }
 
@@ -776,7 +891,8 @@ pub fn provider_configs_from_v2(
     strategy_raw: &str,
 ) -> Result<ProviderConfigs, ConfigError> {
     let providers = parse_providers_file(providers_raw)?;
-    let (strategy, restrictions) = parse_strategy_file(strategy_raw)?;
+    let (strategy, restrictions, bound_to) = parse_strategy_file(strategy_raw)?;
+    check_providers_binding(providers_raw, bound_to.as_ref())?;
     let file = ProvidersFileV2 {
         entities: providers.entities.clone(),
         chains: providers

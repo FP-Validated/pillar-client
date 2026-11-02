@@ -546,7 +546,7 @@ where
     let current_response = readiness_response(
         transport
             .get_json_scoped(
-                format!("{}/masterchainInfo", endpoint.trim_end_matches('/')),
+                crate::provider_health::ton_v3_masterchain_info_url(&endpoint),
                 headers,
             )
             .await,
@@ -810,6 +810,9 @@ where
     {
         return Ok(source_changed("Starknet receipt placement changed"));
     }
+    // Equal to the source hash by the check above, so its canonical spelling is one vote.
+    let receipt_hash = super::source_events_starknet::normalize_starknet_felt_hash(receipt_hash)
+        .unwrap_or_default();
     let events = receipt.get("events").and_then(Value::as_array);
     let selected_event = events.and_then(|events| events.get(source_evidence.event_index as usize));
     if selected_event != Some(&source_evidence.event) {
@@ -1196,5 +1199,78 @@ mod ton_tests {
         )
         .await;
         assert!(result.is_err(), "transport failures must be non-votes");
+    }
+}
+
+#[cfg(test)]
+mod starknet_tests {
+    use super::*;
+
+    const TX: &str = "0x1";
+
+    #[derive(Clone)]
+    struct Node {
+        receipt_block_hash: &'static str,
+    }
+
+    #[async_trait]
+    impl JsonRpcTransport for Node {
+        async fn post_json(
+            &self,
+            _url: String,
+            _headers: HashMap<String, String>,
+            body: Value,
+        ) -> Result<Value, String> {
+            Ok(match body["method"].as_str() {
+                Some("starknet_getTransactionReceipt") => json!({"result": {
+                    "execution_status": "SUCCEEDED",
+                    "finality_status": "ACCEPTED_ON_L2",
+                    "transaction_hash": TX,
+                    "block_hash": self.receipt_block_hash,
+                    "block_number": 100,
+                    "events": [{"data": []}],
+                }}),
+                Some("starknet_getBlockWithTxHashes") => {
+                    json!({"result": {"block_hash": "0xabc", "block_number": 100}})
+                }
+                Some("starknet_blockNumber") => json!({"result": 110}),
+                _ => return Err("unexpected method".to_string()),
+            })
+        }
+
+        async fn get_json(
+            &self,
+            _url: String,
+            _headers: HashMap<String, String>,
+        ) -> Result<Value, String> {
+            Err("unexpected GET".to_string())
+        }
+    }
+
+    async fn vote(receipt_block_hash: &'static str) -> String {
+        let evidence = pillar_core::StarknetSourceEvidence {
+            block_hash: "0xabc".to_string(),
+            block_number: 100,
+            transaction_hash: TX.to_string(),
+            event_index: 0,
+            event: json!({"data": []}),
+        };
+        observe_starknet_block_confirmations(
+            Node { receipt_block_hash },
+            "https://starknet.example".to_string(),
+            HashMap::new(),
+            TX,
+            &evidence,
+            5,
+        )
+        .await
+        .unwrap()
+        .validity
+        .fingerprint()
+    }
+
+    #[tokio::test]
+    async fn one_block_hash_spelled_two_ways_is_one_vote() {
+        assert_eq!(vote("0xABC").await, vote("0x000abc").await);
     }
 }

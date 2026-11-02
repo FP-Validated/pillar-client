@@ -64,8 +64,10 @@ fn strategy_one(reqs: Vec<CategoryRequirement>) -> QuorumStrategy {
     }
 }
 
+mod binding;
 mod config;
 mod entry_validation;
+mod matching;
 mod strategy;
 mod upstream_any;
 mod upstream_cross_category;

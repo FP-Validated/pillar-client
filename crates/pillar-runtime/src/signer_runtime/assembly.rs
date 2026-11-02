@@ -96,7 +96,7 @@ pub async fn aws_mnemonic_signer_assembly_from_config_with_metrics(
 pub async fn production_aws_mnemonic_secret_client(
     region: Option<&String>,
 ) -> Result<AwsSecretsManagerMnemonicClient, String> {
-    let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+    let config = crate::aws_client::defaults()
         .region(secrets_manager_region_provider(region.map(String::as_str)))
         .load()
         .await;
@@ -313,7 +313,7 @@ pub async fn production_kms_raw_signer_factory_from_options(
 ) -> Result<Arc<dyn RawSignerAdapterFactory>, String> {
     match options {
         KmsSignerAdapterFactoryOptions::Aws { region } => {
-            let mut config_loader = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            let mut config_loader = crate::aws_client::defaults()
                 .retry_config(aws_sdk_kms::config::retry::RetryConfig::disabled());
             if let Some(region) = region {
                 config_loader =

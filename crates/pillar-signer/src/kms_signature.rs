@@ -48,6 +48,34 @@ pub fn kms_ecdsa_signature_to_recoverable(
     Ok(result)
 }
 
+/// For a backend that does not say which encoding it used: raw `r || s` and a short DER signature can
+/// both be 64 bytes, so the reading that recovers the expected key is the signature.
+pub fn kms_ecdsa_signature_of_either_encoding_to_recoverable(
+    signature: &[u8],
+    digest: &[u8],
+    expected_public_key: &[u8],
+    transform_recovery_id: bool,
+) -> Result<Vec<u8>, SignerError> {
+    if signature.len() == 64 {
+        if let Ok(recovered) = kms_ecdsa_signature_to_recoverable(
+            signature,
+            KmsEcdsaSignatureEncoding::Raw,
+            digest,
+            expected_public_key,
+            transform_recovery_id,
+        ) {
+            return Ok(recovered);
+        }
+    }
+    kms_ecdsa_signature_to_recoverable(
+        signature,
+        KmsEcdsaSignatureEncoding::Der,
+        digest,
+        expected_public_key,
+        transform_recovery_id,
+    )
+}
+
 fn recover_ecdsa_recovery_id(
     signature: &EcdsaSignature,
     digest: &[u8],

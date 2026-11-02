@@ -35,9 +35,10 @@ impl AwsKmsClient for MockAwsKmsClient {
     }
 
     async fn sign_ed25519_raw(&self, key_id: &str, message: &[u8]) -> Result<Vec<u8>, SignerError> {
-        assert!(
-            key_id == self.key_id
-                || key_id == format!("arn:aws:kms:us-east-1:111122223333:key/{}", self.key_id)
+        assert_eq!(
+            key_id,
+            format!("arn:aws:kms:us-east-1:111122223333:key/{}", self.key_id),
+            "signing must name the immutable key, never the configured alias"
         );
         self.ed25519_messages.lock().await.push(message.to_vec());
         Ok(self.ed25519_signature.clone())
@@ -162,6 +163,31 @@ async fn aws_kms_adapter_signs_ed25519_raw_and_decodes_spki_public_key() {
         .await
         .unwrap();
     assert_eq!(public_key, ed_public_key);
+}
+
+#[tokio::test]
+async fn aws_kms_adapter_refuses_an_ed25519_signature_of_the_wrong_length() {
+    let client = Arc::new(MockAwsKmsClient {
+        key_id: "aws-ed-key".to_string(),
+        ecdsa_signing_key: EcdsaSigningKey::from_slice(&[12u8; 32]).unwrap(),
+        public_key_der: ed25519_spki_der(&[0x23u8; 32]),
+        ed25519_signature: vec![0x51; 63],
+        public_key_calls: Mutex::new(0),
+        ecdsa_digests: Mutex::new(Vec::new()),
+        ed25519_messages: Mutex::new(Vec::new()),
+    });
+    let adapter = AwsKmsRawSignerAdapter::new("aws-ed-key".to_string(), client);
+    let error = adapter
+        .sign(SignRequest {
+            data: b"raw-message".to_vec(),
+            signature_type: SignatureType::Ed25519,
+            private_key_signature_type: SignatureType::Ed25519,
+            transform_recovery_id: false,
+            seed_kind: SeedKind::Bip39,
+        })
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("signature length"), "{error}");
 }
 
 #[tokio::test]
