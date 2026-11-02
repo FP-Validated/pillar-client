@@ -26,6 +26,7 @@
 use super::ton_v3_builder::uses_deprecated_uln;
 use super::validation_payload::payload_signed_validation_result;
 use super::*;
+use sha2::{Digest, Sha256};
 
 use pillar_layerzero::{
     boc_from_base64_with_limits, committable_view_is_signed, dvn_attestation,
@@ -224,6 +225,13 @@ where
             TonStorageRead::Inactive => return inactive(),
             TonStorageRead::Unavailable => return Err(RpcError::Unavailable),
         };
+    let mut digest = Sha256::new();
+    digest.update((connection_storage_boc.len() as u64).to_be_bytes());
+    digest.update(connection_storage_boc.as_bytes());
+    digest.update(uln_storage_boc.as_bytes());
+    let storage_fingerprint = format!("{:x}", digest.finalize());
+    drop(connection_storage_boc);
+    drop(uln_storage_boc);
     // Past this point the inputs are the agreed cells, so a decode failure is
     // deterministic rather than provider-specific: upstream decodes once, after
     // the quorum, and throws. Fingerprinted by the cells that produced it so
@@ -231,7 +239,7 @@ where
     // different bytes do not.
     let undecodable = || {
         Ok((
-            format!("undecodable:{connection_storage_boc}:{uln_storage_boc}"),
+            format!("undecodable:{storage_fingerprint}"),
             PayloadSignedValidity::Missing,
         ))
     };
@@ -290,7 +298,7 @@ where
         }
     };
     Ok((
-        format!("{connection_storage_boc}:{uln_storage_boc}:{state}:{attestation:?}"),
+        format!("active:{storage_fingerprint}:{state}:{attestation:?}"),
         validity,
     ))
 }

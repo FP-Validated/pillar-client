@@ -45,9 +45,18 @@ pub(crate) fn aptos_indexer_provider_health_request(
         .find(|(key, _)| key == "event-indexer")
         .map(|(_, value)| value.clone())
         .filter(|value| !value.is_empty());
-    let (report_url, credential_name) = match no_code_indexer {
-        Some(url) => (url, "no-code-indexer-api-key"),
-        None => (event_indexer?, "event-indexer-api-key"),
+    let (report_url, credential_name, kind) = match (is_movement, event_indexer, no_code_indexer) {
+        (true, Some(url), _) | (false, Some(url), None) => (
+            url,
+            "event-indexer-api-key",
+            AptosIndexerHealthKind::Movement,
+        ),
+        (_, _, Some(url)) => (
+            url,
+            "no-code-indexer-api-key",
+            AptosIndexerHealthKind::NoCode,
+        ),
+        _ => return None,
     };
     let auxiliary = reqwest::Url::parse(&report_url).ok()?;
     if auxiliary.origin() != parsed_url.origin() {
@@ -61,11 +70,6 @@ pub(crate) fn aptos_indexer_provider_health_request(
         headers.insert("Authorization".to_string(), format!("Bearer {api_key}"));
     }
 
-    let kind = if is_movement {
-        AptosIndexerHealthKind::Movement
-    } else {
-        AptosIndexerHealthKind::NoCode
-    };
     Some(AptosIndexerProviderHealthRequest {
         request_url: format!("{}/", report_url.trim_end_matches('/')),
         report_url,

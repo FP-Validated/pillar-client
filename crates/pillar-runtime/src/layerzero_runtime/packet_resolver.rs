@@ -1334,7 +1334,7 @@ where
                         "starknet",
                         json!({
                             "method": "starknet_getTransactionReceipt",
-                            "params": [src_tx_hash],
+                            "params": { "transaction_hash": src_tx_hash },
                             "id": 1,
                             "jsonrpc": "2.0",
                         }),

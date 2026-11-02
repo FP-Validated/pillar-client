@@ -604,6 +604,19 @@ async fn sign_v301_to_aptos(environment: &str, dvn: Option<&str>, state: AptosSt
     }
 }
 
+pub(crate) async fn m99_payload_case(hash: &'static str) -> (StatusCode, Value, usize) {
+    let outcome = sign_v301_to_aptos(
+        "mainnet",
+        Some(DVN),
+        AptosState {
+            stored_payload_hash: Some(hash),
+            ..UNSIGNED
+        },
+    )
+    .await;
+    (outcome.status, outcome.body, outcome.signatures)
+}
+
 fn read_labels(outcome: &Outcome) -> Vec<&str> {
     outcome
         .aptos_reads
@@ -646,7 +659,7 @@ async fn v301_to_aptos_matches_upstreams_already_signed_chain_read_for_read() {
     .unwrap();
     assert_eq!(fixture["dvn"], DVN);
     assert_eq!(fixture["nonce"], NONCE);
-    let scenarios: [(&str, AptosState); 11] = [
+    let scenarios: [(&str, AptosState); 10] = [
         ("unsigned", UNSIGNED),
         (
             "confirmationsAtThreshold",
@@ -659,13 +672,6 @@ async fn v301_to_aptos_matches_upstreams_already_signed_chain_read_for_read() {
             "nonceAlreadyReceived",
             AptosState {
                 inbound_nonce: NONCE,
-                ..UNSIGNED
-            },
-        ),
-        (
-            "payloadHashStored",
-            AptosState {
-                stored_payload_hash: Some("0xfeed"),
                 ..UNSIGNED
             },
         ),
@@ -715,7 +721,7 @@ async fn v301_to_aptos_matches_upstreams_already_signed_chain_read_for_read() {
     ];
     for environment in ["mainnet", "testnet"] {
         let cases = fixture["environments"][environment].as_object().unwrap();
-        assert_eq!(cases.len(), scenarios.len(), "{environment}");
+        assert_eq!(cases.len(), scenarios.len() + 1, "{environment}");
         for (name, state) in scenarios {
             let upstream = &cases[name];
             let given = &upstream["state"];
@@ -975,7 +981,9 @@ async fn v301_to_aptos_already_signed_is_refused_without_signing() {
         (
             "payload hash stored",
             AptosState {
-                stored_payload_hash: Some("0xfeed"),
+                stored_payload_hash: Some(
+                    "0x54f9fffd6ee74a4b242cbcee08f1639c0f14bcb1d81d173c931541af64e59dea",
+                ),
                 ..UNSIGNED
             },
             true,

@@ -458,6 +458,77 @@ pub fn order_providers_for_quorum(
             }
         }
     }
+    if strategy.one_of.is_empty() {
+        return output;
+    }
+
+    let mut best: Option<(usize, i64, Vec<bool>)> = None;
+    for alternative in &strategy.one_of {
+        let candidate = QuorumStrategy {
+            all_of: strategy.all_of.clone(),
+            one_of: vec![alternative.clone()],
+        };
+        let mut counts = BTreeMap::<(String, String), usize>::new();
+        let mut entities = BTreeMap::<String, BTreeSet<String>>::new();
+        for provider in &output {
+            *counts
+                .entry((provider.category.clone(), provider.entity.clone()))
+                .or_default() += 1;
+            entities
+                .entry(provider.category.clone())
+                .or_default()
+                .insert(provider.entity.clone());
+        }
+        if !is_strategy_satisfiable(&entities, &candidate) {
+            continue;
+        }
+        let mut selected = vec![true; output.len()];
+        for (index, provider) in output.iter().enumerate().rev() {
+            let key = (provider.category.clone(), provider.entity.clone());
+            let count = counts.get_mut(&key).expect("provider counted");
+            *count -= 1;
+            if *count == 0 {
+                entities
+                    .get_mut(&provider.category)
+                    .expect("category counted")
+                    .remove(&provider.entity);
+            }
+            if is_strategy_satisfiable(&entities, &candidate) {
+                selected[index] = false;
+            } else {
+                *count += 1;
+                entities
+                    .get_mut(&provider.category)
+                    .expect("category counted")
+                    .insert(provider.entity.clone());
+            }
+        }
+        let count = selected.iter().filter(|selected| **selected).count();
+        let rank = output
+            .iter()
+            .zip(&selected)
+            .filter(|(_, selected)| **selected)
+            .fold(0i64, |sum, (provider, _)| {
+                sum.saturating_add(i64::from(provider.rank))
+            });
+        if best
+            .as_ref()
+            .is_none_or(|(best_count, best_rank, _)| (count, rank) < (*best_count, *best_rank))
+        {
+            best = Some((count, rank, selected));
+        }
+    }
+    if let Some((_, _, selected)) = best {
+        let (first, rest): (Vec<_>, Vec<_>) = output
+            .into_iter()
+            .zip(selected)
+            .partition(|(_, selected)| *selected);
+        return first
+            .into_iter()
+            .chain(rest)
+            .map(|(provider, _)| provider)
+            .collect();
+    }
     output
 }
 

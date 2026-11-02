@@ -5,6 +5,7 @@ mod projection;
 mod read_http;
 
 const MAX_JSON_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+const MAX_TON_ACCOUNT_RESPONSE_BYTES: usize = 32 * 1024 * 1024;
 const MAX_PAGINATED_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 // Non-TON responses: ~60x the largest recorded one (Solana 2,150), ~3,000 EVM logs.
 const MAX_JSON_PARSE_NODES: usize = 128 * 1024;
@@ -616,6 +617,8 @@ impl JsonRpcTransport for ReqwestJsonRpcTransport {
         headers: HashMap<String, String>,
         body: Value,
     ) -> Result<Value, String> {
+        let ton_account = super::rpc_context::rpc_target().as_deref() == Some("ton")
+            && body.get("method").and_then(Value::as_str) == Some("getAddressInformation");
         let projection = projection::for_post(&body);
         let mut request = self.client_for(&url).post(url).json(&body);
         for (key, value) in headers {
@@ -631,6 +634,9 @@ impl JsonRpcTransport for ReqwestJsonRpcTransport {
             .send()
             .await
             .map_err(|error| error.without_url().to_string())?;
+        if ton_account {
+            return bounded_ton_account_response(response).await;
+        }
         match projection {
             Some(projection) => projection::response(response, projection).await,
             None => bounded_json_response(response).await,
@@ -779,21 +785,52 @@ async fn bounded_ton_json_response(response: reqwest::Response) -> Result<Value,
     permit.finish(&result);
     result
 }
+async fn bounded_ton_account_response(response: reqwest::Response) -> Result<Value, String> {
+    let mut permit = acquire_json_parse_slot().await?;
+    let result = async {
+        let status = response.status();
+        if !status.is_success() {
+            return Err(format!("Provider returned HTTP {status}"));
+        }
+        let bytes =
+            bounded_response_bytes_with_limit(response, MAX_TON_ACCOUNT_RESPONSE_BYTES).await?;
+        parse_json_with_limit(&bytes, true, MAX_TON_ACCOUNT_RESPONSE_BYTES)
+    }
+    .await;
+    permit.finish(&result);
+    result
+}
 
 async fn bounded_response_bytes(response: reqwest::Response) -> Result<Vec<u8>, String> {
+    bounded_response_bytes_with_limit(response, MAX_JSON_RESPONSE_BYTES).await
+}
+
+async fn bounded_response_bytes_with_limit(
+    response: reqwest::Response,
+    limit: usize,
+) -> Result<Vec<u8>, String> {
     if response
         .content_length()
-        .is_some_and(|length| length > MAX_JSON_RESPONSE_BYTES as u64)
+        .is_some_and(|length| length > limit as u64)
     {
-        return Err(format!(
-            "Provider JSON response exceeds {MAX_JSON_RESPONSE_BYTES} byte limit"
-        ));
+        return Err(format!("Provider JSON response exceeds {limit} byte limit"));
     }
     let mut bytes = Vec::new();
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|error| error.without_url().to_string())?;
-        extend_bounded_json(&mut bytes, &chunk)?;
+        if limit == MAX_JSON_RESPONSE_BYTES {
+            extend_bounded_json(&mut bytes, &chunk)?;
+        } else {
+            if bytes
+                .len()
+                .checked_add(chunk.len())
+                .is_none_or(|len| len > limit)
+            {
+                return Err(format!("Provider JSON response exceeds {limit} byte limit"));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
     }
     Ok(bytes)
 }
@@ -925,17 +962,19 @@ pub(crate) async fn parse_bounded_json(bytes: &[u8], ton: bool) -> Result<Value,
 }
 
 pub(crate) fn parse_json_with_limits(bytes: &[u8], ton: bool) -> Result<Value, String> {
-    if bytes.len() > MAX_JSON_RESPONSE_BYTES {
-        return Err(format!(
-            "Provider JSON response exceeds {MAX_JSON_RESPONSE_BYTES} byte limit"
-        ));
+    parse_json_with_limit(bytes, ton, MAX_JSON_RESPONSE_BYTES)
+}
+
+fn parse_json_with_limit(bytes: &[u8], ton: bool, limit: usize) -> Result<Value, String> {
+    if bytes.len() > limit {
+        return Err(format!("Provider JSON response exceeds {limit} byte limit"));
     }
     let (depth_limit, node_limit) = if ton {
         (MAX_TON_JSON_DEPTH, MAX_TON_JSON_PARSE_NODES)
     } else {
         (128, MAX_JSON_PARSE_NODES)
     };
-    ensure_json_parse_budget(bytes, depth_limit, node_limit)?;
+    ensure_json_parse_budget(bytes, depth_limit, node_limit, limit)?;
     if !ton {
         return pillar_core::json::parse_value_slice(bytes).map_err(|error| error.to_string());
     }
@@ -957,6 +996,7 @@ fn ensure_json_parse_budget(
     bytes: &[u8],
     depth_limit: usize,
     node_limit: usize,
+    string_limit: usize,
 ) -> Result<(), String> {
     let mut depth = 0usize;
     let mut nodes = 0usize;
@@ -967,9 +1007,9 @@ fn ensure_json_parse_budget(
     for &byte in bytes {
         if in_string {
             string_bytes = string_bytes.saturating_add(1);
-            if string_bytes > MAX_JSON_STRING_BYTES {
+            if string_bytes > string_limit {
                 return Err(format!(
-                    "Provider JSON exceeds {MAX_JSON_STRING_BYTES} string byte limit"
+                    "Provider JSON exceeds {string_limit} string byte limit"
                 ));
             }
             if escaped {

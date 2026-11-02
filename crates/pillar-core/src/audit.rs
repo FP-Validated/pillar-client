@@ -51,6 +51,9 @@ impl EvidenceKind {
 }
 #[async_trait]
 pub trait SigningAuditStore: Send + Sync + 'static {
+    fn completion_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(5)
+    }
     async fn begin(&self, intent: &AttemptIntent) -> Result<i64, String>;
     async fn record(
         &self,
@@ -209,6 +212,10 @@ pub struct EffectRecord {
     id: i64,
 }
 impl EffectRecord {
+    pub fn completion_timeout(&self) -> std::time::Duration {
+        self.store.completion_timeout()
+    }
+
     pub async fn returned(&self, signature: &[u8]) -> Result<(), String> {
         self.store
             .record(

@@ -9,18 +9,19 @@ pub(crate) fn tron_json_rpc_provider_uri_parts(
     };
 
     if !parsed_url.username().is_empty() {
-        let credentials = format!(
-            "{}:{}",
-            parsed_url.username(),
-            parsed_url.password().unwrap_or("")
-        );
+        let mut credentials =
+            percent_encoding::percent_decode_str(parsed_url.username()).collect::<Vec<_>>();
+        credentials.push(b':');
+        credentials.extend(percent_encoding::percent_decode_str(
+            parsed_url.password().unwrap_or(""),
+        ));
         if !headers
             .keys()
             .any(|key| key.eq_ignore_ascii_case("authorization"))
         {
             headers.insert(
                 "Authorization".to_string(),
-                format!("Basic {}", base64_encode(credentials.as_bytes())),
+                format!("Basic {}", base64_encode(&credentials)),
             );
         }
         let _ = parsed_url.set_username("");
@@ -99,14 +100,15 @@ pub(crate) fn tron_web_endpoint_parts(
 ) -> Option<(String, String, HashMap<String, String>)> {
     let mut parsed_url = reqwest::Url::parse(tron_web_url).ok()?;
     if !parsed_url.username().is_empty() {
-        let credentials = format!(
-            "{}:{}",
-            parsed_url.username(),
-            parsed_url.password().unwrap_or("")
-        );
+        let mut credentials =
+            percent_encoding::percent_decode_str(parsed_url.username()).collect::<Vec<_>>();
+        credentials.push(b':');
+        credentials.extend(percent_encoding::percent_decode_str(
+            parsed_url.password().unwrap_or(""),
+        ));
         headers
             .entry("Authorization".to_string())
-            .or_insert_with(|| format!("Basic {}", base64_encode(credentials.as_bytes())));
+            .or_insert_with(|| format!("Basic {}", base64_encode(&credentials)));
         let _ = parsed_url.set_username("");
         let _ = parsed_url.set_password(None);
     }

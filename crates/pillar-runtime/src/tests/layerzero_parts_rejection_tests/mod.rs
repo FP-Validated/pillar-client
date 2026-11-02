@@ -1,6 +1,6 @@
 use super::*;
 
-mod aptos_v301_destination;
+pub(crate) mod aptos_v301_destination;
 mod matrix;
 mod move_v302_destination;
 mod move_v302_resolve_and_sign;

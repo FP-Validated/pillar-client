@@ -374,6 +374,10 @@ impl PostgresAuditStore {
 }
 #[async_trait]
 impl SigningAuditStore for PostgresAuditStore {
+    fn completion_timeout(&self) -> std::time::Duration {
+        self.config.timeout
+    }
+
     async fn begin(&self, intent: &AttemptIntent) -> Result<i64, String> {
         let mut slot = self.queue().await?;
         let mut session = slot.take();
