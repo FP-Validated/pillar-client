@@ -61,7 +61,10 @@ the Prometheus metric names.
 - L-51: the Stellar `ScMap` reader accepts symbol keys only and refuses a name that also appears under another tag.
 - I-02: SECURITY.md documents the TON `v3-endpoint` and that the entity label must cover it; the startup report shows each TON entry's v3 origin.
 - I-03: SECURITY.md states that the confirmation count in the 400 body is one provider's observation, not an agreed value. The message is unchanged.
-- L-21, L-22, L-45: not changed. The Solana `ReceiveLibraryConfig`, Sui receive-library and Starknet `verifiable` reads need recorded chain data this repository does not hold.
+- L-21: the Solana already-signed check reads the endpoint's `ReceiveLibraryConfig` of the receiver and of the srcEid default and applies the endpoint's `is_valid_receive_library`, including the grace period, at the slot of the read; a receiver not on the pinned ULN, or one with a config missing, is refused.
+- L-22: the Sui and IOTA already-signed check asks the endpoint's `is_valid_receive_library` about the pinned ULN302 and refuses a receiver on another library, whatever the verification state.
+- L-45: the Starknet already-signed check also reads the ULN's `verifiable` and counts `Verified` as signed, since `commit` reclaims the per-DVN record the check read alone.
+- Live DVNs: the FurtherFP DVNs on 17 mainnet EVM chains, Aptos and Sui return the `vid` this service signs (`tests/onchain_provenance/dvn_vid_mainnet.json`, read on chain 2026-11-02).
 - L-42, I-01: no change needed; both already hold.
 
 ## 2.7.4 - 2026-10-29

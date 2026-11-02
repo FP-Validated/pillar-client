@@ -142,7 +142,10 @@ The following are deployment-side controls the software cannot enforce for you:
   `scroll` and `zksyncsep` (and on no mainnet chain). The deployed LayerZero Labs DVNs
   on `doma`, `lineasep` and `zksyncsep` return the EndpointV1 id from `vid()`
   (`crates/pillar-runtime/tests/onchain_provenance/dvn_vid.json`); `scroll` could not be
-  read on chain and keeps its EndpointV1 id as an unconfirmed corrected input.
+  read on chain and keeps its EndpointV1 id as an unconfirmed corrected input. The live
+  FurtherFP DVNs on mainnet return the same value this service signs: 17 EVM chains, Aptos
+  (`get_vid`) and Sui (`dvn::vid`), read on 2026-11-02
+  (`crates/pillar-runtime/tests/onchain_provenance/dvn_vid_mainnet.json`).
 - TON BOCs differ from upstream `@ton/core`. A valid pruned branch with a sparse
   level mask (for example `0b010`, inside nested Merkle proofs) parses here, so a
   source trace carrying one in any message still reaches quorum; `@ton/core` 0.63.1
@@ -798,6 +801,22 @@ Addresses live in `stellar_uln_302_for_environment`,
   - The check costs one extra `eth_call` per provider, two when the receiver
     overrides the default library. A `V2` send pays one more lookup round
     before validation, so a migrated one reads the receive library twice.
+- The other destination families refuse a receiver whose effective receive library is
+  not the pinned ULN302, as the endpoint would when the verify lands, instead of
+  reading the pinned contract's state for it (an `UnsupportedReceiveLibrary` 400). A
+  grace period after a library change keeps the replaced ULN valid until it ends.
+  - Solana reads the endpoint's `ReceiveLibraryConfig` of the receiver and of the
+    srcEid default in the same `getMultipleAccounts` call and applies the endpoint's
+    `is_valid_receive_library` at the slot of that read. A missing config is
+    refused, because the endpoint's `verify` takes both as initialized accounts.
+    Layout and PDAs were read from mainnet on 2026-11-02.
+  - Sui and IOTA ask the endpoint's `is_valid_receive_library` about the pinned ULN302
+    package, which is the library's identity, at the Clock. The pinned package must
+    stay the original package id of `uln_302`; a different id refuses every request.
+  - Stellar refuses a library, default or not, other than the pinned ULN302.
+  - Starknet does not resolve a library. Besides the per-DVN record it asks the ULN's
+    `verifiable` when that record does not show the packet signed, and `Verified`
+    counts as signed: `commit` reclaims the DVN's record.
 - A pathway names the receiver as `bytes32`, and the packet header that gets
   signed keeps that padded form, so EVM `address` arguments are narrowed at the
   lookup input instead (`evm_address_from_pathway_value`). Upstream narrows with

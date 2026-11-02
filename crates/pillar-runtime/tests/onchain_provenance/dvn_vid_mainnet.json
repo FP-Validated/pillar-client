@@ -1,0 +1,436 @@
+{
+  "_provenance": {
+    "what": "The vid each live (mainnet) FurtherFP DVN contract returns, read on chain. DVN.verify/execute reject call data whose packed vid differs, so the signed vid must equal this value.",
+    "sources": {
+      "dvnAddresses": "supplied by the operator for the FurtherFP DVN on each chain; each EVM address is listed as `FurtherFP` for that chain in https://metadata.layerzero-api.com/v1/metadata/dvns?environment=mainnet (`metadataEntry`); `metadataChain` is that response's chain key where it differs from this service's chain name",
+      "evm": "eth_call vid() (selector 0xcf34c768 = keccak256(\"vid()\")[:4]) at block tag latest against the public RPC listed per row, after eth_chainId matched the chain",
+      "aptos": "POST /v1/view {function: <dvn>::dvn::get_vid} (lz-v2 aptos workers/dvn/sources/dvn.move: universal_config::eid() % 30_000)",
+      "sui": "GraphQL simulateTransaction of `dvn::vid(&DVN)` on the DVN object, whose type is 0x60d4...::dvn::DVN (lz-v2 sui workers/dvns/dvn/sources/dvn.move)"
+    },
+    "result": "every vid equals the EndpointV1 id of the chain (EVM, Aptos) or the EndpointV2 id modulo 30000 (Sui, which has no EndpointV1 id), as `runtime_v_id_by_chain_name` signs for mainnet",
+    "howToRegenerate": "POST eth_chainId then eth_call {to: <dvn>, data: 0xcf34c768} to each rpc; no key needed. Aptos and Sui as above."
+  },
+  "observations": [
+    {
+      "environment": "mainnet",
+      "chain": "arc",
+      "metadataChain": "arc",
+      "rpc": "https://rpc.mainnet.arc.io",
+      "eth_chainId": "0x13b2",
+      "eth_chainId_decimal": 5042,
+      "dvn": "0x943900a250411cfbf789b3ca94d2f851527e9267",
+      "metadataEntry": {
+        "canonicalName": "FurtherFP",
+        "id": "FurtherFP",
+        "version": 2
+      },
+      "codePresent": true,
+      "call": {
+        "selector": "0xcf34c768",
+        "signature": "vid()"
+      },
+      "rawResult": "0x00000000000000000000000000000000000000000000000000000000000001a1",
+      "vid": 417,
+      "responseSha256": "b37aae00f1e0a4e7dda3b50df5277f773675ede9a56dbb600272cf52bef7566e",
+      "capturedAt": "2026-11-02"
+    },
+    {
+      "environment": "mainnet",
+      "chain": "bera",
+      "metadataChain": "bera",
+      "rpc": "https://rpc.berachain.com",
+      "eth_chainId": "0x138de",
+      "eth_chainId_decimal": 80094,
+      "dvn": "0xeaf61aa92476a43046b0b1a74f9fb630d8e635fa",
+      "metadataEntry": {
+        "canonicalName": "FurtherFP",
+        "id": "FurtherFP",
+        "version": 2
+      },
+      "codePresent": true,
+      "call": {
+        "selector": "0xcf34c768",
+        "signature": "vid()"
+      },
+      "rawResult": "0x000000000000000000000000000000000000000000000000000000000000016a",
+      "vid": 362,
+      "responseSha256": "c2187be4c748368f4fb3a2c68347a71c83f682cbece1ed4e251e2b77c35cdd7a",
+      "capturedAt": "2026-11-02"
+    },
+    {
+      "environment": "mainnet",
+      "chain": "flare",
+      "metadataChain": "flare",
+      "rpc": "https://flare-api.flare.network/ext/C/rpc",
+      "eth_chainId": "0xe",
+      "eth_chainId_decimal": 14,
+      "dvn": "0x4c4ffcd9f2d1936a9cc3e3daf6a89343084e9451",
+      "metadataEntry": {
+        "canonicalName": "FurtherFP",
+        "id": "FurtherFP",
+        "version": 2
+      },
+      "codePresent": true,
+      "call": {
+        "selector": "0xcf34c768",
+        "signature": "vid()"
+      },
+      "rawResult": "0x0000000000000000000000000000000000000000000000000000000000000127",
+      "vid": 295,
+      "responseSha256": "a88e6dcfc6a22b285e1f0948a65b6f0799ed365faf01785b6dcce9fe242163dd",
+      "capturedAt": "2026-11-02"
+    },
+    {
+      "environment": "mainnet",
+      "chain": "fraxtal",
+      "metadataChain": "fraxtal",
+      "rpc": "https://rpc.frax.com",
+      "eth_chainId": "0xfc",
+      "eth_chainId_decimal": 252,
+      "dvn": "0x0f88850a2762a08a08921b0e1af8aa2689bb4dc3",
+      "metadataEntry": {
+        "canonicalName": "FurtherFP",
+        "id": "FurtherFP",
+        "version": 2
+      },
+      "codePresent": true,
+      "call": {
+        "selector": "0xcf34c768",
+        "signature": "vid()"
+      },
+      "rawResult": "0x00000000000000000000000000000000000000000000000000000000000000ff",
+      "vid": 255,
+      "responseSha256": "6151f0d88c2fd09564fd9d91ac8c9661b5171ef6fdfecf786815d8fbccb6abd1",
+      "capturedAt": "2026-11-02"
+    },
+    {
+      "environment": "mainnet",
+      "chain": "ink",
+      "metadataChain": "ink",
+      "rpc": "https://rpc-gel.inkonchain.com",
+      "eth_chainId": "0xdef1",
+      "eth_chainId_decimal": 57073,
+      "dvn": "0x3410d9f92bdecf95f6bfba31d016a21b084f781b",
+      "metadataEntry": {
+        "canonicalName": "FurtherFP",
+        "id": "FurtherFP",
+        "version": 2
+      },
+      "codePresent": true,
+      "call": {
+        "selector": "0xcf34c768",
+        "signature": "vid()"
+      },
+      "rawResult": "0x0000000000000000000000000000000000000000000000000000000000000153",
+      "vid": 339,
+      "responseSha256": "8c4c9bfc9aca5fbeadf5a2a7a5686429b2d5116970322943ddc37da815b32423",
+      "capturedAt": "2026-11-02"
+    },
+    {
+      "environment": "mainnet",
+      "chain": "kava",
+      "metadataChain": "kava",
+      "rpc": "https://evm.kava.io",
+      "eth_chainId": "0x8ae",
+      "eth_chainId_decimal": 2222,
+      "dvn": "0xbc50ec6c3dd2dbbebf4bc8e6f7e490f581a8f308",
+      "metadataEntry": {
+        "canonicalName": "FurtherFP",
+        "id": "FurtherFP",
+        "version": 2
+      },
+      "codePresent": true,
+      "call": {
+        "selector": "0xcf34c768",
+        "signature": "vid()"
+      },
+      "rawResult": "0x00000000000000000000000000000000000000000000000000000000000000b1",
+      "vid": 177,
+      "responseSha256": "e43cedd3292388b0e8b058d7ee343b3cab4c19be00fa585eb4be71b5f890b84f",
+      "capturedAt": "2026-11-02"
+    },
+    {
+      "environment": "mainnet",
+      "chain": "zkconsensys",
+      "metadataChain": "zkconsensys",
+      "rpc": "https://rpc.linea.build",
+      "eth_chainId": "0xe708",
+      "eth_chainId_decimal": 59144,
+      "dvn": "0xb76e45b7fa0d10694510190a3edf79739ad30054",
+      "metadataEntry": {
+        "canonicalName": "FurtherFP",
+        "id": "FurtherFP",
+        "version": 2
+      },
+      "codePresent": true,
+      "call": {
+        "selector": "0xcf34c768",
+        "signature": "vid()"
+      },
+      "rawResult": "0x00000000000000000000000000000000000000000000000000000000000000b7",
+      "vid": 183,
+      "responseSha256": "6bc8898d64b5d36d0219eb1a5b7df281b1513a7dda4fd3855279ae5466d63f08",
+      "capturedAt": "2026-11-02"
+    },
+    {
+      "environment": "mainnet",
+      "chain": "mantle",
+      "metadataChain": "mantle",
+      "rpc": "https://rpc.mantle.xyz",
+      "eth_chainId": "0x1388",
+      "eth_chainId_decimal": 5000,
+      "dvn": "0x39afb616cf25f87971005adebd91b5199c577d6e",
+      "metadataEntry": {
+        "canonicalName": "FurtherFP",
+        "id": "FurtherFP",
+        "version": 2
+      },
+      "codePresent": true,
+      "call": {
+        "selector": "0xcf34c768",
+        "signature": "vid()"
+      },
+      "rawResult": "0x00000000000000000000000000000000000000000000000000000000000000b5",
+      "vid": 181,
+      "responseSha256": "12a461ecd9121ae278de27740ed3172266e4d102551f3477de03d6d15d5e5389",
+      "capturedAt": "2026-11-02"
+    },
+    {
+      "environment": "mainnet",
+      "chain": "megaeth",
+      "metadataChain": "megaeth",
+      "rpc": "https://mainnet.megaeth.com/rpc",
+      "eth_chainId": "0x10e6",
+      "eth_chainId_decimal": 4326,
+      "dvn": "0x54fac80601a9d2c604402fd21bacc02c9f1d9de1",
+      "metadataEntry": {
+        "canonicalName": "FurtherFP",
+        "id": "FurtherFP",
+        "version": 2
+      },
+      "codePresent": true,
+      "call": {
+        "selector": "0xcf34c768",
+        "signature": "vid()"
+      },
+      "rawResult": "0x000000000000000000000000000000000000000000000000000000000000018e",
+      "vid": 398,
+      "responseSha256": "9996041ad2bc154d8b293cf68c80b9e1ffd4970c352765a4ce4dea9f6948f777",
+      "capturedAt": "2026-11-02"
+    },
+    {
+      "environment": "mainnet",
+      "chain": "monad",
+      "metadataChain": "monad",
+      "rpc": "https://rpc.monad.xyz",
+      "eth_chainId": "0x8f",
+      "eth_chainId_decimal": 143,
+      "dvn": "0x3e8b303b32a9e5a065084700e3e36243fd75ff5e",
+      "metadataEntry": {
+        "canonicalName": "FurtherFP",
+        "id": "FurtherFP",
+        "version": 2
+      },
+      "codePresent": true,
+      "call": {
+        "selector": "0xcf34c768",
+        "signature": "vid()"
+      },
+      "rawResult": "0x0000000000000000000000000000000000000000000000000000000000000186",
+      "vid": 390,
+      "responseSha256": "b8dc4455555ad93ff090465426e9fb085d7b1e357af8c6af28f1c06aab4b4e07",
+      "capturedAt": "2026-11-02"
+    },
+    {
+      "environment": "mainnet",
+      "chain": "morph",
+      "metadataChain": "morph",
+      "rpc": "https://rpc-bgw.morph.network",
+      "eth_chainId": "0xb02",
+      "eth_chainId_decimal": 2818,
+      "dvn": "0x14245a6f1f74bf46f9843c33ebc01fa0d81b771d",
+      "metadataEntry": {
+        "canonicalName": "FurtherFP",
+        "id": "FurtherFP",
+        "version": 2
+      },
+      "codePresent": true,
+      "call": {
+        "selector": "0xcf34c768",
+        "signature": "vid()"
+      },
+      "rawResult": "0x0000000000000000000000000000000000000000000000000000000000000142",
+      "vid": 322,
+      "responseSha256": "657f2afda7df960e946de2a39b7984d638a540e55111b52ce316241c55896cb9",
+      "capturedAt": "2026-11-02"
+    },
+    {
+      "environment": "mainnet",
+      "chain": "pharos",
+      "metadataChain": "pharos",
+      "rpc": "https://rpc.pharos.xyz",
+      "eth_chainId": "0x688",
+      "eth_chainId_decimal": 1672,
+      "dvn": "0xff01cd64723fdbf691e808151157a02411ceb2b2",
+      "metadataEntry": {
+        "canonicalName": "FurtherFP",
+        "id": "FurtherFP",
+        "version": 2
+      },
+      "codePresent": true,
+      "call": {
+        "selector": "0xcf34c768",
+        "signature": "vid()"
+      },
+      "rawResult": "0x0000000000000000000000000000000000000000000000000000000000000197",
+      "vid": 407,
+      "responseSha256": "cd5a5c0e6ffb583bee69e219f73c43737282a54f5e07fd28abf45dfb9c2020c0",
+      "capturedAt": "2026-11-02"
+    },
+    {
+      "environment": "mainnet",
+      "chain": "plasma",
+      "metadataChain": "plasma",
+      "rpc": "https://rpc.plasma.to",
+      "eth_chainId": "0x2611",
+      "eth_chainId_decimal": 9745,
+      "dvn": "0x1a335dc84c1f48b30984f8f377b33d6a72dc4933",
+      "metadataEntry": {
+        "canonicalName": "FurtherFP",
+        "id": "FurtherFP",
+        "version": 2
+      },
+      "codePresent": true,
+      "call": {
+        "selector": "0xcf34c768",
+        "signature": "vid()"
+      },
+      "rawResult": "0x000000000000000000000000000000000000000000000000000000000000017f",
+      "vid": 383,
+      "responseSha256": "a12ec0ad45075b2bae1f58d2692176b84c5a3cc45d71907b953e51e3811a8772",
+      "capturedAt": "2026-11-02"
+    },
+    {
+      "environment": "mainnet",
+      "chain": "redbelly",
+      "metadataChain": "redbelly",
+      "rpc": "https://governors.mainnet.redbelly.network",
+      "eth_chainId": "0x97",
+      "eth_chainId_decimal": 151,
+      "dvn": "0x75ba91391c23c6506f05380bfc49fc209c4012a6",
+      "metadataEntry": {
+        "canonicalName": "FurtherFP",
+        "id": "FurtherFP",
+        "version": 2
+      },
+      "codePresent": true,
+      "call": {
+        "selector": "0xcf34c768",
+        "signature": "vid()"
+      },
+      "rawResult": "0x0000000000000000000000000000000000000000000000000000000000000192",
+      "vid": 402,
+      "responseSha256": "443a396cab64b3482c8855298bb2870be47614b67f15df8a2ccc2f5fa7131174",
+      "capturedAt": "2026-11-02"
+    },
+    {
+      "environment": "mainnet",
+      "chain": "robinhood",
+      "metadataChain": "robinhood",
+      "rpc": "https://rpc.mainnet.chain.robinhood.com",
+      "eth_chainId": "0x1237",
+      "eth_chainId_decimal": 4663,
+      "dvn": "0xc7b93c8089c75fc2f4f08cedb5c87193e85cf3fe",
+      "metadataEntry": {
+        "canonicalName": "FurtherFP",
+        "id": "FurtherFP",
+        "version": 2
+      },
+      "codePresent": true,
+      "call": {
+        "selector": "0xcf34c768",
+        "signature": "vid()"
+      },
+      "rawResult": "0x00000000000000000000000000000000000000000000000000000000000001a0",
+      "vid": 416,
+      "responseSha256": "72cebb0ae5614d5cdd77b70ba6ee68f84c883c31fa35d918d9d4174247af0fb4",
+      "capturedAt": "2026-11-02"
+    },
+    {
+      "environment": "mainnet",
+      "chain": "xlayer",
+      "metadataChain": "xlayer",
+      "rpc": "https://rpc.xlayer.tech",
+      "eth_chainId": "0xc4",
+      "eth_chainId_decimal": 196,
+      "dvn": "0xcad8df29c315b769f5bd5c65e8864542cb9911f9",
+      "metadataEntry": {
+        "canonicalName": "FurtherFP",
+        "id": "FurtherFP",
+        "version": 2
+      },
+      "codePresent": true,
+      "call": {
+        "selector": "0xcf34c768",
+        "signature": "vid()"
+      },
+      "rawResult": "0x0000000000000000000000000000000000000000000000000000000000000112",
+      "vid": 274,
+      "responseSha256": "91d0d0c7dea848840aad29e7fe85b59ddb26429af24def4e5d11ae6e2744a44a",
+      "capturedAt": "2026-11-02"
+    },
+    {
+      "environment": "mainnet",
+      "chain": "zksync",
+      "metadataChain": "zksync",
+      "rpc": "https://mainnet.era.zksync.io",
+      "eth_chainId": "0x144",
+      "eth_chainId_decimal": 324,
+      "dvn": "0xe60fab0f3df4a73e8e6526a927387a226ff28395",
+      "metadataEntry": {
+        "canonicalName": "FurtherFP",
+        "id": "FurtherFP",
+        "version": 2
+      },
+      "codePresent": true,
+      "call": {
+        "selector": "0xcf34c768",
+        "signature": "vid()"
+      },
+      "rawResult": "0x00000000000000000000000000000000000000000000000000000000000000a5",
+      "vid": 165,
+      "responseSha256": "7cf480358ef2b51782b177fe803ea0aa3427fc4b7666ba5c2556d3be945fa56f",
+      "capturedAt": "2026-11-02"
+    },
+    {
+      "environment": "mainnet",
+      "chain": "aptos",
+      "rpc": "https://fullnode.mainnet.aptoslabs.com/v1",
+      "dvn": "0x948d8dc00c0a868649ef936f31aa15f68ca5eb8679990c3ac0087edfbbb4417c",
+      "call": {
+        "view": "0x948d8dc00c0a868649ef936f31aa15f68ca5eb8679990c3ac0087edfbbb4417c::dvn::get_vid",
+        "returns": "u32 = universal_config::eid() % 30_000"
+      },
+      "rawResult": "[108]",
+      "vid": 108,
+      "responseSha256": "ea8833e4cf9c0c9ac02998ebaf4fed7e76b926e1edfdeacf8b16f53fa05e055d",
+      "capturedAt": "2026-11-02"
+    },
+    {
+      "environment": "mainnet",
+      "chain": "sui",
+      "rpc": "https://graphql.mainnet.sui.io/graphql",
+      "dvn": "0xcd2695e5b4c008e445e09221d82394123843e443353e2117db346a1d8fd3852c",
+      "workerPackage": "0x4021372bf6f9ce502ace24000dec5d3805422e3875fcd562367b3ef385eb1b53",
+      "dvnTypePackage": "0x60d4ef2e0e057d19e947406ccec3ac4d0208adc8e1981964ab2552166a30f461",
+      "call": {
+        "simulateTransaction": "0x60d4ef2e0e057d19e947406ccec3ac4d0208adc8e1981964ab2552166a30f461::dvn::vid(&DVN)",
+        "returns": "u32, `DVN.vid`: endpoint v1 eid if available, otherwise endpoint v2 eid % 30_000"
+      },
+      "rawResult": "egEAAA==",
+      "vid": 378,
+      "responseSha256": "db64a50303683a1a7f04cac02124f151827a8c6862c750ff5b3a3ed1380a2f7d",
+      "capturedAt": "2026-11-02"
+    }
+  ]
+}

@@ -215,6 +215,69 @@ fn v_id_equals_the_vid_deployed_dvns_enforce() {
     assert_eq!(table.get("scroll").map(String::as_str), Some("10214"));
 }
 
+/// What the live FurtherFP DVNs enforce on mainnet, read on chain on 2026-11-02: the signed
+/// vId for each of these chains must be the value their DVN returns.
+#[test]
+fn v_id_equals_the_vid_live_mainnet_dvns_enforce() {
+    let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("tests/onchain_provenance/dvn_vid_mainnet.json");
+    let provenance: Value =
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).expect("provenance parses");
+    let chain_names = pillar_config::layerzero_available_chain_names("mainnet").unwrap();
+    let table = runtime_v_id_by_chain_name("mainnet", &chain_names).unwrap();
+
+    let mut checked = std::collections::BTreeSet::new();
+    for observation in provenance["observations"].as_array().unwrap() {
+        let chain_name = observation["chain"].as_str().unwrap();
+        let onchain_vid = observation["vid"].as_u64().unwrap().to_string();
+        assert_eq!(
+            table.get(chain_name),
+            Some(&onchain_vid),
+            "{chain_name} DVN {} enforces vid {onchain_vid}",
+            observation["dvn"]
+        );
+        if observation["call"]["selector"] == "0xcf34c768" {
+            assert_eq!(observation["codePresent"], true, "{chain_name}");
+            assert_eq!(
+                observation["metadataEntry"]["canonicalName"], "FurtherFP",
+                "{chain_name}: the LayerZero metadata lists this address as the FurtherFP DVN"
+            );
+            assert_eq!(
+                observation["rawResult"]
+                    .as_str()
+                    .map(|raw| u64::from_str_radix(raw.trim_start_matches("0x"), 16).unwrap()),
+                observation["vid"].as_u64(),
+                "{chain_name}"
+            );
+        }
+        checked.insert(chain_name);
+    }
+    assert_eq!(
+        checked.into_iter().collect::<Vec<_>>(),
+        [
+            "aptos",
+            "arc",
+            "bera",
+            "flare",
+            "fraxtal",
+            "ink",
+            "kava",
+            "mantle",
+            "megaeth",
+            "monad",
+            "morph",
+            "pharos",
+            "plasma",
+            "redbelly",
+            "robinhood",
+            "sui",
+            "xlayer",
+            "zkconsensys",
+            "zksync"
+        ]
+    );
+}
+
 /// Non-EVM chains have no EndpointV1 id and take their V2 id from the non-EVM table,
 /// not the generated EVM one. Verified against `getVId` in the fixture above.
 #[test]

@@ -81,9 +81,9 @@ pub use read_v1002::{
 pub use router::DestinationUlnPayloadBuilderRouter;
 pub use solana::{
     solana_message_library_address, solana_payload_is_signed, solana_payload_signed_accounts,
-    solana_payload_signed_request, SolanaFetchedPayloadSignedAccounts, SolanaPayloadSignedAccounts,
-    SolanaPayloadSignedRequest, SolanaUlnPayloadBuilder, SOLANA_ENDPOINT_PROGRAM_ID,
-    SOLANA_ULN_PROGRAM_ID,
+    solana_payload_signed_request, solana_uln_is_valid_receive_library,
+    SolanaFetchedPayloadSignedAccounts, SolanaPayloadSignedAccounts, SolanaPayloadSignedRequest,
+    SolanaUlnPayloadBuilder, SOLANA_ENDPOINT_PROGRAM_ID, SOLANA_ULN_PROGRAM_ID,
 };
 pub use sui::{SuiReceiveContracts, SuiUlnPayloadBuilder};
 pub use sui_bcs::{

@@ -24,6 +24,8 @@ mod official_vectors;
 mod solana_builder_tests;
 #[path = "tests/solana_payload_signed_tests.rs"]
 mod solana_payload_signed_tests;
+#[path = "tests/solana_receive_library_tests.rs"]
+mod solana_receive_library_tests;
 
 #[derive(Default)]
 struct Recorder {
