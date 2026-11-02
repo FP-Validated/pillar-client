@@ -15,7 +15,7 @@ where
             headers,
             json!({
                 "method": "getSlot",
-                "params": [{"commitment": "confirmed"}],
+                "params": [{"commitment": "finalized"}],
                 "id": 1,
                 "jsonrpc": "2.0",
             }),

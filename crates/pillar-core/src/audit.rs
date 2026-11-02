@@ -77,7 +77,51 @@ struct IntentScope {
 struct WalletScope {
     intent: IntentScope,
     wallet_hash: String,
-    attempts: Mutex<Vec<i64>>,
+    /// Each attempt with whether an outcome was recorded for it.
+    attempts: Mutex<Vec<(i64, bool)>>,
+}
+impl WalletScope {
+    fn attempt_ids(&self) -> Vec<i64> {
+        self.attempts.lock().iter().map(|(id, _)| *id).collect()
+    }
+    fn open_attempts(&self) -> Vec<i64> {
+        self.attempts
+            .lock()
+            .iter()
+            .filter(|(_, recorded)| !recorded)
+            .map(|(id, _)| *id)
+            .collect()
+    }
+    fn recorded(&self, id: i64) {
+        if let Some(attempt) = self.attempts.lock().iter_mut().find(|(at, _)| *at == id) {
+            attempt.1 = true;
+        }
+    }
+}
+/// Records an unknown outcome for every attempt still open when its signing future is dropped.
+struct AttemptGuard(Arc<WalletScope>);
+impl Drop for AttemptGuard {
+    fn drop(&mut self) {
+        let open = self.0.open_attempts();
+        if open.is_empty() {
+            return;
+        }
+        let store = self.0.intent.store.clone();
+        let record = async move {
+            for id in open {
+                let _ = store.record(id, EvidenceKind::OutcomeUnknown, None).await;
+            }
+        };
+        let workers = ROOT.try_with(|root| root.workers.clone()).ok().flatten();
+        match workers.and_then(|workers| workers.reserve().ok().map(|slot| (workers, slot))) {
+            Some((workers, slot)) => workers.spawn(slot, record),
+            None => {
+                if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                    drop(runtime.spawn(record));
+                }
+            }
+        }
+    }
 }
 tokio::task_local! {
     static ROOT: Root;
@@ -181,8 +225,9 @@ where
         wallet_hash: fingerprint(wallet.as_bytes()),
         attempts: Mutex::new(Vec::new()),
     });
+    let _guard = AttemptGuard(scope.clone());
     let result = WALLET.scope(scope.clone(), future).await;
-    let attempts = scope.attempts.lock().clone();
+    let attempts = scope.attempt_ids();
     if result.is_ok() && attempts.is_empty() {
         return Err(AppCoreError::Internal(
             "durable audit: signer emitted no auditable wallet attempt".into(),
@@ -204,31 +249,40 @@ where
             .record(id, kind, hash.as_deref())
             .await
             .map_err(AppCoreError::Internal)?;
+        scope.recorded(id);
     }
     result
 }
 pub struct EffectRecord {
-    store: Arc<dyn SigningAuditStore>,
+    scope: Arc<WalletScope>,
     id: i64,
 }
 impl EffectRecord {
     pub fn completion_timeout(&self) -> std::time::Duration {
-        self.store.completion_timeout()
+        self.scope.intent.store.completion_timeout()
     }
 
     pub async fn returned(&self, signature: &[u8]) -> Result<(), String> {
-        self.store
+        self.scope
+            .intent
+            .store
             .record(
                 self.id,
                 EvidenceKind::ExternalReturned,
                 Some(&fingerprint(signature)),
             )
-            .await
+            .await?;
+        self.scope.recorded(self.id);
+        Ok(())
     }
     pub async fn unknown(&self) -> Result<(), String> {
-        self.store
+        self.scope
+            .intent
+            .store
             .record(self.id, EvidenceKind::OutcomeUnknown, None)
-            .await
+            .await?;
+        self.scope.recorded(self.id);
+        Ok(())
     }
 }
 pub async fn begin_effect(
@@ -263,11 +317,8 @@ pub async fn begin_effect(
         algorithm,
     };
     let id = scope.intent.store.begin(&intent).await?;
-    scope.attempts.lock().push(id);
-    Ok(Some(EffectRecord {
-        store: scope.intent.store.clone(),
-        id,
-    }))
+    scope.attempts.lock().push((id, false));
+    Ok(Some(EffectRecord { scope, id }))
 }
 
 #[cfg(test)]

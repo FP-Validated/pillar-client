@@ -322,30 +322,74 @@ pub(super) fn runtime_rpc_solana_payload_checks(
     )
 }
 
-// Account order follows the endpoint nonce PDAs, then the ULN configuration and confirmations.
+// Account order follows the endpoint nonce PDAs, then the ULN configuration and confirmations,
+// then the endpoint's library configs. The library configs default to a receiver following the
+// default and a default that names the pinned ULN, as the large majority on mainnet do.
 pub(super) fn get_multiple_accounts_result(
     accounts: [Option<Vec<u8>>; 5],
 ) -> Result<Value, String> {
+    get_multiple_accounts_result_with_libraries(
+        accounts,
+        Some(solana_receive_library_config_bytes([0; 32])),
+        Some(solana_receive_library_config_bytes(solana_uln_library())),
+    )
+}
+
+pub(super) fn get_multiple_accounts_result_with_libraries(
+    accounts: [Option<Vec<u8>>; 5],
+    library_config: Option<Vec<u8>>,
+    default_library_config: Option<Vec<u8>>,
+) -> Result<Value, String> {
     use base64::Engine;
-    let value: Vec<Value> = accounts
-        .into_iter()
-        .enumerate()
-        .map(|(index, account)| match account {
-            None => Value::Null,
-            Some(bytes) => json!({
-                "data": [base64::engine::general_purpose::STANDARD.encode(bytes), "base64"],
-                "executable": false,
-                "lamports": 1,
-                "owner": if index < 2 { pillar_layerzero::SOLANA_ENDPOINT_PROGRAM_ID } else { pillar_layerzero::SOLANA_ULN_PROGRAM_ID },
-                "rentEpoch": 0,
-            }),
-        })
-        .collect();
+    let [nonce, pending, receive_config, default_receive_config, confirmations] = accounts;
+    let value: Vec<Value> = [
+        nonce,
+        pending,
+        receive_config,
+        default_receive_config,
+        confirmations,
+        library_config,
+        default_library_config,
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, account)| match account {
+        None => Value::Null,
+        Some(bytes) => json!({
+            "data": [base64::engine::general_purpose::STANDARD.encode(bytes), "base64"],
+            "executable": false,
+            "lamports": 1,
+            "owner": if !(2..5).contains(&index) { pillar_layerzero::SOLANA_ENDPOINT_PROGRAM_ID } else { pillar_layerzero::SOLANA_ULN_PROGRAM_ID },
+            "rentEpoch": 0,
+        }),
+    })
+    .collect();
     Ok(json!({
         "jsonrpc": "2.0",
         "id": 1,
         "result": { "context": { "slot": 1 }, "value": value },
     }))
+}
+
+/// The message-library PDA of the pinned ULN, which the endpoint's library configs name.
+pub(super) fn solana_uln_library() -> [u8; 32] {
+    bs58::decode(
+        pillar_layerzero::solana_message_library_address(pillar_layerzero::SOLANA_ULN_PROGRAM_ID)
+            .unwrap(),
+    )
+    .into_vec()
+    .unwrap()
+    .try_into()
+    .unwrap()
+}
+
+/// An endpoint `ReceiveLibraryConfig` without a grace period, as the program stores it (82 bytes).
+pub(super) fn solana_receive_library_config_bytes(message_lib: [u8; 32]) -> Vec<u8> {
+    let mut bytes = vec![142, 226, 251, 138, 1, 206, 91, 193];
+    bytes.extend_from_slice(&message_lib);
+    bytes.extend_from_slice(&[0, 254]);
+    bytes.resize(82, 0);
+    bytes
 }
 
 const SOLANA_NONCE_ACCOUNT_DISCRIMINATOR: [u8; 8] = [143, 197, 147, 95, 106, 165, 50, 43];

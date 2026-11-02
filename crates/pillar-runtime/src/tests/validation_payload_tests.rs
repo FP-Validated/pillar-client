@@ -216,6 +216,7 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_starknet_payload() {
             responses: Arc::new(Mutex::new(vec![
                 Ok(json!({"result": "0x0"})),
                 Ok(json!({"result": ["0x5", "0x1", "0x0", "0x0", "0x0", "0x0", "0x0"]})),
+                Ok(json!({"result": ["0x0"]})),
             ])),
         },
     )
@@ -239,15 +240,17 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_starknet_payload() {
         .unwrap();
     assert_eq!(required, Some(5));
 
-    // No stored verification for this DVN: one storage read, then the requirement.
+    // No stored verification for this DVN: one storage read, the requirement, then the
+    // ULN's own verification state.
     let calls = calls.lock().unwrap();
-    assert_eq!(calls.len(), 2);
+    assert_eq!(calls.len(), 3);
     assert_eq!(calls[0].2["method"], "starknet_getStorageAt");
     assert_eq!(
         calls[0].2["params"][0],
         "0x0727f40349719ac76861a51a0b3d3e07be1577fff137bb81a5dc32e5a5c61d38"
     );
     assert_eq!(calls[1].2["method"], "starknet_call");
+    assert_eq!(calls[2].2["method"], "starknet_call");
 }
 
 #[tokio::test]
@@ -295,6 +298,156 @@ async fn runtime_rpc_validation_checks_rejects_signed_starknet_payload() {
         .unwrap_err();
     assert!(matches!(error, AppCoreError::BadRequest(_)));
     assert!(error.to_string().starts_with("Payload already signed"));
+}
+
+fn starknet_verifiable_checks(
+    responses: Vec<Result<Value, String>>,
+    calls: RecordedJsonCalls,
+) -> (RuntimeRpcValidationChecks<RecordingTransport>, LzSentEvent) {
+    let getter = StaticProviderConfig::new(
+        indexmap::IndexMap::from([(
+            "starknet".to_string(),
+            ProviderConfig::with_distinct_entities(
+                vec![ProviderUri::Uri("https://starknet.example".to_string())],
+                1,
+            ),
+        )]),
+        Some(&["starknet".to_string()]),
+    )
+    .unwrap();
+    let checks = RuntimeRpcValidationChecks::from_getter(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        RecordingTransport {
+            calls,
+            responses: Arc::new(Mutex::new(responses)),
+        },
+    )
+    .with_starknet_uln_302("0x0727f40349719ac76861a51a0b3d3e07be1577fff137bb81a5dc32e5a5c61d38");
+    let mut event = payload_signed_sent_event();
+    event.lz_message_id.pathway_id.dst_chain_name = "starknet".to_string();
+    event
+        .lz_message_id
+        .pathway_id
+        .extra
+        .insert("dstEid".to_string(), Value::from(30_500));
+    (checks, event)
+}
+
+const STARKNET_DVN: &str = "0x3333333333333333333333333333333333333333";
+
+/// `commit` reclaims the per-DVN record, so a committed packet reads as unsubmitted there; the ULN's
+/// own `verifiable` still answers `Verified` (state 2), read on mainnet 2026-11-02.
+#[tokio::test]
+async fn a_committed_starknet_packet_is_signed_although_commit_reclaimed_the_dvn_record() {
+    let calls: RecordedJsonCalls = Arc::new(Mutex::new(Vec::new()));
+    let (checks, event) = starknet_verifiable_checks(
+        vec![
+            Ok(json!({"result": "0x0"})),
+            Ok(json!({"result": ["0x5", "0x1", "0x0", "0x0", "0x0", "0x0", "0x0"]})),
+            Ok(json!({"result": ["0x2"]})),
+        ],
+        calls.clone(),
+    );
+    let error = checks
+        .validate_payload_not_signed(&event, Some(STARKNET_DVN), "starknet", None)
+        .await
+        .unwrap_err();
+    assert!(
+        error.to_string().starts_with("Payload already signed"),
+        "{error}"
+    );
+
+    let proof = pillar_layerzero::compute_lz_packet_v1_proof_from_event(&event).unwrap();
+    let header = hex::decode(proof.packet_header.trim_start_matches("0x")).unwrap();
+    let payload_hash = hex::decode(proof.payload_hash.trim_start_matches("0x")).unwrap();
+    let felt = |bytes: &[u8]| format!("0x{:x}", num_bigint::BigUint::from_bytes_be(bytes));
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls.len(), 3);
+    let call = &calls[2].2["params"][0];
+    assert_eq!(calls[2].2["method"], "starknet_call");
+    assert_eq!(
+        call["contract_address"],
+        "0x0727f40349719ac76861a51a0b3d3e07be1577fff137bb81a5dc32e5a5c61d38"
+    );
+    // `starknet_keccak("verifiable")`, derived apart from the production code.
+    assert_eq!(
+        call["entry_point_selector"],
+        "0x134925cb34d303c49454958947ec0311c97227001334626c9fd46aa8f0bc868"
+    );
+    // A Cairo `ByteArray` (full 31-byte words, pending word, its length) then a `u256` low and high.
+    assert_eq!(
+        call["calldata"],
+        json!([
+            format!("0x{:x}", header.len() / 31),
+            felt(&header[..31]),
+            felt(&header[31..62]),
+            felt(&header[62..]),
+            format!("0x{:x}", header.len() % 31),
+            felt(&payload_hash[16..]),
+            felt(&payload_hash[..16]),
+        ])
+    );
+}
+
+#[tokio::test]
+async fn a_starknet_packet_the_uln_does_not_call_verified_stays_unsigned() {
+    for state in ["0x0", "0x1", "0x3"] {
+        let (checks, event) = starknet_verifiable_checks(
+            vec![
+                Ok(json!({"result": "0x0"})),
+                Ok(json!({"result": ["0x5", "0x1", "0x0", "0x0", "0x0", "0x0", "0x0"]})),
+                Ok(json!({"result": [state]})),
+            ],
+            Arc::new(Mutex::new(Vec::new())),
+        );
+        assert_eq!(
+            checks
+                .validate_payload_not_signed(&event, Some(STARKNET_DVN), "starknet", None)
+                .await,
+            Ok(Some(5)),
+            "state {state}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_unreadable_starknet_verification_state_is_a_provider_failure_not_a_verdict() {
+    for answer in [json!(["0x4"]), json!([]), json!(["0x0", "0x0"])] {
+        let (checks, event) = starknet_verifiable_checks(
+            vec![
+                Ok(json!({"result": "0x0"})),
+                Ok(json!({"result": ["0x5", "0x1", "0x0", "0x0", "0x0", "0x0", "0x0"]})),
+                Ok(json!({"result": answer})),
+            ],
+            Arc::new(Mutex::new(Vec::new())),
+        );
+        let error = checks
+            .validate_payload_not_signed(&event, Some(STARKNET_DVN), "starknet", None)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, AppCoreError::Internal(_)),
+            "{answer}: {error}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_starknet_dvn_record_at_the_requirement_needs_no_verification_read() {
+    let calls: RecordedJsonCalls = Arc::new(Mutex::new(Vec::new()));
+    let (checks, event) = starknet_verifiable_checks(
+        vec![
+            Ok(json!({"result": "0x1"})),
+            Ok(json!({"result": "0x5"})),
+            Ok(json!({"result": ["0x5", "0x1", "0x0", "0x0", "0x0", "0x0", "0x0"]})),
+        ],
+        calls.clone(),
+    );
+    assert!(checks
+        .validate_payload_not_signed(&event, Some(STARKNET_DVN), "starknet", None)
+        .await
+        .is_err());
+    assert_eq!(calls.lock().unwrap().len(), 3);
 }
 
 #[tokio::test]
@@ -988,7 +1141,7 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_solana_payload() {
     assert_eq!(calls[0].0, "https://solana-rpc.example");
     assert_eq!(calls[0].2["method"], "getMultipleAccounts");
     let pubkeys = calls[0].2["params"][0].as_array().unwrap();
-    assert_eq!(pubkeys.len(), 5);
+    assert_eq!(pubkeys.len(), 7);
 }
 
 #[tokio::test]
@@ -1889,5 +2042,76 @@ async fn no_non_evm_chain_falls_through_to_the_evm_payload_check() {
                  whether this DVN already signed would be read from EVM receive contracts"
             );
         }
+    }
+}
+
+async fn solana_payload_with_libraries(
+    library_config: Option<Vec<u8>>,
+    default_library_config: Option<Vec<u8>>,
+) -> Result<Option<u64>, AppCoreError> {
+    runtime_rpc_solana_payload_checks(
+        vec![get_multiple_accounts_result_with_libraries(
+            [
+                None,
+                None,
+                None,
+                Some(solana_receive_config_account_bytes(5)),
+                None,
+            ],
+            library_config,
+            default_library_config,
+        )],
+        Arc::new(Mutex::new(Vec::new())),
+    )
+    .validate_payload_not_signed(
+        &payload_signed_solana_sent_event(),
+        Some("4gnov6q1KFcjtwBjepBmQtuf5R4ho4XVkrytY8hk4CTF"),
+        "solana",
+        None,
+    )
+    .await
+}
+
+#[tokio::test]
+async fn a_solana_receiver_on_another_library_is_refused_before_a_verify_is_signed() {
+    let uln_default = solana_receive_library_config_bytes(solana_uln_library());
+    for receiver in [
+        solana_receive_library_config_bytes([7; 32]),
+        // A receiver on the default, which is not the ULN.
+        solana_receive_library_config_bytes([0; 32]),
+    ] {
+        let default = if receiver[8..40] == [0; 32] {
+            solana_receive_library_config_bytes([7; 32])
+        } else {
+            uln_default.clone()
+        };
+        let result = solana_payload_with_libraries(Some(receiver), Some(default)).await;
+        assert!(
+            matches!(&result, Err(AppCoreError::BadRequest(message)) if message.contains("cannot validate")),
+            "{result:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_solana_receiver_naming_the_uln_or_following_a_uln_default_is_served() {
+    let uln = solana_receive_library_config_bytes(solana_uln_library());
+    for receiver in [uln.clone(), solana_receive_library_config_bytes([0; 32])] {
+        assert_eq!(
+            solana_payload_with_libraries(Some(receiver), Some(uln.clone())).await,
+            Ok(Some(5))
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_solana_receiver_without_both_library_configs_is_refused() {
+    let uln = solana_receive_library_config_bytes(solana_uln_library());
+    for (receiver, default) in [(None, Some(uln.clone())), (Some(uln), None)] {
+        let result = solana_payload_with_libraries(receiver, default).await;
+        assert!(
+            matches!(&result, Err(AppCoreError::BadRequest(message)) if message.contains("cannot validate")),
+            "{result:?}"
+        );
     }
 }

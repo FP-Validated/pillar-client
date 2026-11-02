@@ -293,6 +293,9 @@ const PENDING_INBOUND_NONCE_ACCOUNT_DISCRIMINATOR: [u8; 8] =
     [170, 176, 95, 240, 120, 231, 241, 218];
 const RECEIVE_CONFIG_ACCOUNT_DISCRIMINATOR: [u8; 8] = [162, 159, 153, 188, 56, 65, 245, 58];
 const CONFIRMATIONS_ACCOUNT_DISCRIMINATOR: [u8; 8] = [206, 57, 50, 8, 124, 133, 138, 112];
+const RECEIVE_LIBRARY_CONFIG_ACCOUNT_DISCRIMINATOR: [u8; 8] = [142, 226, 251, 138, 1, 206, 91, 193];
+/// The endpoint's `DEFAULT_MESSAGE_LIB`: a receiver config naming it follows the default.
+const DEFAULT_MESSAGE_LIB: [u8; 32] = [0; 32];
 /// Sentinel `u64` value the on-chain ULN program uses to mean "explicitly
 /// override to zero confirmations required", distinct from "unset" (which is
 /// the ordinary `0` default). Mirrors TypeScript `NIL_CONFIRMATIONS`.
@@ -322,6 +325,9 @@ pub struct SolanaPayloadSignedAccounts {
     pub receive_config_pda: [u8; 32],
     pub default_receive_config_pda: [u8; 32],
     pub confirmations_pda: [u8; 32],
+    /// The endpoint's `ReceiveLibraryConfig` of the receiver and of the srcEid default.
+    pub library_config_pda: [u8; 32],
+    pub default_library_config_pda: [u8; 32],
 }
 
 /// Raw, possibly-missing account bytes fetched for the PDAs from
@@ -407,12 +413,26 @@ pub fn solana_payload_signed_accounts(
         ],
         &uln_program_id,
     )?;
+    let library_config_pda = find_program_address(
+        &[
+            b"ReceiveLibraryConfig".as_slice(),
+            &request.receiver,
+            &src_eid_be,
+        ],
+        &endpoint_program_id,
+    )?;
+    let default_library_config_pda = find_program_address(
+        &[b"ReceiveLibraryConfig".as_slice(), &src_eid_be],
+        &endpoint_program_id,
+    )?;
     Ok(SolanaPayloadSignedAccounts {
         nonce_pda,
         pending_nonce_pda,
         receive_config_pda,
         default_receive_config_pda,
         confirmations_pda,
+        library_config_pda,
+        default_library_config_pda,
     })
 }
 
@@ -473,6 +493,75 @@ pub fn solana_payload_is_signed(
         return Ok(false);
     }
     Ok(confirmation_value >= required_confirmations)
+}
+
+/// The endpoint's `is_valid_receive_library` (`endpoint/src/instructions/verify.rs`) for the pinned
+/// ULN's message-library PDA, the signer of the verify this service builds. `slot` is the slot the
+/// accounts were read at. The endpoint's `verify` takes both configs as initialized accounts, so
+/// a missing one means the verify cannot succeed.
+pub fn solana_uln_is_valid_receive_library(
+    library_config: Option<&[u8]>,
+    default_library_config: Option<&[u8]>,
+    slot: u64,
+) -> Result<bool, AppCoreError> {
+    let (Some(library_config), Some(default_library_config)) =
+        (library_config, default_library_config)
+    else {
+        return Ok(false);
+    };
+    let uln = find_program_address(
+        &[b"MessageLib".as_slice()],
+        &public_key_bytes(SOLANA_ULN_PROGRAM_ID)?,
+    )?;
+    let config = decode_solana_receive_library_config(library_config)?;
+    let default = decode_solana_receive_library_config(default_library_config)?;
+    let (expected, timeout) = if config.message_lib == DEFAULT_MESSAGE_LIB {
+        (default.message_lib, default.timeout)
+    } else {
+        (config.message_lib, config.timeout)
+    };
+    Ok(expected == uln
+        || timeout.is_some_and(|(message_lib, expiry)| message_lib == uln && expiry > slot))
+}
+
+struct SolanaReceiveLibraryConfig {
+    message_lib: [u8; 32],
+    /// The replaced library and the slot its grace period ends at.
+    timeout: Option<([u8; 32], u64)>,
+}
+
+fn decode_solana_receive_library_config(
+    data: &[u8],
+) -> Result<SolanaReceiveLibraryConfig, AppCoreError> {
+    check_account_discriminator(
+        data,
+        &RECEIVE_LIBRARY_CONFIG_ACCOUNT_DISCRIMINATOR,
+        "ReceiveLibraryConfig",
+    )?;
+    // layout: 8-byte discriminator, message_lib, Option<{message_lib, u64 expiry}>, 1-byte bump
+    let message_lib = read_pubkey(data, 8, "ReceiveLibraryConfig.message_lib")?;
+    let timeout = match data.get(40) {
+        Some(0) => None,
+        Some(1) => Some((
+            read_pubkey(data, 41, "ReceiveLibraryConfig.timeout.message_lib")?,
+            read_u64_le(data, 73, "ReceiveLibraryConfig.timeout.expiry")?,
+        )),
+        _ => {
+            return Err(AppCoreError::Internal(
+                "ReceiveLibraryConfig timeout tag is invalid".to_string(),
+            ))
+        }
+    };
+    Ok(SolanaReceiveLibraryConfig {
+        message_lib,
+        timeout,
+    })
+}
+
+fn read_pubkey(data: &[u8], offset: usize, field: &str) -> Result<[u8; 32], AppCoreError> {
+    data.get(offset..offset + 32)
+        .and_then(|slice| slice.try_into().ok())
+        .ok_or_else(|| AppCoreError::Internal(format!("{field}: account data too short")))
 }
 
 struct SolanaNonceAccount {

@@ -106,6 +106,7 @@ pub(super) fn iota_responses(
     responses.push(Ok(json!({"result":{"results":confirmation_results}})));
     responses.push(normalized(3));
     responses.push(inspect(uln_config_bytes(required)));
+    responses.extend(iota_library_responses(true));
     responses
 }
 fn uln_config_bytes(confirmations: u64) -> Vec<u8> {
@@ -118,6 +119,25 @@ fn uln_config_bytes(confirmations: u64) -> Vec<u8> {
 
 fn address_bytes(hex_value: &str) -> Vec<u8> {
     hex::decode(hex_value.trim_start_matches("0x")).unwrap()
+}
+
+/// The receive-library check: the view's parameters, the Clock's shared version, and the answer.
+fn sui_library_responses(valid: bool) -> Vec<Result<Value, String>> {
+    vec![
+        normalized_immutable(5),
+        shared_object(1),
+        dev_inspect_bytes(vec![u8::from(valid)]),
+    ]
+}
+
+pub(super) fn iota_library_responses(valid: bool) -> Vec<Result<Value, String>> {
+    vec![
+        Ok(
+            json!({"result":{"parameters":(0..5).map(|_| json!({"Reference":{"Struct":{"module":"endpoint_v2","name":"EndpointV2"}}})).collect::<Vec<_>>()}}),
+        ),
+        Ok(json!({"result":[{"data":{"owner":{"Shared":{"initial_shared_version":1}}}}]})),
+        Ok(json!({"result":{"results":[{"returnValues":[[[u8::from(valid)],"bool"]]}]}})),
+    ]
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -143,6 +163,7 @@ pub(super) fn sui_responses(
     );
     responses.push(normalized_immutable(3));
     responses.push(dev_inspect_bytes(uln_config_bytes(required)));
+    responses.extend(sui_library_responses(true));
     responses
 }
 
@@ -669,6 +690,7 @@ async fn slow_sui_entity_cannot_occupy_the_entire_destination_lane() {
                     dev_inspect_three_commands(0u64.to_le_bytes().to_vec())
                 }
                 Some("get_effective_receive_uln_config") => dev_inspect_bytes(uln_config_bytes(15)),
+                Some("is_valid_receive_library") => dev_inspect_bytes(vec![1]),
                 _ => Err(format!("unexpected Sui request {body}")),
             }
         }
@@ -742,4 +764,97 @@ async fn slow_sui_entity_cannot_occupy_the_entire_destination_lane() {
     );
     assert!(transport.peak.load(Ordering::SeqCst) <= 2);
     assert_eq!(transport.active.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn a_sui_receiver_on_another_receive_library_is_refused_whatever_the_verification_state() {
+    for state in [0u8, 2] {
+        let mut responses = sui_responses(SUI_RECEIVER, state, None, 15);
+        *responses.last_mut().unwrap() = dev_inspect_bytes(vec![0]);
+        let error = sui_checks("sui", responses, Arc::new(Mutex::new(Vec::new())))
+            .validate_payload_not_signed(
+                &sui_sent_event("sui", 30_350),
+                Some(VERIFIER),
+                "sui",
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, AppCoreError::BadRequest(message) if message.contains("cannot validate")),
+            "state {state}: {error}"
+        );
+    }
+}
+
+/// The endpoint's own `is_valid_receive_library`, asked about the pinned ULN302 package (the
+/// library's identity: its original package id, which is the mainnet default receive library
+/// for srcEid 30101 read on 2026-11-02) at the Clock, honours a receiver's grace period.
+#[tokio::test]
+async fn the_sui_library_check_asks_the_endpoint_about_the_pinned_uln_and_the_clock() {
+    let calls: RecordedJsonCalls = Arc::new(Mutex::new(Vec::new()));
+    let event = sui_sent_event("sui", 30_350);
+    sui_checks(
+        "sui",
+        sui_responses(SUI_RECEIVER, 0, None, 15),
+        calls.clone(),
+    )
+    .validate_payload_not_signed(&event, Some(VERIFIER), "sui", None)
+    .await
+    .unwrap();
+
+    let calls = calls.lock().unwrap();
+    let programmable =
+        &calls.last().unwrap().2["variables"]["transaction"]["kind"]["programmableTransaction"];
+    let command = &programmable["commands"][0]["moveCall"];
+    assert_eq!(command["module"], "endpoint_v2");
+    assert_eq!(command["function"], "is_valid_receive_library");
+    let pure = |index: usize| {
+        base64_decode(programmable["inputs"][index]["pure"].as_str().unwrap()).unwrap()
+    };
+    assert_eq!(pure(1), address_bytes(SUI_RECEIVER));
+    let src_eid = event.lz_message_id.pathway_id.extra["srcEid"]
+        .as_u64()
+        .unwrap() as u32;
+    assert_eq!(pure(2), src_eid.to_le_bytes());
+    assert_eq!(pure(3), address_bytes(SUI_ULN_302));
+    let clock = &programmable["inputs"][4];
+    assert_eq!(clock["kind"], "SHARED");
+    assert_eq!(
+        clock["objectId"],
+        "0x0000000000000000000000000000000000000000000000000000000000000006"
+    );
+    assert_eq!(clock["mutable"], false);
+}
+
+#[tokio::test]
+async fn an_unreadable_sui_library_answer_is_a_provider_failure_not_a_verdict() {
+    let mut responses = sui_responses(SUI_RECEIVER, 0, None, 15);
+    *responses.last_mut().unwrap() = dev_inspect_bytes(vec![1, 0]);
+    let error = sui_checks("sui", responses, Arc::new(Mutex::new(Vec::new())))
+        .validate_payload_not_signed(&sui_sent_event("sui", 30_350), Some(VERIFIER), "sui", None)
+        .await
+        .unwrap_err();
+    assert!(matches!(error, AppCoreError::Internal(_)), "{error}");
+}
+
+#[tokio::test]
+async fn an_iota_receiver_on_another_receive_library_is_refused() {
+    let mut responses = iota_responses(SUI_RECEIVER, 0, 15);
+    let tail = responses.len() - 3;
+    responses.truncate(tail);
+    responses.extend(iota_library_responses(false));
+    let error = sui_checks("iotal1", responses, Arc::new(Mutex::new(Vec::new())))
+        .validate_payload_not_signed(
+            &sui_sent_event("iotal1", 30_423),
+            Some(VERIFIER),
+            "iotal1",
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&error, AppCoreError::BadRequest(message) if message.contains("cannot validate")),
+        "{error}"
+    );
 }

@@ -17,6 +17,8 @@ aws-sdk-kms.workspace = true
 aws-sdk-lambda.workspace = true
 aws-sdk-s3.workspace = true
 aws-sdk-secretsmanager.workspace = true
+aws-smithy-http-client = { version = "1.4", default-features = false, features = ["rustls-aws-lc"] }
+aws-smithy-runtime-api = "1.15"
 azure_core.workspace = true
 azure_identity.workspace = true
 azure_security_keyvault_keys.workspace = true

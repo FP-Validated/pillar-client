@@ -544,3 +544,71 @@ async fn round3_m12_initia_sender_read_ignores_node_index_events() {
         "{error}"
     );
 }
+
+/// The scenario's first event with its destination EID replaced by one the legacy table lacks.
+fn event_to_unmapped_destination(event: &Value) -> Value {
+    let mut event = event.clone();
+    let packet = event["data"]["encoded_packet"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // nonce (8) | srcChainId (2) | srcAddress (32) | dstChainId (2)
+    let at = 2 + 2 * (8 + 2 + 32);
+    event["data"]["encoded_packet"] =
+        Value::from(format!("{}270f{}", &packet[..at], &packet[at + 4..]));
+    event
+}
+
+async fn resolve_aptos_v1_events(events: Vec<Value>) -> Result<LzSentEvent, AppCoreError> {
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../tests/gasolina_parity/aptos_v1_source.json"
+    ))
+    .unwrap();
+    let scenario = &fixture["scenarios"][0];
+    let src_tx_hash = scenario["srcTxHash"].as_str().unwrap();
+    let request: LzMessageId = serde_json::from_value(scenario["request"].clone()).unwrap();
+    let transaction = json!({
+        "type": "user_transaction",
+        "version": src_tx_hash,
+        "hash": format!("0x{}", "aa".repeat(32)),
+        "success": true,
+        "events": events,
+    });
+    resolve_aptos_v1_with_providers(
+        vec![ProviderUri::Uri("https://aptos-a.example/v1".to_string())],
+        1,
+        HashMap::from([("aptos-a.example", (transaction, fixture["block"].clone()))]),
+        src_tx_hash,
+        &request,
+    )
+    .await
+}
+
+#[tokio::test]
+async fn an_earlier_event_to_an_unmapped_destination_does_not_hide_the_requested_packet() {
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../tests/gasolina_parity/aptos_v1_source.json"
+    ))
+    .unwrap();
+    let events = fixture["scenarios"][0]["events"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let mut with_sibling = vec![event_to_unmapped_destination(&events[0])];
+    with_sibling.extend(events);
+    let resolved = resolve_aptos_v1_events(with_sibling).await.unwrap();
+    assert_eq!(resolved.lz_message_id.nonce, 26733);
+}
+
+#[tokio::test]
+async fn a_transaction_whose_only_event_has_an_unmapped_destination_is_refused_as_upstream_does() {
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../tests/gasolina_parity/aptos_v1_source.json"
+    ))
+    .unwrap();
+    let first = fixture["scenarios"][0]["events"][0].clone();
+    let error = resolve_aptos_v1_events(vec![event_to_unmapped_destination(&first)])
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("Invalid endpointId"), "{error}");
+}

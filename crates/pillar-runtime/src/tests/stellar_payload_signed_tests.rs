@@ -11,6 +11,37 @@ fn fixture() -> Value {
         .expect("fixture parses")
 }
 
+/// A recorded return's XDR. The recorded default library is a placeholder address, so it is
+/// replaced by the pinned ULN302, which is what a real pathway resolves to.
+fn return_xdr(fixture: &Value, name: &str) -> String {
+    let recorded = |name: &str| {
+        fixture["returns"][name]["xdr"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    match name {
+        "foreignDefaultLibrary" => recorded("defaultLibrary"),
+        "defaultLibrary" => {
+            let pinned = pillar_layerzero::stellar_contract_id_from_strkey(
+                crate::layerzero_runtime::config::stellar_uln_302_for_environment("mainnet")
+                    .unwrap(),
+            )
+            .unwrap();
+            let mut bytes = base64::engine::general_purpose::STANDARD
+                .decode(recorded(name))
+                .unwrap();
+            let at = bytes
+                .windows(32)
+                .position(|window| window == [0x55; 32])
+                .unwrap();
+            bytes[at..at + 32].copy_from_slice(&pinned);
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        }
+        _ => recorded(name),
+    }
+}
+
 /// Answers each `simulateTransaction` by recognising the call against the
 /// stellar-sdk encoding: a request whose `InvokeContractArgs` bytes match no
 /// recorded call panics, so an encoding drift fails rather than misroutes.
@@ -90,12 +121,7 @@ pub(super) async fn run(
     returns: impl IntoIterator<Item = (&'static str, Result<&'static str, &'static str>)>,
 ) -> (Result<Option<u64>, AppCoreError>, Vec<String>) {
     let fixture = fixture();
-    let xdr = |name: &str| {
-        fixture["returns"][name]["xdr"]
-            .as_str()
-            .unwrap()
-            .to_string()
-    };
+    let xdr = |name: &str| return_xdr(&fixture, name);
     let seen = Arc::new(Mutex::new(Vec::new()));
     let transport = SorobanReplay {
         calls: fixture["calls"].clone(),
@@ -215,7 +241,8 @@ async fn stellar_payload_signed_refuses_an_invalid_override_library() {
     );
     assert_eq!(seen, ["get_receive_library", "is_valid_receive_library"]);
 
-    let (outcome, _) = run([
+    // A valid override that is not the pinned ULN302 is refused, not read through the pinned one.
+    let (outcome, seen) = run([
         ("get_receive_library", Ok("overrideLibrary")),
         ("is_valid_receive_library", Ok("valid")),
         ("effective_receive_uln_config", Ok("config15")),
@@ -223,7 +250,27 @@ async fn stellar_payload_signed_refuses_an_invalid_override_library() {
         ("uln_verifiable", Ok("verifying")),
     ])
     .await;
-    assert_eq!(outcome, Ok(Some(15)));
+    assert!(
+        matches!(&outcome, Err(AppCoreError::BadRequest(message)) if message.contains("cannot validate")),
+        "{outcome:?}"
+    );
+    assert_eq!(seen, ["get_receive_library", "is_valid_receive_library"]);
+}
+
+#[tokio::test]
+async fn stellar_payload_signed_refuses_a_default_library_other_than_the_pinned_uln() {
+    let (outcome, seen) = run([
+        ("get_receive_library", Ok("foreignDefaultLibrary")),
+        ("effective_receive_uln_config", Ok("config15")),
+        ("confirmations", Ok("confirmations15")),
+        ("uln_verifiable", Ok("verified")),
+    ])
+    .await;
+    assert!(
+        matches!(&outcome, Err(AppCoreError::BadRequest(message)) if message.contains("cannot validate")),
+        "{outcome:?}"
+    );
+    assert_eq!(seen, ["get_receive_library"]);
 }
 
 #[tokio::test]
@@ -255,15 +302,7 @@ async fn stellar_account_dvn_uses_account_xdr_without_allowing_account_receivers
             ("uln_verifiable", "verifying"),
         ]
         .into_iter()
-        .map(|(method, name)| {
-            (
-                method,
-                Ok(fixture["returns"][name]["xdr"]
-                    .as_str()
-                    .unwrap()
-                    .to_string()),
-            )
-        })
+        .map(|(method, name)| (method, Ok(return_xdr(&fixture, name))))
         .collect(),
         seen: seen.clone(),
     };

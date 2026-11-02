@@ -2,7 +2,8 @@ use super::*;
 use futures::stream::FuturesUnordered;
 use pillar_config::provider_validation::{
     canonical_strategy_key, is_strategy_satisfiable, is_trivial_strategy,
-    min_providers_for_strategy, order_providers_for_quorum, voter_entities, OrderableProvider,
+    min_providers_for_strategy, order_providers_for_quorum, prioritize_minimal_quorum,
+    voter_entities, OrderableProvider, PROVIDER_CATEGORY_ANY,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -232,8 +233,8 @@ impl<'a, T> ExactQuorumAccumulator<'a, T> {
                 self.pending.remove(&index);
                 self.deferred.get_or_insert(error);
             }
-            Err(error @ (RpcError::Remote(_) | RpcError::Unavailable)) => {
-                tracing::error!(target: "pillar_runtime", "provider quorum vote error: {error}");
+            Err(RpcError::Remote(_) | RpcError::Unavailable) => {
+                tracing::error!(target: "pillar_runtime", provider = index, "provider quorum vote error");
                 self.record(index, None);
             }
             Err(error) => return Err(error.into()),
@@ -601,10 +602,13 @@ pub(crate) async fn plan_dispatch_for_keys<'a>(
             rank: *rank as i32,
         })
         .collect::<Vec<_>>();
-    let ordered = if is_trivial_strategy(&config.strategy) {
+    let ordered = if ranks_only(&config.strategy) {
         orderable
     } else {
-        order_providers_for_quorum(&orderable, &config.strategy)
+        prioritize_minimal_quorum(
+            order_providers_for_quorum(&orderable, &config.strategy),
+            &config.strategy,
+        )
     };
     let first_wave = min_providers_for_strategy(&ordered, &config.strategy).max(1);
     let order = ordered
@@ -616,17 +620,30 @@ pub(crate) async fn plan_dispatch_for_keys<'a>(
                 .expect("ids are provider indices")
         })
         .chain(unhealthy.into_iter().map(|(index, _)| index));
+    let stagger_cap = pillar_core::execution::current()
+        .and_then(|context| context.deadline)
+        .map(|deadline| deadline.saturating_duration_since(tokio::time::Instant::now()) / 4);
     Ok(order
         .enumerate()
         .map(|(position, index)| {
             let behind = (position + 1).saturating_sub(first_wave);
+            let delay = DEFAULT_STALL_TIMEOUT * behind as u32;
             DispatchEntry {
                 index,
                 uri: &config.uris[index],
-                delay: DEFAULT_STALL_TIMEOUT * behind as u32,
+                delay: stagger_cap.map_or(delay, |cap| delay.min(cap)),
             }
         })
         .collect())
+}
+
+/// Rank order is enough only when no named category constrains the vote.
+fn ranks_only(strategy: &pillar_config::provider_validation::QuorumStrategy) -> bool {
+    is_trivial_strategy(strategy)
+        && strategy
+            .all_of
+            .iter()
+            .all(|requirement| requirement.keys().all(|key| key == PROVIDER_CATEGORY_ANY))
 }
 
 #[cfg(test)]
@@ -891,6 +908,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn plan_dispatch_caps_stagger_to_a_share_of_the_request_deadline() {
+        let tracker = ProviderRankTracker::new();
+        let names = (0..10)
+            .map(|index| format!("entity-{index}"))
+            .collect::<Vec<_>>();
+        let voters = names
+            .iter()
+            .chain(&names)
+            .map(|name| ("shared_external", name.as_str()))
+            .collect::<Vec<_>>();
+        let config = entity_pool(&voters, any(2));
+        let plan = pillar_core::execution::RequestContext::new(Duration::from_secs(8))
+            .scope(plan_dispatch(&tracker, "hoodi", rule(&config)))
+            .await
+            .unwrap();
+        let longest = plan.iter().map(|entry| entry.delay).max().unwrap();
+        assert!(
+            longest <= Duration::from_secs(2),
+            "serial rounds share one deadline, so one round may not stagger past a quarter of it: {longest:?}"
+        );
+        assert!(plan.iter().any(|entry| entry.delay == Duration::ZERO));
+    }
+
+    #[tokio::test]
     async fn plan_dispatch_first_wave_spans_distinct_entities() {
         let tracker = ProviderRankTracker::new();
         let config = entity_pool(
@@ -916,6 +957,65 @@ mod tests {
         );
         assert_eq!(plan[2].index, 1);
         assert_eq!(plan[2].delay, DEFAULT_STALL_TIMEOUT);
+    }
+
+    fn category(name: &str, count: u64) -> pillar_config::provider_validation::QuorumStrategy {
+        pillar_config::provider_validation::QuorumStrategy {
+            all_of: vec![BTreeMap::from([(
+                name.to_string(),
+                pillar_config::provider_validation::Quorum::Count(count),
+            )])],
+            one_of: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn plan_dispatch_sends_a_named_category_vote_before_unrelated_urls() {
+        let tracker = ProviderRankTracker::new();
+        let mut voters = (0..8)
+            .map(|index| ("shared_external", format!("external-{index}")))
+            .collect::<Vec<_>>();
+        voters.push(("internal", "operator".to_string()));
+        let voters = voters
+            .iter()
+            .map(|(category, entity)| (*category, entity.as_str()))
+            .collect::<Vec<_>>();
+        let config = entity_pool(&voters, category("internal", 1));
+        let plan = plan_dispatch(&tracker, "hoodi", rule(&config))
+            .await
+            .unwrap();
+        let first_wave = plan
+            .iter()
+            .filter(|entry| entry.delay.is_zero())
+            .map(|entry| entry.index)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            first_wave,
+            [8],
+            "the only internal URL must not queue behind eight unrelated RPCs"
+        );
+    }
+
+    #[tokio::test]
+    async fn plan_dispatch_first_wave_reaches_a_second_entity_before_more_urls_of_the_first() {
+        let tracker = ProviderRankTracker::new();
+        let mut voters = vec![("internal", "operator"); 8];
+        voters.push(("shared_external", "alchemy"));
+        let config = entity_pool(&voters, any(2));
+        let plan = plan_dispatch(&tracker, "hoodi", rule(&config))
+            .await
+            .unwrap();
+        let mut first_wave = plan
+            .iter()
+            .filter(|entry| entry.delay.is_zero())
+            .map(|entry| entry.index)
+            .collect::<Vec<_>>();
+        first_wave.sort_unstable();
+        assert_eq!(
+            first_wave,
+            [0, 8],
+            "eight URLs of one entity are one vote and must not fill the first wave"
+        );
     }
 
     #[tokio::test]
@@ -1028,5 +1128,52 @@ mod tests {
             resolve_provider_quorum_with_zero_signal(mixed, 2, rule(&config), "test").await,
             Err(QuorumResolutionFailure::Other(AppCoreError::Admission(_)))
         ));
+    }
+}
+
+#[cfg(test)]
+mod log_tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone, Default)]
+    struct Buffer(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Buffer {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_provider_error_is_logged_without_its_text() {
+        let buffer = Buffer::default();
+        let writer = buffer.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(move || writer.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            let config = pillar_config::ProviderConfig::with_distinct_entities(
+                vec![pillar_config::ProviderUri::Uri(
+                    "https://rpc.example".into(),
+                )],
+                1,
+            );
+            let rule = required_provider_quorum(&config, "test").unwrap();
+            let mut accumulator = ExactQuorumAccumulator::<u64>::new(rule, 0..1);
+            accumulator
+                .record_result(
+                    0,
+                    Err(RpcError::Remote("Authorization: Bearer SECRET".to_string())),
+                )
+                .unwrap();
+        });
+        let log = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
+        assert!(log.contains("provider quorum vote error"), "{log}");
+        assert!(!log.contains("SECRET"), "{log}");
     }
 }

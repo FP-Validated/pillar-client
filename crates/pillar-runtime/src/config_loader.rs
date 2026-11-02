@@ -45,7 +45,7 @@ pub(crate) async fn load_s3_provider_config(
     key: String,
     region: Option<String>,
 ) -> Result<String, ConfigError> {
-    let mut loader = aws_config::defaults(aws_config::BehaviorVersion::latest());
+    let mut loader = crate::aws_client::defaults();
     let region = region.unwrap_or_else(|| "us-east-1".to_string());
     loader = loader.region(aws_config::Region::new(region));
     let config = loader.load().await;
@@ -75,7 +75,9 @@ pub(crate) async fn load_gcs_provider_config(
     _project_id: String,
     _region: String,
 ) -> Result<String, ConfigError> {
+    // A resumed read re-enters itself with no attempt limit; the next refresh is the retry.
     let client = Storage::builder()
+        .with_read_resume_policy(google_cloud_storage::read_resume_policy::NeverResume)
         .build()
         .await
         .map_err(|error| ConfigError::RemoteProviderConfig(error.to_string()))?;

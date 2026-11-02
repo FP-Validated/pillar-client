@@ -15,6 +15,12 @@ impl AzureKmsKeyId {
     }
 }
 
+/// `scheme://host[:port]` of a key URL in lowercase, or `None` for a bare key name.
+pub(crate) fn azure_key_vault_origin(key_id: &str) -> Option<String> {
+    let url = reqwest::Url::parse(key_id).ok()?;
+    matches!(url.scheme(), "http" | "https").then(|| url.origin().ascii_serialization())
+}
+
 pub fn parse_azure_kms_key_id(key_id: &str) -> Result<AzureKmsKeyId, SignerError> {
     if !key_id.starts_with("http://") && !key_id.starts_with("https://") {
         return Ok(AzureKmsKeyId {

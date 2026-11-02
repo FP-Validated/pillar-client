@@ -35,6 +35,9 @@ const MODULE_BYTES32: &str = "bytes32";
 /// `VerificationState.VERIFIED` (`packages/common-model/src/v2/lzMessage.ts:116-145`).
 const SUI_VERIFICATION_STATE_VERIFIED: u8 = 2;
 
+/// The Clock, a shared object at `0x6` on Sui and IOTA alike.
+const SUI_CLOCK: &str = "0x0000000000000000000000000000000000000000000000000000000000000006";
+
 /// `Uln302GetConfirmationsErrorCodes.EConfirmationsNotFound`
 /// (`packages/sdks/lz-v2-sdk/src/uln/sui/index.ts:62-71`).
 const E_CONFIRMATIONS_NOT_FOUND: i64 = 1;
@@ -398,7 +401,7 @@ where
     let config_bytes = dev_inspect_return(
         transport,
         url,
-        headers,
+        headers.clone(),
         chain_name,
         &[
             SuiCallArg::Shared(config_uln_object),
@@ -421,6 +424,64 @@ where
     let required = decode_sui_uln_config(&config_bytes)
         .map_err(|_| RpcError::Unavailable)?
         .confirmations;
+
+    // 5. the receiver's effective receive library for this source EID must be the pinned ULN302,
+    //    as the endpoint asserts when the verify lands. The library's identity is the original
+    //    package id of ULN302, which the pinned package is.
+    let library_parameters = normalized_parameters(
+        transport,
+        url,
+        headers.clone(),
+        chain_name,
+        endpoint_package,
+        MODULE_ENDPOINT_V2,
+        "is_valid_receive_library",
+    )
+    .await?;
+    let clock_version =
+        shared_object_initial_versions(transport, url, headers.clone(), chain_name, &[SUI_CLOCK])
+            .await?[0];
+    let library_bytes = dev_inspect_return(
+        transport,
+        url,
+        headers,
+        chain_name,
+        &[
+            SuiCallArg::Shared(shared_object_input(
+                &contracts.endpoint_v2_object,
+                endpoint_version,
+                &library_parameters,
+                0,
+            )?),
+            SuiCallArg::Pure(sui_pure_address(receiver)),
+            SuiCallArg::Pure(sui_pure_u32(src_eid)),
+            SuiCallArg::Pure(sui_pure_address(&uln_package)),
+            SuiCallArg::Shared(shared_object_input(
+                SUI_CLOCK,
+                clock_version,
+                &library_parameters,
+                4,
+            )?),
+        ],
+        &[SuiMoveCall {
+            package: endpoint_package,
+            module: MODULE_ENDPOINT_V2.to_string(),
+            function: "is_valid_receive_library".to_string(),
+            arguments: (0..5).map(SuiArgument::Input).collect(),
+        }],
+    )
+    .await?
+    .map_err(|_| RpcError::Unavailable)?;
+    match decode_sui_u8(&library_bytes).map_err(|_| RpcError::Unavailable)? {
+        1 => {}
+        0 => {
+            return Ok((
+                "unsupported-receive-library".to_string(),
+                PayloadSignedValidity::UnsupportedReceiveLibrary,
+            ))
+        }
+        _ => return Err(RpcError::Unavailable),
+    }
 
     // `receive_uln::verified`: no record is unverified, even when 0 are required (M-21 class).
     let dvn_confirmed = confirmations.is_some_and(|count| count >= required);

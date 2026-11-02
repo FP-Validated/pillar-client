@@ -90,7 +90,7 @@ async fn provider_health_marks_stellar_unhealthy_when_latest_ledger_probe_fails(
 }
 
 #[tokio::test]
-async fn provider_health_probes_solana_confirmed_slot_like_typescript() {
+async fn provider_health_probes_solana_finalized_slot_because_signing_reads_finalized() {
     let getter = StaticProviderConfig::new(
         indexmap::IndexMap::from([(
             "solana".to_string(),
@@ -142,6 +142,6 @@ async fn provider_health_probes_solana_confirmed_slot_like_typescript() {
     assert_eq!(calls[0].2["method"], "getSlot");
     assert_eq!(
         calls[0].2["params"][0]["commitment"],
-        Value::from("confirmed")
+        Value::from("finalized")
     );
 }

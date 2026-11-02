@@ -116,3 +116,63 @@ async fn audit_success_commits_external_and_wallet_hashes_before_return() {
     );
     println!("AUDIT_SUCCESS_ARTIFACT external_and_wallet_results_committed=true");
 }
+
+fn store() -> Arc<FaultStore> {
+    Arc::new(FaultStore {
+        fail_begin: false,
+        fail_result: false,
+        begins: AtomicUsize::new(0),
+        events: parking_lot::Mutex::new(Vec::new()),
+    })
+}
+async fn dropped_after_begin(store: Arc<FaultStore>, returned_first: bool) -> Arc<AuditWorkers> {
+    let workers = Arc::new(AuditWorkers::new(1));
+    let signing = scope_root(
+        Some(store),
+        Some(workers.clone()),
+        1,
+        scope_intent(
+            intent(),
+            sign_wallet("synthetic-wallet", async move {
+                let effect = begin_effect(key(), &[7; 32], "ecdsa")
+                    .await
+                    .map_err(crate::AppCoreError::Internal)?
+                    .expect("audit is enabled");
+                if returned_first {
+                    effect
+                        .returned(&[8; 64])
+                        .await
+                        .map_err(crate::AppCoreError::Internal)?;
+                }
+                std::future::pending::<Result<crate::Signature, crate::AppCoreError>>().await
+            }),
+        ),
+    );
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), signing)
+            .await
+            .is_err(),
+        "the signer never completes, so the caller gives up"
+    );
+    workers
+}
+#[tokio::test]
+async fn a_signer_dropped_mid_effect_leaves_an_unknown_outcome_not_an_open_attempt() {
+    let store = store();
+    let _workers = dropped_after_begin(store.clone(), false).await;
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while store.events.lock().is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the guard records the outcome");
+    assert_eq!(*store.events.lock(), vec![EvidenceKind::OutcomeUnknown]);
+}
+#[tokio::test]
+async fn a_drop_after_the_effect_was_recorded_adds_no_unknown_outcome() {
+    let store = store();
+    let _workers = dropped_after_begin(store.clone(), true).await;
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert_eq!(*store.events.lock(), vec![EvidenceKind::ExternalReturned]);
+}

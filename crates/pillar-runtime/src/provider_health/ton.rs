@@ -124,9 +124,7 @@ pub(crate) fn ton_v3_provider_uri_parts(
 
     if let Some((_, api_key)) = query_pairs.iter().find(|(key, _)| key == "api-key") {
         if !api_key.is_empty() {
-            headers
-                .entry("X-API-Key".to_string())
-                .or_insert_with(|| api_key.clone());
+            insert_header_if_absent(&mut headers, "X-API-Key", api_key.clone());
         }
     }
 
@@ -135,9 +133,51 @@ pub(crate) fn ton_v3_provider_uri_parts(
 }
 
 pub(crate) fn ton_v3_masterchain_info_url(endpoint: &str) -> String {
-    let endpoint_base = endpoint.trim_end_matches('/');
-    match reqwest::Url::parse(&format!("{endpoint_base}/masterchainInfo")) {
-        Ok(request_url) => request_url.to_string(),
-        Err(_) => format!("{endpoint_base}/masterchainInfo"),
+    append_url_path(endpoint, &["masterchainInfo"]).map_or_else(
+        || format!("{}/masterchainInfo", endpoint.trim_end_matches('/')),
+        String::from,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn with_headers(uri: &str, headers: &[(&str, &str)]) -> ProviderUri {
+        ProviderUri::UriWithHeaders {
+            uri: uri.to_string(),
+            headers: headers
+                .iter()
+                .map(|(name, value)| (name.to_string(), value.to_string()))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn a_derived_v3_api_key_does_not_repeat_a_configured_header_in_another_case() {
+        let uri = with_headers(
+            "https://v2.example/api/v2?v3-endpoint=https%3A%2F%2Fv3.example&api-key=derived",
+            &[("x-api-key", "configured")],
+        );
+        let (_, _, headers) = ton_v3_provider_uri_parts(&uri).unwrap();
+        assert_eq!(headers.len(), 1);
+        assert_eq!(headers["x-api-key"], "configured");
+    }
+
+    #[test]
+    fn a_v3_endpoint_with_its_own_query_keeps_it_after_the_path() {
+        assert_eq!(
+            ton_v3_masterchain_info_url("https://v3.example/api?key=secret"),
+            "https://v3.example/api/masterchainInfo?key=secret"
+        );
+    }
+
+    #[test]
+    fn a_v2_url_whose_only_parameter_is_the_v3_endpoint_has_no_query() {
+        let uri = ProviderUri::Uri(
+            "https://ton.example/api/v2?v3-endpoint=https%3A%2F%2Fv3.example".to_string(),
+        );
+        let (_, request_url, _) = ton_v2_provider_uri_parts(&uri);
+        assert_eq!(request_url, "https://ton.example/api/v2/jsonRPC");
     }
 }

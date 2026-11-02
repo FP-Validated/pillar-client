@@ -56,6 +56,11 @@ struct CachedHealth {
     generation: u64,
 }
 
+/// Milliseconds since `earlier`; a clock that stepped backwards has no known age, so it is the oldest.
+pub fn elapsed_ms(now: u64, earlier: u64) -> u64 {
+    now.checked_sub(earlier).unwrap_or(u64::MAX)
+}
+
 pub struct ProviderHealthCache<S> {
     source: Arc<S>,
     state: Arc<Mutex<Option<CachedHealth>>>,
@@ -112,7 +117,7 @@ where
             .clone()
             .filter(|cached| cached.generation == self.source.configuration_generation());
         if let Some(cached) = cached {
-            let age = now.saturating_sub(cached.checked_at_unix_ms);
+            let age = elapsed_ms(now, cached.checked_at_unix_ms);
             if age <= PROVIDER_HEALTH_CACHE_TTL_MS {
                 return Ok(cached.value);
             }
@@ -167,7 +172,7 @@ where
             // it for the whole TTL.
             let generation = self.source.configuration_generation();
             if let Some(cached) = self.fresh_enough_for(generation).await {
-                let age = (self.now)().saturating_sub(cached.checked_at_unix_ms);
+                let age = elapsed_ms((self.now)(), cached.checked_at_unix_ms);
                 if age <= PROVIDER_HEALTH_CACHE_TTL_MS {
                     return Ok(cached.value);
                 }
@@ -192,7 +197,7 @@ where
                     // A failed probe may still be covered by a stale value, but
                     // only one describing the configuration now serving.
                     if let Some(cached) = self.fresh_enough_for(generation).await {
-                        let age = (self.now)().saturating_sub(cached.checked_at_unix_ms);
+                        let age = elapsed_ms((self.now)(), cached.checked_at_unix_ms);
                         if age <= PROVIDER_HEALTH_CACHE_STALE_MS {
                             return Ok(cached.value);
                         }
@@ -336,6 +341,27 @@ mod tests {
         now.store(1_000, Ordering::SeqCst);
         assert_eq!(cache.read().await.unwrap(), snapshot(true));
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_clock_stepped_backwards_does_not_keep_a_cached_value_fresh() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let now = Arc::new(AtomicU64::new(1_000_000));
+        let cache = ProviderHealthCache::new(
+            CountingSource {
+                calls: calls.clone(),
+                values: vec![snapshot(true), snapshot(false)],
+            },
+            {
+                let now = now.clone();
+                move || now.load(Ordering::SeqCst)
+            },
+        );
+
+        assert_eq!(cache.read().await.unwrap(), snapshot(true));
+        now.store(500_000, Ordering::SeqCst);
+        assert_eq!(cache.read().await.unwrap(), snapshot(false));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]

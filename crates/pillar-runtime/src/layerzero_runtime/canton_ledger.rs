@@ -7,6 +7,7 @@ use super::source_events_ton::hash_fields;
 use super::*;
 use crate::provider_health::TransactionFromObservation;
 use pillar_config::ProviderConfig;
+use std::future::Future;
 use zeroize::Zeroizing;
 
 /// The query keys `parseCantonChainUri` removes before the rest becomes the JSON Ledger
@@ -127,6 +128,8 @@ pub(crate) fn canton_ledger_parties(config: &ProviderConfig) -> Vec<String> {
 #[async_trait]
 pub(crate) trait CantonTokenProvider: Send + Sync {
     async fn get_token(&self) -> Result<String, AppCoreError>;
+    /// Forgets `rejected` after the ledger refused it, so the next `get_token` is a new one.
+    async fn invalidate(&self, _rejected: &str) {}
 }
 
 const CANTON_OAUTH2_REQUIRED: &str = "Canton provider requires OAuth2 credentials (token-url, \
@@ -205,6 +208,16 @@ where
         }
         Ok(token)
     }
+
+    async fn invalidate(&self, rejected: &str) {
+        let mut cached = self.cached.lock().await;
+        if cached
+            .as_ref()
+            .is_some_and(|token| *token.token == rejected)
+        {
+            *cached = None;
+        }
+    }
 }
 
 impl<T> CantonClientCredentials<T>
@@ -243,13 +256,8 @@ where
                 .ok()
                 .and_then(|status| status.canonical_reason())
                 .unwrap_or_default();
-            let suffix = if text.is_empty() {
-                String::new()
-            } else {
-                format!(" — {text}")
-            };
             return Err(AppCoreError::Internal(format!(
-                "Client credentials token request failed: {status} {reason}{suffix}"
+                "Client credentials token request failed: {status} {reason}"
             )));
         }
         let response = crate::provider_health::parse_bounded_json(text.as_bytes(), false)
@@ -287,14 +295,17 @@ where
     }
 }
 
-/// `createTokenProvider` (`provider.ts:178-195`), one provider per `rpc` entry, built on
-/// first use as upstream's multiprovider builds them. Sandbox/localnet would use a
-/// self-signed admin JWT upstream; that development auth is not enabled here.
+/// By identity-provider client: the secret it was built with, and the provider.
+type CantonProviders = HashMap<String, (Zeroizing<String>, Arc<dyn CantonTokenProvider>)>;
+
+/// `createTokenProvider` (`provider.ts:178-195`), built on first use as upstream's multiprovider
+/// builds them and shared by every `rpc` entry with the same identity provider, client and scope.
+/// Sandbox/localnet would use a self-signed admin JWT upstream; that development auth is not enabled here.
 #[derive(Clone, Default)]
 pub(crate) struct CantonLedgerAuth {
     local: bool,
     env_client_secret: Option<Zeroizing<String>>,
-    providers: Arc<std::sync::Mutex<HashMap<String, Arc<dyn CantonTokenProvider>>>>,
+    providers: Arc<std::sync::Mutex<CantonProviders>>,
 }
 
 impl std::fmt::Debug for CantonLedgerAuth {
@@ -327,7 +338,6 @@ impl CantonLedgerAuth {
 
     pub(crate) fn token_provider<T: JsonRpcTransport>(
         &self,
-        entry_uri: &str,
         uri: &CantonChainUri,
         transport: &T,
     ) -> Result<Arc<dyn CantonTokenProvider>, AppCoreError> {
@@ -351,24 +361,73 @@ impl CantonLedgerAuth {
         ) else {
             return Err(AppCoreError::Internal(CANTON_OAUTH2_REQUIRED.into()));
         };
+        let key = format!(
+            "{token_url}\n{client_id}\n{}\n{}",
+            uri.scope.as_deref().unwrap_or_default(),
+            uri.audience.as_deref().unwrap_or_default()
+        );
         let mut providers = self
             .providers
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let provider = providers.entry(entry_uri.to_string()).or_insert_with(|| {
-            Arc::new(CantonClientCredentials::new(
+        // A rotated secret replaces its provider, so the superseded secret and token are dropped.
+        if providers
+            .get(&key)
+            .is_none_or(|(secret, _)| *secret != client_secret)
+        {
+            let provider: Arc<dyn CantonTokenProvider> = Arc::new(CantonClientCredentials::new(
                 CantonOAuth2Config {
                     token_url,
                     client_id,
-                    client_secret,
+                    client_secret: client_secret.clone(),
                     scope: uri.scope.clone(),
                     audience: uri.audience.clone(),
                 },
                 transport.clone(),
-            ))
-        });
-        Ok(provider.clone())
+            ));
+            providers.insert(key.clone(), (client_secret, provider));
+        }
+        Ok(providers[&key].1.clone())
     }
+
+    #[cfg(test)]
+    pub(crate) fn provider_count(&self) -> usize {
+        self.providers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
+    }
+}
+
+/// One ledger call with the provider's token; a 401 or 403 drops that token and retries once with a new one.
+async fn authorized<F, Fut>(
+    tokens: &Arc<dyn CantonTokenProvider>,
+    call: F,
+) -> Result<Value, RpcError>
+where
+    F: Fn(HashMap<String, String>) -> Fut,
+    Fut: Future<Output = Result<Value, RpcError>>,
+{
+    // An empty token sends no header, as upstream.
+    let bearer = |token: &str| {
+        let mut headers = HashMap::new();
+        if !token.is_empty() {
+            headers.insert("Authorization".to_string(), format!("Bearer {token}"));
+        }
+        headers
+    };
+    let token = Zeroizing::new(tokens.get_token().await?);
+    let result = call(bearer(&token)).await;
+    if !token.is_empty()
+        && matches!(&result, Err(error) if crate::provider_health::is_http_unauthorized(error))
+    {
+        tokens.invalidate(&token).await;
+        let fresh = Zeroizing::new(tokens.get_token().await?);
+        if *fresh != *token {
+            return call(bearer(&fresh)).await;
+        }
+    }
+    result
 }
 
 /// `basePath + path`. Stricter than upstream: a base URL that still carries a query or
@@ -394,16 +453,11 @@ pub(crate) async fn canton_ledger_end_offset<T: JsonRpcTransport>(
 ) -> Result<Value, RpcError> {
     let uri = parse_canton_chain_uri(entry_uri).map_err(RpcError::Remote)?;
     let url = canton_ledger_url(&uri.json_api_url, "/v2/state/ledger-end")?;
-    let tokens = auth.token_provider(entry_uri, &uri, transport)?;
-    let token = Zeroizing::new(tokens.get_token().await?);
-    let mut headers = HashMap::new();
-    if !token.is_empty() {
-        headers.insert(
-            "Authorization".to_string(),
-            format!("Bearer {}", token.as_str()),
-        );
-    }
-    let response = transport.get_json_scoped(url, headers).await?;
+    let tokens = auth.token_provider(&uri, transport)?;
+    let response = authorized(&tokens, |headers| {
+        transport.get_json_scoped(url.clone(), headers)
+    })
+    .await?;
     match response.get("offset") {
         Some(offset @ Value::Number(_)) => Ok(offset.clone()),
         _ => Err(RpcError::Remote(
@@ -589,23 +643,15 @@ async fn observe_canton_transaction_from<T>(
 where
     T: JsonRpcTransport,
 {
-    // `accessToken` is asked on every request; an empty token sends no header, as upstream.
-    let token = Zeroizing::new(tokens.get_token().await?);
-    let mut headers = HashMap::new();
-    if !token.is_empty() {
-        headers.insert(
-            "Authorization".to_string(),
-            format!("Bearer {}", token.as_str()),
-        );
-    }
-    let response = transport
-        .post_json_scoped(
-            url,
+    let response = authorized(&tokens, |headers| {
+        transport.post_json_scoped(
+            url.clone(),
             headers,
             canton_update_by_id_request(&update_id, &party),
         )
-        .await
-        .map_err(AppCoreError::from)?;
+    })
+    .await
+    .map_err(AppCoreError::from)?;
     let transaction = canton_transaction_from_update(&response, &update_id)?;
     Ok(TransactionFromObservation {
         from: canton_transaction_sender(transaction)?,

@@ -1613,7 +1613,7 @@ async fn starknet_and_stellar_resolution_failures_match_upstream() {
         (
             "stellar",
             json!({ "status": "FAILED" }),
-            json!({ "status": "SUCCESS" }),
+            json!({ "status": "SUCCESS", "events": { "contractEventsXdr": [[]] } }),
         ),
     ] {
         let mut request = evm_packet_sent_request("V302");

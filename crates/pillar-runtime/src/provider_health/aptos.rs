@@ -71,7 +71,10 @@ pub(crate) fn aptos_indexer_provider_health_request(
     }
 
     Some(AptosIndexerProviderHealthRequest {
-        request_url: format!("{}/", report_url.trim_end_matches('/')),
+        request_url: append_url_path(&report_url, &[""]).map_or_else(
+            || format!("{}/", report_url.trim_end_matches('/')),
+            String::from,
+        ),
         report_url,
         headers,
         body: aptos_indexer_health_query(kind),
@@ -89,5 +92,23 @@ pub(crate) fn aptos_indexer_health_query(kind: AptosIndexerHealthKind) -> Value 
             "operationName": "MovementLatest",
             "query": "\n        query MovementLatest {\n            events(limit: 1, order_by: { transaction_version: desc }) {\n                transaction_version\n            }\n        }\n    ",
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_indexer_request_url_keeps_its_query_after_the_path() {
+        let uri = ProviderUri::Uri(
+            "https://aptos.example?no-code-indexer=https%3A%2F%2Findexer.example%2Fgraphql%3Fkey%3Dsecret"
+                .to_string(),
+        );
+        let request = aptos_indexer_provider_health_request(&uri, false).unwrap();
+        assert_eq!(
+            request.request_url,
+            "https://indexer.example/graphql/?key=secret"
+        );
     }
 }

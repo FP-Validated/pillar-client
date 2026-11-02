@@ -14,8 +14,8 @@ pub mod json;
 mod provider_health_cache;
 
 pub use provider_health_cache::{
-    ProviderHealthCache, ProviderHealthRefresh, ProviderHealthSnapshot, ProviderHealthSource,
-    PROVIDER_HEALTH_CACHE_STALE_ALLOWANCE_MS, PROVIDER_HEALTH_CACHE_STALE_MS,
+    elapsed_ms, ProviderHealthCache, ProviderHealthRefresh, ProviderHealthSnapshot,
+    ProviderHealthSource, PROVIDER_HEALTH_CACHE_STALE_ALLOWANCE_MS, PROVIDER_HEALTH_CACHE_STALE_MS,
     PROVIDER_HEALTH_CACHE_TTL_MS,
 };
 

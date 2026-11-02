@@ -360,13 +360,38 @@ where
         Ok(first)
     }
 
+    /// A chain is healthy only when every endpoint reports it healthy; one that any endpoint does not report is left out.
     pub async fn get_provider_health(&self) -> Result<ProviderHealthSnapshot, ClientError> {
-        let body = get_body_for_path(&self.transport, self.first_uri()?, "provider-health").await?;
-        serde_json::from_value(body).map_err(|error| ClientError::Transport(error.to_string()))
+        let mut merged: Option<ProviderHealthSnapshot> = None;
+        for body in self.get_bodies_for_path("provider-health").await? {
+            let snapshot: ProviderHealthSnapshot = serde_json::from_value(body)
+                .map_err(|error| ClientError::Transport(error.to_string()))?;
+            merged = Some(match merged {
+                None => snapshot,
+                Some(mut merged) => {
+                    merged.retain(|chain, healthy| {
+                        snapshot.get(chain).is_some_and(|other| {
+                            *healthy &= *other;
+                            true
+                        })
+                    });
+                    merged
+                }
+            });
+        }
+        merged.ok_or(ClientError::NoUris)
     }
 
+    /// The reports of every endpoint merged per chain: healthy only if all are, checked as long ago as the oldest, with every endpoint's providers.
     pub async fn get_provider_health_report(&self) -> Result<Value, ClientError> {
-        get_body_for_path(&self.transport, self.first_uri()?, "provider-health/report").await
+        let mut merged: Option<Value> = None;
+        for body in self.get_bodies_for_path("provider-health/report").await? {
+            merged = Some(match merged {
+                None => body,
+                Some(merged) => merge_health_reports(merged, body),
+            });
+        }
+        merged.ok_or(ClientError::NoUris)
     }
 
     pub async fn get_provider_health_report_typed(
@@ -409,6 +434,15 @@ where
         Ok(out)
     }
 
+    async fn get_bodies_for_path(&self, path: &str) -> Result<Vec<Value>, ClientError> {
+        self.first_uri()?;
+        let mut bodies = Vec::with_capacity(self.uris.len());
+        for uri in &self.uris {
+            bodies.push(get_body_for_path(&self.transport, &uri.0, path).await?);
+        }
+        Ok(bodies)
+    }
+
     fn first_uri(&self) -> Result<&str, ClientError> {
         self.uris
             .first()
@@ -436,6 +470,46 @@ async fn get_body_for_path<T: PillarTransport>(
         ));
     }
     Ok(body)
+}
+
+/// Per chain both reports carry: healthy only if both say so, the older check time, both providers lists.
+/// A report that is not an object of chains merges to no chains.
+fn merge_health_reports(first: Value, second: Value) -> Value {
+    let (Value::Object(first), Value::Object(mut second)) = (first, second) else {
+        return Value::Object(serde_json::Map::new());
+    };
+    let mut merged = serde_json::Map::new();
+    for (chain, mut report) in first {
+        let Some(mut other) = second.remove(&chain) else {
+            continue;
+        };
+        let (Some(report_fields), Some(other_fields)) =
+            (report.as_object_mut(), other.as_object_mut())
+        else {
+            continue;
+        };
+        let healthy = report_fields.get("healthy") == Some(&Value::Bool(true))
+            && other_fields.get("healthy") == Some(&Value::Bool(true));
+        report_fields.insert("healthy".to_string(), Value::Bool(healthy));
+        let oldest = [
+            report_fields.get("checkedAtUnixMs"),
+            other_fields.get("checkedAtUnixMs"),
+        ]
+        .into_iter()
+        .filter_map(|checked| checked.and_then(Value::as_u64))
+        .min();
+        if let Some(oldest) = oldest {
+            report_fields.insert("checkedAtUnixMs".to_string(), Value::from(oldest));
+        }
+        if let (Some(Value::Array(providers)), Some(Value::Array(more))) = (
+            report_fields.get_mut("providers"),
+            other_fields.get_mut("providers"),
+        ) {
+            providers.append(more);
+        }
+        merged.insert(chain, report);
+    }
+    Value::Object(merged)
 }
 
 fn decode_response(uri: String, envelope: ApiEnvelope) -> Result<PillarApiResponse, ClientError> {
@@ -1094,6 +1168,56 @@ mod tests {
         let health = client.get_provider_health().await.unwrap();
         assert!(health["ethereum"]);
         assert!(!health["tron"]);
+    }
+
+    async fn two_endpoints(path: &str, first: Value, second: Value) -> PillarClient<MockTransport> {
+        let transport = MockTransport::default();
+        for (host, body) in [("a", first), ("b", second)] {
+            transport.gets.lock().await.insert(
+                format!("https://{host}.test/{path}"),
+                Ok(ApiEnvelope {
+                    status_code: 200,
+                    body: serde_json::json!({"statusCode": 200, "body": body}),
+                }),
+            );
+        }
+        PillarClient::new(
+            vec!["https://a.test".to_string(), "https://b.test".to_string()],
+            "canonical",
+            transport,
+        )
+    }
+
+    #[tokio::test]
+    async fn provider_health_needs_every_endpoint_to_report_a_chain_healthy() {
+        let client = two_endpoints(
+            "provider-health",
+            serde_json::json!({"ethereum": true, "tron": true, "sui": true}),
+            serde_json::json!({"ethereum": false, "tron": true, "solana": true}),
+        )
+        .await;
+        let health = client.get_provider_health().await.unwrap();
+        assert_eq!(
+            health.into_iter().collect::<Vec<_>>(),
+            [("ethereum".to_string(), false), ("tron".to_string(), true)],
+            "one endpoint's unhealthy chain is unhealthy, and a chain only one serves is not reported"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_health_report_covers_every_endpoint_and_keeps_the_oldest_check() {
+        let entry = |healthy: bool, checked: u64, url: &str| serde_json::json!({"healthy": healthy, "checkedAtUnixMs": checked, "providers": [{"url": url}]});
+        let client = two_endpoints(
+            "provider-health/report",
+            serde_json::json!({"ethereum": entry(true, 2000, "https://rpc-a"), "tron": entry(true, 1, "x")}),
+            serde_json::json!({"ethereum": entry(false, 1000, "https://rpc-b")}),
+        )
+        .await;
+        let report = client.get_provider_health_report().await.unwrap();
+        assert_eq!(report.as_object().unwrap().len(), 1);
+        assert_eq!(report["ethereum"]["healthy"], false);
+        assert_eq!(report["ethereum"]["checkedAtUnixMs"], 1000);
+        assert_eq!(report["ethereum"]["providers"].as_array().unwrap().len(), 2);
     }
 
     #[tokio::test]

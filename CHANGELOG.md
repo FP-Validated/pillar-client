@@ -21,6 +21,51 @@ the Prometheus metric names.
 - M-106: `oneOf` dispatch prioritizes a satisfiable provider group before optional providers.
 - M-107: Tron health probes percent-decode URL credentials before constructing Basic authentication.
 - M-108: native-drop receivers are aggregated in insertion order without quadratic searches.
+- M-109: `quorum-strategy.json` may carry `_providersSha256`, the SHA-256 of the exact `providers-v2.json` text it is written for. A mismatched or malformed digest is refused: startup fails and a refresh keeps the serving configuration, so a half-written S3/GCS rollout is not served. Without the key the pair loads as before and one warning is logged.
+- L-05, L-09: the first dispatch wave sends a named-category vote before unrelated URLs and reaches a second entity before more URLs of the first.
+- L-06, L-32: AWS clients (signer assembly, S3 configuration, Lambda) share one HTTP client with a 10 s connect and 60 s operation timeout and a DNS resolver that keeps its slot until the lookup itself ends, so a cancelled or stalled call cannot leave lookups running.
+- L-07, L-36: Canton token-endpoint bodies, sequencer and ledger response text and a rejected sequencer URI are no longer reflected into HTTP 500 bodies.
+- L-08: provider-controlled JSON text no longer reaches error logs; a malformed EVM receipt fails with fixed text and a quorum vote error logs the provider index only.
+- L-10: the provider stagger delay is capped at a quarter of the remaining request deadline.
+- L-11: GCP KMS rebuilds credentials that gave up, such as after an interrupted WIF token-file read.
+- L-12: GCS configuration reads never resume a failed read, which could exhaust the stack.
+- L-13: the CLI log filter pins `aws_smithy_runtime::client::orchestrator` to `info`, so SSO bearer tokens are not logged at TRACE.
+- L-14: Starknet readiness canonicalizes receipt felts before agreement.
+- L-15: a signer dropped mid-effect records an `OutcomeUnknown` attempt instead of leaving the audit trail unfinished.
+- L-16: provider-health cache ages use `elapsed_ms`; a clock that stepped backwards is the oldest.
+- L-17: Canton packet scans and ledger updates are read up to 16 MiB (parse budget as TON); other responses keep 4 MiB.
+- L-18: an Aptos V1 event to a destination the legacy table lacks no longer hides the requested packet; the `Invalid endpointId` refusal remains when no event matches.
+- L-19: AWS Ed25519 signing always signs through the immutable key ARN and checks for a 64-byte signature.
+- L-20: the Stellar already-signed check refuses a receive library other than the pinned ULN302 instead of reading the pinned contract's state for it.
+- L-23: EVM receipt agreement keeps logs in index order without the `logIndex` values, so providers numbering logs from 0 or 1 agree.
+- L-24: Azure and GCP KMS backend error text is logged, not returned in 500 responses.
+- L-25: a provider whose probe only timed out ranks as slow, not unhealthy; SECURITY.md states the refusal when too few healthy providers remain.
+- L-26: the Aptos V301 already-signed quorum key no longer carries the raw `inbound_nonce`.
+- L-27: a 64-byte DER ECDSA signature from Azure KMS is no longer misread as raw `r || s`.
+- L-28: provider strategy satisfiability uses augmenting paths instead of recursion, so a large policy cannot exhaust the worker stack.
+- L-29, L-52: the Initia indexer diagnostic falls back to the REST check when the aggregate height is null or not numeric.
+- L-30: a TON admin list headed by an empty cell with one reference is followed.
+- L-31, L-39: configured provider headers replace the client's own, are deduplicated case-insensitively, and conflicting values are refused.
+- L-33, L-50: Canton token providers are keyed by token URL, client id, scope and audience and replaced when the secret changes; a 401 or 403 drops the token and the read is retried once.
+- L-34: Tron password-only URL userinfo is moved into Basic authentication.
+- L-35: Azure Key Vault keys must be EC or EC-HSM on P-256K and a valid point.
+- L-37: TON trace digests normalize source and destination addresses.
+- L-38, L-48: derived provider endpoint paths are placed before the query; the Initia `auth` query credential moves into an `authorization` header.
+- L-40: Solana health probes use `finalized`, as source signing does.
+- L-41: the EVM health probe falls back to `net_version` on a JSON-RPC error from `eth_chainId`.
+- L-43: a successful Stellar transaction without `events` is a provider failure naming `stellar-rpc` 23 instead of a packet mismatch.
+- L-44: the generic provider-health constructor derives each chain's type instead of probing every chain as EVM.
+- L-46: an Azure key URL on a vault other than the configured one is refused.
+- L-47: SECURITY.md lists the extra keys the policy `sentEvent` carries per source family.
+- L-49: `PillarClient` provider-health calls query every endpoint; a chain is healthy only if all report it healthy and chains an endpoint omits are left out.
+- L-51: the Stellar `ScMap` reader accepts symbol keys only and refuses a name that also appears under another tag.
+- I-02: SECURITY.md documents the TON `v3-endpoint` and that the entity label must cover it; the startup report shows each TON entry's v3 origin.
+- I-03: SECURITY.md states that the confirmation count in the 400 body is one provider's observation, not an agreed value. The message is unchanged.
+- L-21: the Solana already-signed check reads the endpoint's `ReceiveLibraryConfig` of the receiver and of the srcEid default and applies the endpoint's `is_valid_receive_library`, including the grace period, at the slot of the read; a receiver not on the pinned ULN, or one with a config missing, is refused.
+- L-22: the Sui and IOTA already-signed check asks the endpoint's `is_valid_receive_library` about the pinned ULN302 and refuses a receiver on another library, whatever the verification state.
+- L-45: the Starknet already-signed check also reads the ULN's `verifiable` and counts `Verified` as signed, since `commit` reclaims the per-DVN record the check read alone.
+- Live DVNs: the FurtherFP DVNs on 17 mainnet EVM chains, Aptos and Sui return the `vid` this service signs (`tests/onchain_provenance/dvn_vid_mainnet.json`, read on chain 2026-11-02).
+- L-42, I-01: no change needed; both already hold.
 
 ## 2.7.4 - 2026-10-29
 

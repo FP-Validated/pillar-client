@@ -895,6 +895,7 @@ async fn m22_starknet_already_signed_compares_confirmations() {
                 Ok(
                     json!({"result": [format!("0x{required:x}"), "0x1", "0x0", "0x0", "0x0", "0x0", "0x0"]}),
                 ),
+                Ok(json!({"result": ["0x0"]})),
             ],
             calls.clone(),
         );
@@ -937,6 +938,7 @@ async fn m22_starknet_confirmation_floor_refuses_below_requirement() {
         vec![
             Ok(json!({"result": "0x0"})),
             Ok(json!({"result": ["0x5", "0x1", "0x0", "0x0", "0x0", "0x0", "0x0"]})),
+            Ok(json!({"result": ["0x0"]})),
         ],
         calls.clone(),
     );
@@ -948,9 +950,10 @@ async fn m22_starknet_confirmation_floor_refuses_below_requirement() {
     assert_eq!(required, 5);
     let (below_error, at_result) = assert_core_confirmation_floor(required).await;
     let recorded = calls.lock().unwrap().clone();
-    assert_eq!(recorded.len(), 2, "{recorded:?}");
+    assert_eq!(recorded.len(), 3, "{recorded:?}");
     assert_eq!(recorded[0].2["method"], "starknet_getStorageAt");
     assert_eq!(recorded[1].2["method"], "starknet_call");
+    assert_eq!(recorded[2].2["method"], "starknet_call");
     rows.push(json!({
         "required": required, "below": required - 1,
         "belowError": below_error, "at": at_result,
@@ -1108,6 +1111,7 @@ async fn m22_confirmation_floor_all_families() {
         vec![
             Ok(json!({"result": "0x0"})),
             Ok(json!({"result": ["0x5", "0x1", "0x0", "0x0", "0x0", "0x0", "0x0"]})),
+            Ok(json!({"result": ["0x0"]})),
         ],
         starknet_calls.clone(),
     )

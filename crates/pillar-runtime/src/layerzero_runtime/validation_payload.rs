@@ -808,7 +808,7 @@ where
         }
     };
     Ok((
-        format!("{required_confirmations}:{confirmations:?}:{verification_state}:{verified:?}"),
+        format!("{required_confirmations}:{confirmations:?}:{verification_state}:{signed}"),
         validity,
     ))
 }
@@ -1236,8 +1236,9 @@ fn encode_uleb128(mut value: usize) -> Vec<u8> {
 }
 
 /// `UltraLightNode302._verified` for this DVN: `submitted && confirmations >= required`,
-/// with `required` the OApp's effective receive confirmations. The contract's own
-/// `has_payload_signed`, which upstream calls, is true for any stored verification,
+/// with `required` the OApp's effective receive confirmations, or the ULN's own `verifiable`
+/// saying `Verified` (the packet is committed, which reclaimed the DVN's record). The contract's
+/// own `has_payload_signed`, which upstream calls, is true for any stored verification,
 /// so a below-requirement one that `commit` never counts would pin the duplicate
 /// check while `verify` would overwrite it. The verification is read from storage
 /// because no view returns it; the slot derivation is pinned against mainnet in
@@ -1308,13 +1309,91 @@ where
         src_eid,
     )
     .await?;
-    Ok(if stored.is_some_and(|stored| stored >= required) {
+    if stored.is_some_and(|stored| stored >= required) {
+        return Ok(PayloadSignedValidity::Signed);
+    }
+    // `commit` reclaims the DVN's record, so a committed packet reads as unsubmitted above;
+    // the ULN's own state still says `Verified`.
+    let state = observe_starknet_verification_state(
+        &transport,
+        url,
+        headers,
+        uln_address,
+        &header,
+        &payload_hash,
+    )
+    .await?;
+    Ok(if state == STARKNET_VERIFIED {
         PayloadSignedValidity::Signed
     } else {
         PayloadSignedValidity::NotSigned {
             required: Some(required),
         }
     })
+}
+
+/// `VerificationState::Verified` of the ULN's `verifiable` (Verifying, Verifiable, Verified,
+/// NotInitializable).
+const STARKNET_VERIFIED: u64 = 2;
+
+async fn observe_starknet_verification_state<T>(
+    transport: &T,
+    url: String,
+    headers: HashMap<String, String>,
+    uln_address: &str,
+    header: &[u8],
+    payload_hash: &[u8; 32],
+) -> Result<u64, RpcError>
+where
+    T: JsonRpcTransport,
+{
+    let mut calldata = starknet_byte_array_calldata(header);
+    // `Bytes32` is a `u256`: low half, then high half.
+    calldata.push(starknet_felt_hex(&payload_hash[16..]));
+    calldata.push(starknet_felt_hex(&payload_hash[..16]));
+    let response = transport
+        .post_json_scoped(
+            url,
+            headers,
+            json!({
+                "method": "starknet_call",
+                "params": [{
+                    "contract_address": uln_address,
+                    "entry_point_selector": starknet_selector("verifiable"),
+                    "calldata": calldata,
+                }, "latest"],
+                "id": 1,
+                "jsonrpc": "2.0",
+            }),
+        )
+        .await?;
+    match response
+        .get("result")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+    {
+        Some([state]) => state
+            .as_str()
+            .and_then(starknet_felt_u64)
+            .filter(|state| *state <= 3)
+            .ok_or(RpcError::Unavailable),
+        _ => Err(RpcError::Unavailable),
+    }
+}
+
+/// A Cairo `ByteArray` as call data: the count of full 31-byte words, the words, the pending
+/// word and its length.
+fn starknet_byte_array_calldata(bytes: &[u8]) -> Vec<String> {
+    let (words, pending) = bytes.as_chunks::<31>();
+    let mut calldata = vec![format!("0x{:x}", words.len())];
+    calldata.extend(words.iter().map(|word| starknet_felt_hex(word)));
+    calldata.push(starknet_felt_hex(pending));
+    calldata.push(format!("0x{:x}", pending.len()));
+    calldata
+}
+
+fn starknet_felt_hex(bytes: &[u8]) -> String {
+    format!("0x{:x}", num_bigint::BigUint::from_bytes_be(bytes))
 }
 
 /// `get_oapp_uln_receive_config(receiver, src_eid)`: the effective receive config,
@@ -1436,4 +1515,82 @@ fn starknet_selector(name: &str) -> String {
     let mut hash: [u8; 32] = Keccak256::digest(name.as_bytes()).into();
     hash[0] &= 0x03;
     normalize_starknet_felt(&hex::encode(hash))
+}
+
+#[cfg(test)]
+mod aptos_v301_tests {
+    use super::*;
+
+    const VERIFIER: &str = "0x00000000000000000000000000000000000000000000000000000000000000d1";
+
+    #[derive(Clone)]
+    struct Node {
+        inbound_nonce: u64,
+    }
+
+    #[async_trait]
+    impl JsonRpcTransport for Node {
+        async fn post_json(
+            &self,
+            _url: String,
+            _headers: HashMap<String, String>,
+            body: Value,
+        ) -> Result<Value, String> {
+            let function = body["function"].as_str().unwrap_or_default();
+            Ok(match function.rsplit("::").next() {
+                Some("get_receive_msglib") => json!(["2", "0"]),
+                Some("get_config") => {
+                    json!([format!("0x{:016x}0001{}00000000", 2, &VERIFIER[2..])])
+                }
+                Some("get_verification_confirmations") => json!(["0"]),
+                Some("verifiable") => json!([0]),
+                Some("inbound_nonce") => json!([self.inbound_nonce.to_string()]),
+                _ => return Err(format!("unexpected view {function}")),
+            })
+        }
+
+        async fn get_json(
+            &self,
+            _url: String,
+            _headers: HashMap<String, String>,
+        ) -> Result<Value, String> {
+            Err("unexpected GET".to_string())
+        }
+    }
+
+    async fn vote(inbound_nonce: u64) -> (String, PayloadSignedValidity) {
+        let contracts = AptosV301Contracts {
+            uln_301: "0x1".to_string(),
+            layerzero: "0x2".to_string(),
+            view: "0x3".to_string(),
+            view_uln301: "0x4".to_string(),
+        };
+        observe_aptos_v301_payload_signed(
+            Node { inbound_nonce },
+            "https://aptos.example".to_string(),
+            HashMap::new(),
+            AptosV301Observation {
+                contracts: &contracts,
+                receiver: "0x5",
+                receiver_bytes32: "0x5",
+                src_eid: 101,
+                sender: "0x6",
+                nonce: 5,
+                verifier_address: VERIFIER,
+                packet_header: "0x01",
+                payload_hash: "0x07",
+            },
+        )
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn providers_that_agree_on_the_verdict_cast_one_vote_whatever_the_nonce_cursor() {
+        let (first, first_verdict) = vote(7).await;
+        let (second, second_verdict) = vote(8).await;
+        assert!(matches!(first_verdict, PayloadSignedValidity::Signed));
+        assert!(matches!(second_verdict, PayloadSignedValidity::Signed));
+        assert_eq!(first, second);
+    }
 }

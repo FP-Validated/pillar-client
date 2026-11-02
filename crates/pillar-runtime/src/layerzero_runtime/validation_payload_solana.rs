@@ -4,7 +4,8 @@ use super::*;
 use base64::Engine;
 use pillar_layerzero::{
     solana_payload_is_signed, solana_payload_signed_accounts, solana_payload_signed_request,
-    SolanaFetchedPayloadSignedAccounts, SolanaPayloadSignedRequest,
+    solana_uln_is_valid_receive_library, SolanaFetchedPayloadSignedAccounts,
+    SolanaPayloadSignedRequest,
 };
 
 const SOLANA_ACCOUNT_COMMITMENT: &str = "confirmed";
@@ -17,9 +18,12 @@ where
     /// TypeScript `UlnSolanaSdk.isVerified` instead of the EVM
     /// `eth_call`-based `observe_payload_signed` path: fetches the on-chain
     /// `Nonce`, `PendingInboundNonce`, `ReceiveConfig` (custom + default),
-    /// and `Confirmations` PDAs for `verifier_address` via a single
-    /// `getMultipleAccounts` call per provider, then evaluates whether this
-    /// DVN has already recorded a sufficient confirmation for this packet.
+    /// `Confirmations` and the endpoint's `ReceiveLibraryConfig` (receiver +
+    /// default) PDAs for `verifier_address` via a single `getMultipleAccounts`
+    /// call per provider. A receiver whose effective receive library is not the
+    /// pinned ULN is refused, as the endpoint would refuse that verify. Then it
+    /// evaluates whether this DVN has already recorded a sufficient
+    /// confirmation for this packet.
     pub(crate) async fn validate_solana_payload_not_signed_with_quorum(
         &self,
         sent_event: &LzSentEvent,
@@ -44,6 +48,8 @@ where
             accounts.receive_config_pda,
             accounts.default_receive_config_pda,
             accounts.confirmations_pda,
+            accounts.library_config_pda,
+            accounts.default_library_config_pda,
         ]
         .map(|pubkey| bs58::encode(pubkey).into_string());
 
@@ -78,7 +84,7 @@ async fn observe_solana_payload_signed<T>(
     url: String,
     headers: HashMap<String, String>,
     request: SolanaPayloadSignedRequest,
-    pubkeys: [String; 5],
+    pubkeys: [String; 7],
 ) -> Result<PayloadSignedValidity, RpcError>
 where
     T: JsonRpcTransport,
@@ -106,18 +112,25 @@ where
             .ok_or_else(|| {
                 AppCoreError::Internal("Missing getMultipleAccounts result".to_string())
             })?;
-        if values.len() != 5 {
+        if values.len() != 7 {
             return Err(AppCoreError::Internal(
                 "Unexpected getMultipleAccounts result length".to_string(),
             ));
         }
+        let slot = response
+            .pointer("/result/context/slot")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| {
+                AppCoreError::Internal("Missing getMultipleAccounts context slot".to_string())
+            })?;
         let decoded = values
             .iter()
             .enumerate()
             .map(|(index, value)| {
                 decode_solana_account_data(
                     value,
-                    if index < 2 {
+                    // The nonce accounts and the library configs belong to the endpoint.
+                    if !(2..5).contains(&index) {
                         pillar_layerzero::SOLANA_ENDPOINT_PROGRAM_ID
                     } else {
                         pillar_layerzero::SOLANA_ULN_PROGRAM_ID
@@ -125,6 +138,10 @@ where
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
+        if !solana_uln_is_valid_receive_library(decoded[5].as_deref(), decoded[6].as_deref(), slot)?
+        {
+            return Ok(PayloadSignedValidity::UnsupportedReceiveLibrary);
+        }
         let required = solana_required_confirmations(decoded[2].as_deref(), decoded[3].as_deref())?;
         let accounts = SolanaFetchedPayloadSignedAccounts {
             nonce: decoded[0].as_deref(),

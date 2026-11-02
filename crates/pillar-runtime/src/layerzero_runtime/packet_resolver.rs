@@ -480,6 +480,7 @@ where
             .ok_or_else(|| AppCoreError::Internal("tx.events is not iterable".to_string()))?;
         let event_type = format!("{}::packet_event::OutboundEvent", source.layerzero_account);
         let mut block: Option<(Value, Value)> = None;
+        let mut unmapped: Option<AppCoreError> = None;
         for event in events {
             if event.get("type").and_then(Value::as_str) != Some(event_type.as_str()) {
                 continue;
@@ -501,15 +502,19 @@ where
                     source.endpoint_v1_id, packet.src_chain_id
                 )));
             }
-            let dst_chain_name =
+            let Some(dst_chain_name) =
                 pillar_config::layerzero_legacy_chain_name(u32::from(packet.dst_chain_id))
-                    .ok_or_else(|| {
-                        AppCoreError::Internal(format!(
-                            "Invariant failed: Invalid endpointId: {}",
-                            packet.dst_chain_id
-                        ))
-                    })?
-                    .to_string();
+            else {
+                // A sibling packet is not the requested one; refuse only when no packet matches.
+                unmapped.get_or_insert_with(|| {
+                    AppCoreError::Internal(format!(
+                        "Invariant failed: Invalid endpointId: {}",
+                        packet.dst_chain_id
+                    ))
+                });
+                continue;
+            };
+            let dst_chain_name = dst_chain_name.to_string();
             let (block_hash, block_number) = match &block {
                 Some(block) => block.clone(),
                 None => {
@@ -574,7 +579,7 @@ where
                 return Ok(sent_event);
             }
         }
-        Err(packet_does_not_match(src_tx_hash))
+        Err(unmapped.unwrap_or_else(|| packet_does_not_match(src_tx_hash)))
     }
     async fn get_sui_events(
         &self,
@@ -726,30 +731,9 @@ where
                                 return Ok(("null".to_string(), result));
                             }
                             if let Some(expected_tx_hash) = receipt_expected_tx_hash {
-                                serde_json::from_value::<EvmTransactionReceipt>(result)
-                                    .map_err(|error| RpcError::Remote(error.to_string()))
-                                    .and_then(|receipt| {
-                                        receipt
-                                            .normalize(expected_tx_hash)
-                                            .map_err(RpcError::Remote)
-                                    })
-                                    .and_then(|receipt| {
-                                        let fingerprint = evm_receipt_fingerprint(&receipt)
-                                            .map_err(RpcError::Remote)?;
-                                        let value = serde_json::to_value(receipt)
-                                            .map_err(|error| RpcError::Remote(error.to_string()))?;
-                                        Ok((fingerprint, value))
-                                    })
+                                evm_receipt_vote(result, expected_tx_hash)
                             } else if stellar_transaction {
-                                let fields = (
-                                    result.get("status"),
-                                    result.get("ledger"),
-                                    result.get("envelopeXdr"),
-                                    result.pointer("/events/contractEventsXdr"),
-                                );
-                                crate::provider_health::canonical_json_fingerprint(&fields)
-                                    .map(|fingerprint| (fingerprint, result))
-                                    .map_err(|error| RpcError::Remote(error.to_string()))
+                                stellar_transaction_vote(result)
                             } else if starknet_receipt {
                                 let value = starknet_receipt_projection(result);
                                 starknet_receipt_fingerprint(&value)
@@ -2495,4 +2479,79 @@ fn legacy_destination_address_size(dst_chain_id: u32) -> usize {
     pillar_config::layerzero_legacy_chain_name(dst_chain_id)
         .map(destination_address_size)
         .unwrap_or(20)
+}
+
+/// One provider's receipt as a quorum vote; its decode error names no provider text.
+fn evm_receipt_vote(result: Value, expected_tx_hash: &str) -> Result<(String, Value), RpcError> {
+    let receipt = serde_json::from_value::<EvmTransactionReceipt>(result)
+        .map_err(|_| RpcError::Remote("malformed receipt".to_string()))?
+        .normalize(expected_tx_hash)
+        .map_err(RpcError::Remote)?;
+    let fingerprint = evm_receipt_fingerprint(&receipt).map_err(RpcError::Remote)?;
+    let value =
+        serde_json::to_value(receipt).map_err(|error| RpcError::Remote(error.to_string()))?;
+    Ok((fingerprint, value))
+}
+
+/// One provider's Stellar transaction as a quorum vote.
+fn stellar_transaction_vote(result: Value) -> Result<(String, Value), RpcError> {
+    if result.get("status").and_then(Value::as_str) == Some("SUCCESS")
+        && result.get("events").is_none()
+    {
+        return Err(RpcError::Remote(
+            "Stellar RPC returned no transaction events; stellar-rpc 23 or later is required"
+                .to_string(),
+        ));
+    }
+    let fields = (
+        result.get("status"),
+        result.get("ledger"),
+        result.get("envelopeXdr"),
+        result.pointer("/events/contractEventsXdr"),
+    );
+    crate::provider_health::canonical_json_fingerprint(&fields)
+        .map(|fingerprint| (fingerprint, result))
+        .map_err(|error| RpcError::Remote(error.to_string()))
+}
+
+#[cfg(test)]
+mod receipt_vote_tests {
+    use super::*;
+
+    #[test]
+    fn a_malformed_receipt_error_never_repeats_provider_text() {
+        let error = evm_receipt_vote(
+            json!({"transactionHash": "0x1", "logs": "Authorization: Bearer SECRET"}),
+            "0x1",
+        )
+        .unwrap_err();
+        let RpcError::Remote(message) = error else {
+            panic!("a malformed receipt is the provider's failure");
+        };
+        assert!(!message.contains("SECRET"), "{message}");
+    }
+}
+
+#[cfg(test)]
+mod stellar_vote_tests {
+    use super::*;
+
+    #[test]
+    fn a_successful_transaction_without_events_names_the_rpc_version_it_needs() {
+        let error =
+            stellar_transaction_vote(json!({"status": "SUCCESS", "ledger": 7})).unwrap_err();
+        let RpcError::Remote(message) = error else {
+            panic!("an old RPC is the provider's failure");
+        };
+        assert!(message.contains("stellar-rpc 23"), "{message}");
+    }
+
+    #[test]
+    fn a_transaction_with_events_or_one_that_is_not_found_is_a_vote() {
+        assert!(stellar_transaction_vote(
+            json!({"status": "SUCCESS", "ledger": 7, "events": {"contractEventsXdr": [[]]}})
+        )
+        .is_ok());
+        assert!(stellar_transaction_vote(json!({"status": "NOT_FOUND"})).is_ok());
+    }
 }

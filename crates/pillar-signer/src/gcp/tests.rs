@@ -177,3 +177,27 @@ async fn gcp_solana_signer_info_keeps_the_upstream_sec1_slice_address() {
     assert_eq!(info.address, "KhLrwX6FuKJfNtoxn2meHYBxKjvazGPHbfMdmx78HZ6");
     assert_eq!(info.public_key, format!("0x{}", hex::encode(&x_y)));
 }
+
+#[tokio::test]
+async fn gcp_credentials_that_gave_up_are_rebuilt_and_the_rebuild_is_kept() {
+    let rebuilds = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = rebuilds.clone();
+    let client = GoogleCloudKmsClient::with_credentials(
+        reqwest::Url::parse("https://cloudkms.example/").unwrap(),
+        google_cloud_auth::credentials::testing::error_credentials(false),
+        Arc::new(move || {
+            counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(google_cloud_auth::credentials::anonymous::Builder::new().build())
+        }),
+    )
+    .unwrap();
+    client
+        .credential_headers()
+        .await
+        .expect("rebuilt credentials answer");
+    client
+        .credential_headers()
+        .await
+        .expect("and keep answering");
+    assert_eq!(rebuilds.load(std::sync::atomic::Ordering::SeqCst), 1);
+}

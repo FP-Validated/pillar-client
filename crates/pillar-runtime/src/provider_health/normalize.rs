@@ -30,6 +30,9 @@ pub(super) fn health_error_response(error: RpcError) -> Result<Value, RpcError> 
     }
 }
 
+/// What a request that ran past its time limit reports; probes and signing share the text.
+pub(crate) const PROVIDER_RESPONSE_TIMED_OUT: &str = "provider response timed out";
+
 /// Longest provider response string the health report retains, counted after redaction.
 pub(crate) const MAX_HEALTH_RESPONSE_TEXT_BYTES: usize = 64 * 1024;
 
