@@ -4,7 +4,7 @@ All notable changes to this project are documented here. This project follows
 semantic versioning for the HTTP surface, the environment-variable contract and
 the Prometheus metric names.
 
-## Unreleased
+## 2.7.5 - 2026-11-04
 
 ### Security
 
