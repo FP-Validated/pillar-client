@@ -1,7 +1,7 @@
 use super::*;
 
 use pillar_layerzero::{
-    build_ton_dvn_verify, decode_proxy_admin_target, TonContractCodeCells, TonDvnVerifyRequest,
+    build_ton_dvn_verify, TonContractCodeCells, TonDvnVerifyRequest,
 };
 
 const DEPRECATED_ULN_OAPPS: &[&str] = &[
@@ -115,15 +115,15 @@ where
     T: JsonRpcTransport,
 {
     use super::validation_payload_ton::{ton_storage_cell, TonStorageRead};
-    use sha2::{Digest, Sha256};
 
     match ton_storage_cell(&transport, &url, headers, address).await? {
-        TonStorageRead::Cell(data, _) => {
-            let target = decode_proxy_admin_target(&data).map_err(|_| RpcError::Unavailable)?;
-            Ok((
-                format!("active:{:x}", Sha256::digest(data.as_bytes())),
-                target,
-            ))
+        // The storage was parsed once, by the read; the target comes from that cell and the vote
+        // is keyed by its representation hash, so every encoding of one storage agrees.
+        TonStorageRead::Cell(_, cell) => {
+            let target = pillar_layerzero::decode_proxy_admin_target_from_cell(&cell)
+                .map_err(|_| RpcError::Unavailable)?;
+            let hash = cell.hash().map_err(|_| RpcError::Unavailable)?;
+            Ok((format!("active:{}", hex::encode(hash.as_slice())), target))
         }
         TonStorageRead::Inactive => Ok(("inactive".to_string(), None)),
         TonStorageRead::Unavailable => Err(RpcError::Unavailable),

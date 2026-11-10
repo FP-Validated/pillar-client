@@ -33,13 +33,19 @@ pub(crate) async fn read_json_body(
     if !compressed {
         return read_json_body_sync(&headers, body);
     }
-    let permit = DECOMPRESSION_SLOTS
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| AppError::Http {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            message: "Compressed request processing capacity exhausted".to_string(),
-        })?;
+    // Slots are granted in arrival order, so a few slow decodes cannot starve every other
+    // compressed request; only a wait past two seconds is refused.
+    let permit = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        DECOMPRESSION_SLOTS.clone().acquire_owned(),
+    )
+    .await
+    .ok()
+    .and_then(Result::ok)
+    .ok_or_else(|| AppError::Http {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        message: "Compressed request processing capacity exhausted".to_string(),
+    })?;
     tokio::task::spawn_blocking(move || {
         // The worker owns admission even if its HTTP request is cancelled.
         let _permit = permit;

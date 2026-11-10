@@ -599,8 +599,9 @@ impl PillarApp {
 
         // Upstream builds this pathway with `convertLegacyMessageIdToPathwayId`, whose
         // key order (`app/utils/index.ts:7-14`) is what its error bodies stringify.
-        let v2_order = pathway_json(&lz_message_id.pathway_id);
-        let v1_order = legacy_pathway_json(&lz_message_id.pathway_id);
+        // Rendered only for an error body: formatting caller-supplied values before admission
+        // would put unbounded work ahead of the signing gate.
+        let pathway_id = lz_message_id.pathway_id.clone();
         self.sign_request_v2(PillarApiRequestV2 {
             src_tx_hash: request_input.src_tx_hash,
             lz_message_id,
@@ -613,17 +614,28 @@ impl PillarApp {
             },
         })
         .await
-        .map_err(|error| match error {
-            AppCoreError::BadRequest(message) => {
-                AppCoreError::BadRequest(message.replace(&v2_order, &v1_order))
+        .map_err(|error| {
+            let render = || {
+                (
+                    pathway_json(&pathway_id),
+                    legacy_pathway_json(&pathway_id),
+                )
+            };
+            match error {
+                AppCoreError::BadRequest(message) => {
+                    let (v2_order, v1_order) = render();
+                    AppCoreError::BadRequest(message.replace(&v2_order, &v1_order))
+                }
+                AppCoreError::UnresolvableCommand(message) => {
+                    let (v2_order, v1_order) = render();
+                    AppCoreError::UnresolvableCommand(message.replace(&v2_order, &v1_order))
+                }
+                AppCoreError::Internal(message) => {
+                    let (v2_order, v1_order) = render();
+                    AppCoreError::Internal(message.replace(&v2_order, &v1_order))
+                }
+                other => other,
             }
-            AppCoreError::UnresolvableCommand(message) => {
-                AppCoreError::UnresolvableCommand(message.replace(&v2_order, &v1_order))
-            }
-            AppCoreError::Internal(message) => {
-                AppCoreError::Internal(message.replace(&v2_order, &v1_order))
-            }
-            other => other,
         })
     }
 
@@ -1334,24 +1346,38 @@ fn legacy_pathway_json(pathway_id: &PathwayId) -> String {
 /// `JSON.stringify` for a value `JSON.parse` produced: numbers render as JavaScript
 /// renders them, everything else as serde does (both escape the same way).
 pub fn js_json(value: &Value) -> String {
+    let mut out = String::new();
+    write_js_json(value, &mut out);
+    out
+}
+
+/// One output buffer for the whole value, so the work is linear in its size, not in its depth.
+fn write_js_json(value: &Value, out: &mut String) {
     match value {
-        Value::Number(number) => js_number(number),
-        Value::Array(items) => format!(
-            "[{}]",
-            items.iter().map(js_json).collect::<Vec<_>>().join(",")
-        ),
-        Value::Object(map) => format!(
-            "{{{}}}",
-            map.iter()
-                .map(|(key, item)| format!(
-                    "{}:{}",
-                    serde_json::to_string(key).expect("key serializes"),
-                    js_json(item)
-                ))
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
-        other => serde_json::to_string(other).expect("JSON value serializes"),
+        Value::Number(number) => out.push_str(&js_number(number)),
+        Value::Array(items) => {
+            out.push('[');
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    out.push(',');
+                }
+                write_js_json(item, out);
+            }
+            out.push(']');
+        }
+        Value::Object(map) => {
+            out.push('{');
+            for (index, (key, item)) in map.iter().enumerate() {
+                if index > 0 {
+                    out.push(',');
+                }
+                out.push_str(&serde_json::to_string(key).expect("key serializes"));
+                out.push(':');
+                write_js_json(item, out);
+            }
+            out.push('}');
+        }
+        other => out.push_str(&serde_json::to_string(other).expect("JSON value serializes")),
     }
 }
 

@@ -798,6 +798,11 @@ fn ton_principal_address(value: &str) -> Result<String, AppCoreError> {
         })?;
         return Ok(format!("0x{}", hex::encode(bytes)));
     }
+    if !super::source_events_ton::plausible_ton_address_text(value) {
+        return Err(AppCoreError::Internal(
+            "Invalid TON principal address".to_string(),
+        ));
+    }
     let address = value
         .parse::<ton_core::types::TonAddress>()
         .map_err(|error| {

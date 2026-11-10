@@ -28,10 +28,22 @@ pub(crate) struct TonPacketSentEvent {
     pub(crate) block_number: u64,
 }
 
+/// The longest text a TON address takes in any spelling (friendly base64 is 48 characters, raw
+/// `workchain:hash` under 80); the pinned parser splits on every `:` before it checks their
+/// number, so an unbounded string of them is an allocation a provider chooses.
+pub(crate) const MAX_TON_ADDRESS_TEXT_BYTES: usize = 128;
+
+pub(crate) fn plausible_ton_address_text(value: &str) -> bool {
+    value.len() <= MAX_TON_ADDRESS_TEXT_BYTES && value.matches(':').count() <= 1
+}
+
 /// Normalize friendly and raw TON addresses to the canonical `workchain:hash`
 /// representation used by the V3 API. Invalid values are lower-cased so that
 /// malformed provider data cannot accidentally match a trusted address.
 pub(crate) fn normalize_ton_address(value: &str) -> String {
+    if !plausible_ton_address_text(value) {
+        return value.trim().to_ascii_lowercase();
+    }
     value
         .parse::<ton_core::types::TonAddress>()
         .map(|address| format!("{}:{}", address.workchain, hex::encode(address.hash)))

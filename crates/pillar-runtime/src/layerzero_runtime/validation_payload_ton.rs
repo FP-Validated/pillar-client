@@ -29,7 +29,7 @@ use super::*;
 use sha2::{Digest, Sha256};
 
 use pillar_layerzero::{
-    boc_from_base64_with_limits, committable_view_is_signed, dvn_attestation,
+    committable_view_is_signed, dvn_attestation,
     required_receive_confirmations, ton_address_to_be32, ton_boc_to_base64,
     ton_payload_signed_targets, uln_default_receive_config, DvnAttestation, TonContractCodeCells,
     TonPayloadSignedRequest, TonPayloadSignedTargets, TonStorageCell, MAX_ACCOUNT_STATE_CELLS,
@@ -225,10 +225,15 @@ where
             TonStorageRead::Inactive => return inactive(),
             TonStorageRead::Unavailable => return Err(RpcError::Unavailable),
         };
+    // Keyed by the cells' representation hashes, not their text: CRC and no-CRC, standard and
+    // URL-safe spellings of one storage are one answer.
+    let (Ok(connection_hash), Ok(uln_hash)) = (connection_storage.hash(), uln_storage.hash())
+    else {
+        return Err(RpcError::Unavailable);
+    };
     let mut digest = Sha256::new();
-    digest.update((connection_storage_boc.len() as u64).to_be_bytes());
-    digest.update(connection_storage_boc.as_bytes());
-    digest.update(uln_storage_boc.as_bytes());
+    digest.update(connection_hash.as_slice());
+    digest.update(uln_hash.as_slice());
     let storage_fingerprint = format!("{:x}", digest.finalize());
     drop(connection_storage_boc);
     drop(uln_storage_boc);
@@ -362,22 +367,21 @@ where
     else {
         return Ok(TonStorageRead::Inactive);
     };
-    if !ton_boc_cell_count_fits(data) {
+    let Ok(bytes) = pillar_layerzero::boc_base64_bytes(data) else {
+        return Ok(TonStorageRead::Unavailable);
+    };
+    if !ton_boc_cell_count_fits(&bytes) {
         return Ok(TonStorageRead::Unavailable);
     }
     Ok(
-        match boc_from_base64_with_limits(data, MAX_ACCOUNT_STATE_CELLS, false) {
+        match pillar_layerzero::boc_from_bytes_with_limits(bytes, MAX_ACCOUNT_STATE_CELLS, false) {
             Ok(cell) => TonStorageRead::Cell(data.to_string(), cell),
             Err(_) => TonStorageRead::Unavailable,
         },
     )
 }
 
-fn ton_boc_cell_count_fits(encoded: &str) -> bool {
-    use base64::Engine;
-    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(encoded) else {
-        return false;
-    };
+fn ton_boc_cell_count_fits(bytes: &[u8]) -> bool {
     if bytes.len() < 6 || bytes[..4] != [0xb5, 0xee, 0x9c, 0x72] {
         return true;
     }
@@ -482,15 +486,14 @@ mod boc_header_tests {
 
     #[test]
     fn rejects_fourteen_byte_boc_with_impossible_declared_cell_count() {
-        use base64::Engine;
         let bytes = [0xb5, 0xee, 0x9c, 0x72, 1, 1, 255, 1, 0, 1, 0, 0, 0, 0];
-        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-        assert!(!ton_boc_cell_count_fits(&encoded));
+        assert!(!ton_boc_cell_count_fits(&bytes));
     }
 }
 #[cfg(test)]
 mod default_receive_config_tests {
     use super::*;
+    use pillar_layerzero::boc_from_base64_with_limits;
     use std::collections::VecDeque;
     use ton_core::cell::TonCell;
 

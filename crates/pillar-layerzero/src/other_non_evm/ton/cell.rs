@@ -38,11 +38,34 @@ pub fn boc_from_hex(hex: &str) -> Result<TonCell, AppCoreError> {
     boc_from_bytes(bytes)
 }
 
+/// The bytes of a base64 BOC in either alphabet, padded or not: the spellings
+/// `Buffer.from(_, 'base64')` and `@ton/core` take.
+pub fn boc_base64_bytes(data: &str) -> Result<Vec<u8>, AppCoreError> {
+    decode_boc_base64(data)
+}
+
+fn decode_boc_base64(data: &str) -> Result<Vec<u8>, AppCoreError> {
+    use base64::{
+        alphabet,
+        engine::{general_purpose::GeneralPurposeConfig, DecodePaddingMode, GeneralPurpose},
+    };
+    const STANDARD: GeneralPurpose = GeneralPurpose::new(
+        &alphabet::STANDARD,
+        GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent),
+    );
+    const URL_SAFE: GeneralPurpose = GeneralPurpose::new(
+        &alphabet::URL_SAFE,
+        GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent),
+    );
+    STANDARD
+        .decode(data)
+        .or_else(|_| URL_SAFE.decode(data))
+        .map_err(map_err)
+}
+
 /// Parse a single-root BOC from a base64 string (toncenter `data` field).
 pub fn boc_from_base64(data: &str) -> Result<TonCell, AppCoreError> {
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(data)
-        .map_err(map_err)?;
+    let bytes = decode_boc_base64(data)?;
     boc_from_bytes(bytes)
 }
 
@@ -55,10 +78,37 @@ pub fn boc_from_base64_with_limits(
     max_cells: usize,
     reject_exotic: bool,
 ) -> Result<TonCell, AppCoreError> {
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(data)
-        .map_err(map_err)?;
+    let bytes = decode_boc_base64(data)?;
     boc_from_bytes_with_limits(bytes, max_cells, reject_exotic)
+}
+
+/// The two older BOC serializations, `0x68ff65f3` (indexed) and `0xacc3a728` (indexed, CRC32C),
+/// carry the same body as the generic one behind another magic. They are rewritten to the
+/// generic magic, with its flags and a recomputed checksum, so one decoder reads all three.
+fn canonical_boc_bytes(mut bytes: Vec<u8>) -> Vec<u8> {
+    let with_crc = match bytes.get(..4) {
+        Some([0x68, 0xff, 0x65, 0xf3]) => false,
+        Some([0xac, 0xc3, 0xa7, 0x28]) => true,
+        _ => return bytes,
+    };
+    if bytes.len() < 10 || bytes[4] == 0 || bytes[4] > 4 {
+        return bytes;
+    }
+    let crc = crc::Crc::<u32>::new(&crc::CRC_32_ISCSI);
+    if with_crc {
+        let body = bytes.len() - 4;
+        if crc.checksum(&bytes[..body]).to_le_bytes() != bytes[body..] {
+            return bytes;
+        }
+    }
+    bytes[..4].copy_from_slice(&[0xb5, 0xee, 0x9c, 0x72]);
+    bytes[4] = 0x80 | if with_crc { 0x40 } else { 0 } | bytes[4];
+    if with_crc {
+        let body = bytes.len() - 4;
+        let checksum = crc.checksum(&bytes[..body]).to_le_bytes();
+        bytes[body..].copy_from_slice(&checksum);
+    }
+    bytes
 }
 
 pub fn boc_from_bytes_with_limits(
@@ -66,6 +116,7 @@ pub fn boc_from_bytes_with_limits(
     max_cells: usize,
     reject_exotic: bool,
 ) -> Result<TonCell, AppCoreError> {
+    let bytes = canonical_boc_bytes(bytes);
     if !boc_header_is_safe(&bytes, max_cells) {
         return Err(map_err("invalid BOC header"));
     }
@@ -97,6 +148,24 @@ pub fn boc_from_bytes_with_limits(
         Ok(root)
     }))
     .unwrap_or_else(|_| Err(map_err("BOC parser panicked")))
+}
+
+/// Refuses a cell tree holding any exotic or non-zero-level cell, for a caller that parsed it
+/// with those allowed.
+pub fn ensure_no_exotic_cells(root: &TonCell) -> Result<(), AppCoreError> {
+    let mut cells = vec![root.clone()];
+    let mut visited = std::collections::HashSet::new();
+    while let Some(cell) = cells.pop() {
+        if cell.cell_type() != CellType::Ordinary || cell.level_mask().mask() != 0 {
+            return Err(map_err("exotic TON cells are not supported"));
+        }
+        let refs = cell.refs();
+        if refs.is_empty() || !visited.insert(refs.as_ptr() as usize) {
+            continue;
+        }
+        cells.extend(refs.iter().cloned());
+    }
+    Ok(())
 }
 
 pub const MAX_MESSAGE_CELLS: usize = 1 << 13;

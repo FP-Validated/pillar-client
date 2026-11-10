@@ -8,7 +8,9 @@
 
 use num_bigint::BigUint;
 
-use super::cell::{boc_from_base64_with_limits, map_err, MAX_ACCOUNT_STATE_CELLS};
+use super::cell::{
+    boc_from_base64_with_limits, ensure_no_exotic_cells, map_err, MAX_ACCOUNT_STATE_CELLS,
+};
 use super::cl_declare::{cell_name, cl_get_ref};
 use pillar_core::AppCoreError;
 
@@ -23,11 +25,20 @@ const MAX_ADDRESS_LIST_HOPS: usize = 4;
 /// then falls back to the original DVN address, like `getImplementationContract`).
 pub fn decode_proxy_admin_target(storage_boc_base64: &str) -> Result<Option<String>, AppCoreError> {
     let cell = boc_from_base64_with_limits(storage_boc_base64, MAX_ACCOUNT_STATE_CELLS, true)?;
-    if cell_name(&cell)? != PROXY_NAME {
+    decode_proxy_admin_target_from_cell(&cell)
+}
+
+/// [`decode_proxy_admin_target`] over a storage cell the caller already parsed, so a provider's
+/// BOC is parsed once. The caller may have allowed exotic cells; they are refused here.
+pub fn decode_proxy_admin_target_from_cell(
+    cell: &ton_core::cell::TonCell,
+) -> Result<Option<String>, AppCoreError> {
+    ensure_no_exotic_cells(cell)?;
+    if cell_name(cell)? != PROXY_NAME {
         return Ok(None);
     }
     // Proxy field 0 = workerCoreStorage; WorkerCoreStorage field 0 = admins.
-    let worker_core_storage = cl_get_ref(&cell, 0)?;
+    let worker_core_storage = cl_get_ref(cell, 0)?;
     let mut admins = cl_get_ref(&worker_core_storage, 0)?;
     // An address list may be headed by an empty cell whose single reference holds the address.
     for _ in 0..MAX_ADDRESS_LIST_HOPS {
