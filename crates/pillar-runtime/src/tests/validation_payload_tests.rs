@@ -247,7 +247,7 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_starknet_payload() {
     assert_eq!(calls[0].2["method"], "starknet_getStorageAt");
     assert_eq!(
         calls[0].2["params"][0],
-        "0x0727f40349719ac76861a51a0b3d3e07be1577fff137bb81a5dc32e5a5c61d38"
+        "0x727f40349719ac76861a51a0b3d3e07be1577fff137bb81a5dc32e5a5c61d38"
     );
     assert_eq!(calls[1].2["method"], "starknet_call");
     assert_eq!(calls[2].2["method"], "starknet_call");
@@ -367,7 +367,7 @@ async fn a_committed_starknet_packet_is_signed_although_commit_reclaimed_the_dvn
     assert_eq!(calls[2].2["method"], "starknet_call");
     assert_eq!(
         call["contract_address"],
-        "0x0727f40349719ac76861a51a0b3d3e07be1577fff137bb81a5dc32e5a5c61d38"
+        "0x727f40349719ac76861a51a0b3d3e07be1577fff137bb81a5dc32e5a5c61d38"
     );
     // `starknet_keccak("verifiable")`, derived apart from the production code.
     assert_eq!(

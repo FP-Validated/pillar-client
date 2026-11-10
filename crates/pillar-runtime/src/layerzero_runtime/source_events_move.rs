@@ -483,8 +483,18 @@ where
     }
     // Upstream's `getBlockByHashOrVersion` (`multiprovider/src/aptos.ts:372-399`): a `0x`
     // value is a transaction hash, anything else the ledger version a ULNv2 send names.
-    let ledger_version = (chain_name == "aptos" && !tx_hash.starts_with("0x"))
-        .then(|| aptos_ledger_version(tx_hash).unwrap_or_default());
+    // A bare 64-digit value is a transaction hash that resolution accepted, never a version.
+    let bare_hash = tx_hash.len() == 64 && tx_hash.bytes().all(|byte| byte.is_ascii_hexdigit());
+    let ledger_version = if chain_name == "aptos" && !tx_hash.starts_with("0x") && !bare_hash {
+        Some(aptos_ledger_version(tx_hash).map_err(|_| {
+            RpcError::Remote(
+                "Aptos source identifier is neither a transaction hash nor a ledger version"
+                    .to_string(),
+            )
+        })?)
+    } else {
+        None
+    };
     let transaction = match ledger_version {
         Some(_) => Value::Null,
         None => {

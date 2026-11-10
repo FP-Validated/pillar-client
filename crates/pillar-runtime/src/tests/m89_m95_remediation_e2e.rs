@@ -798,6 +798,7 @@ async fn proxy_child() {
     let body = json!({"jsonrpc": "2.0", "id": 1, "method": "eth_chainId", "params": []});
     let loopback = std::env::var("PILLAR_M94_LOOPBACK").unwrap();
     let hostname = std::env::var("PILLAR_M94_HOSTNAME").unwrap();
+    let localhost = std::env::var("PILLAR_M94_LOCALHOST").unwrap();
     let answer = |result: Result<Value, String>| match result {
         Ok(value) => value["result"].as_str().unwrap_or("none").to_string(),
         Err(error) => format!("error: {error}"),
@@ -810,6 +811,7 @@ async fn proxy_child() {
             )
             .await
         ),
+        "reqwest_localhost": answer(transport.post_json(localhost, HashMap::new(), body.clone()).await),
         "reqwest_hostname": answer(transport.post_json(hostname, HashMap::new(), body).await),
     });
     println!("M94_RESULT {report}");
@@ -833,8 +835,12 @@ async fn m94_loopback_bypasses_proxy() -> Value {
                 format!("http://127.0.0.1:{honest}/rpc"),
             )
             .env(
-                "PILLAR_M94_HOSTNAME",
+                "PILLAR_M94_LOCALHOST",
                 format!("http://localhost:{honest}/rpc"),
+            )
+            .env(
+                "PILLAR_M94_HOSTNAME",
+                format!("http://rpc.proxy-test.example:{honest}/rpc"),
             )
             .output()
             .unwrap()
@@ -852,16 +858,17 @@ async fn m94_loopback_bypasses_proxy() -> Value {
         .find_map(|line| line.split_once("M94_RESULT ").map(|(_, result)| result))
         .map(|line| serde_json::from_str(line).unwrap())
         .unwrap_or_else(|| panic!("child printed no result: {stdout}"));
-    // The literal loopback address never reaches the proxy, on either HTTP path.
+    // Literal loopback addresses and `localhost` never reach the proxy, on any HTTP path.
     assert_eq!(result["reqwest_loopback"], "honest", "{result}");
     assert_eq!(result["read_loopback"], "honest", "{result}");
-    // The proxy is live: a host name still goes through it.
+    assert_eq!(result["reqwest_localhost"], "honest", "{result}");
+    // The proxy is live: another host name still goes through it.
     assert_eq!(result["reqwest_hostname"], "forged", "{result}");
     let proxy_seen = proxy_seen.lock().unwrap().clone();
     assert_eq!(proxy_seen.len(), 1, "{proxy_seen:?}");
-    assert!(proxy_seen[0].contains("localhost"), "{proxy_seen:?}");
+    assert!(proxy_seen[0].contains("rpc.proxy-test.example"), "{proxy_seen:?}");
     let honest_seen = honest_seen.lock().unwrap().clone();
-    assert_eq!(honest_seen.len(), 2, "{honest_seen:?}");
+    assert_eq!(honest_seen.len(), 3, "{honest_seen:?}");
     json!({"child": result, "proxy_saw": proxy_seen, "honest_listener_saw": honest_seen})
 }
 

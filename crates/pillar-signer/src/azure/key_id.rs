@@ -1,9 +1,21 @@
 use crate::types::SignerError;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Azure names key objects case-insensitively, so two spellings of one key are one identity.
+#[derive(Debug, Clone, Eq)]
 pub struct AzureKmsKeyId {
     pub name: String,
     pub version: Option<String>,
+}
+
+impl PartialEq for AzureKmsKeyId {
+    fn eq(&self, other: &Self) -> bool {
+        self.name.eq_ignore_ascii_case(&other.name)
+            && match (&self.version, &other.version) {
+                (Some(left), Some(right)) => left.eq_ignore_ascii_case(right),
+                (None, None) => true,
+                _ => false,
+            }
+    }
 }
 
 impl AzureKmsKeyId {
@@ -22,7 +34,12 @@ pub(crate) fn azure_key_vault_origin(key_id: &str) -> Option<String> {
 }
 
 pub fn parse_azure_kms_key_id(key_id: &str) -> Result<AzureKmsKeyId, SignerError> {
-    if !key_id.starts_with("http://") && !key_id.starts_with("https://") {
+    let has_http_scheme = |scheme: &str| {
+        key_id
+            .get(..scheme.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(scheme))
+    };
+    if !has_http_scheme("http://") && !has_http_scheme("https://") {
         return Ok(AzureKmsKeyId {
             name: key_id.to_string(),
             version: None,

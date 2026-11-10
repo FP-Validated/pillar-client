@@ -29,6 +29,10 @@ where
             health_error_response(error)?
         }
         refused => {
+            let chain_id_timed_out = matches!(
+                &refused,
+                Err(RpcError::Remote(message)) if message == PROVIDER_RESPONSE_TIMED_OUT
+            );
             let chain_id_error = match refused {
                 Err(error) => error.to_string(),
                 Ok(_) => "JSON-RPC error".to_string(),
@@ -49,6 +53,13 @@ where
                 Ok(response) => response.get("result").cloned().unwrap_or(Value::Null),
                 Err(error @ (RpcError::Admission(_) | RpcError::Configuration(_))) => {
                     health_error_response(error)?
+                }
+                // Both calls only ran past their limit: that is slow, not unhealthy, and the
+                // bare sentinel is what ranking looks for.
+                Err(RpcError::Remote(message))
+                    if chain_id_timed_out && message == PROVIDER_RESPONSE_TIMED_OUT =>
+                {
+                    Value::String(PROVIDER_RESPONSE_TIMED_OUT.to_string())
                 }
                 Err(net_version_error) => Value::String(format!(
                     "eth_chainId error: {chain_id_error}; net_version error: {net_version_error}"

@@ -271,7 +271,10 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
                     .filter(|value| !value.is_null())
                     .ok_or(RpcError::Unavailable)?;
             }
-            unreachable!();
+            // Page-size retries use iterations without advancing, so the budget can run out here.
+            return Err(RpcError::Remote(
+                "IOTA transaction exceeds 1024 events".into(),
+            ));
         }
         if target.as_ref() == "sui" {
             if body.get("query").and_then(Value::as_str).is_some()
@@ -456,6 +459,20 @@ fn apply_headers(
     for (name, value) in headers {
         let name = HeaderName::try_from(name.as_str())
             .map_err(|_| "invalid provider header name".to_string())?;
+        // Hop-by-hop headers describe one connection, not the request; the pooled client would
+        // reuse a connection the provider has already closed.
+        if matches!(
+            name.as_str(),
+            "connection"
+                | "keep-alive"
+                | "proxy-connection"
+                | "te"
+                | "trailer"
+                | "transfer-encoding"
+                | "upgrade"
+        ) {
+            continue;
+        }
         let value = HeaderValue::try_from(value.as_str())
             .map_err(|_| format!("invalid value for provider header {name}"))?;
         match map.get(&name) {
@@ -593,8 +610,9 @@ impl AwsLambdaInvokeClient for AwsSdkLambdaInvokeClient {
 #[derive(Clone, Debug)]
 pub struct ReqwestJsonRpcTransport {
     client: reqwest::Client,
-    /// For literal loopback targets only. The environment's proxy settings would otherwise carry a
-    /// request the config validation treats as local, and its bearer token, through a third party.
+    /// For loopback targets only (literal addresses and `localhost`). The environment's proxy
+    /// settings would otherwise carry a request the config validation treats as local, and its
+    /// bearer token, through a third party.
     loopback_client: reqwest::Client,
     read_http: read_http::ReadHttp,
 }
@@ -611,8 +629,18 @@ pub const DEFAULT_RPC_TIMEOUT: std::time::Duration = std::time::Duration::from_m
 impl ReqwestJsonRpcTransport {
     pub fn new() -> Result<Self, String> {
         let build = |client: reqwest::ClientBuilder| {
+            let mut headers = reqwest::header::HeaderMap::new();
+            // No content coding is negotiated or decoded, so the answer must not be encoded.
+            headers.insert(
+                reqwest::header::ACCEPT_ENCODING,
+                reqwest::header::HeaderValue::from_static("identity"),
+            );
             client
                 .timeout(DEFAULT_RPC_TIMEOUT)
+                // A connector started speculatively outlives the request that raced it, and the
+                // request timeout does not cover it.
+                .connect_timeout(std::time::Duration::from_secs(10))
+                .default_headers(headers)
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .map_err(|error| error.to_string())
@@ -626,7 +654,12 @@ impl ReqwestJsonRpcTransport {
 
     fn client_for(&self, url: &str) -> &reqwest::Client {
         let loopback = reqwest::Url::parse(url)
-            .map(|url| pillar_config::is_literal_loopback(&url))
+            .map(|url| {
+                pillar_config::is_literal_loopback(&url)
+                    || url
+                        .host_str()
+                        .is_some_and(|host| host.trim_end_matches('.').eq_ignore_ascii_case("localhost"))
+            })
             .unwrap_or(false);
         if loopback {
             &self.loopback_client

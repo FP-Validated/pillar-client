@@ -63,10 +63,8 @@ async fn provider_health_probes_initia_latest_block_like_typescript() {
     );
     assert_eq!(calls[0].2["method"], "GET");
     assert_eq!(calls[1].0, "https://indexer.example/graphql/");
-    assert_eq!(
-        calls[1].1.get("authorization"),
-        Some(&"Bearer initia-token".to_string())
-    );
+    // The indexer is another origin: the RPC credential is not sent to it.
+    assert_eq!(calls[1].1.get("authorization"), None);
     assert_eq!(calls[1].2["operationName"], "InitiaLatest");
     assert!(calls[1].2["query"]
         .as_str()

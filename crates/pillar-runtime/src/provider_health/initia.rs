@@ -23,7 +23,10 @@ pub(crate) struct InitiaIndexerProviderHealthRequest {
     pub(crate) report_url: String,
     pub(crate) indexer_request_url: String,
     pub(crate) base_url: String,
+    /// The RPC entry's headers, for the RPC fallback probe only.
     pub(crate) headers: HashMap<String, String>,
+    /// What the indexer itself is sent: the RPC headers only when it is the same origin.
+    pub(crate) indexer_headers: HashMap<String, String>,
     pub(crate) body: Value,
 }
 
@@ -38,6 +41,13 @@ pub(crate) fn initia_indexer_provider_health_request(
         .map(|(_, value)| value.into_owned())
         .filter(|value| !value.is_empty())?;
     let base_url = initia_provider_uri_parts(uri).0;
+    let same_origin = reqwest::Url::parse(&indexer_url)
+        .is_ok_and(|indexer| indexer.origin() == parsed_url.origin());
+    let indexer_headers = if same_origin {
+        headers.clone()
+    } else {
+        HashMap::new()
+    };
 
     Some(InitiaIndexerProviderHealthRequest {
         indexer_request_url: append_url_path(&indexer_url, &[""]).map_or_else(
@@ -47,6 +57,7 @@ pub(crate) fn initia_indexer_provider_health_request(
         report_url: indexer_url,
         base_url,
         headers,
+        indexer_headers,
         body: initia_indexer_health_query(),
     })
 }

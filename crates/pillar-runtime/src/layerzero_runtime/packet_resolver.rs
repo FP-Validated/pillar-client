@@ -241,7 +241,7 @@ where
             )));
         }
         let receipt: EvmTransactionReceipt = serde_json::from_value(result)
-            .map_err(|error| AppCoreError::Internal(error.to_string()))?;
+            .map_err(|_| AppCoreError::Internal("malformed EVM receipt".to_string()))?;
         // Still refused, but as upstream reports it: a reverted transaction has no
         // PacketSent log, so its sdk ends in `Packet does not match lzMessageId`.
         if receipt.status != "1" {
@@ -1059,11 +1059,7 @@ where
                 .iter()
                 .enumerate()
                 .filter_map(|(index, uri)| {
-                    let (endpoint, _, headers) = ton_v3_provider_uri_parts(uri)?;
-                    Some((
-                        index,
-                        crate::provider_health::dialled_identity_key(endpoint, headers),
-                    ))
+                    Some((index, crate::provider_health::ton_v3_rank_key(uri)?))
                 })
                 .collect();
             let plan = crate::provider_health::plan_dispatch_for_keys(
@@ -1777,6 +1773,17 @@ where
         }
         let mut accumulator = ExactQuorumAccumulator::new(quorum, 0..provider_config.uris.len());
         while let Some((index, response)) = requests.next().await {
+            // An absent table entry is an answer the providers can agree on; every other
+            // failure stays a lost vote.
+            let response = match response {
+                Err(error)
+                    if crate::provider_health::is_http_not_found(&error)
+                        || matches!(&error, RpcError::Remote(message) if message == "table item not found") =>
+                {
+                    Ok(Value::Null)
+                }
+                other => other,
+            };
             let observation = provider_response(response).and_then(|response| {
                 response
                     .map(|value| {
@@ -2018,12 +2025,16 @@ where
                 json!({"key_type": "u64", "value_type": "vector<u8>", "key": key}),
                 "Aptos adapter params table",
             )
-            .await;
+            .await?;
         Ok(match item {
-            Ok(Value::String(text)) => {
-                pillar_layerzero::node_buffer_from_hex(strip_hex_prefix(&text))
+            Value::String(text) => pillar_layerzero::node_buffer_from_hex(strip_hex_prefix(&text)),
+            // No entry for the destination: upstream's default.
+            Value::Null => fallback(),
+            _ => {
+                return Err(AppCoreError::Internal(
+                    "Aptos adapter params table returned an unusable value".to_string(),
+                ))
             }
-            _ => fallback(),
         })
     }
 

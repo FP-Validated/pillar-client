@@ -338,9 +338,15 @@ pub async fn production_kms_raw_signer_factory_from_options(
                 key_version: key_version.clone(),
             },
             Arc::new(
-                GoogleCloudKmsClient::from_default_credentials()
-                    .await
-                    .map_err(|error| error.to_string())?,
+                // Metadata discovery has no request timeout of its own, so a metadata endpoint
+                // that accepts the connection and never answers would leave startup pending.
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    GoogleCloudKmsClient::from_default_credentials(),
+                )
+                .await
+                .map_err(|_| "GCP KMS credential discovery timed out after 30 seconds".to_string())?
+                .map_err(|error| error.to_string())?,
             ),
         )) as Arc<dyn RawSignerAdapterFactory>),
         KmsSignerAdapterFactoryOptions::Azure { vault_url } => {

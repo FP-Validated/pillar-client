@@ -99,7 +99,7 @@ where
     let graph_ql_response = transport
         .post_json_scoped(
             request.indexer_request_url,
-            request.headers.clone(),
+            request.indexer_headers.clone(),
             request.body,
         )
         .await;
@@ -199,6 +199,7 @@ mod tests {
                 indexer_request_url: "https://indexer.example/".to_string(),
                 base_url: "https://initia.example".to_string(),
                 headers: HashMap::new(),
+                indexer_headers: HashMap::new(),
                 body: json!({}),
             },
         )

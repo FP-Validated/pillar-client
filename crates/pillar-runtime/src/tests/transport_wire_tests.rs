@@ -68,7 +68,7 @@ fn recorded_response(method: &str, path: &str, request_body: &[u8]) -> Vec<u8> {
         }
         if path.contains(&ton_case_hash("malformed-topology-source")) {
             let hash = ton_case_hash("malformed-topology-source");
-            return serde_json::to_vec(&serde_json::json!({"events":[{"trace":{"tx_hash":hash.clone(),"children":null},"transactions":{(hash.clone()):{"hash":hash,"in_msg":null}}}]})).expect("malformed-topology fixture serializes");
+            return serde_json::to_vec(&serde_json::json!({"events":[{"trace":{"tx_hash":hash.clone(),"children":{}},"transactions":{(hash.clone()):{"hash":hash,"in_msg":null}}}]})).expect("malformed-topology fixture serializes");
         }
         if path.contains(&ton_case_hash("malformed-json-source")) {
             return b"{\"events\":[".to_vec();

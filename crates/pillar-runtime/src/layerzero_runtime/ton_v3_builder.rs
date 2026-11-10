@@ -55,7 +55,8 @@ where
             uln_manager_address,
             deprecated_code,
             deprecated_uln_manager_address,
-            rank_tracker: Arc::new(ProviderRankTracker::new()),
+            // The handle's tracker is the one the health probes seed; a private one never is.
+            rank_tracker: providers.rank_tracker.clone(),
         }
     }
 

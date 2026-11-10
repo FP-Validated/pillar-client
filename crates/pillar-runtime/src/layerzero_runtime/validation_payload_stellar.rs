@@ -20,9 +20,15 @@ const SCV_MAP: i32 = 17;
 const SCV_ADDRESS: i32 = 18;
 
 /// `OAPP_CONFIG_ERROR_PATTERNS`: a views simulation failing this way means the
-/// pathway is not initializable (`uln/stellar/index.ts:58,135-141,200-203`).
-const OAPP_CONFIG_ERROR_PATTERNS: [&str; 3] =
-    ["contract not found", "entry not found", "not deployed"];
+/// pathway is not initializable (`uln/stellar/index.ts:58,135-141,200-203`). The last pattern is
+/// Soroban's own diagnostic for a receiver contract instance that does not exist
+/// (`Error(Storage, MissingValue)`), narrower than a bare `MissingValue`.
+const OAPP_CONFIG_ERROR_PATTERNS: [&str; 4] = [
+    "contract not found",
+    "entry not found",
+    "not deployed",
+    "non-existing value for contract instance",
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum StellarAddress {

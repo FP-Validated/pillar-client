@@ -360,6 +360,7 @@ pub fn layerzero_available_chain_names(environment: &str) -> Result<Vec<String>,
     for capability in layerzero_chain_capabilities(environment)? {
         if matches!(capability.uln_version, "V2" | "V302")
             && capability.status != "DEPRECATED"
+            && serves_endpoint_v2(environment, capability.chain_name)
             && !available
                 .iter()
                 .any(|chain_name| chain_name == capability.chain_name)
@@ -368,6 +369,23 @@ pub fn layerzero_available_chain_names(environment: &str) -> Result<Vec<String>,
         }
     }
     Ok(available)
+}
+
+/// Runtime assembly needs an EndpointV2 id and the ULN302 deployments for every EVM-shaped
+/// chain it serves. A legacy-only chain listed without them would stop the whole instance from
+/// starting, so it is not advertised.
+fn serves_endpoint_v2(environment: &str, chain_name: &str) -> bool {
+    match static_chain_type_name(chain_name) {
+        Ok("EVM" | "TRON") => {
+            layerzero_evm_endpoint_id(chain_name, environment).is_ok()
+                && ["EndpointV2", "SendUln302", "ReceiveUln302", "ReceiveUln302View"]
+                    .iter()
+                    .all(|contract| {
+                        layerzero_contract_address(chain_name, environment, contract).is_ok()
+                    })
+        }
+        _ => true,
+    }
 }
 
 pub fn layerzero_rollout_block_reason(environment: &str, chain_name: &str) -> Option<&'static str> {
@@ -1487,12 +1505,20 @@ pub type ProviderConfigs = IndexMap<String, ProviderConfig>;
 
 pub fn redact_url(raw: &str) -> String {
     let (prefix, rest) = match raw.split_once("://") {
-        Some((scheme, rest)) => (format!("{scheme}://"), rest),
-        None => return "<redacted>".to_string(),
+        // The text before `://` is only a scheme when it looks like one; anything else is a
+        // spelling the transport may parse differently, so none of it is kept.
+        Some((scheme, rest)) if is_url_scheme(scheme) => (format!("{scheme}://"), rest),
+        _ => return "<redacted>".to_string(),
     };
     let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let suffix = &rest[authority_end..];
     format!("{prefix}<redacted>{}", redact_path_and_query(suffix))
+}
+
+fn is_url_scheme(scheme: &str) -> bool {
+    let mut chars = scheme.chars();
+    chars.next().is_some_and(|first| first.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
 }
 
 /// Redact a name/value pair whose name suggests it carries a secret.
@@ -1513,6 +1539,10 @@ pub fn redact_secret_value(name: &str, value: &str) -> String {
 }
 
 pub fn redact_kms_key_id(provider: &str, key_id: &str) -> String {
+    // A short identifier would be shown whole by a four-character suffix.
+    if key_id.chars().count() <= 8 {
+        return format!("{provider}:<redacted>");
+    }
     let suffix = last_chars(key_id, 4);
     format!("{provider}:...{suffix}")
 }

@@ -1328,7 +1328,7 @@ where
                     headers,
                     json!({
                         "method": "starknet_getStorageAt",
-                        "params": [uln_address, key, "latest"],
+                        "params": [normalize_starknet_felt(uln_address), key, "latest"],
                         "id": 1,
                         "jsonrpc": "2.0",
                     }),
@@ -1405,7 +1405,7 @@ where
             json!({
                 "method": "starknet_call",
                 "params": [{
-                    "contract_address": uln_address,
+                    "contract_address": normalize_starknet_felt(uln_address),
                     "entry_point_selector": starknet_selector("verifiable"),
                     "calldata": calldata,
                 }, "latest"],
@@ -1463,7 +1463,7 @@ where
             json!({
                 "method": "starknet_call",
                 "params": [{
-                    "contract_address": uln_address,
+                    "contract_address": normalize_starknet_felt(uln_address),
                     "entry_point_selector": starknet_selector("get_oapp_uln_receive_config"),
                     "calldata": [normalize_starknet_felt(receiver), format!("0x{src_eid:x}")],
                 }, "latest"],

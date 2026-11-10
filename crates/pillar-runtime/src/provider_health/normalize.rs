@@ -119,7 +119,20 @@ fn bounded_report_text(mut text: String) -> String {
 
 pub(crate) fn numeric_response(response: &Value) -> Option<String> {
     match response {
-        Value::Number(number) => number.as_i64().map(|value| value.to_string()),
+        Value::Number(number) => number
+            .as_i64()
+            .or_else(|| {
+                // An integral value in a float spelling (`1.0`, `1e3`) is still that integer; only
+                // values a double holds exactly are taken.
+                number
+                    .as_f64()
+                    .filter(|float| {
+                        float.fract() == 0.0
+                            && (-9_007_199_254_740_992.0..=9_007_199_254_740_992.0).contains(float)
+                    })
+                    .map(|float| float as i64)
+            })
+            .map(|value| value.to_string()),
         Value::String(value) => parse_numeric_string(value),
         _ => None,
     }
@@ -138,7 +151,12 @@ pub(crate) fn parse_numeric_string(value: &str) -> Option<String> {
             .ok()
             .map(|value| value.to_string())
     } else {
-        trimmed.parse::<i128>().ok().map(|value| value.to_string())
+        // Both spellings reach `u128::MAX`; only the decimal one may also be negative.
+        trimmed
+            .parse::<i128>()
+            .ok()
+            .map(|value| value.to_string())
+            .or_else(|| trimmed.parse::<u128>().ok().map(|value| value.to_string()))
     }
 }
 

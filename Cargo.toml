@@ -100,7 +100,7 @@ pem-rfc7468 = { version = "1.0.0", features = ["alloc"] }
 num-bigint = "0.4"
 pbkdf2 = "0.12"
 regex = "1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "http2"] }
 ripemd = "0.1.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["unbounded_depth"] }

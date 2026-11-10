@@ -192,12 +192,11 @@ fn infers_chain_type_by_chain_name_from_supported_wallet_definitions() {
 
 #[test]
 fn chain_type_inference_rejects_ambiguous_wallet_definitions() {
-    let err = infer_chain_type_by_chain_name_from_signer_env_map(
-        &HashMap::from([
-            (SIGNER_TYPE.to_string(), "LOCAL_MNEMONIC".to_string()),
-            (
-                pillar_config::LZ_WALLETS.to_string(),
-                r#"[{
+    let vars = HashMap::from([
+        (SIGNER_TYPE.to_string(), "LOCAL_MNEMONIC".to_string()),
+        (
+            pillar_config::LZ_WALLETS.to_string(),
+            r#"[{
                         "name":"wallet-a",
                         "walletSetName":"set-a",
                         "byChainType":{
@@ -205,21 +204,28 @@ fn chain_type_inference_rejects_ambiguous_wallet_definitions() {
                             "SOLANA":{"secretName":"secret-solana"}
                         }
                     }]"#
-                .to_string(),
-            ),
-            (
-                pillar_config::LZ_WALLET_MNEMONIC_MAPPING.to_string(),
-                "{}".to_string(),
-            ),
-        ]),
-        &["ethereum".to_string()],
-    )
-    .unwrap_err();
-
+            .to_string(),
+        ),
+        (
+            pillar_config::LZ_WALLET_MNEMONIC_MAPPING.to_string(),
+            "{}".to_string(),
+        ),
+    ]);
+    // Neither declared family is the chain's own, so the declaration cannot be applied.
+    let err = infer_chain_type_by_chain_name_from_signer_env_map(&vars, &["aptos".to_string()])
+        .unwrap_err();
     assert_eq!(
         err,
-        "Cannot infer signer chain type for ethereum: ambiguous wallet chain types EVM,SOLANA"
+        "Cannot infer signer chain type for aptos: ambiguous wallet chain types EVM,SOLANA"
     );
+    // Declaring several families is not ambiguous for a chain of one of them.
+    let mapping = infer_chain_type_by_chain_name_from_signer_env_map(
+        &vars,
+        &["ethereum".to_string(), "solana".to_string()],
+    )
+    .unwrap();
+    assert_eq!(mapping["ethereum"], "EVM");
+    assert_eq!(mapping["solana"], "SOLANA");
 }
 
 #[test]

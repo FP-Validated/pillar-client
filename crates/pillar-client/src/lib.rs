@@ -169,6 +169,7 @@ impl ReqwestPillarTransport {
         }
         let mut builder = reqwest::Client::builder()
             .timeout(Duration::from_secs(70))
+            .connect_timeout(Duration::from_secs(10))
             .redirect(reqwest::redirect::Policy::none());
         if no_proxy_is_wildcard() {
             builder = builder.no_proxy();
