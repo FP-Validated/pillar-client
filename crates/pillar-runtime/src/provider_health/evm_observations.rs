@@ -280,21 +280,29 @@ pub(crate) fn validate_receipt_binding(
         .get("logs")
         .and_then(Value::as_array)
         .ok_or_else(|| "source receipt logs are missing".to_string())?;
-    let mut matching_logs = logs.iter().filter(|log| {
-        log.get("logIndex")
+    let mut indexed = Vec::with_capacity(logs.len());
+    for log in logs {
+        let index = log
+            .get("logIndex")
             .and_then(numeric_response)
-            .and_then(|index| index.parse::<u64>().ok())
-            == Some(evidence.packet_log_index)
-    });
-    let packet_log = matching_logs.next().ok_or_else(|| {
-        format!(
-            "source PacketSent log index {} is no longer present",
-            evidence.packet_log_index
-        )
-    })?;
-    if matching_logs.next().is_some() {
+            .and_then(|index| index.parse::<u128>().ok())
+            .ok_or_else(|| "source receipt log index is invalid".to_string())?;
+        indexed.push((index, log));
+    }
+    indexed.sort_by_key(|(index, _)| *index);
+    if indexed.windows(2).any(|pair| pair[0].0 == pair[1].0) {
         return Err("source receipt contains duplicate PacketSent log index".to_string());
     }
+    let packet_log = usize::try_from(evidence.packet_log_index)
+        .ok()
+        .and_then(|position| indexed.get(position))
+        .map(|(_, log)| *log)
+        .ok_or_else(|| {
+            format!(
+                "source PacketSent log position {} is no longer present",
+                evidence.packet_log_index
+            )
+        })?;
     if !matches!(packet_log.get("removed"), None | Some(Value::Bool(false))) {
         return Err("source PacketSent log is removed or has an invalid removed state".to_string());
     }

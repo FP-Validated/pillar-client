@@ -104,19 +104,16 @@ fn felt_decimal(felt: &str) -> Option<String> {
     num_bigint::BigUint::parse_bytes(digits.as_bytes(), 16).map(|value| value.to_string())
 }
 
-/// `getChainName(eid)` as upstream's `formatPathwayId` applies it; a configured chain keeps its
-/// configured name.
+/// `getChainName(eid)` as upstream's `formatPathwayId` applies it, over the active
+/// environment's own endpoint ids. The global legacy table spans every environment, so
+/// falling back to it let a foreign-stage destination id reach the signer under a local name.
 pub(crate) fn chain_name_for_packet_eid(
     chain_name_by_eid: &HashMap<u32, String>,
     eid: u32,
 ) -> Result<String, AppCoreError> {
-    chain_name_by_eid
-        .get(&eid)
-        .cloned()
-        .or_else(|| pillar_config::layerzero_legacy_chain_name(eid).map(str::to_string))
-        .ok_or_else(|| {
-            AppCoreError::Internal(format!("Invariant failed: Invalid endpointId: {eid}"))
-        })
+    chain_name_by_eid.get(&eid).cloned().ok_or_else(|| {
+        AppCoreError::Internal(format!("Invariant failed: Invalid endpointId: {eid}"))
+    })
 }
 
 /// Upstream's `extractLZEventFromPacketSentEvent` (`starknet/decoders/index.ts:88-120`): pathway

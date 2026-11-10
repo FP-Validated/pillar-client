@@ -384,10 +384,20 @@ fn authorized(state: &ApiState, req: &Request<Body>) -> bool {
     let Ok(value) = value.to_str() else {
         return false;
     };
-    let Some(token) = value.strip_prefix("Bearer ") else {
+    let Some(token) = bearer_token(value) else {
         return false;
     };
     state.app.auth_token_matches(token.as_bytes())
+}
+
+/// RFC 9110: the authentication scheme is case-insensitive and is followed by one or more spaces.
+fn bearer_token(value: &str) -> Option<&str> {
+    let (scheme, rest) = value.split_once(' ')?;
+    if !scheme.eq_ignore_ascii_case("bearer") {
+        return None;
+    }
+    let token = rest.trim_start_matches(' ');
+    (!token.is_empty()).then_some(token)
 }
 /// Compares bearer tokens without returning early on a differing byte.
 pub fn constant_time_token_match(provided: &[u8], expected: &[u8]) -> bool {
@@ -456,13 +466,6 @@ async fn request_middleware(
     };
     align_json_content_type(&mut response);
     let status_code = response.status().as_u16();
-    outcome.finish(status_code);
-    if let Some(class) = response
-        .extensions()
-        .get::<pillar_core::execution::Outcome>()
-    {
-        outcome.finish_class(*class);
-    }
     if response.status().is_client_error() || response.status().is_server_error() {
         response.extensions_mut().insert(HttpErrorExtension {
             request_id: request_id.clone(),
@@ -471,12 +474,24 @@ async fn request_middleware(
             status_code,
         });
     }
-    state.metrics.lock().await.record_http_request(
-        method,
-        route,
-        status_code,
-        started_at.elapsed().as_secs_f64(),
-    );
+    {
+        // The outcome is finalized only once the lock is held: a connection deadline that
+        // fires while this waits is still seen by the guard when it is dropped.
+        let mut metrics = state.metrics.lock().await;
+        outcome.finish(status_code);
+        if let Some(class) = response
+            .extensions()
+            .get::<pillar_core::execution::Outcome>()
+        {
+            outcome.finish_class(*class);
+        }
+        metrics.record_http_request(
+            method,
+            route,
+            status_code,
+            started_at.elapsed().as_secs_f64(),
+        );
+    }
     if matches!(method, "GET" | "HEAD") && status_code < 400 {
         tracing::debug!(parent: &span, http_status = status_code, duration_ms = started_at.elapsed().as_millis(), "http request completed");
     } else {
@@ -621,12 +636,18 @@ fn validate_v2_request_shape(value: &Value) -> Result<(), AppError> {
     if issues.is_empty() {
         Ok(())
     } else {
+        let truncated = issues.len() > MAX_REPORTED_ISSUES;
+        issues.truncate(MAX_REPORTED_ISSUES);
         Err(AppError::BadRequest(format!(
-            "Invalid request: {}",
-            issues.join(", ")
+            "Invalid request: {}{}",
+            issues.join(", "),
+            if truncated { ", ..." } else { "" }
         )))
     }
 }
+
+/// A malformed body can repeat one defect once per element; the first issues name the shape.
+const MAX_REPORTED_ISSUES: usize = 100;
 
 /// Zod 3's `getParsedType` names for JSON values.
 fn zod_type(value: &Value) -> &'static str {
@@ -721,6 +742,9 @@ fn zod_signing_context(value: Option<&Value>, issues: &mut Vec<String>) {
         match context.get("resolvedTimestampTimeMarkers") {
             Some(Value::Array(markers)) => {
                 for marker in markers {
+                    if issues.len() > MAX_REPORTED_ISSUES {
+                        break;
+                    }
                     zod_object(Some(marker), issues, |marker, issues| {
                         zod_number(marker.get("blockConfirmation"), issues);
                         if marker.get("isBlockNumber") != Some(&Value::Bool(false)) {

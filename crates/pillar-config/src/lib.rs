@@ -1626,16 +1626,33 @@ impl RemoteProviderSource {
         }))
     }
 
+    /// Both objects are read twice and a generation is built only from a pair that did not move
+    /// between the reads, so a rollout that writes the two objects one after the other is not
+    /// served half-applied. Two independent objects cannot be made atomic from the reader's
+    /// side; publishing them as one object closes the remaining window (see `SECURITY.md`).
     pub async fn load(
         &self,
         loader: &(impl RemoteProviderConfigLoader + ?Sized),
         required_chain_names: Option<&[String]>,
     ) -> Result<StaticProviderConfig, ConfigError> {
-        let (providers, strategy) = futures::join!(
-            loader.load_provider_config(self.providers.clone()),
-            loader.load_provider_config(self.strategy.clone()),
-        );
-        StaticProviderConfig::from_v2(&providers?, &strategy?, required_chain_names)
+        const PAIR_READ_ATTEMPTS: usize = 3;
+        for _ in 0..PAIR_READ_ATTEMPTS {
+            let (providers, strategy) = futures::join!(
+                loader.load_provider_config(self.providers.clone()),
+                loader.load_provider_config(self.strategy.clone()),
+            );
+            let (providers, strategy) = (providers?, strategy?);
+            let (confirm_providers, confirm_strategy) = futures::join!(
+                loader.load_provider_config(self.providers.clone()),
+                loader.load_provider_config(self.strategy.clone()),
+            );
+            if providers == confirm_providers? && strategy == confirm_strategy? {
+                return StaticProviderConfig::from_v2(&providers, &strategy, required_chain_names);
+            }
+        }
+        Err(ConfigError::RemoteProviderConfig(
+            "provider configuration objects kept changing while being read".to_string(),
+        ))
     }
 }
 
@@ -2237,6 +2254,8 @@ mod tests {
             let mut expected = vec![
                 format!("{:?}", request(LZ_PROVIDER_CONFIG_REMOTE_KEY)),
                 format!("{:?}", request(LZ_QUORUM_STRATEGY_REMOTE_KEY)),
+                format!("{:?}", request(LZ_PROVIDER_CONFIG_REMOTE_KEY)),
+                format!("{:?}", request(LZ_QUORUM_STRATEGY_REMOTE_KEY)),
             ];
             expected.sort();
             assert_eq!(sorted_requests(&calls), expected);
@@ -2632,6 +2651,8 @@ mod tests {
             sorted_requests(&calls),
             vec![
                 request("providers-v2.json"),
+                request("providers-v2.json"),
+                request("quorum-strategy.json"),
                 request("quorum-strategy.json")
             ]
         );

@@ -469,18 +469,25 @@ async fn evm_v302_to_aptos_and_movement_runs_resolver_validator_builder_and_sign
 
 #[tokio::test]
 async fn move_v302_receive_library_error_and_malformed_value_refuse_without_signing() {
+    // A library the receiver left ULN302 for is a counted verdict, not a failed provider.
     let cases = [
         (
             vec![Err("Provider returned HTTP 400 Bad Request".to_string())],
             "provider error",
+            StatusCode::INTERNAL_SERVER_ERROR,
         ),
-        (vec![Ok(json!([42]))], "malformed address"),
+        (
+            vec![Ok(json!([42]))],
+            "malformed address",
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ),
         (
             vec![Ok(json!([format!("0x{}", "44".repeat(32))]))],
             "unsupported registered library",
+            StatusCode::BAD_REQUEST,
         ),
     ];
-    for (index, (responses, label)) in cases.into_iter().enumerate() {
+    for (index, (responses, label, expected_status)) in cases.into_iter().enumerate() {
         let (status, body, signatures, requests) =
             run_resolve_and_sign("aptos", 0, responses).await;
         audit_round_artifact(
@@ -488,7 +495,7 @@ async fn move_v302_receive_library_error_and_malformed_value_refuse_without_sign
             &format!("move-receive-library-error-{index}"),
             json!({"case":label,"http_status":status.as_u16(),"body":body,"signatures":signatures,"views":requests}),
         );
-        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{label}: {body}");
+        assert_eq!(status, expected_status, "{label}: {body}");
         assert_eq!(signatures, 0, "{label}: signer was called");
         assert_eq!(
             requests.len(),

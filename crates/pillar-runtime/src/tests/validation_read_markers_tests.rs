@@ -276,7 +276,7 @@ async fn runtime_rpc_validation_checks_rejects_a_block_that_changed_hash_during_
         .await
         .unwrap_err();
 
-    assert!(err.to_string().contains("quorum"), "{err}");
+    assert!(err.to_string().contains("no longer canonical"), "{err}");
     assert_eq!(calls.lock().unwrap().len(), 4);
 }
 
@@ -958,7 +958,7 @@ async fn maximum_read_timestamp_markers_share_headers_and_finish_with_bounded_pa
     let calls = calls.lock().unwrap();
     assert_eq!(calls["0x63"], 1);
     for height in 100..356 {
-        assert_eq!(calls[&format!("0x{height:x}")], 2);
+        assert_eq!(calls[&format!("0x{height:x}")], 3);
     }
     assert_eq!(calls["latest"], 256);
     assert!((2..=4).contains(&peak.load(Ordering::SeqCst)));

@@ -1065,25 +1065,31 @@ fn rendered_address(chain_name: &str, raw: &str) -> String {
         .unwrap_or_else(|| raw.to_string())
 }
 
-fn chain_name_for_eid(eid: u32) -> Result<String, AppCoreError> {
-    pillar_config::layerzero_legacy_chain_name(eid)
-        .map(str::to_string)
-        .ok_or_else(|| {
-            AppCoreError::Internal(format!("Invariant failed: Invalid endpointId: {eid}"))
-        })
+/// The environment's own name for an endpoint id. The global legacy table spans every
+/// environment, so it must not decide what a signable pathway names.
+fn chain_name_for_eid(
+    chain_name_by_eid: &HashMap<u32, String>,
+    eid: u32,
+) -> Result<String, AppCoreError> {
+    chain_name_by_eid.get(&eid).cloned().ok_or_else(|| {
+        AppCoreError::Internal(format!("Invariant failed: Invalid endpointId: {eid}"))
+    })
 }
 
 /// `extractLZEventFromPacketSentScanEvent` (`lz-v2-sdk/src/canton/decoders.ts:656-681`).
-fn packet_sent_event(event: &Value) -> Result<LzSentEvent, AppCoreError> {
+fn packet_sent_event(
+    event: &Value,
+    chain_name_by_eid: &HashMap<u32, String>,
+) -> Result<LzSentEvent, AppCoreError> {
     let internal = AppCoreError::Internal;
     let data = property_of(Some(event), "data").map_err(internal)?;
     let encoded = property_of(data, "encodedPayload").map_err(internal)?;
     let packet = decode_lz_packet_v1(encoded.and_then(Value::as_str).unwrap_or_default())?;
-    let dst_chain_name = chain_name_for_eid(packet.dst_eid)?;
+    let dst_chain_name = chain_name_for_eid(chain_name_by_eid, packet.dst_eid)?;
     let src_chain_name = if pillar_layerzero::is_lz_read_endpoint_id(packet.src_eid) {
         dst_chain_name.clone()
     } else {
-        chain_name_for_eid(packet.src_eid)?
+        chain_name_for_eid(chain_name_by_eid, packet.src_eid)?
     };
     let field = |key: &str| {
         data.and_then(|data| data.get(key))
@@ -1155,6 +1161,7 @@ fn requested_message_id_json(lz_message_id: &LzMessageId) -> String {
 pub(crate) async fn resolve_canton_packet_sent<T: JsonRpcTransport>(
     transport: &T,
     sequencer: &CantonSequencer,
+    chain_name_by_eid: &HashMap<u32, String>,
     src_tx_hash: &str,
     lz_message_id: &LzMessageId,
 ) -> Result<LzSentEvent, AppCoreError> {
@@ -1172,11 +1179,12 @@ pub(crate) async fn resolve_canton_packet_sent<T: JsonRpcTransport>(
         SequencerAnswer::Ok(response) => response.events,
         SequencerAnswer::Error => return Err(sequencer_refusal()),
     };
-    select_canton_packet(&events, src_tx_hash, lz_message_id)
+    select_canton_packet(&events, chain_name_by_eid, src_tx_hash, lz_message_id)
 }
 
 fn select_canton_packet(
     events: &[Value],
+    chain_name_by_eid: &HashMap<u32, String>,
     src_tx_hash: &str,
     lz_message_id: &LzMessageId,
 ) -> Result<LzSentEvent, AppCoreError> {
@@ -1185,14 +1193,14 @@ fn select_canton_packet(
             "Packet sent event not found or not valid".to_string(),
         ));
     }
-    let mut decoded = Vec::new();
+    let mut matched_by_tx_hash = 0usize;
     let mut first_error = None;
     for event in events {
-        match packet_sent_event(event) {
+        match packet_sent_event(event, chain_name_by_eid) {
             Ok(event) if lz_message_id_matches(lz_message_id, &event.lz_message_id) => {
                 return Ok(event);
             }
-            Ok(event) => decoded.push(event),
+            Ok(_) => matched_by_tx_hash += 1,
             Err(error) => {
                 first_error.get_or_insert(error);
             }
@@ -1201,16 +1209,12 @@ fn select_canton_packet(
     if let Some(error) = first_error {
         return Err(error);
     }
+    // Sibling packets of the commitment belong to other senders; naming them would let any
+    // caller who knows the commitment hash enumerate them and probe their message hashes.
     Err(AppCoreError::Internal(format!(
-        "Did not find correct PacketSent() event in tx {src_tx_hash}: matched {} packet(s) by \
-         txHash but none matched lzMessageId {}; found [{}]",
-        decoded.len(),
+        "Did not find correct PacketSent() event in tx {src_tx_hash}: matched {matched_by_tx_hash} packet(s) by \
+         txHash but none matched lzMessageId {}",
         requested_message_id_json(lz_message_id),
-        decoded
-            .iter()
-            .map(|event| crate::provider_health::resolved_message_id_json(&event.lz_message_id))
-            .collect::<Vec<_>>()
-            .join(","),
     )))
 }
 
@@ -1268,7 +1272,11 @@ pub(crate) async fn canton_block_confirmations<T: JsonRpcTransport>(
         })?,
         SequencerAnswer::Error => return Err(sequencer_refusal()),
     };
-    let emitted = (timestamp.to_f64() / 1000.0).floor();
+    // Current sequencers report Unix seconds, older ones milliseconds. No second count reaches
+    // 1e11 for any realistic date, so the magnitude names the unit and a unit change cannot
+    // inflate the age into a bypass of the finality delay.
+    let raw = timestamp.to_f64();
+    let emitted = if raw >= 1e11 { (raw / 1000.0).floor() } else { raw.floor() };
     Ok((now_unix_seconds - emitted).max(0.0))
 }
 
@@ -1277,7 +1285,7 @@ pub(crate) async fn canton_payload_signed<T: JsonRpcTransport>(
     transport: &T,
     sequencer: &CantonSequencer,
     sent_event: &LzSentEvent,
-    verifier_address: &str,
+    verifier_address: Option<&str>,
 ) -> Result<(bool, u64), AppCoreError> {
     let uln = CANTON_STATIC_VE3_CONTRACTS[3];
     let read = |function: &'static str, arguments: Value| async move {
@@ -1302,12 +1310,24 @@ pub(crate) async fn canton_payload_signed<T: JsonRpcTransport>(
     let config = read("getUlnConfig", json!({"oapp": oapp, "remoteEid": src_eid})).await?;
     let required_confirmations =
         uln_config_confirmations(&config).map_err(AppCoreError::Internal)?;
+    // The guarded consumer reports non-finite and fractional values with the upstream message;
+    // negative and oversized values are refused here too, since the `as u64` below would turn
+    // them into a zero or saturated floor.
+    js_f64_to_bigint(required_confirmations).map_err(AppCoreError::Internal)?;
+    if !(0.0..=u64::MAX as f64).contains(&required_confirmations) {
+        return Err(AppCoreError::Internal(format!(
+            "Canton receive config reported an unusable confirmations value: {required_confirmations}"
+        )));
+    }
 
     let proof = compute_lz_packet_v1_proof_from_event(sent_event)?;
     let header = hex::decode(proof.packet_header.trim_start_matches("0x"))
         .map_err(|error| AppCoreError::Internal(error.to_string()))?;
     let header_hash = format!("0x{}", hex::encode(Keccak256::digest(&header)));
     let dvn_confirmed = async {
+        let Some(verifier_address) = verifier_address else {
+            return Ok(false);
+        };
         let result = read(
             "getHashLookup",
             json!({
@@ -1416,13 +1436,22 @@ mod tests {
         .unwrap();
         bytes[45..49].copy_from_slice(&u32::MAX.to_be_bytes());
         unknown["data"]["encodedPayload"] = Value::from(format!("0x{}", hex::encode(bytes)));
+        let eids = crate::layerzero_runtime::runtime_chain_name_by_endpoint_id(
+            "mainnet",
+            &["canton".to_string(), "ethereum".to_string()],
+        )
+        .unwrap();
         for invalid in [unknown, json!({"data":{"encodedPayload":"0xbroken"}})] {
-            let selected =
-                select_canton_packet(&[invalid.clone(), valid.clone()], "commitment", &request)
-                    .unwrap();
+            let selected = select_canton_packet(
+                &[invalid.clone(), valid.clone()],
+                &eids,
+                "commitment",
+                &request,
+            )
+            .unwrap();
             assert_eq!(selected.lz_message_id.nonce, 7);
             assert_eq!(selected.message, "0xdeadbeef");
-            assert!(select_canton_packet(&[invalid], "commitment", &request).is_err());
+            assert!(select_canton_packet(&[invalid], &eids, "commitment", &request).is_err());
         }
     }
 

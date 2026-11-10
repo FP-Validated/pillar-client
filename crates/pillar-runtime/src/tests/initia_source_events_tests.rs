@@ -365,16 +365,17 @@ async fn initia_source_chain_mismatch_is_reported_only_when_nothing_matches() {
 }
 
 #[tokio::test]
-async fn initia_destination_on_another_stage_resolves_through_the_legacy_table() {
-    // 30101 -> 40161, a testnet id absent from the mainnet map but present in the legacy table.
+async fn initia_destination_on_another_stage_is_refused() {
+    // 30101 -> 40161, a testnet id absent from the mainnet map: it must not reach the signer
+    // under a local chain name.
     let (fixture, event, mut request) = match_with_packet_bytes_replaced("00007595", "00009ce1");
     request.pathway_id.dst_chain_name = "sepolia".to_string();
     request.pathway_id.extra["dstEid"] = Value::from(40_161);
     let mut transaction = fixture["scenarios"][0]["transaction"].clone();
     transaction["events"] = json!([event]);
-    let resolved = scripted_resolver(fixture["environment"].as_str().unwrap(), &transaction)
+    let error = scripted_resolver(fixture["environment"].as_str().unwrap(), &transaction)
         .get_lz_sent_event(fixture["txHash"].as_str().unwrap(), &request)
         .await
-        .unwrap();
-    assert_eq!(resolved.lz_message_id.pathway_id.dst_chain_name, "sepolia");
+        .unwrap_err();
+    assert!(error.to_string().contains("Did not find correct PacketSent()"), "{error}");
 }

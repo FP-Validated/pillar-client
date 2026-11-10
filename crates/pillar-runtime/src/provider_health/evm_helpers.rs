@@ -243,6 +243,14 @@ impl EvmTransactionReceipt {
                 return Err("receipt contains duplicate logIndex".to_string());
             }
         }
+        // Providers list logs in their own order and number them from 0 or 1. Position in the
+        // index-ordered list is the one shared coordinate, so downstream readers of the
+        // retained receipt (array scans, the evidence index) see what the quorum agreed on.
+        self.logs
+            .sort_by_key(|log| log.log_index.parse::<u128>().unwrap_or(u128::MAX));
+        for (position, log) in self.logs.iter_mut().enumerate() {
+            log.log_index = position.to_string();
+        }
         Ok(self)
     }
 }

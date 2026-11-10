@@ -18,17 +18,43 @@ where
                     return Ok(None);
                 }
                 if is_chain_native_payload_signed_destination(dst_chain_name) {
-                    let Some(verifier_address) = verifier_address else {
+                    // The receive requirement does not depend on the DVN subject; only the
+                    // duplicate lookup does. Without a subject the lookup reads a null record,
+                    // so the confirmation floor is still returned to the caller.
+                    if dst_chain_name == "canton" {
+                        return self
+                            .validate_canton_payload_not_signed_with_quorum(
+                                sent_event,
+                                verifier_address,
+                                dst_chain_name,
+                            )
+                            .await;
+                    }
+                    let Some(subject) = verifier_address.or(match dst_chain_name {
+                        "solana" | "stellar" | "ton" => None,
+                        _ => Some(CHAIN_NATIVE_NULL_SUBJECT),
+                    }) else {
                         return Ok(None);
                     };
-                    return self
+                    let result = self
                         .validate_chain_native_payload_not_signed_with_quorum(
                             sent_event,
-                            verifier_address,
+                            subject,
                             dst_chain_name,
                             effective_receive_version,
                         )
                         .await;
+                    return match result {
+                        // With no subject, "signed" can only be the ULN's own verified state,
+                        // and a verified packet has no attestation left to overwrite.
+                        Err(AppCoreError::BadRequest(message))
+                            if verifier_address.is_none()
+                                && message.starts_with(PAYLOAD_ALREADY_SIGNED_ERROR_PREFIX) =>
+                        {
+                            Ok(None)
+                        }
+                        other => other,
+                    };
                 }
 
                 let snapshot = self.providers.load();
@@ -351,25 +377,39 @@ where
                 .await;
         }
         if dst_chain_name == "canton" {
-            let snapshot = self.providers.load();
-            let sequencer =
-                canton_sequencer(dst_chain_name, snapshot.provider_config(dst_chain_name)?)?;
-            let (signed, required) =
-                canton_payload_signed(&self.transport, &sequencer, sent_event, verifier_address)
-                    .await?;
-            return payload_signed_validation_result(
-                if signed {
-                    PayloadSignedValidity::Signed
-                } else {
-                    PayloadSignedValidity::NotSigned {
-                        required: Some(required),
-                    }
-                },
-                sent_event,
-                dst_chain_name,
-            );
+            return self
+                .validate_canton_payload_not_signed_with_quorum(
+                    sent_event,
+                    Some(verifier_address),
+                    dst_chain_name,
+                )
+                .await;
         }
         unreachable!("chain-native destination was not dispatched: {dst_chain_name}");
+    }
+
+    async fn validate_canton_payload_not_signed_with_quorum(
+        &self,
+        sent_event: &LzSentEvent,
+        verifier_address: Option<&str>,
+        dst_chain_name: &str,
+    ) -> Result<Option<u64>, AppCoreError> {
+        let snapshot = self.providers.load();
+        let sequencer = canton_sequencer(dst_chain_name, snapshot.provider_config(dst_chain_name)?)?;
+        let (signed, required) =
+            canton_payload_signed(&self.transport, &sequencer, sent_event, verifier_address)
+                .await?;
+        payload_signed_validation_result(
+            if signed {
+                PayloadSignedValidity::Signed
+            } else {
+                PayloadSignedValidity::NotSigned {
+                    required: Some(required),
+                }
+            },
+            sent_event,
+            dst_chain_name,
+        )
     }
 
     async fn validate_move_payload_not_signed_with_quorum(
@@ -600,6 +640,10 @@ where
         payload_signed_validation_result(validity, sent_event, dst_chain_name)
     }
 }
+
+/// A well-formed address no DVN holds, read in place of the caller's `dvnAddress` when only
+/// the destination's confirmation requirement is wanted.
+const CHAIN_NATIVE_NULL_SUBJECT: &str = "0x0";
 
 fn is_chain_native_payload_signed_destination(dst_chain_name: &str) -> bool {
     matches!(
@@ -968,7 +1012,10 @@ where
     .and_then(aptos_address_bytes32)
     .ok_or(RpcError::Unavailable)?;
     if aptos_address_bytes32(uln_302).as_deref() != Some(receive_library.as_str()) {
-        return Err(RpcError::Remote("Unsupported Move receive library".into()));
+        return Ok((
+            format!("library:{receive_library}"),
+            PayloadSignedValidity::UnsupportedReceiveLibrary,
+        ));
     }
     let config = move_view_value(
         &transport,

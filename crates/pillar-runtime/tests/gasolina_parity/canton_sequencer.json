@@ -580,7 +580,7 @@
     }
    ],
    "outcome": {
-    "error": "Did not find correct PacketSent() event in tx 1220bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb: matched 2 packet(s) by txHash but none matched lzMessageId {\"pathwayId\":{\"srcEid\":30567,\"dstEid\":30101,\"sender\":\"0xc4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4\",\"receiver\":\"0xe7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7\",\"srcChainName\":\"canton\",\"dstChainName\":\"ethereum\"},\"nonce\":9,\"ulnSendVersion\":\"V302\"}; found [{\"pathwayId\":{\"srcEid\":30567,\"srcChainName\":\"canton\",\"dstEid\":30101,\"dstChainName\":\"ethereum\",\"sender\":\"0xc4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4\",\"receiver\":\"0xe7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7\"},\"nonce\":7,\"ulnSendVersion\":\"V302\"},{\"pathwayId\":{\"srcEid\":30567,\"srcChainName\":\"canton\",\"dstEid\":30101,\"dstChainName\":\"ethereum\",\"sender\":\"0xc4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4\",\"receiver\":\"0xe7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7\"},\"nonce\":8,\"ulnSendVersion\":\"V302\"}]"
+    "error": "Did not find correct PacketSent() event in tx 1220bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb: matched 2 packet(s) by txHash but none matched lzMessageId {\"pathwayId\":{\"srcEid\":30567,\"dstEid\":30101,\"sender\":\"0xc4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4\",\"receiver\":\"0xe7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7\",\"srcChainName\":\"canton\",\"dstChainName\":\"ethereum\"},\"nonce\":9,\"ulnSendVersion\":\"V302\"}"
    }
   },
   {

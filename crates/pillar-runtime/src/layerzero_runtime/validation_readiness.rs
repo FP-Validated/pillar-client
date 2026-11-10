@@ -703,6 +703,19 @@ fn parse_solana_current_slot(response: &Value) -> Result<i64, String> {
         .ok_or_else(|| "Missing Solana current slot".to_string())
 }
 
+const STARKNET_BLOCK_NOT_FOUND: i64 = 24;
+const STARKNET_TXN_HASH_NOT_FOUND: i64 = 29;
+
+/// The JSON-RPC error code of a successfully transported reply, if it carries one.
+fn jsonrpc_error_code(response: &Result<Value, RpcError>) -> Option<i64> {
+    response
+        .as_ref()
+        .ok()?
+        .get("error")?
+        .get("code")
+        .and_then(Value::as_i64)
+}
+
 async fn observe_starknet_block_confirmations<T>(
     transport: T,
     url: String,
@@ -748,6 +761,15 @@ where
     );
     let (receipt_response, current_response, canonical_response) =
         tokio::join!(receipt, current, canonical_block);
+    let source_changed = |reason: &str| BlockConfirmationObservation {
+        validity: BlockConfirmationValidity::SourceChanged(reason.to_string()),
+        current_confirmations: None,
+    };
+    if jsonrpc_error_code(&receipt_response) == Some(STARKNET_TXN_HASH_NOT_FOUND) {
+        return Ok(source_changed(
+            "Starknet receipt for the resolved transaction is no longer served",
+        ));
+    }
     let receipt_response = readiness_response(receipt_response)?;
     let Some(receipt) = receipt_response
         .get("result")
@@ -757,10 +779,6 @@ where
             validity: BlockConfirmationValidity::Missing,
             current_confirmations: None,
         });
-    };
-    let source_changed = |reason: &str| BlockConfirmationObservation {
-        validity: BlockConfirmationValidity::SourceChanged(reason.to_string()),
-        current_confirmations: None,
     };
     let execution_status = receipt
         .get("execution_status")
@@ -819,6 +837,9 @@ where
         return Ok(source_changed(
             "Starknet selected event contents or placement changed",
         ));
+    }
+    if jsonrpc_error_code(&canonical_response) == Some(STARKNET_BLOCK_NOT_FOUND) {
+        return Ok(source_changed("Starknet evidence block is no longer served"));
     }
     let canonical_response = readiness_response(canonical_response)?;
     let canonical = canonical_response

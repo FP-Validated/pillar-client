@@ -25,7 +25,9 @@ pub(crate) enum BlockConfirmationValidity {
 
 impl BlockConfirmationValidity {
     /// The quorum key. `SourceChanged` carries diagnostic prose that differs between providers
-    /// observing the same reorg, so it must not split the vote.
+    /// observing the same reorg, so it must not split the vote. A vanished source and a moved
+    /// one are both a vote against the resolved source and share one bucket, so a pool holding
+    /// mixed reorg views forms one negative side instead of two that cannot meet the strategy.
     pub(crate) fn fingerprint(&self) -> String {
         match self {
             Self::Sufficient {
@@ -37,8 +39,7 @@ impl BlockConfirmationValidity {
                 receipt_block_number,
             } => format!("insufficient:{receipt_block_hash}:{receipt_block_number}"),
             Self::InvalidRange => "invalid-range".to_string(),
-            Self::SourceChanged(_) => "source-changed".to_string(),
-            Self::Missing => "missing".to_string(),
+            Self::SourceChanged(_) | Self::Missing => "source-changed".to_string(),
         }
     }
 }

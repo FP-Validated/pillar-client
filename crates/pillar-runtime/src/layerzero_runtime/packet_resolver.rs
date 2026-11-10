@@ -502,8 +502,11 @@ where
                     source.endpoint_v1_id, packet.src_chain_id
                 )));
             }
-            let Some(dst_chain_name) =
-                pillar_config::layerzero_legacy_chain_name(u32::from(packet.dst_chain_id))
+            let Some(dst_chain_name) = self
+                .config
+                .chain_name_by_eid
+                .get(&u32::from(packet.dst_chain_id))
+                .cloned()
             else {
                 // A sibling packet is not the requested one; refuse only when no packet matches.
                 unmapped.get_or_insert_with(|| {
@@ -514,7 +517,6 @@ where
                 });
                 continue;
             };
-            let dst_chain_name = dst_chain_name.to_string();
             let (block_hash, block_number) = match &block {
                 Some(block) => block.clone(),
                 None => {
@@ -1408,7 +1410,13 @@ where
                 let sequencer = canton_sequencer("canton", snapshot.provider_config("canton")?)?;
                 return crate::provider_health::rpc_scope(
                     "canton",
-                    resolve_canton_packet_sent(&self.transport, &sequencer, src_tx_hash, lz_message_id),
+                    resolve_canton_packet_sent(
+                        &self.transport,
+                        &sequencer,
+                        &self.config.chain_name_by_eid,
+                        src_tx_hash,
+                        lz_message_id,
+                    ),
                 )
                 .await;
             }

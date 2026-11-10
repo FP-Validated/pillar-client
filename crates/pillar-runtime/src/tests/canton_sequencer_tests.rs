@@ -222,6 +222,14 @@ fn without_provider_text(mut value: Value) -> Value {
     }
     value
 }
+fn mainnet_canton_eids() -> HashMap<u32, String> {
+    crate::layerzero_runtime::runtime_chain_name_by_endpoint_id(
+        "mainnet",
+        &["canton".to_string(), "ethereum".to_string()],
+    )
+    .unwrap()
+}
+
 pub(super) async fn recorded_unsigned_canton_requirement() -> u64 {
     let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
     let scenario = fixture["scenarios"]
@@ -238,7 +246,7 @@ pub(super) async fn recorded_unsigned_canton_requirement() -> u64 {
         &transport,
         &sequencer,
         &event,
-        scenario["dvnAddress"].as_str().unwrap(),
+        Some(scenario["dvnAddress"].as_str().unwrap()),
     )
     .await
     .expect("recorded Canton payload-signed exchange replays");
@@ -300,6 +308,7 @@ async fn canton_sequencer_path_matches_gasolina() {
                         resolve_canton_packet_sent(
                             &transport,
                             &sequencer,
+                            &mainnet_canton_eids(),
                             scenario["srcTxHash"].as_str().unwrap(),
                             &lz_message_id,
                         )
@@ -340,7 +349,7 @@ async fn canton_sequencer_path_matches_gasolina() {
                             &transport,
                             &sequencer,
                             &event,
-                            scenario["dvnAddress"].as_str().unwrap(),
+                            Some(scenario["dvnAddress"].as_str().unwrap()),
                         )
                         .await
                     }

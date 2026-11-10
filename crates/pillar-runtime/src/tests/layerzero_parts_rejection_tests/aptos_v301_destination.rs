@@ -937,10 +937,10 @@ async fn v301_to_aptos_with_a_dvn_reads_upstreams_views_and_signs_once() {
     }
 }
 
-/// Without a `dvnAddress` upstream skips `validatePayloadSigned` (`app.ts:308-309`): the
-/// only destination read is the ledger timestamp for expiration.
+/// Without a `dvnAddress` the duplicate lookup reads a null record, but the destination's
+/// confirmation requirement is still read, so the caller's floor is enforced (M-109).
 #[tokio::test]
-async fn v301_to_aptos_without_a_dvn_skips_the_payload_signed_reads() {
+async fn v301_to_aptos_without_a_dvn_still_reads_the_confirmation_requirement() {
     for environment in ["mainnet", "testnet"] {
         let outcome = sign_v301_to_aptos(environment, None, UNSIGNED).await;
         assert_eq!(
@@ -950,7 +950,13 @@ async fn v301_to_aptos_without_a_dvn_skips_the_payload_signed_reads() {
             outcome.body
         );
         assert_eq!(outcome.signatures, 1, "{environment}");
-        assert_eq!(read_labels(&outcome), [""], "{environment}");
+        let labels = read_labels(&outcome);
+        assert!(
+            labels
+                .iter()
+                .any(|label| label.ends_with("::endpoint_view::get_config")),
+            "{environment}: {labels:?}"
+        );
     }
 }
 

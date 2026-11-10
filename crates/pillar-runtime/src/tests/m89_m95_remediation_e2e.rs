@@ -275,19 +275,34 @@ async fn m91_read_already_signed() -> Value {
             eth_call_result(&abi_address_bool(READ_LIB, true)),
             eth_call_result(&abi_word(0)),
             eth_call_result(&abi_word(state)),
+            eth_call_result(&abi_word(1)),
         ])
         .await;
         assert_eq!(already_signed(&outcome), signed, "{name}: {outcome:?}");
         if !signed {
             assert_eq!(outcome, Ok(None), "{name}");
         }
+        // Only a verified packet asks the endpoint whether it was nilified.
+        assert_eq!(selectors.len(), if state == 2 { 4 } else { 3 }, "{name}");
         assert_eq!(
-            selectors,
+            selectors[..3],
             [GET_RECEIVE_LIBRARY, GET_READ_LIB_CONFIG, VERIFIABLE],
             "{name}: READ never asks for a stored hash"
         );
         rows.push(json!({"case": name, "refused_as_already_signed": signed, "reads": selectors}));
     }
+    // A nilified packet keeps the NIL sentinel at the endpoint: the library view calls it
+    // verified, yet the commit still needs this DVN's fresh attestation.
+    let (outcome, _) = payload_signed_reads(vec![
+        eth_call_result(&abi_address_bool(READ_LIB, true)),
+        eth_call_result(&abi_word(0)),
+        eth_call_result(&abi_word(2)),
+        eth_call_result(&format!("0x{}", "ff".repeat(32))),
+    ])
+    .await;
+    assert!(!already_signed(&outcome), "{outcome:?}");
+    assert_eq!(outcome, Ok(None));
+    rows.push(json!({"case": "nilified_read", "refused_as_already_signed": false}));
     // The message libraries still compare the stored confirmation with the requirement.
     let (outcome, selectors) = payload_signed_reads(vec![
         eth_call_result(&abi_address_bool(TEST_RECEIVE_ULN_302, true)),

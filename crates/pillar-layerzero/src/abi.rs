@@ -105,6 +105,44 @@ pub fn build_evm_verifiable_call_data(proof: &EvmUlnProof) -> Result<String, App
     out.extend_from_slice(&solidity_dynamic_bytes(&proof.packet_header)?);
     Ok(format!("0x{}", hex::encode(out)))
 }
+
+/// `EndpointV2.inboundPayloadHash(receiver, srcEid, sender, nonce)` for the packet a header
+/// names. A nilified packet keeps a non-zero hash there (the NIL sentinel), which the receive
+/// libraries' own views report as already verified.
+pub fn build_evm_inbound_payload_hash_call_data(
+    proof: &EvmUlnProof,
+) -> Result<String, AppCoreError> {
+    let header = decode_hex_bytes(&proof.packet_header)?;
+    if header.len() != 81 {
+        return Err(AppCoreError::Internal(format!(
+            "packet header must be 81 bytes, got {}",
+            header.len()
+        )));
+    }
+    let nonce = u64::from_be_bytes(header[1..9].try_into().expect("8 bytes"));
+    let src_eid = u32::from_be_bytes(header[9..13].try_into().expect("4 bytes"));
+    let mut out = Vec::from(function_selector(
+        "inboundPayloadHash(address,uint32,bytes32,uint64)",
+    ));
+    let mut receiver = [0u8; 32];
+    receiver[12..].copy_from_slice(&header[61..81]);
+    out.extend_from_slice(&receiver);
+    out.extend_from_slice(&solidity_uint256(u64::from(src_eid)));
+    out.extend_from_slice(&header[13..45]);
+    out.extend_from_slice(&solidity_uint256(nonce));
+    Ok(format!("0x{}", hex::encode(out)))
+}
+
+/// Whether an `inboundPayloadHash` result is `EndpointV2`'s NIL sentinel (`bytes32(uint256.max)`).
+pub fn evm_inbound_payload_hash_is_nil(result: &str) -> Result<bool, AppCoreError> {
+    let bytes = decode_hex_bytes(result)?;
+    if bytes.len() != 32 {
+        return Err(AppCoreError::Internal(
+            "inboundPayloadHash result must be 32 bytes".to_string(),
+        ));
+    }
+    Ok(bytes.iter().all(|byte| *byte == 0xff))
+}
 /// ReadLib1002.getReadLibConfig(receiver, srcEid); receiver equals sender for READ on-chain.
 pub fn build_evm_get_read_lib_config_call_data(
     oapp: &str,
