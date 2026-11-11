@@ -141,7 +141,12 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         body: String,
     ) -> Result<(u16, String), RpcError> {
         let target = rpc_target_for_call()?;
-        limited_rpc(&target, self.post_form(url, headers, body)).await
+        limited_rpc(
+            &target,
+            endpoint_resource(&target, &url),
+            self.post_form(url, headers, body),
+        )
+        .await
     }
 
     async fn post_json_on(
@@ -151,7 +156,12 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         headers: HashMap<String, String>,
         body: Value,
     ) -> Result<Value, RpcError> {
-        limited_rpc(chain, self.post_json(url, headers, body)).await
+        limited_rpc(
+            chain,
+            endpoint_resource(chain, &url),
+            self.post_json(url, headers, body),
+        )
+        .await
     }
     async fn get_json_on(
         &self,
@@ -159,7 +169,12 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         url: String,
         headers: HashMap<String, String>,
     ) -> Result<Value, RpcError> {
-        limited_rpc(chain, self.get_json(url, headers)).await
+        limited_rpc(
+            chain,
+            endpoint_resource(chain, &url),
+            self.get_json(url, headers),
+        )
+        .await
     }
     async fn get_ton_json_scoped(
         &self,
@@ -167,7 +182,12 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         headers: HashMap<String, String>,
     ) -> Result<Value, RpcError> {
         let target = rpc_target_for_call()?;
-        limited_rpc(&target, self.get_ton_json(url, headers)).await
+        limited_rpc(
+            &target,
+            endpoint_resource(&target, &url),
+            self.get_ton_json(url, headers),
+        )
+        .await
     }
     async fn post_json_scoped(
         &self,
@@ -202,6 +222,7 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
                 page_body["params"][3] = Value::Bool(false);
                 let mut response = match limited_rpc(
                     &target,
+                    endpoint_resource(&target, &url),
                     self.post_json(url.clone(), headers.clone(), page_body.clone()),
                 )
                 .await
@@ -271,13 +292,21 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
                     .filter(|value| !value.is_null())
                     .ok_or(RpcError::Unavailable)?;
             }
-            unreachable!();
+            // Page-size retries use iterations without advancing, so the budget can run out here.
+            return Err(RpcError::Remote(
+                "IOTA transaction exceeds 1024 events".into(),
+            ));
         }
         if target.as_ref() == "sui" {
             if body.get("query").and_then(Value::as_str).is_some()
                 && body.get("variables").is_some_and(Value::is_object)
             {
-                return limited_rpc(&target, self.post_json(url, headers, body)).await;
+                return limited_rpc(
+                    &target,
+                    endpoint_resource(&target, &url),
+                    self.post_json(url, headers, body),
+                )
+                .await;
             }
             let (method, mut query) =
                 super::sui_graphql::request(&body, None).ok_or(RpcError::Unavailable)?;
@@ -302,6 +331,7 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
                     query = page_query;
                     let mut response = limited_rpc(
                         &target,
+                        endpoint_resource(&target, &url),
                         self.post_json(url.clone(), headers.clone(), query.clone()),
                     )
                     .await?;
@@ -380,7 +410,12 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
                 }
                 unreachable!();
             }
-            let response = limited_rpc(&target, self.post_json(url, headers, query)).await?;
+            let response = limited_rpc(
+                &target,
+                endpoint_resource(&target, &url),
+                self.post_json(url, headers, query),
+            )
+            .await?;
             if let Some(expected) = expected_digest {
                 if response
                     .pointer("/data/transaction/digest")
@@ -398,14 +433,24 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         if target.as_ref() == "iotal1"
             && body.get("method").and_then(Value::as_str) == Some("iota_getTransactionBlock")
         {
-            let response = limited_rpc(&target, self.post_json(url, headers, body.clone())).await?;
+            let response = limited_rpc(
+                &target,
+                endpoint_resource(&target, &url),
+                self.post_json(url, headers, body.clone()),
+            )
+            .await?;
             let expected = body.pointer("/params/0").and_then(Value::as_str);
             if response.pointer("/result/digest").and_then(Value::as_str) != expected {
                 return Err(RpcError::Remote("IOTA transaction digest mismatch".into()));
             }
             return Ok(response);
         }
-        limited_rpc(&target, self.post_json(url, headers, body)).await
+        limited_rpc(
+            &target,
+            endpoint_resource(&target, &url),
+            self.post_json(url, headers, body),
+        )
+        .await
     }
     async fn get_json_scoped(
         &self,
@@ -413,7 +458,12 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         headers: HashMap<String, String>,
     ) -> Result<Value, RpcError> {
         let target = rpc_target_for_call()?;
-        limited_rpc(&target, self.get_json(url, headers)).await
+        limited_rpc(
+            &target,
+            endpoint_resource(&target, &url),
+            self.get_json(url, headers),
+        )
+        .await
     }
     async fn post_text_scoped(
         &self,
@@ -422,7 +472,12 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         body: Value,
     ) -> Result<(u16, String), RpcError> {
         let target = rpc_target_for_call()?;
-        limited_rpc(&target, self.post_text(url, headers, body)).await
+        limited_rpc(
+            &target,
+            endpoint_resource(&target, &url),
+            self.post_text(url, headers, body),
+        )
+        .await
     }
     async fn get_text_scoped(
         &self,
@@ -430,7 +485,12 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         headers: HashMap<String, String>,
     ) -> Result<(u16, String), RpcError> {
         let target = rpc_target_for_call()?;
-        limited_rpc(&target, self.get_text(url, headers)).await
+        limited_rpc(
+            &target,
+            endpoint_resource(&target, &url),
+            self.get_text(url, headers),
+        )
+        .await
     }
 }
 
@@ -456,6 +516,20 @@ fn apply_headers(
     for (name, value) in headers {
         let name = HeaderName::try_from(name.as_str())
             .map_err(|_| "invalid provider header name".to_string())?;
+        // Hop-by-hop headers describe one connection, not the request; the pooled client would
+        // reuse a connection the provider has already closed.
+        if matches!(
+            name.as_str(),
+            "connection"
+                | "keep-alive"
+                | "proxy-connection"
+                | "te"
+                | "trailer"
+                | "transfer-encoding"
+                | "upgrade"
+        ) {
+            continue;
+        }
         let value = HeaderValue::try_from(value.as_str())
             .map_err(|_| format!("invalid value for provider header {name}"))?;
         match map.get(&name) {
@@ -471,8 +545,16 @@ fn apply_headers(
     Ok(request.headers(map))
 }
 
+/// The admission resource of a call: the provider entity the endpoint belongs to when the
+/// request has planned its dispatch, else the chain alone.
+fn endpoint_resource(chain: &str, url: &str) -> Option<String> {
+    let entity = pillar_core::execution::current()?.entity_of(chain, url)?;
+    Some(format!("{chain}/{entity}"))
+}
+
 async fn limited_rpc<T, F: Future<Output = Result<T, String>>>(
     chain: &str,
+    resource: Option<String>,
     future: F,
 ) -> Result<T, RpcError> {
     use pillar_core::execution::{current, within_deadline, Outcome};
@@ -491,13 +573,26 @@ async fn limited_rpc<T, F: Future<Output = Result<T, String>>>(
             Some(
                 resources
                     .rpc
-                    .acquire_for(lane, Some(chain))
+                    .acquire_for(lane, Some(resource.as_deref().unwrap_or(chain)))
                     .await
                     .map_err(RpcError::Admission)?,
             )
         }
         None => None,
     };
+    // A deadline already past is a refusal before dispatch, not a provider that was asked and
+    // failed to answer in time.
+    if current()
+        .and_then(|context| context.deadline)
+        .is_some_and(|deadline| tokio::time::Instant::now() >= deadline)
+    {
+        if let Some(permit) = &mut permit {
+            permit.finish(Outcome::TimedOut);
+        }
+        return Err(RpcError::Admission(
+            pillar_core::execution::BudgetError::Deadline,
+        ));
+    }
     let maximum =
         if current().is_some_and(|context| context.source_chain.as_deref() == Some("background")) {
             std::time::Duration::from_secs(2)
@@ -531,7 +626,12 @@ pub trait AwsLambdaInvokeClient: Send + Sync + 'static {
         function_name: &str,
         payload: Value,
     ) -> Result<Value, RpcError> {
-        limited_rpc("extra_context", self.invoke_json(function_name, payload)).await
+        limited_rpc(
+            "extra_context",
+            None,
+            self.invoke_json(function_name, payload),
+        )
+        .await
     }
 }
 
@@ -593,8 +693,7 @@ impl AwsLambdaInvokeClient for AwsSdkLambdaInvokeClient {
 #[derive(Clone, Debug)]
 pub struct ReqwestJsonRpcTransport {
     client: reqwest::Client,
-    /// For literal loopback targets only. The environment's proxy settings would otherwise carry a
-    /// request the config validation treats as local, and its bearer token, through a third party.
+    /// For loopback targets only (literal addresses and `localhost`).
     loopback_client: reqwest::Client,
     read_http: read_http::ReadHttp,
 }
@@ -611,8 +710,18 @@ pub const DEFAULT_RPC_TIMEOUT: std::time::Duration = std::time::Duration::from_m
 impl ReqwestJsonRpcTransport {
     pub fn new() -> Result<Self, String> {
         let build = |client: reqwest::ClientBuilder| {
+            let mut headers = reqwest::header::HeaderMap::new();
+            // No content coding is negotiated or decoded, so the answer must not be encoded.
+            headers.insert(
+                reqwest::header::ACCEPT_ENCODING,
+                reqwest::header::HeaderValue::from_static("identity"),
+            );
             client
                 .timeout(DEFAULT_RPC_TIMEOUT)
+                // A connector started speculatively outlives the request that raced it, and the
+                // request timeout does not cover it.
+                .connect_timeout(std::time::Duration::from_secs(10))
+                .default_headers(headers)
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .map_err(|error| error.to_string())
@@ -626,7 +735,12 @@ impl ReqwestJsonRpcTransport {
 
     fn client_for(&self, url: &str) -> &reqwest::Client {
         let loopback = reqwest::Url::parse(url)
-            .map(|url| pillar_config::is_literal_loopback(&url))
+            .map(|url| {
+                pillar_config::is_literal_loopback(&url)
+                    || url.host_str().is_some_and(|host| {
+                        host.trim_end_matches('.').eq_ignore_ascii_case("localhost")
+                    })
+            })
             .unwrap_or(false);
         if loopback {
             &self.loopback_client
@@ -891,7 +1005,25 @@ impl Drop for JsonParseWaiter {
 
 struct JsonParsePermit {
     budget: Option<pillar_core::execution::BudgetPermit>,
+    _target: Option<tokio::sync::OwnedSemaphorePermit>,
     _global: tokio::sync::OwnedSemaphorePermit,
+}
+
+// One READ target may hold all but one of the pool, so a single address cannot take the slots
+// every other READ parse in the process needs.
+static READ_TARGET_SLOTS: LazyLock<
+    std::sync::Mutex<std::collections::HashMap<Arc<str>, std::sync::Arc<tokio::sync::Semaphore>>>,
+> = LazyLock::new(Default::default);
+
+fn read_target_slots(target: Arc<str>) -> std::sync::Arc<tokio::sync::Semaphore> {
+    READ_TARGET_SLOTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .entry(target)
+        .or_insert_with(|| {
+            std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_JSON_PARSERS - 1))
+        })
+        .clone()
 }
 
 impl JsonParsePermit {
@@ -909,14 +1041,24 @@ impl JsonParsePermit {
 async fn acquire_json_parse_slot() -> Result<JsonParsePermit, String> {
     use pillar_core::execution::{current, BudgetError};
     if super::rpc_context::in_read_target_scope() {
-        let permit = READ_JSON_PARSE_SLOTS
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(|_| JSON_PARSER_CLOSED.to_string())?;
+        let target = super::rpc_context::rpc_target().unwrap_or_else(|| Arc::from("read"));
+        let admitted =
+            pillar_core::execution::within_deadline(std::time::Duration::from_secs(2), async {
+                let per_target = read_target_slots(target).acquire_owned().await?;
+                let global = READ_JSON_PARSE_SLOTS.clone().acquire_owned().await?;
+                Ok::<_, tokio::sync::AcquireError>((per_target, global))
+            })
+            .await;
+        // A wait that ends in capacity refusal is a local admission outcome, not a lost vote.
+        let (per_target, global) = match admitted {
+            Ok(Ok(permits)) => permits,
+            Ok(Err(_)) => return Err(JSON_PARSER_CLOSED.to_string()),
+            Err(_) => return Err(JSON_PARSER_OVERLOADED.to_string()),
+        };
         return Ok(JsonParsePermit {
             budget: None,
-            _global: permit,
+            _target: Some(per_target),
+            _global: global,
         });
     }
     let context = current();
@@ -957,6 +1099,7 @@ async fn acquire_json_parse_slot() -> Result<JsonParsePermit, String> {
         };
         return Ok(JsonParsePermit {
             budget: Some(permit),
+            _target: None,
             _global: permit_global,
         });
     }
@@ -981,6 +1124,7 @@ async fn acquire_json_parse_slot() -> Result<JsonParsePermit, String> {
     };
     Ok(JsonParsePermit {
         budget: None,
+        _target: None,
         _global: permit,
     })
 }

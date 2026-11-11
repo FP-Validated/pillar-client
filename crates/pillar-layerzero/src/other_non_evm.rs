@@ -12,15 +12,16 @@ pub use stellar::{
     stellar_account_id_from_strkey, stellar_contract_id_from_strkey, StellarUlnPayloadBuilder,
 };
 pub use ton::{
-    boc_from_base64, boc_from_base64_with_limits, boc_from_bytes, boc_from_bytes_with_limits,
-    build_ton_dvn_verify, committable_view_is_signed, decode_proxy_admin_target,
-    decode_ton_relayer_options, derive_uln_addresses, dvn_attestation,
-    effective_receive_confirmations, required_receive_confirmations, ton_address_to_be32,
-    ton_boc_from_hex, ton_boc_to_base64, ton_payload_signed_targets, ton_state_init_address,
-    uln_default_receive_config, DerivedAddresses, DvnAttestation, TonContractCodeCells,
-    TonDvnVerifyOutput, TonDvnVerifyRequest, TonPathway, TonPayloadSignedRequest,
-    TonPayloadSignedTargets, TonStorageCell, TonUlnPayloadBuilder, LIVE_TON_PACKET_BOC,
-    MAX_ACCOUNT_STATE_CELLS, MAX_MESSAGE_CELLS,
+    boc_base64_bytes, boc_from_base64, boc_from_base64_with_limits, boc_from_bytes,
+    boc_from_bytes_with_limits, build_ton_dvn_verify, committable_view_is_signed,
+    decode_proxy_admin_target, decode_proxy_admin_target_from_cell, decode_ton_relayer_options,
+    derive_uln_addresses, dvn_attestation, effective_receive_confirmations,
+    required_receive_confirmations, ton_address_to_be32, ton_boc_from_hex, ton_boc_to_base64,
+    ton_payload_signed_targets, ton_state_init_address, uln_default_receive_config,
+    DerivedAddresses, DvnAttestation, TonContractCodeCells, TonDvnVerifyOutput,
+    TonDvnVerifyRequest, TonPathway, TonPayloadSignedRequest, TonPayloadSignedTargets,
+    TonStorageCell, TonUlnPayloadBuilder, LIVE_TON_PACKET_BOC, MAX_ACCOUNT_STATE_CELLS,
+    MAX_MESSAGE_CELLS,
 };
 
 use sha3::{Digest, Keccak256};

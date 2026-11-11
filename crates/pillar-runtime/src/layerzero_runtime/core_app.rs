@@ -15,6 +15,11 @@ pub struct RuntimeCoreAppParts {
 }
 
 pub fn core_api_app_from_runtime_parts(parts: RuntimeCoreAppParts) -> CoreApiApp {
+    // Without these the returned app keeps its fail-closed defaults (no tokens, signing routes
+    // protected), which contradicts the configuration it was assembled from.
+    let api_auth_tokens = parts.runtime_config.api_auth_tokens.clone();
+    let public_sign_routes = parts.runtime_config.public_sign_routes;
+    let api_auth_enabled = parts.runtime_config.api_auth_enabled;
     CoreApiApp::with_metrics(
         PillarApp {
             available_chain_names: parts.available_chain_names,
@@ -41,6 +46,9 @@ pub fn core_api_app_from_runtime_parts(parts: RuntimeCoreAppParts) -> CoreApiApp
         parts.provider_health_report,
         parts.metrics,
     )
+    .with_auth_tokens(api_auth_tokens)
+    .with_public_sign_routes(public_sign_routes)
+    .with_api_auth_enabled(api_auth_enabled)
 }
 
 pub fn runtime_core_dependencies_from_layerzero_parts<C>(

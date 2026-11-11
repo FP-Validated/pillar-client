@@ -496,13 +496,21 @@ async fn payload_signed_refuses_a_receiver_that_is_not_a_padded_evm_address() {
     );
 }
 
-/// A chain-native V2 message has no duplicate-signature subject until the caller
-/// supplies its DVN address. The missing-address path therefore skips all Move
-/// RPCs, matching the upstream gate at apps/gasolina/src/app/app.ts:494.
+/// A chain-native V2 message has no duplicate-signature subject until the caller supplies
+/// its DVN address, but the destination's confirmation requirement does not depend on it:
+/// it is still read, and the lookup runs against a null subject (M-109).
 #[tokio::test]
-async fn payload_signed_skips_move_validation_without_a_dvn_address() {
+async fn payload_signed_reads_the_move_requirement_without_a_dvn_address() {
     let calls = Arc::new(Mutex::new(Vec::new()));
-    let checks = aptos_payload_checks(Vec::new(), calls.clone());
+    let checks = aptos_payload_checks(
+        vec![
+            Ok(json!([format!("0x{}", "44".repeat(32)), false])),
+            Ok(json!(["0x0000000000000002000000000000"])),
+            Ok(json!([0])),
+            Ok(json!([1])),
+        ],
+        calls.clone(),
+    );
     let mut event = payload_signed_sent_event();
     event.lz_message_id.pathway_id.dst_chain_name = "aptos".to_string();
 
@@ -511,10 +519,8 @@ async fn payload_signed_skips_move_validation_without_a_dvn_address() {
         .await
         .expect("a Move V2 payload without a verifier address is not a refusal");
 
-    assert!(
-        calls.lock().unwrap().is_empty(),
-        "missing verifier address must skip every chain-native RPC call"
-    );
+    let calls = calls.lock().unwrap();
+    assert_eq!(calls[1].2["function"], "0xendpoint::endpoint::get_config");
 }
 
 /// Supplying the address restores the chain-native duplicate-signature query;

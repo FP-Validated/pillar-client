@@ -166,8 +166,8 @@ async fn round3_m12_aptos_node_release_and_indexer_differences_still_reach_quoru
         assert_archived_send(&event);
         assert_eq!(
             urls.len(),
-            4,
-            "{case}: two by_hash and two by_version reads"
+            6,
+            "{case}: two by_hash, two block and two by_version reads"
         );
         assert_eq!(
             urls.iter()
@@ -365,6 +365,23 @@ impl JsonRpcTransport for InitiaPerHost {
         url: String,
         _headers: HashMap<String, String>,
     ) -> Result<Value, String> {
+        if let Some(block) = self
+            .by_host
+            .keys()
+            .find(|host| {
+                url.starts_with(&format!(
+                    "https://{host}/cosmos/base/tendermint/v1beta1/blocks/"
+                ))
+            })
+            .map(|_| {
+                json!({
+                    "block_id": {"hash": "ERERERERERERERERERERERERERERERERERERERERERE="},
+                    "block": {"header": {"height": "777", "time": "2026-01-01T00:00:00Z"}}
+                })
+            })
+        {
+            return Ok(block);
+        }
         self.by_host
             .iter()
             .find(|(host, _)| url.starts_with(&format!("https://{host}/cosmos/tx/v1beta1/txs/")))

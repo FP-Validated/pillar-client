@@ -1,6 +1,7 @@
 // Test code parses its own committed fixtures; production parsing goes through pillar_core::json.
 #![cfg_attr(test, allow(clippy::disallowed_methods))]
 mod audit;
+mod audit_tls;
 mod aws_client;
 mod config_loader;
 mod execution;
@@ -53,7 +54,8 @@ pub use signer_runtime::{
     RuntimeSignerConfig, RuntimeSignerMaterial,
 };
 pub use startup_report::{
-    startup_report_from_env_map, RuntimeMode, StartupChainReport, StartupReport,
+    startup_report_from_env_map, startup_report_from_env_map_async, RuntimeMode,
+    StartupChainReport, StartupReport,
 };
 pub use validation::{
     ExpirationValidRange, RuntimeAppValidator, RuntimeValidationChecks,

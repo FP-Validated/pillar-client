@@ -72,8 +72,8 @@ fn bucket_object(fixture: &str, key: &str) -> String {
     }
 }
 
-/// Hands out one scripted bucket state per refresh: the n-th read of each object
-/// answers from the n-th entry, so a refresh's two reads always describe one state.
+/// Hands out one scripted bucket state per refresh: a refresh reads each object twice, to
+/// confirm the pair did not move, and both reads answer from the same entry.
 struct ScriptedLoader {
     script: Vec<Result<String, pillar_config::ConfigError>>,
     reads: std::sync::Mutex<HashMap<String, usize>>,
@@ -99,7 +99,7 @@ impl pillar_config::RemoteProviderConfigLoader for ScriptedLoader {
             let mut reads = self.reads.lock().unwrap();
             let count = reads.entry(key.clone()).or_default();
             *count += 1;
-            *count - 1
+            (*count - 1) / 2
         };
         match self.script.get(read) {
             None => Err(pillar_config::ConfigError::Json(
@@ -123,8 +123,8 @@ impl pillar_config::RemoteProviderConfigLoader for HangsAfterFirstReadLoader {
         &self,
         request: pillar_config::RemoteProviderConfigRequest,
     ) -> Result<String, pillar_config::ConfigError> {
-        // The first refresh reads both objects.
-        if self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 2 {
+        // The first refresh reads both objects, twice each.
+        if self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 4 {
             return Ok(bucket_object(REPLACEMENT, &requested_key(&request)));
         }
         std::future::pending().await
@@ -404,8 +404,8 @@ async fn a_loop_hung_inside_its_work_reports_a_growing_age() {
 
     assert_eq!(
         reads.load(std::sync::atomic::Ordering::SeqCst),
-        4,
-        "the loop must still be in its second refresh's two object reads, not spinning \
+        6,
+        "the loop must still be in its second refresh's first two object reads, not spinning \
          through more"
     );
     assert!(

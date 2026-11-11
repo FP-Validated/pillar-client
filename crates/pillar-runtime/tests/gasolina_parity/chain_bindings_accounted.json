@@ -403,6 +403,19 @@
     "testnet/initia/emitters: ours Some(\"{\\\"cc4e9fda80712972deb0338d85b84822a42d5155b645ef1b2eeae42cedd41b04\\\"}\") upstream Some(\"{\\\"9b4f328857baf5471ffe873471459a75da3aa3db0629f4c1b0ede4d48cf9fac1\\\", \\\"cc4e9fda80712972deb0338d85b84822a42d5155b645ef1b2eeae42cedd41b04\\\"}\")",
     "testnet/movement/emitters: ours Some(\"{\\\"7f03103b83c51c8b09be1751a797a65ac6e755f72947ecdecffc203d32d816c6\\\"}\") upstream Some(\"{\\\"7f03103b83c51c8b09be1751a797a65ac6e755f72947ecdecffc203d32d816c6\\\", \\\"9b4f328857baf5471ffe873471459a75da3aa3db0629f4c1b0ede4d48cf9fac1\\\"}\")"
    ]
+  },
+  {
+   "id": "legacy-only-evm-catalog",
+   "decision": "Upstream lists EndpointV1-only EVM chains in its available union. Runtime assembly needs EndpointV2 and ULN302 for every EVM chain and refuses the whole instance without them, so Pillar does not advertise them. Pillar stricter.",
+   "count": 6,
+   "lines": [
+    "catalog mainnet/sepolia: upstream only",
+    "catalog testnet/alpen: upstream only",
+    "catalog testnet/harmony: upstream only",
+    "catalog testnet/kiwi2: upstream only",
+    "catalog testnet/kiwi: upstream only",
+    "catalog testnet/polygoncdk: upstream only"
+   ]
   }
  ]
 }

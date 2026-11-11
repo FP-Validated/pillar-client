@@ -26,6 +26,30 @@ fn move_block_projection(value: Value) -> Value {
     project_fields(value, &["block_height", "block_hash"])
 }
 
+/// The agreed part of a Cosmos block read: its hash as the `0x` hex a policy checks, and its
+/// height. A hash that is not 32 bytes of base64 is left null, which the identity check refuses.
+fn initia_block_projection(value: Value) -> Value {
+    use base64::Engine;
+    let hash = value
+        .pointer("/block_id/hash")
+        .and_then(Value::as_str)
+        .and_then(|encoded| {
+            base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .ok()
+        })
+        .filter(|bytes| bytes.len() == 32)
+        .map_or(Value::Null, |bytes| {
+            Value::from(format!("0x{}", hex::encode(bytes)))
+        });
+    let height = value
+        .pointer("/block/header/height")
+        .or_else(|| value.pointer("/sdk_block/header/height"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    json!({ "block_hash": hash, "block_height": height })
+}
+
 /// `executor_v1::AdapterParamsConfig` is read only for its table handle, so the quorum
 /// agrees on that and not on fields a node may add or order differently.
 fn aptos_adapter_params_handle_projection(value: Value) -> Value {
@@ -241,7 +265,7 @@ where
             )));
         }
         let receipt: EvmTransactionReceipt = serde_json::from_value(result)
-            .map_err(|error| AppCoreError::Internal(error.to_string()))?;
+            .map_err(|_| AppCoreError::Internal("malformed EVM receipt".to_string()))?;
         // Still refused, but as upstream reports it: a reverted transaction has no
         // PacketSent log, so its sdk ends in `Packet does not match lzMessageId`.
         if receipt.status != "1" {
@@ -296,7 +320,9 @@ where
                         let (normalized, _) =
                             crate::provider_health::solana_transaction_projection(
                                 &result,
-                                Some(&self.config.trusted_solana_endpoint_program_ids),
+                                crate::provider_health::SolanaInstructionBinding::TrustedData(
+                                    &self.config.trusted_solana_endpoint_program_ids,
+                                ),
                             )
                             .map_err(|error| RpcError::Remote(error.to_string()))?;
                         let fingerprint =
@@ -502,8 +528,11 @@ where
                     source.endpoint_v1_id, packet.src_chain_id
                 )));
             }
-            let Some(dst_chain_name) =
-                pillar_config::layerzero_legacy_chain_name(u32::from(packet.dst_chain_id))
+            let Some(dst_chain_name) = self
+                .config
+                .chain_name_by_eid
+                .get(&u32::from(packet.dst_chain_id))
+                .cloned()
             else {
                 // A sibling packet is not the requested one; refuse only when no packet matches.
                 unmapped.get_or_insert_with(|| {
@@ -514,7 +543,6 @@ where
                 });
                 continue;
             };
-            let dst_chain_name = dst_chain_name.to_string();
             let (block_hash, block_number) = match &block {
                 Some(block) => block.clone(),
                 None => {
@@ -1057,11 +1085,7 @@ where
                 .iter()
                 .enumerate()
                 .filter_map(|(index, uri)| {
-                    let (endpoint, _, headers) = ton_v3_provider_uri_parts(uri)?;
-                    Some((
-                        index,
-                        crate::provider_health::dialled_identity_key(endpoint, headers),
-                    ))
+                    Some((index, crate::provider_health::ton_v3_rank_key(uri)?))
                 })
                 .collect();
             let plan = crate::provider_health::plan_dispatch_for_keys(
@@ -1242,11 +1266,65 @@ where
                     )))),
                 };
                 let identity_field = if src_chain_name == "initia" { "txhash" } else { "version" };
-                if let Some(identity) = transaction.get(identity_field).and_then(|value| {
+                let identity = transaction.get(identity_field).and_then(|value| {
                     value.as_str().map(str::to_owned)
                         .or_else(|| value.as_u64().map(|number| number.to_string()))
-                }) {
-                    sent_event.extra.insert("onChainTxHash".to_string(), Value::from(identity));
+                });
+                if let Some(identity) = identity {
+                    sent_event.extra.insert("onChainTxHash".to_string(), Value::from(identity.clone()));
+                    // The block identity ULNv2 attaches, read the same way, so a configured
+                    // policy is satisfied by agreed data. Aptos and Movement look the block up by
+                    // ledger version; Initia names a transaction by hash and by block height.
+                    let fetched = if src_chain_name == "initia" {
+                        let height = transaction
+                            .get("height")
+                            .and_then(|height| {
+                                height
+                                    .as_str()
+                                    .map(str::to_owned)
+                                    .or_else(|| height.as_u64().map(|height| height.to_string()))
+                            })
+                            .filter(|height| {
+                                !height.is_empty() && height.bytes().all(|byte| byte.is_ascii_digit())
+                            });
+                        // Without a height there is no block to name, and a policy that needs
+                        // one refuses the event for the missing identity.
+                        match height {
+                            Some(height) => Some(
+                                self.get_aptos_json(
+                                    "initia",
+                                    |base| initia_block_by_height_url(base, &height),
+                                    initia_block_projection,
+                                    &format!("Initia block at height {height}"),
+                                )
+                                .await?,
+                            ),
+                            None => None,
+                        }
+                    } else {
+                        Some(
+                            self.get_aptos_json(
+                                src_chain_name,
+                                |base| move_block_by_version_url(base, &identity),
+                                move_block_projection,
+                                &format!("{src_chain_name} block at version {identity}"),
+                            )
+                            .await?,
+                        )
+                    };
+                    if let Some(fetched) = fetched {
+                        let height = fetched
+                            .get("block_height")
+                            .and_then(Value::as_str)
+                            .map(pillar_core::js_parse_int)
+                            .filter(|height| height.is_finite() && height.fract() == 0.0)
+                            .map_or(Value::Null, |height| Value::from(height as i64));
+                        sent_event.extra.insert(
+                            "blockHash".to_string(),
+                            fetched.get("block_hash").cloned().unwrap_or(Value::Null),
+                        );
+                        sent_event.extra.insert("blockNumber".to_string(), height);
+                    }
                 }
                 if sent_event.lz_message_id.uln_send_version == ULN_VERSION_V301 {
                     // `onChainEvent.txHash`: the ledger version on Aptos, the hash on Initia.
@@ -1408,7 +1486,13 @@ where
                 let sequencer = canton_sequencer("canton", snapshot.provider_config("canton")?)?;
                 return crate::provider_health::rpc_scope(
                     "canton",
-                    resolve_canton_packet_sent(&self.transport, &sequencer, src_tx_hash, lz_message_id),
+                    resolve_canton_packet_sent(
+                        &self.transport,
+                        &sequencer,
+                        &self.config.chain_name_by_eid,
+                        src_tx_hash,
+                        lz_message_id,
+                    ),
                 )
                 .await;
             }
@@ -1769,6 +1853,17 @@ where
         }
         let mut accumulator = ExactQuorumAccumulator::new(quorum, 0..provider_config.uris.len());
         while let Some((index, response)) = requests.next().await {
+            // An absent table entry is an answer the providers can agree on; every other
+            // failure stays a lost vote.
+            let response = match response {
+                Err(error)
+                    if crate::provider_health::is_http_not_found(&error)
+                        || matches!(&error, RpcError::Remote(message) if message == "table item not found") =>
+                {
+                    Ok(Value::Null)
+                }
+                other => other,
+            };
             let observation = provider_response(response).and_then(|response| {
                 response
                     .map(|value| {
@@ -2010,12 +2105,16 @@ where
                 json!({"key_type": "u64", "value_type": "vector<u8>", "key": key}),
                 "Aptos adapter params table",
             )
-            .await;
+            .await?;
         Ok(match item {
-            Ok(Value::String(text)) => {
-                pillar_layerzero::node_buffer_from_hex(strip_hex_prefix(&text))
+            Value::String(text) => pillar_layerzero::node_buffer_from_hex(strip_hex_prefix(&text)),
+            // No entry for the destination: upstream's default.
+            Value::Null => fallback(),
+            _ => {
+                return Err(AppCoreError::Internal(
+                    "Aptos adapter params table returned an unusable value".to_string(),
+                ))
             }
-            _ => fallback(),
         })
     }
 
@@ -2510,8 +2609,44 @@ fn stellar_transaction_vote(result: Value) -> Result<(String, Value), RpcError> 
         result.pointer("/events/contractEventsXdr"),
     );
     crate::provider_health::canonical_json_fingerprint(&fields)
-        .map(|fingerprint| (fingerprint, result))
+        .map(|fingerprint| (fingerprint, stellar_consumed_fields(&result)))
         .map_err(|error| RpcError::Remote(error.to_string()))
+}
+
+/// What `decode_stellar_packet_sent_events` and the status check read.
+fn stellar_consumed_fields(result: &Value) -> Value {
+    let mut consumed = serde_json::Map::new();
+    for key in ["status", "ledger"] {
+        if let Some(value) = result
+            .get(key)
+            .filter(|value| value.is_string() || value.is_number())
+        {
+            consumed.insert(key.to_string(), value.clone());
+        }
+    }
+    if let Some(events) = result
+        .pointer("/events/contractEventsXdr")
+        .and_then(Value::as_array)
+    {
+        let events = events
+            .iter()
+            .filter_map(Value::as_array)
+            .map(|operation| {
+                Value::Array(
+                    operation
+                        .iter()
+                        .filter(|event| event.is_string())
+                        .cloned()
+                        .collect(),
+                )
+            })
+            .collect();
+        consumed.insert(
+            "events".to_string(),
+            json!({ "contractEventsXdr": Value::Array(events) }),
+        );
+    }
+    Value::Object(consumed)
 }
 
 #[cfg(test)]

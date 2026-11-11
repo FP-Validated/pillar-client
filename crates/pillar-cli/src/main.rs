@@ -29,6 +29,7 @@ use tower::ServiceExt;
 use tracing_subscriber::{fmt, EnvFilter};
 mod connections;
 mod healthcheck;
+mod logging;
 mod response_body;
 
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(58);
@@ -52,11 +53,22 @@ const PRODUCTION_CONNECTION_TIMEOUTS: ConnectionTimeouts = ConnectionTimeouts {
     keep_alive: KEEP_ALIVE_TIMEOUT,
     header_read: HEADER_READ_TIMEOUT,
 };
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
+    // The probe is synchronous, so it must not need a runtime (or its worker threads) to run.
     if std::env::args().nth(1).as_deref() == Some("healthcheck") {
         std::process::exit(healthcheck::exit_code());
     }
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    let result = runtime.block_on(run());
+    // A resolver lookup already running on the blocking pool cannot be cancelled, and dropping
+    // the runtime would wait for it past the shutdown grace.
+    runtime.shutdown_timeout(Duration::from_secs(1));
+    result
+}
+
+async fn run() -> anyhow::Result<()> {
     init_tracing();
     let config = load_from_env()?;
     let port = config.server_port;
@@ -164,6 +176,9 @@ async fn serve_until_with_lifetime(
             Ok(connection) => connection,
             Err(error) => {
                 tracing::error!(?error, "TCP accept failed; backing off");
+                // Descriptor exhaustion below the connection cap would otherwise wait on idle
+                // keep-alives that nothing reclaims.
+                connections.evict_idle();
                 tokio::select! {
                     _ = tokio::time::sleep(Duration::from_millis(100)) => {},
                     signalled = &mut shutdown => break 'accept signalled?,
@@ -188,6 +203,7 @@ async fn serve_until_with_lifetime(
     };
     let started = Instant::now();
     let deadline = started + shutdown_grace;
+    connections.set_grace_deadline(deadline);
     let withdrawal_end = started + shutdown_withdrawal.min(shutdown_grace);
     shutdown_signal.trigger();
     if !shutdown_withdrawal.is_zero() {
@@ -201,6 +217,7 @@ async fn serve_until_with_lifetime(
                 Ok(connection) => connection,
                 Err(error) => {
                     tracing::error!(?error, "TCP accept failed; backing off");
+                    connections.evict_idle();
                     tokio::select! {
                         _ = tokio::time::sleep(Duration::from_millis(100)) => {},
                         _ = &mut end => break,
@@ -372,6 +389,16 @@ where
             let draining = control
                 .as_ref()
                 .is_some_and(|control| control.is_draining());
+            if control
+                .as_ref()
+                .is_some_and(|control| control.grace_expired())
+            {
+                context.shutdown();
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "shutdown grace expired before the response was released",
+                ));
+            }
             if Instant::now() >= deadline || response.is_err() {
                 context.timeout();
                 if let Ok(Ok(response)) = &mut response {
@@ -606,6 +633,7 @@ fn init_tracing() {
     });
     let _ = fmt()
         .with_env_filter(without_credential_dumps(filter))
+        .with_writer(logging::LossyStdout::spawn())
         .with_target(true)
         .compact()
         .try_init();

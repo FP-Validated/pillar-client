@@ -212,6 +212,25 @@ pub fn startup_report_from_env_map(
         runtime_config.available_chain_names.as_deref(),
     )
     .map_err(|error| error.to_string())?;
+    startup_report_from_loaded(vars, &runtime_config, &provider_config)
+}
+
+/// [`startup_report_from_env_map`] through the production loader, so an S3 or GCS provider
+/// configuration is reported rather than refused.
+pub async fn startup_report_from_env_map_async(
+    vars: &HashMap<String, String>,
+) -> Result<StartupReport, String> {
+    let runtime_config = load_from_map(vars.clone()).map_err(|error| error.to_string())?;
+    let provider_config =
+        crate::config_loader::runtime_provider_config_from_env_map(vars, &runtime_config).await?;
+    startup_report_from_loaded(vars, &runtime_config, &provider_config)
+}
+
+fn startup_report_from_loaded(
+    vars: &HashMap<String, String>,
+    runtime_config: &RuntimeConfig,
+    provider_config: &impl ProviderConfigGetter,
+) -> Result<StartupReport, String> {
     let available_chain_names = runtime_config
         .available_chain_names
         .clone()
@@ -222,11 +241,11 @@ pub fn startup_report_from_env_map(
                 .cloned()
                 .collect()
         });
-    let mode = startup_mode(vars, &runtime_config);
+    let mode = startup_mode(vars, runtime_config);
     StartupReport::from_parts(
         vars,
-        &runtime_config,
-        &provider_config,
+        runtime_config,
+        provider_config,
         &available_chain_names,
         mode,
     )

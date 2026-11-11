@@ -204,16 +204,15 @@ async fn azure_wire_real_format_versions_case_retry_and_high_s() {
         assert!(paths[2].0.contains(&format!("/keys/key-a/{VERSION}/sign?")));
         rows.push(json!({"host":host,"resolved_version":VERSION,"http_calls":paths.len(),"high_s_recovered":true}));
         let (client, _) = client_for_case(host, "Key-A", Some(VERSION));
-        let error = client
+        let key = client
             .get_ec_public_key_coordinates(&AzureKmsKeyId {
                 name: "key-a".into(),
                 version: None,
             })
             .await
-            .err()
             .unwrap();
-        assert!(error.to_string().contains("public key identity changed"));
-        rows.push(json!({"host":host,"case_mismatch_error":error.to_string()}));
+        assert!(key.key_id.name.eq_ignore_ascii_case("key-a"));
+        rows.push(json!({"host":host,"case_variant_accepted":true}));
         let other = format!("https://{host}/keys/key-a/{}", "f".repeat(32));
         let (client, _) = client_for_sign(host, Some(other), StatusCode::Ok);
         let error = client

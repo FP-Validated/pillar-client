@@ -235,6 +235,31 @@ pub fn is_strategy_satisfiable(
         .any(|alt| check_requirement_set(counts, &strategy.all_of, alt))
 }
 
+/// Slots per named category and the `any` slots a requirement asks for; `None` when a quorum is
+/// not a count.
+fn requirement_demand(
+    all_of: &[CategoryRequirement],
+    one_of: &CategoryRequirement,
+) -> Option<(BTreeMap<String, usize>, usize)> {
+    let mut demand = BTreeMap::<String, usize>::new();
+    let mut any_quorum = 0usize;
+    for req in all_of.iter().chain(std::iter::once(one_of)) {
+        for (category, quorum) in req {
+            let Quorum::Count(n) = quorum else {
+                return None;
+            };
+            let n = usize::try_from(*n).ok()?;
+            if category == PROVIDER_CATEGORY_ANY {
+                any_quorum = any_quorum.saturating_add(n);
+            } else if n > 0 {
+                let slots = demand.entry(category.clone()).or_default();
+                *slots = slots.saturating_add(n);
+            }
+        }
+    }
+    Some((demand, any_quorum))
+}
+
 fn check_requirement_set(
     counts: &BTreeMap<String, BTreeSet<String>>,
     all_of: &[CategoryRequirement],
@@ -245,94 +270,146 @@ fn check_requirement_set(
         .flat_map(|s| s.iter())
         .collect::<BTreeSet<_>>()
         .len();
-    let mut categories = Vec::new();
-    let mut any_quorum = 0usize;
-    for req in all_of.iter().chain(std::iter::once(one_of)) {
-        for (category, quorum) in req {
-            let Quorum::Count(n) = quorum else {
-                return false;
-            };
-            let Ok(n) = usize::try_from(*n) else {
-                return false;
-            };
-            if category == PROVIDER_CATEGORY_ANY {
-                any_quorum = any_quorum.saturating_add(n);
-            } else {
-                // Each slot needs its own entity, so more slots than entities is unmet;
-                // checked before expanding so a mistyped count cannot exhaust memory.
-                if n > pool.saturating_sub(categories.len()) {
-                    return false;
-                }
-                categories.extend(std::iter::repeat_n(category.clone(), n));
-            }
-        }
-    }
-    pool >= any_quorum.max(categories.len()) && assign_entities(counts, &categories)
+    let Some((demand, any_quorum)) = requirement_demand(all_of, one_of) else {
+        return false;
+    };
+    // Each slot needs its own entity, so more slots than entities is unmet.
+    let total = demand
+        .values()
+        .fold(0usize, |sum, n| sum.saturating_add(*n));
+    pool >= any_quorum.max(total) && every_category_subset_has_enough_entities(counts, &demand)
 }
 
-/// Whether every category slot can hold its own entity, by augmenting paths so the depth does not grow with the policy.
-fn assign_entities(counts: &BTreeMap<String, BTreeSet<String>>, categories: &[String]) -> bool {
-    let mut owner: BTreeMap<&str, &str> = BTreeMap::new();
-    let mut lists: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-    let mut owned_prefix: BTreeMap<&str, usize> = BTreeMap::new();
-    for category in categories {
-        let Some(candidates) = counts.get(category) else {
-            return false;
-        };
-        let list = lists
-            .entry(category)
-            .or_insert_with(|| candidates.iter().map(String::as_str).collect());
-        // An entity is only ever handed from one category to another, so a prefix found owned stays owned.
-        let prefix = owned_prefix.entry(category).or_default();
-        while list
-            .get(*prefix)
-            .is_some_and(|entity| owner.contains_key(entity))
-        {
-            *prefix += 1;
+/// Whether every named-category slot can hold its own entity.
+fn every_category_subset_has_enough_entities(
+    counts: &BTreeMap<String, BTreeSet<String>>,
+    demand: &BTreeMap<String, usize>,
+) -> bool {
+    let mut sets = Vec::with_capacity(demand.len());
+    for category in demand.keys() {
+        match counts.get(category) {
+            Some(entities) => sets.push((entities, demand[category])),
+            None => return false,
         }
-        if let Some(&entity) = list.get(*prefix) {
-            owner.insert(entity, category);
-        } else if !augment(counts, &mut owner, category) {
+    }
+    if sets.len() > MAX_HALL_CATEGORIES {
+        return false;
+    }
+    for subset in 1u32..(1u32 << sets.len()) {
+        let mut union = BTreeSet::<&str>::new();
+        let mut needed = 0usize;
+        for (bit, (entities, slots)) in sets.iter().enumerate() {
+            if subset & (1 << bit) != 0 {
+                needed = needed.saturating_add(*slots);
+                union.extend(entities.iter().map(String::as_str));
+            }
+        }
+        if union.len() < needed {
             return false;
         }
     }
     true
 }
 
-/// Gives `start` one more entity, moving entities between categories along a shortest path when none is free.
-fn augment<'a>(
-    counts: &'a BTreeMap<String, BTreeSet<String>>,
-    owner: &mut BTreeMap<&'a str, &'a str>,
-    start: &'a str,
-) -> bool {
-    let mut via: BTreeMap<&str, (&str, &str)> = BTreeMap::new();
-    let mut queue = std::collections::VecDeque::from([start]);
-    let mut seen = BTreeSet::from([start]);
-    while let Some(category) = queue.pop_front() {
-        let Some(candidates) = counts.get(category) else {
-            continue;
-        };
-        for entity in candidates {
-            match owner.get(entity.as_str()).copied() {
-                None => {
-                    owner.insert(entity, category);
-                    let mut at = category;
-                    while at != start {
-                        let (previous, taken) = via[at];
-                        owner.insert(taken, previous);
-                        at = previous;
-                    }
-                    return true;
-                }
-                Some(holder) if seen.insert(holder) => {
-                    via.insert(holder, (category, entity));
-                    queue.push_back(holder);
-                }
-                Some(_) => {}
+/// Only the provider categories can be named, so this bounds nothing real; it keeps the subset
+/// enumeration finite for any caller.
+const MAX_HALL_CATEGORIES: usize = 8;
+
+/// The distinct entities of a changing pool, grouped by which demanded categories each serves,
+/// so Hall's condition is a sum over a constant number of group counts after every change.
+struct HallPool {
+    bit_of: BTreeMap<String, usize>,
+    slots: Vec<usize>,
+    providers: BTreeMap<(String, String), usize>,
+    mask_of: BTreeMap<String, u32>,
+    pairs_of: BTreeMap<String, usize>,
+    groups: Vec<usize>,
+}
+
+impl HallPool {
+    fn new(demand: &BTreeMap<String, usize>) -> Option<Self> {
+        if demand.len() > 4 {
+            return None;
+        }
+        Some(Self {
+            bit_of: demand
+                .keys()
+                .enumerate()
+                .map(|(bit, category)| (category.clone(), bit))
+                .collect(),
+            slots: demand.values().copied().collect(),
+            providers: BTreeMap::new(),
+            mask_of: BTreeMap::new(),
+            pairs_of: BTreeMap::new(),
+            groups: vec![0; 1 << demand.len()],
+        })
+    }
+
+    fn add(&mut self, category: &str, entity: &str) {
+        let count = self
+            .providers
+            .entry((category.to_string(), entity.to_string()))
+            .or_default();
+        *count += 1;
+        if *count == 1 {
+            *self.pairs_of.entry(entity.to_string()).or_default() += 1;
+            if let Some(bit) = self.bit_of.get(category).copied() {
+                let old = self.mask_of.get(entity).copied().unwrap_or(0);
+                self.regroup(entity, old, old | (1 << bit));
             }
         }
     }
-    false
+
+    fn remove(&mut self, category: &str, entity: &str) {
+        let key = (category.to_string(), entity.to_string());
+        let count = self.providers.get_mut(&key).expect("provider counted");
+        *count -= 1;
+        if *count == 0 {
+            self.providers.remove(&key);
+            let pairs = self.pairs_of.get_mut(entity).expect("entity counted");
+            *pairs -= 1;
+            if *pairs == 0 {
+                self.pairs_of.remove(entity);
+            }
+            if let Some(bit) = self.bit_of.get(category).copied() {
+                let old = self.mask_of.get(entity).copied().unwrap_or(0);
+                self.regroup(entity, old, old & !(1 << bit));
+            }
+        }
+    }
+
+    fn regroup(&mut self, entity: &str, old: u32, new: u32) {
+        if old != 0 {
+            self.groups[old as usize] -= 1;
+        }
+        if new != 0 {
+            self.groups[new as usize] += 1;
+            self.mask_of.insert(entity.to_string(), new);
+        } else {
+            self.mask_of.remove(entity);
+        }
+    }
+
+    fn satisfies(&self, any_quorum: usize) -> bool {
+        let total = self.slots.iter().sum::<usize>();
+        if self.pairs_of.len() < any_quorum.max(total) {
+            return false;
+        }
+        (1u32..(1u32 << self.slots.len())).all(|subset| {
+            let needed = self
+                .slots
+                .iter()
+                .enumerate()
+                .filter(|(bit, _)| subset & (1 << bit) != 0)
+                .map(|(_, slots)| *slots)
+                .sum::<usize>();
+            let available = (1u32..(1u32 << self.slots.len()))
+                .filter(|mask| mask & subset != 0)
+                .map(|mask| self.groups[mask as usize])
+                .sum::<usize>();
+            available >= needed
+        })
+    }
 }
 
 fn resolve_max(
@@ -553,6 +630,39 @@ fn minimal_satisfying_selection(
     output: &[OrderableProvider],
     candidate: &QuorumStrategy,
 ) -> Option<Vec<bool>> {
+    let empty = CategoryRequirement::new();
+    if candidate.one_of.len() > 1 {
+        return minimal_satisfying_selection_by_recheck(output, candidate);
+    }
+    let (demand, any_quorum) = requirement_demand(
+        &candidate.all_of,
+        candidate.one_of.first().unwrap_or(&empty),
+    )?;
+    let Some(mut pool) = HallPool::new(&demand) else {
+        return minimal_satisfying_selection_by_recheck(output, candidate);
+    };
+    for provider in output {
+        pool.add(&provider.category, &provider.entity);
+    }
+    if !pool.satisfies(any_quorum) {
+        return None;
+    }
+    let mut selected = vec![true; output.len()];
+    for (index, provider) in output.iter().enumerate().rev() {
+        pool.remove(&provider.category, &provider.entity);
+        if pool.satisfies(any_quorum) {
+            selected[index] = false;
+        } else {
+            pool.add(&provider.category, &provider.entity);
+        }
+    }
+    Some(selected)
+}
+
+fn minimal_satisfying_selection_by_recheck(
+    output: &[OrderableProvider],
+    candidate: &QuorumStrategy,
+) -> Option<Vec<bool>> {
     let mut counts = BTreeMap::<(String, String), usize>::new();
     let mut entities = BTreeMap::<String, BTreeSet<String>>::new();
     for provider in output {
@@ -607,17 +717,30 @@ pub fn min_providers_for_strategy(
     providers: &[OrderableProvider],
     strategy: &QuorumStrategy,
 ) -> usize {
-    let mut votes = BTreeMap::<String, BTreeSet<String>>::new();
-    for (index, provider) in providers.iter().enumerate() {
-        votes
-            .entry(provider.category.clone())
-            .or_default()
-            .insert(provider.entity.clone());
-        if is_strategy_satisfiable(&votes, strategy) {
-            return index + 1;
+    let satisfied_by = |length: usize| {
+        let mut votes = BTreeMap::<String, BTreeSet<String>>::new();
+        for provider in &providers[..length] {
+            votes
+                .entry(provider.category.clone())
+                .or_default()
+                .insert(provider.entity.clone());
+        }
+        is_strategy_satisfiable(&votes, strategy)
+    };
+    // More providers only add entities, so satisfiability is monotone in the prefix length.
+    let (mut low, mut high) = (1usize, providers.len());
+    if providers.is_empty() || !satisfied_by(high) {
+        return providers.len();
+    }
+    while low < high {
+        let middle = low + (high - low) / 2;
+        if satisfied_by(middle) {
+            high = middle;
+        } else {
+            low = middle + 1;
         }
     }
-    providers.len()
+    low
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -791,13 +914,28 @@ pub fn reject_legacy_provider_config(raw: &str) -> Result<(), ConfigError> {
 /// The `_`-prefixed strategy key holding the SHA-256 of the exact `providers-v2.json` text it was written for.
 pub const PROVIDERS_BINDING_KEY: &str = "_providersSha256";
 
+/// Whether a strategy must name the providers file it was written for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BindingPolicy {
+    Optional,
+    /// Objects fetched one at a time from a bucket can be read from different rollouts; the
+    /// strategy must then carry the digest that proves they are not.
+    Required,
+}
+
 /// A strategy that names its providers file is only valid with that file, so a bucket
 /// holding the two objects from different rollouts is refused instead of served.
 fn check_providers_binding(
     providers_raw: &str,
     bound_to: Option<&serde_json::Value>,
+    policy: BindingPolicy,
 ) -> Result<(), ConfigError> {
     let Some(bound_to) = bound_to else {
+        if policy == BindingPolicy::Required {
+            return Err(ConfigError::ProviderValidation(format!(
+                "quorum-strategy.json: `{PROVIDERS_BINDING_KEY}` is required for remote configuration, so two objects from different rollouts are never paired"
+            )));
+        }
         static UNBOUND: std::sync::Once = std::sync::Once::new();
         UNBOUND.call_once(|| {
             tracing::warn!(
@@ -890,9 +1028,18 @@ pub fn provider_configs_from_v2(
     providers_raw: &str,
     strategy_raw: &str,
 ) -> Result<ProviderConfigs, ConfigError> {
+    provider_configs_from_v2_with(providers_raw, strategy_raw, BindingPolicy::Optional)
+}
+
+/// [`provider_configs_from_v2`] with the binding policy of where the pair came from.
+pub fn provider_configs_from_v2_with(
+    providers_raw: &str,
+    strategy_raw: &str,
+    policy: BindingPolicy,
+) -> Result<ProviderConfigs, ConfigError> {
     let providers = parse_providers_file(providers_raw)?;
     let (strategy, restrictions, bound_to) = parse_strategy_file(strategy_raw)?;
-    check_providers_binding(providers_raw, bound_to.as_ref())?;
+    check_providers_binding(providers_raw, bound_to.as_ref(), policy)?;
     let file = ProvidersFileV2 {
         entities: providers.entities.clone(),
         chains: providers

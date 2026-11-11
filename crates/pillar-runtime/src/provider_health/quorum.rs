@@ -174,6 +174,9 @@ pub(crate) struct ExactQuorumAccumulator<'a, T> {
     error_count: usize,
     deferred: Option<pillar_core::execution::BudgetError>,
     voters: BTreeMap<String, QuorumCandidate<T>>,
+    /// Providers that answered a fingerprint whose value could not be retained.
+    withheld: BTreeMap<String, BTreeSet<usize>>,
+    withheld_oversized: bool,
 }
 
 impl<'a, T> ExactQuorumAccumulator<'a, T> {
@@ -185,6 +188,8 @@ impl<'a, T> ExactQuorumAccumulator<'a, T> {
             error_count: 0,
             deferred: None,
             voters: BTreeMap::new(),
+            withheld: BTreeMap::new(),
+            withheld_oversized: false,
         }
     }
 
@@ -219,7 +224,34 @@ impl<'a, T> ExactQuorumAccumulator<'a, T> {
         self.voters
             .values()
             .map(|candidate| candidate.indices.len())
-            .sum()
+            .sum::<usize>()
+            + self.withheld.values().map(BTreeSet::len).sum::<usize>()
+    }
+
+    fn record_withheld(&mut self, index: usize, fingerprint: String) {
+        self.pending.remove(&index);
+        match self.voters.get_mut(&fingerprint) {
+            Some(candidate) => {
+                candidate.indices.insert(index);
+            }
+            None => {
+                self.withheld.entry(fingerprint).or_default().insert(index);
+            }
+        }
+    }
+
+    fn buckets(&self) -> BTreeMap<&String, BTreeSet<usize>> {
+        let mut buckets = BTreeMap::new();
+        for (fingerprint, candidate) in &self.voters {
+            buckets.insert(fingerprint, candidate.indices.clone());
+        }
+        for (fingerprint, indices) in &self.withheld {
+            buckets
+                .entry(fingerprint)
+                .or_insert_with(BTreeSet::new)
+                .extend(indices);
+        }
+        buckets
     }
 
     pub(crate) fn record_result(
@@ -244,68 +276,74 @@ impl<'a, T> ExactQuorumAccumulator<'a, T> {
 
     pub(crate) fn can_reach_quorum(&self) -> bool {
         self.rule.is_met_by(&self.pending)
-            || self.voters.values().any(|candidate| {
-                self.rule
-                    .is_met_by(candidate.indices.iter().chain(&self.pending))
-            })
+            || self
+                .buckets()
+                .values()
+                .any(|indices| self.rule.is_met_by(indices.iter().chain(&self.pending)))
     }
 
-    fn candidates(&self) -> Vec<&String> {
-        self.voters
-            .iter()
-            .filter(|(_, candidate)| self.rule.is_met_by(&candidate.indices))
-            .map(|(fingerprint, _)| fingerprint)
+    fn candidates(&self) -> Vec<String> {
+        self.buckets()
+            .into_iter()
+            .filter(|(_, indices)| self.rule.is_met_by(indices))
+            .map(|(fingerprint, _)| fingerprint.clone())
             .collect()
     }
 
     pub(crate) fn unambiguous_result(&mut self) -> Option<T> {
-        let candidates = self.candidates();
-        let [candidate] = candidates.as_slice() else {
+        let buckets = self.buckets();
+        let mut candidates = buckets
+            .iter()
+            .filter(|(_, indices)| self.rule.is_met_by(*indices))
+            .map(|(fingerprint, _)| *fingerprint);
+        let candidate = candidates.next()?;
+        if candidates.next().is_some() {
             return None;
-        };
+        }
         // A response not seen yet could still meet the rule from pending providers alone,
         // or join one already recorded.
         if self.rule.is_met_by(&self.pending)
-            || self.voters.iter().any(|(fingerprint, vote)| {
-                fingerprint != *candidate
-                    && self
-                        .rule
-                        .is_met_by(vote.indices.iter().chain(&self.pending))
+            || buckets.iter().any(|(fingerprint, indices)| {
+                *fingerprint != candidate
+                    && self.rule.is_met_by(indices.iter().chain(&self.pending))
             })
         {
             return None;
         }
-        let fingerprint = (*candidate).clone();
-        drop(candidates);
+        let fingerprint = candidate.clone();
+        drop(buckets);
         self.voters
             .remove(&fingerprint)
             .map(|candidate| candidate.value)
     }
 
     pub(crate) fn finish(mut self, context: &str) -> Result<T, AppCoreError> {
+        let candidates = self.candidates();
+        let distinct = self.buckets().len();
+        let error_count = self.error_count;
         let incomplete = || {
             AppCoreError::Internal(format!(
-                "No {context} quorum: response set is ambiguous or incomplete; {} distinct successful responses, {} errors",
-                self.voters.len(),
-                self.error_count
+                "No {context} quorum: response set is ambiguous or incomplete; {distinct} distinct successful responses, {error_count} errors"
             ))
         };
-        let candidates = self.candidates();
-        let [candidate] = candidates.as_slice() else {
-            if candidates.is_empty() && self.voters.len() <= 1 {
+        let [fingerprint] = candidates.as_slice() else {
+            if candidates.is_empty() && distinct <= 1 {
                 if let Some(error) = self.deferred {
                     return Err(AppCoreError::Admission(error));
                 }
             }
             return Err(incomplete());
         };
-        let fingerprint = (*candidate).clone();
-        drop(candidates);
-        Ok(self
-            .voters
-            .remove(&fingerprint)
-            .expect("quorum candidate selected from this map")
-            .value)
+        match self.voters.remove(fingerprint) {
+            Some(candidate) => Ok(candidate.value),
+            None => Err(match self.deferred {
+                Some(error) => AppCoreError::Admission(error),
+                None if self.withheld_oversized => AppCoreError::Internal(format!(
+                    "No {context} quorum: the agreed provider response exceeds the retained value limit"
+                )),
+                None => incomplete(),
+            }),
+        }
     }
 }
 
@@ -331,12 +369,8 @@ impl<'a> ExactQuorumAccumulator<'a, Value> {
             .get(&fingerprint)
             .is_none_or(|candidate| candidate.indices.first().is_none_or(|first| index < *first));
         let Some(bytes) = estimate_json_retained_bytes(&value, fingerprint.len()) else {
-            self.record_result(
-                index,
-                Err(RpcError::Remote(
-                    "Provider JSON response exceeds retained value limit".to_string(),
-                )),
-            )?;
+            self.withheld_oversized = true;
+            self.record_withheld(index, fingerprint);
             return Ok(false);
         };
         if !replacing {
@@ -366,21 +400,15 @@ impl<'a> ExactQuorumAccumulator<'a, Value> {
             .get(&fingerprint)
             .is_some_and(|candidate| candidate.lease.is_some());
         if has_lease {
-            self.record_result(
-                index,
-                Err(RpcError::Admission(
-                    pillar_core::execution::BudgetError::Overloaded,
-                )),
-            )?;
+            self.deferred
+                .get_or_insert(pillar_core::execution::BudgetError::Overloaded);
+            self.record_withheld(index, fingerprint);
             return Ok(false);
         }
         let Some(lease) = budget.reserve(bytes) else {
-            self.record_result(
-                index,
-                Err(RpcError::Admission(
-                    pillar_core::execution::BudgetError::Overloaded,
-                )),
-            )?;
+            self.deferred
+                .get_or_insert(pillar_core::execution::BudgetError::Overloaded);
+            self.record_withheld(index, fingerprint);
             return Ok(false);
         };
         self.record(index, Some((fingerprint.clone(), value)));
@@ -574,11 +602,21 @@ pub(crate) async fn plan_dispatch_for_keys<'a>(
     keyed: Vec<(usize, String)>,
 ) -> Result<Vec<DispatchEntry<'a>>, AppCoreError> {
     let config = quorum.config();
-    let mut ranked = Vec::with_capacity(keyed.len());
-    for (index, key) in keyed {
-        let rank = tracker.rank_of(chain_name, &key).await;
-        ranked.push((index, rank));
+    if let Some(context) = pillar_core::execution::current() {
+        for (index, endpoint) in &keyed {
+            context.register_endpoint(chain_name, endpoint, &config.voters[*index].entity);
+        }
     }
+    let urls = keyed
+        .iter()
+        .map(|(_, key)| key.as_str())
+        .collect::<Vec<_>>();
+    let ranks = tracker.ranks_of(chain_name, &urls).await;
+    let mut ranked = keyed
+        .iter()
+        .zip(ranks)
+        .map(|((index, _), rank)| (*index, rank))
+        .collect::<Vec<_>>();
     ranked.sort_by_key(|(_, rank)| *rank);
     let (healthy, unhealthy): (Vec<_>, Vec<_>) = ranked
         .into_iter()
@@ -694,6 +732,25 @@ mod tests {
 
     fn rule(config: &pillar_config::ProviderConfig) -> QuorumRule<'_> {
         required_provider_quorum(config, "test").unwrap()
+    }
+
+    #[test]
+    fn budget_refusal_keeps_competing_quorum_visible() {
+        let config = pool(uris(4), 2);
+        let mut accumulator = ExactQuorumAccumulator::new(rule(&config), 0..4);
+        let value = Value::String("x".repeat(512));
+        let budget = JsonQuorumBudget::new(estimate_json_retained_bytes(&value, 1).unwrap());
+        for (index, fingerprint) in [(0, "x"), (1, "x"), (2, "y")] {
+            accumulator
+                .record_json_result_with_budget(index, fingerprint.into(), value.clone(), &budget)
+                .unwrap();
+        }
+        assert!(accumulator.unambiguous_result().is_none());
+        accumulator
+            .record_json_result_with_budget(3, "y".into(), value, &budget)
+            .unwrap();
+        assert!(accumulator.unambiguous_result().is_none());
+        assert!(accumulator.finish("test").is_err());
     }
 
     #[tokio::test]

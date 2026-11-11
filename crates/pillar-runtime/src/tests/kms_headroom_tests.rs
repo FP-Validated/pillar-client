@@ -75,7 +75,11 @@ async fn default_runtime_kms_leaves_a_same_key_slot_for_another_source() {
 
     assert_eq!(source.len(), 3);
     assert!(other.is_some());
-    assert_eq!(rpc.len(), 8, "RPC budget keeps its per-lane resource limit");
+    assert_eq!(
+        rpc.len(),
+        6,
+        "one resource of the RPC lane holds at most three quarters of it"
+    );
     assert_eq!(signing.len(), 8, "signing budget keeps its per-lane limit");
 }
 

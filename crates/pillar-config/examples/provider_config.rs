@@ -126,20 +126,29 @@ fn convert(legacy: &str, labels: &str, out_dir: &str) -> Result<(), String> {
     }
     #[derive(serde::Serialize)]
     struct StrategyFile {
+        #[serde(rename = "_providersSha256")]
+        providers_sha256: String,
         default: Value,
         chains: indexmap::IndexMap<String, Value>,
     }
     let providers = serde_json::to_string_pretty(&ProvidersFile { entities, chains })
         .map_err(|error| error.to_string())?;
+    // The file is written with a trailing newline, and the digest is of the file's exact text.
+    let providers_sha256 = {
+        use sha2::Digest;
+        hex::encode(sha2::Sha256::digest(format!("{providers}\n").as_bytes()))
+    };
     let strategy = serde_json::to_string_pretty(&StrategyFile {
+        providers_sha256,
         default: json!({ "allOf": [{ "any": 2 }] }),
         chains: strategies,
     })
     .map_err(|error| error.to_string())?;
-    // Refuse to write a pair the service would refuse to start with.
+    // Refuse to write a pair the service would refuse to start with, from a bucket included.
     let roster = legacy.keys().cloned().collect::<Vec<_>>();
-    let loaded = StaticProviderConfig::from_v2(&providers, &strategy, Some(&roster))
-        .map_err(|error| format!("converted pair does not validate: {error}"))?;
+    let loaded =
+        StaticProviderConfig::from_v2_bound(&format!("{providers}\n"), &strategy, Some(&roster))
+            .map_err(|error| format!("converted pair does not validate: {error}"))?;
     let out = std::path::Path::new(out_dir);
     std::fs::create_dir_all(out).map_err(|error| format!("{out_dir}: {error}"))?;
     for (name, body) in [
@@ -155,9 +164,22 @@ fn convert(legacy: &str, labels: &str, out_dir: &str) -> Result<(), String> {
 
 fn validate(providers: &str, strategy: &str, chains: Option<&str>) -> Result<(), String> {
     let roster = chains.map(|chains| chains.split(',').map(str::to_string).collect::<Vec<_>>());
-    let loaded =
-        StaticProviderConfig::from_v2(&read(providers)?, &read(strategy)?, roster.as_deref())
-            .map_err(|error| error.to_string())?;
+    let (providers, strategy) = (read(providers)?, read(strategy)?);
+    // A bucket deployment refuses an unbound pair, so say so here instead of at startup.
+    let loaded = match StaticProviderConfig::from_v2_bound(&providers, &strategy, roster.as_deref())
+    {
+        Ok(loaded) => loaded,
+        Err(error)
+            if error
+                .to_string()
+                .contains("is required for remote configuration") =>
+        {
+            eprintln!("warning: {error}");
+            StaticProviderConfig::from_v2(&providers, &strategy, roster.as_deref())
+                .map_err(|error| error.to_string())?
+        }
+        Err(error) => return Err(error.to_string()),
+    };
     summarize(&loaded);
     Ok(())
 }

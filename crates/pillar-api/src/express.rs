@@ -33,13 +33,19 @@ pub(crate) async fn read_json_body(
     if !compressed {
         return read_json_body_sync(&headers, body);
     }
-    let permit = DECOMPRESSION_SLOTS
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| AppError::Http {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            message: "Compressed request processing capacity exhausted".to_string(),
-        })?;
+    // Slots are granted in arrival order, so a few slow decodes cannot starve every other
+    // compressed request; only a wait past two seconds is refused.
+    let permit = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        DECOMPRESSION_SLOTS.clone().acquire_owned(),
+    )
+    .await
+    .ok()
+    .and_then(Result::ok)
+    .ok_or_else(|| AppError::Http {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        message: "Compressed request processing capacity exhausted".to_string(),
+    })?;
     tokio::task::spawn_blocking(move || {
         // The worker owns admission even if its HTTP request is cancelled.
         let _permit = permit;
@@ -216,7 +222,61 @@ fn content_coding(headers: &HeaderMap) -> Result<Coding, AppError> {
     }
 }
 
-// Both wire and output bytes are bounded; gzip also limits decoder initialization count.
+/// How much compressed input a stream may consume for the output it has produced: an encoder
+/// stores incompressible data at no more than 1/16 over its size, so input far beyond that is
+/// padding (empty blocks cost decoder time and yield nothing). `slack` covers headers and
+/// trailers.
+fn within_work_budget(consumed: usize, produced: usize, slack: usize) -> bool {
+    consumed <= produced + produced / 16 + slack
+}
+
+/// Compressed input is handed to the decoder in pieces this size, so no single decoder call
+/// runs long and the budget above is checked often.
+const INFLATE_STEP_BYTES: usize = 1024;
+const INFLATE_MEMBER_SLACK_BYTES: usize = 512;
+
+/// A gzip member's input, served in small steps that stop once the stream has consumed more
+/// than its output justifies.
+struct MeteredInput<'a> {
+    data: &'a [u8],
+    consumed: usize,
+    produced: std::rc::Rc<std::cell::Cell<usize>>,
+    members: usize,
+}
+
+impl Read for MeteredInput<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let available = std::io::BufRead::fill_buf(self)?;
+        let count = available.len().min(buf.len());
+        buf[..count].copy_from_slice(&available[..count]);
+        std::io::BufRead::consume(self, count);
+        Ok(count)
+    }
+}
+
+impl std::io::BufRead for MeteredInput<'_> {
+    fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+        if !within_work_budget(
+            self.consumed,
+            self.produced.get(),
+            INFLATE_MEMBER_SLACK_BYTES * self.members,
+        ) {
+            return Err(std::io::Error::other(
+                "compressed stream consumes input without producing output",
+            ));
+        }
+        Ok(&self.data[..self.data.len().min(INFLATE_STEP_BYTES)])
+    }
+
+    fn consume(&mut self, amount: usize) {
+        let amount = amount.min(self.data.len());
+        self.data = &self.data[amount..];
+        self.consumed += amount;
+    }
+}
+
+// Wire bytes, output bytes and the work between them are bounded; gzip also limits decoder
+// initialization count.
 fn inflate(raw: &[u8], coding: Coding) -> Result<Vec<u8>, AppError> {
     let invalid = |reason: String| {
         AppError::MalformedJson(format!("Failed to inflate the request body: {reason}"))
@@ -229,13 +289,37 @@ fn inflate(raw: &[u8], coding: Coding) -> Result<Vec<u8>, AppError> {
         Coding::Deflate => {
             let mut out = vec![0; budget];
             let mut stream = flate2::Decompress::new(true);
-            let status = stream
-                .decompress(raw, &mut out, flate2::FlushDecompress::Finish)
-                .map_err(|error| invalid(error.to_string()))?;
-            let written = stream.total_out() as usize;
-            if written > JSON_BODY_LIMIT_BYTES {
-                return Err(too_large());
+            let mut status = flate2::Status::Ok;
+            let mut offset = 0;
+            while offset < raw.len() && status == flate2::Status::Ok {
+                let end = (offset + INFLATE_STEP_BYTES).min(raw.len());
+                let before = stream.total_in();
+                let written = stream.total_out() as usize;
+                status = stream
+                    .decompress(
+                        &raw[offset..end],
+                        &mut out[written..],
+                        flate2::FlushDecompress::None,
+                    )
+                    .map_err(|error| invalid(error.to_string()))?;
+                offset += (stream.total_in() - before) as usize;
+                if stream.total_out() as usize > JSON_BODY_LIMIT_BYTES {
+                    return Err(too_large());
+                }
+                if !within_work_budget(
+                    stream.total_in() as usize,
+                    stream.total_out() as usize,
+                    INFLATE_MEMBER_SLACK_BYTES,
+                ) {
+                    return Err(invalid(
+                        "compressed stream consumes input without producing output".to_string(),
+                    ));
+                }
+                if stream.total_in() == before && status == flate2::Status::BufError {
+                    break;
+                }
             }
+            let written = stream.total_out() as usize;
             if status != flate2::Status::StreamEnd {
                 return Err(invalid("unexpected end of file".to_string()));
             }
@@ -244,18 +328,36 @@ fn inflate(raw: &[u8], coding: Coding) -> Result<Vec<u8>, AppError> {
         }
         Coding::Gzip => {
             let mut out = Vec::new();
-            let mut input = raw;
+            let produced = std::rc::Rc::new(std::cell::Cell::new(0));
+            let mut input = MeteredInput {
+                data: raw,
+                consumed: 0,
+                produced: produced.clone(),
+                members: 0,
+            };
+            let mut chunk = [0u8; 4096];
             for _ in 0..32 {
+                input.members += 1;
                 let mut member = flate2::bufread::GzDecoder::new(input);
-                (&mut member)
-                    .take((budget - out.len()) as u64)
-                    .read_to_end(&mut out)
-                    .map_err(|error| invalid(error.to_string()))?;
+                loop {
+                    let room = (budget - out.len()).min(chunk.len());
+                    if room == 0 {
+                        break;
+                    }
+                    let count = member
+                        .read(&mut chunk[..room])
+                        .map_err(|error| invalid(error.to_string()))?;
+                    if count == 0 {
+                        break;
+                    }
+                    out.extend_from_slice(&chunk[..count]);
+                    produced.set(out.len());
+                }
                 if out.len() > JSON_BODY_LIMIT_BYTES {
                     return Err(too_large());
                 }
                 input = member.into_inner();
-                if input.first().is_none_or(|&byte| byte == 0) {
+                if input.data.first().is_none_or(|&byte| byte == 0) {
                     return Ok(out);
                 }
             }

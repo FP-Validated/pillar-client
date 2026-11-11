@@ -68,8 +68,9 @@ where
     ) -> Result<Option<u64>, AppCoreError> {
         let uln_version = uln_version_value(&sent_event.lz_message_id)
             .ok_or_else(|| AppCoreError::Internal("ulnSendVersion must be a string".to_string()))?;
-        // TS: `packages/sdks/lz-v2-sdk/src/uln/sui/index.ts:509-510`.
-        if uln_version != "V302" {
+        // The Sui destination receives through ULN302 whichever library the source sent with, and
+        // both send versions yield the same packet proof.
+        if !matches!(uln_version, "V301" | "V302") {
             return Err(AppCoreError::BadRequest(format!(
                 "Unsupported {dst_chain_name} payload-signed validation for {uln_version}"
             )));

@@ -686,6 +686,7 @@ async fn m23_unverified_canton_scan_is_refused_before_its_events_are_used() {
     let error = crate::layerzero_runtime::resolve_canton_packet_sent(
         &transport,
         &sequencer,
+        &std::collections::HashMap::new(),
         "0xabc",
         &request_v2().lz_message_id,
     )

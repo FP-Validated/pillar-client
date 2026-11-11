@@ -212,7 +212,10 @@ fn canton_http_env(chains: &[&str]) -> HashMap<String, String> {
         (LZ_PROVIDER_CONFIG_TYPE.to_string(), "LOCAL".to_string()),
         (LZ_ENV.to_string(), "mainnet".to_string()),
         (LZ_PROVIDER_CONFIG.to_string(), provider.to_string()),
-        (LZ_QUORUM_STRATEGY_CONFIG.to_string(), strategy_json(&strategies)),
+        (
+            LZ_QUORUM_STRATEGY_CONFIG.to_string(),
+            pillar_config::test_support::bind_strategy(&strategy_json(&strategies), &provider.to_string()),
+        ),
         (pillar_config::LZ_AVAILABLE_CHAIN_NAMES.to_string(), chains.join(",")),
         (pillar_config::LZ_DEBUG_MODE.to_string(), "true".to_string()),
         (pillar_config::EXTRA_CONTEXT_REQUEST_URL.to_string(), POLICY_URL.to_string()),

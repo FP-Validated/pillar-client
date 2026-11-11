@@ -609,12 +609,8 @@ async fn incomplete_upload_budget_preserves_health_connections_and_expires_silen
             response
         });
     }
-    let refused = tokio::time::timeout(Duration::from_millis(700), uploads.join_next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
-    assert!(refused.starts_with(b"HTTP/1.1 503"), "{refused:?}");
+    // The third upload queues for a permit rather than being refused, and the health route,
+    // which takes no upload permit, answers meanwhile.
     let mut health = TcpStream::connect(address).await.unwrap();
     health
         .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
@@ -626,8 +622,10 @@ async fn incomplete_upload_budget_preserves_health_connections_and_expires_silen
         .unwrap()
         .unwrap();
     assert!(healthy.starts_with(b"HTTP/1.1 200"));
-    for _ in 0..2 {
-        let expired = tokio::time::timeout(Duration::from_secs(2), uploads.join_next())
+    // Two stalled uploads expire at the three-second upload deadline and free their permits;
+    // the queued one then gets one and expires in turn.
+    for deadline in [4, 1, 4] {
+        let expired = tokio::time::timeout(Duration::from_secs(deadline), uploads.join_next())
             .await
             .unwrap()
             .unwrap()
@@ -636,7 +634,7 @@ async fn incomplete_upload_budget_preserves_health_connections_and_expires_silen
     }
     stop.send(()).unwrap();
     server.await.unwrap().unwrap();
-    artifact("M27-upload-budget", "{\"connectionLimit\":4,\"incompleteBodies\":2,\"excessStatus\":503,\"healthStatus\":200,\"silentBodyStatus\":408}");
+    artifact("M27-upload-budget", "{\"connectionLimit\":4,\"incompleteBodies\":3,\"queuedUpload\":true,\"healthStatus\":200,\"silentBodyStatus\":408}");
 }
 
 #[tokio::test]

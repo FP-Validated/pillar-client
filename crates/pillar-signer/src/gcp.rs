@@ -44,6 +44,53 @@ pub trait GcpKmsClient: Send + Sync + 'static {
 
 type CredentialSource = Arc<dyn Fn() -> Result<Credentials, SignerError> + Send + Sync>;
 
+/// An executable-sourced external account runs a helper that expects the audience and token type
+/// in its environment, which the SDK's default chain does not export: the helper would fail at
+/// the first signature, so the configuration is refused at start instead.
+fn reject_executable_credentials() -> Result<(), SignerError> {
+    const MAX_CREDENTIAL_FILE_BYTES: u64 = 1024 * 1024;
+    let path = std::env::var_os("GOOGLE_APPLICATION_CREDENTIALS")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            let base = std::env::var_os("CLOUDSDK_CONFIG")
+                .map(std::path::PathBuf::from)
+                .or_else(|| {
+                    std::env::var_os("HOME")
+                        .map(|home| std::path::Path::new(&home).join(".config/gcloud"))
+                })?;
+            Some(base.join("application_default_credentials.json"))
+        });
+    let Some(path) = path else {
+        return Ok(());
+    };
+    let Ok(file) = std::fs::File::open(path) else {
+        return Ok(());
+    };
+    let mut bytes = Vec::new();
+    if std::io::Read::read_to_end(
+        &mut std::io::Read::take(file, MAX_CREDENTIAL_FILE_BYTES),
+        &mut bytes,
+    )
+    .is_err()
+    {
+        return Ok(());
+    }
+    let executable = pillar_core::json::parse_value_slice(&bytes)
+        .ok()
+        .is_some_and(|credentials| {
+            credentials.get("type").and_then(serde_json::Value::as_str) == Some("external_account")
+                && credentials
+                    .pointer("/credential_source/executable")
+                    .is_some()
+        });
+    if executable {
+        return Err(SignerError::Message(
+            "GCP executable-sourced external account credentials are not supported".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn default_credentials() -> Result<Credentials, SignerError> {
     google_cloud_auth::credentials::Builder::default()
         .build()
@@ -56,10 +103,12 @@ pub struct GoogleCloudKmsClient {
     credentials: Arc<tokio::sync::Mutex<Credentials>>,
     rebuild: CredentialSource,
     endpoint: reqwest::Url,
+    recent_headers: Arc<tokio::sync::Mutex<Option<(std::time::Instant, http::HeaderMap)>>>,
 }
 
 impl GoogleCloudKmsClient {
     pub async fn from_default_credentials() -> Result<Self, SignerError> {
+        reject_executable_credentials()?;
         let credentials = default_credentials()?;
         let credential_domain = credentials
             .universe_domain()
@@ -115,6 +164,7 @@ impl GoogleCloudKmsClient {
             credentials: Arc::new(tokio::sync::Mutex::new(credentials)),
             rebuild,
             endpoint,
+            recent_headers: Arc::default(),
         }
     }
 
@@ -191,9 +241,25 @@ impl GoogleCloudKmsClient {
         Ok(url)
     }
 
+    /// Headers are fetched at most once a second. The credential cache does not pace refreshes
+    /// after a token that is short-lived or already expired, so each request would otherwise
+    /// start another token exchange.
+    async fn credential_headers(&self) -> Result<http::HeaderMap, SignerError> {
+        const MIN_FETCH_INTERVAL: Duration = Duration::from_secs(1);
+        let mut recent = self.recent_headers.lock().await;
+        if let Some((fetched, headers)) = recent.as_ref() {
+            if fetched.elapsed() < MIN_FETCH_INTERVAL {
+                return Ok(headers.clone());
+            }
+        }
+        let headers = self.fetch_credential_headers().await?;
+        *recent = Some((std::time::Instant::now(), headers.clone()));
+        Ok(headers)
+    }
+
     /// A credential worker that hit a permanent error (a token file read that failed once) caches
     /// it for good, so a failing one is replaced by a freshly built one.
-    async fn credential_headers(&self) -> Result<http::HeaderMap, SignerError> {
+    async fn fetch_credential_headers(&self) -> Result<http::HeaderMap, SignerError> {
         let current = self.credentials.lock().await.clone();
         let first = match current.headers(http::Extensions::new()).await {
             Ok(CacheableResource::New { data, .. }) => return Ok(data),

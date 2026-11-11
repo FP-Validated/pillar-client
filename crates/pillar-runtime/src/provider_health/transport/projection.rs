@@ -4,6 +4,9 @@ use serde::Deserialize;
 use std::{cell::Cell, io::Read, rc::Rc};
 
 const MAX_WIRE_BYTES: usize = 64 * 1024 * 1024;
+// Subtrees the projection drops still cost parser time, so they are bounded on their own.
+const MAX_IGNORED_BYTES: usize = 16 * 1024 * 1024;
+const MAX_IGNORED_NODES: usize = 4_000_000;
 
 #[derive(Clone, Copy)]
 pub(super) enum Node {
@@ -115,6 +118,7 @@ const INITIA_TRANSACTION: Node = Node::Object(&[
 ]);
 const INITIA_HEADER: Node = Node::Object(&[("height", Node::All), ("time", Node::All)]);
 const INITIA_BLOCK: Node = Node::Object(&[
+    ("block_id", Node::Object(&[("hash", Node::All)])),
     ("block", Node::Object(&[("header", INITIA_HEADER)])),
     ("sdk_block", Node::Object(&[("header", INITIA_HEADER)])),
     ("code", Node::All),
@@ -140,7 +144,13 @@ pub(super) fn for_get(url: &str) -> Option<Node> {
         Some(MOVE_TRANSACTION)
     } else if path.contains("/cosmos/tx/v1beta1/txs/") {
         Some(INITIA_TRANSACTION)
-    } else if path.ends_with("/cosmos/base/tendermint/v1beta1/blocks/latest") {
+    } else if path.ends_with("/cosmos/base/tendermint/v1beta1/blocks/latest")
+        || path
+            .rsplit_once("/cosmos/base/tendermint/v1beta1/blocks/")
+            .is_some_and(|(_, height)| {
+                !height.is_empty() && height.bytes().all(|byte| byte.is_ascii_digit())
+            })
+    {
         Some(INITIA_BLOCK)
     } else {
         None
@@ -307,6 +317,8 @@ struct GuardedReader {
     retained: Rc<Cell<bool>>,
     bytes: usize,
     nodes: usize,
+    ignored_bytes: usize,
+    ignored_nodes: usize,
     depth: usize,
     in_string: bool,
     escaped: bool,
@@ -321,6 +333,8 @@ impl GuardedReader {
             retained,
             bytes: 0,
             nodes: 0,
+            ignored_bytes: 0,
+            ignored_nodes: 0,
             depth: 0,
             in_string: false,
             escaped: false,
@@ -333,6 +347,11 @@ impl GuardedReader {
             self.bytes += 1;
             if self.bytes > MAX_JSON_RESPONSE_BYTES {
                 return Err(std::io::Error::other("retained JSON byte limit"));
+            }
+        } else {
+            self.ignored_bytes += 1;
+            if self.ignored_bytes > MAX_IGNORED_BYTES {
+                return Err(std::io::Error::other("ignored JSON byte limit"));
             }
         }
         if self.in_string {
@@ -377,10 +396,17 @@ impl GuardedReader {
             }
             _ => false,
         };
-        if retained && node {
-            self.nodes += 1;
-            if self.nodes > MAX_JSON_PARSE_NODES {
-                return Err(std::io::Error::other("retained JSON node limit"));
+        if node {
+            if retained {
+                self.nodes += 1;
+                if self.nodes > MAX_JSON_PARSE_NODES {
+                    return Err(std::io::Error::other("retained JSON node limit"));
+                }
+            } else {
+                self.ignored_nodes += 1;
+                if self.ignored_nodes > MAX_IGNORED_NODES {
+                    return Err(std::io::Error::other("ignored JSON node limit"));
+                }
             }
         }
         Ok(())

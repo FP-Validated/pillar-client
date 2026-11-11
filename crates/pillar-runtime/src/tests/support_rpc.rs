@@ -350,6 +350,7 @@ pub(super) fn get_multiple_accounts_result_with_libraries(
         confirmations,
         library_config,
         default_library_config,
+        None::<Vec<u8>>,
     ]
     .into_iter()
     .enumerate()

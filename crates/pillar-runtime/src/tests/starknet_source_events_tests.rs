@@ -10,7 +10,9 @@ const FIXTURE: &str = include_str!("../../tests/gasolina_parity/starknet_source_
 
 /// Pillar-stricter, not parity: upstream matches the identity alone, and the call data is built
 /// for the requested version, so a `V301` request for a `V302` packet is refused.
-const PILLAR_STRICTER: &[&str] = &["V301 request"];
+/// A destination EID of another stage is absent from the active environment's map; upstream
+/// resolves it through a table spanning every stage, this deployment refuses it (M-112).
+const PILLAR_STRICTER: &[&str] = &["V301 request", "destination on another stage"];
 /// Upstream throws for an unmapped destination EID; this deployment treats it as a non-match.
 const UNKNOWN_DESTINATION_EID_DIVERGENCES: &[&str] = &["unknown destination eid"];
 
@@ -133,7 +135,7 @@ async fn starknet_source_events_match_gasolina() {
         stricter_refused,
         PILLAR_STRICTER.len() + UNKNOWN_DESTINATION_EID_DIVERGENCES.len()
     );
-    assert_eq!(dst_name_refused, 7);
+    assert_eq!(dst_name_refused, 6);
 }
 
 #[tokio::test]

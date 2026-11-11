@@ -13,6 +13,8 @@ use tokio::{
     time::{timeout_at, Instant},
 };
 
+const UPLOAD_DEADLINE: Duration = Duration::from_secs(3);
+
 #[derive(Clone)]
 pub struct RequestUploadBudget(Arc<Semaphore>);
 
@@ -42,7 +44,15 @@ pub(crate) async fn buffer_request(
         .extensions()
         .get::<RequestUploadBudget>()
         .unwrap_or(&default_budget);
-    let Ok(permit) = budget.0.clone().try_acquire_owned() else {
+    // Permits are granted in arrival order and a stalled upload gives its permit back within
+    // `UPLOAD_DEADLINE`, so a request that arrives while stalled uploads hold every permit is
+    // served once the oldest of them expires, and only a wait past that is refused.
+    let Ok(Ok(permit)) = tokio::time::timeout(
+        UPLOAD_DEADLINE + Duration::from_secs(1),
+        budget.0.clone().acquire_owned(),
+    )
+    .await
+    else {
         return refusal(
             StatusCode::SERVICE_UNAVAILABLE,
             "Incomplete request body capacity exhausted",
@@ -51,7 +61,7 @@ pub(crate) async fn buffer_request(
     let (parts, body) = request.into_parts();
     let mut stream = body.into_data_stream();
     let mut bytes = Vec::new();
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + UPLOAD_DEADLINE;
     loop {
         let progress = deadline.min(Instant::now() + Duration::from_secs(1));
         match timeout_at(progress, stream.next()).await {

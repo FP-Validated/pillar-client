@@ -261,6 +261,14 @@ impl HistogramMetric {
         }
     }
 
+    pub(crate) fn series_count(&self) -> usize {
+        self.values.len()
+    }
+
+    pub(crate) fn has_series(&self, labels: &Labels) -> bool {
+        self.values.contains_key(&label_key(labels))
+    }
+
     pub(crate) fn observe(&mut self, labels: Labels, value: f64) {
         let key = label_key(&labels);
         let current = self.values.entry(key).or_insert_with(|| HistogramValue {

@@ -10,6 +10,18 @@ pub use workers::AuditWorkers;
 pub fn fingerprint(bytes: &[u8]) -> String {
     hex::encode(Keccak256::digest(bytes))
 }
+
+static LATE_SIGNER_FAILURES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A backend failure that completed after its caller had gone: the caller's own error path never
+/// sees it, so the audited completion worker counts it here.
+pub fn record_late_signer_failure() {
+    LATE_SIGNER_FAILURES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn late_signer_failures() -> u64 {
+    LATE_SIGNER_FAILURES.load(std::sync::atomic::Ordering::Relaxed)
+}
 #[derive(Clone)]
 pub struct ValidatedIntent {
     pub request_hash: String,

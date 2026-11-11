@@ -415,7 +415,12 @@ async fn run_full_consumer_case(
     if same_entity {
         let mut providers: Value = serde_json::from_str(&variables[LZ_PROVIDER_CONFIG]).unwrap();
         providers["chains"]["bsc"]["rpc"][1]["entity"] = json!("bsc-0");
+        let strategy = pillar_config::test_support::bind_strategy(
+            &variables[LZ_QUORUM_STRATEGY_CONFIG],
+            &providers.to_string(),
+        );
         variables.insert(LZ_PROVIDER_CONFIG.to_string(), providers.to_string());
+        variables.insert(LZ_QUORUM_STRATEGY_CONFIG.to_string(), strategy);
     }
     let app = RuntimeServerApp::from_env_map_with_runtime_core(variables, transport, || {
         1_767_323_045_000

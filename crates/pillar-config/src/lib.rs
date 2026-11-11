@@ -360,6 +360,7 @@ pub fn layerzero_available_chain_names(environment: &str) -> Result<Vec<String>,
     for capability in layerzero_chain_capabilities(environment)? {
         if matches!(capability.uln_version, "V2" | "V302")
             && capability.status != "DEPRECATED"
+            && serves_endpoint_v2(environment, capability.chain_name)
             && !available
                 .iter()
                 .any(|chain_name| chain_name == capability.chain_name)
@@ -368,6 +369,27 @@ pub fn layerzero_available_chain_names(environment: &str) -> Result<Vec<String>,
         }
     }
     Ok(available)
+}
+
+/// Runtime assembly needs an EndpointV2 id and the ULN302 deployments for every EVM-shaped chain it
+/// serves.
+fn serves_endpoint_v2(environment: &str, chain_name: &str) -> bool {
+    match static_chain_type_name(chain_name) {
+        Ok("EVM" | "TRON") => {
+            layerzero_evm_endpoint_id(chain_name, environment).is_ok()
+                && [
+                    "EndpointV2",
+                    "SendUln302",
+                    "ReceiveUln302",
+                    "ReceiveUln302View",
+                ]
+                .iter()
+                .all(|contract| {
+                    layerzero_contract_address(chain_name, environment, contract).is_ok()
+                })
+        }
+        _ => true,
+    }
 }
 
 pub fn layerzero_rollout_block_reason(environment: &str, chain_name: &str) -> Option<&'static str> {
@@ -1487,12 +1509,22 @@ pub type ProviderConfigs = IndexMap<String, ProviderConfig>;
 
 pub fn redact_url(raw: &str) -> String {
     let (prefix, rest) = match raw.split_once("://") {
-        Some((scheme, rest)) => (format!("{scheme}://"), rest),
-        None => return "<redacted>".to_string(),
+        // The text before `://` is only a scheme when it looks like one; anything else is a
+        // spelling the transport may parse differently, so none of it is kept.
+        Some((scheme, rest)) if is_url_scheme(scheme) => (format!("{scheme}://"), rest),
+        _ => return "<redacted>".to_string(),
     };
     let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let suffix = &rest[authority_end..];
     format!("{prefix}<redacted>{}", redact_path_and_query(suffix))
+}
+
+fn is_url_scheme(scheme: &str) -> bool {
+    let mut chars = scheme.chars();
+    chars
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
 }
 
 /// Redact a name/value pair whose name suggests it carries a secret.
@@ -1513,6 +1545,10 @@ pub fn redact_secret_value(name: &str, value: &str) -> String {
 }
 
 pub fn redact_kms_key_id(provider: &str, key_id: &str) -> String {
+    // A short identifier would be shown whole by a four-character suffix.
+    if key_id.chars().count() <= 8 {
+        return format!("{provider}:<redacted>");
+    }
     let suffix = last_chars(key_id, 4);
     format!("{provider}:...{suffix}")
 }
@@ -1626,16 +1662,36 @@ impl RemoteProviderSource {
         }))
     }
 
+    /// Both objects are read twice and a generation is built only from a pair that did not move
+    /// between the reads, so a rollout that writes the two objects one after the other is not
+    /// served half-applied.
     pub async fn load(
         &self,
         loader: &(impl RemoteProviderConfigLoader + ?Sized),
         required_chain_names: Option<&[String]>,
     ) -> Result<StaticProviderConfig, ConfigError> {
-        let (providers, strategy) = futures::join!(
-            loader.load_provider_config(self.providers.clone()),
-            loader.load_provider_config(self.strategy.clone()),
-        );
-        StaticProviderConfig::from_v2(&providers?, &strategy?, required_chain_names)
+        const PAIR_READ_ATTEMPTS: usize = 3;
+        for _ in 0..PAIR_READ_ATTEMPTS {
+            let (providers, strategy) = futures::join!(
+                loader.load_provider_config(self.providers.clone()),
+                loader.load_provider_config(self.strategy.clone()),
+            );
+            let (providers, strategy) = (providers?, strategy?);
+            let (confirm_providers, confirm_strategy) = futures::join!(
+                loader.load_provider_config(self.providers.clone()),
+                loader.load_provider_config(self.strategy.clone()),
+            );
+            if providers == confirm_providers? && strategy == confirm_strategy? {
+                return StaticProviderConfig::from_v2_bound(
+                    &providers,
+                    &strategy,
+                    required_chain_names,
+                );
+            }
+        }
+        Err(ConfigError::RemoteProviderConfig(
+            "provider configuration objects kept changing while being read".to_string(),
+        ))
     }
 }
 
@@ -1720,6 +1776,23 @@ impl StaticProviderConfig {
     ) -> Result<Self, ConfigError> {
         Self::new(
             provider_validation::provider_configs_from_v2(providers_raw, strategy_raw)?,
+            required_chain_names,
+        )
+    }
+
+    /// [`Self::from_v2`] for a pair fetched from a bucket, whose strategy must carry the
+    /// `_providersSha256` of its providers file.
+    pub fn from_v2_bound(
+        providers_raw: &str,
+        strategy_raw: &str,
+        required_chain_names: Option<&[String]>,
+    ) -> Result<Self, ConfigError> {
+        Self::new(
+            provider_validation::provider_configs_from_v2_with(
+                providers_raw,
+                strategy_raw,
+                provider_validation::BindingPolicy::Required,
+            )?,
             required_chain_names,
         )
     }
@@ -2237,6 +2310,8 @@ mod tests {
             let mut expected = vec![
                 format!("{:?}", request(LZ_PROVIDER_CONFIG_REMOTE_KEY)),
                 format!("{:?}", request(LZ_QUORUM_STRATEGY_REMOTE_KEY)),
+                format!("{:?}", request(LZ_PROVIDER_CONFIG_REMOTE_KEY)),
+                format!("{:?}", request(LZ_QUORUM_STRATEGY_REMOTE_KEY)),
             ];
             expected.sort();
             assert_eq!(sorted_requests(&calls), expected);
@@ -2632,6 +2707,8 @@ mod tests {
             sorted_requests(&calls),
             vec![
                 request("providers-v2.json"),
+                request("providers-v2.json"),
+                request("quorum-strategy.json"),
                 request("quorum-strategy.json")
             ]
         );

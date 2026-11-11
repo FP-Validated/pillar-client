@@ -99,15 +99,11 @@ where
                             "Invalid read command timestamp {timestamp}"
                         )));
                     }
-                    let found = unique_markers
-                        .iter()
-                        .enumerate()
-                        .position(|(index, resolved)| {
-                            !matched[index]
-                                && resolved.chain_name == *chain_name
-                                && resolved.timestamp == timestamp as i64
-                                && resolved.block_confirmation == marker.block_confirmation as i64
-                        });
+                    let found = unique_markers.iter().position(|resolved| {
+                        resolved.chain_name == *chain_name
+                            && resolved.timestamp == timestamp as i64
+                            && resolved.block_confirmation == marker.block_confirmation as i64
+                    });
                     match found {
                         Some(index) => matched[index] = true,
                         None => {
@@ -245,6 +241,20 @@ where
                 push_read_block_pin(&mut pins, chain, block)?;
             }
         }
+        let mut chains = indexmap::IndexSet::new();
+        for pin in &pins {
+            chains.insert(pin.chain_name.as_str());
+        }
+        for chain in chains {
+            let chain_pins = pins
+                .iter()
+                .filter(|pin| pin.chain_name == chain)
+                .collect::<Vec<_>>();
+            if chain_pins.len() > 1 {
+                self.pins_share_one_history_with_quorum(chain, &chain_pins)
+                    .await?;
+            }
+        }
         Ok(pins)
     }
 
@@ -255,6 +265,75 @@ where
     ) -> Result<BlockTime, AppCoreError> {
         self.block_time_for_tag_with_quorum(chain_name, &format!("0x{block_number:x}"))
             .await
+    }
+
+    /// Pins at different heights come from separate quorum rounds, so a provider common to two
+    /// subsets could back pins that no single chain history contains.
+    async fn pins_share_one_history_with_quorum(
+        &self,
+        chain_name: &str,
+        pins: &[&ReadBlockPin],
+    ) -> Result<(), AppCoreError> {
+        let expected = pins
+            .iter()
+            .map(|pin| (pin.block_number, pin.block_hash.clone()))
+            .collect::<Vec<_>>();
+        crate::provider_health::rpc_scope(chain_name, async {
+            let snapshot = self.providers.load();
+            let dispatch = snapshot.dispatch(&self.rank_tracker, chain_name).await?;
+            let ChainDispatch { config, quorum, plan } = dispatch;
+            let requests = FuturesUnordered::new();
+            for DispatchEntry { index, uri, delay } in plan {
+                let (url, headers) = provider_uri_parts(uri);
+                let transport = self.transport.clone();
+                let expected = expected.clone();
+                requests.push(async move {
+                    if !delay.is_zero() {
+                        tokio::time::sleep(delay).await;
+                    }
+                    let observation = async {
+                        use futures::{StreamExt, TryStreamExt};
+                        // Two reads at a time keep several providers inside the chain's RPC lane.
+                        let consistent = futures::stream::iter(expected)
+                            .map(|(block_number, block_hash)| {
+                                let transport = transport.clone();
+                                let url = url.clone();
+                                let headers = headers.clone();
+                                async move {
+                                    let observed = observe_block_time(
+                                        transport,
+                                        url,
+                                        headers,
+                                        &format!("0x{block_number:x}"),
+                                    )
+                                    .await?;
+                                    Ok::<bool, AppCoreError>(
+                                        u64::try_from(observed.block.number).ok()
+                                            == Some(block_number)
+                                            && observed.block.hash.eq_ignore_ascii_case(&block_hash),
+                                    )
+                                }
+                            })
+                            .buffer_unordered(2)
+                            .try_fold(true, |all, ok| async move { Ok(all && ok) })
+                            .await?;
+                        Ok::<_, AppCoreError>(if consistent { "consistent" } else { "diverged" })
+                    }
+                    .await;
+                    let vote = provider_response(observation)
+                        .map(|result| result.map(|verdict| (verdict.to_string(), verdict)));
+                    (index, vote)
+                });
+            }
+            let context = format!("READ pinned blocks of one history for chain {chain_name}");
+            match resolve_provider_quorum(requests, config.uris.len(), quorum, &context).await? {
+                "consistent" => Ok(()),
+                _ => Err(AppCoreError::BadRequest(format!(
+                    "READ pinned blocks on chain {chain_name} do not belong to one canonical history"
+                ))),
+            }
+        })
+        .await
     }
 
     async fn block_confirmation_satisfied_with_quorum(
@@ -295,25 +374,35 @@ where
                         if canonical.block.number != pinned_block.number
                             || !canonical.block.hash.eq_ignore_ascii_case(&pinned_block.hash)
                         {
-                            return Err(AppCoreError::Internal("READ confirmation does not extend the pinned block".to_string()));
+                            return Ok::<_, AppCoreError>(None);
                         }
-                        Ok(latest)
+                        Ok(Some(latest))
                     }.await;
                     let vote = provider_response(observation).map(|result| {
-                        result.map(|block| {
-                            let latest_block_number = block.block.number;
-                            let sufficient = latest_block_number >= required_block_number;
-                            (
-                                if sufficient { "sufficient".to_string() } else { "insufficient".to_string() },
-                                (sufficient, latest_block_number),
-                            )
+                        result.map(|observed| match observed {
+                            None => ("source-changed".to_string(), None),
+                            Some(block) => {
+                                let latest_block_number = block.block.number;
+                                let sufficient = latest_block_number >= required_block_number;
+                                (
+                                    if sufficient { "sufficient".to_string() } else { "insufficient".to_string() },
+                                    Some((sufficient, latest_block_number)),
+                                )
+                            }
                         })
                     });
                     (index, vote)
                 });
             }
             let context = format!("READ block confirmation threshold for chain {chain_name}");
-            resolve_provider_quorum(requests, config.uris.len(), quorum, &context).await
+            resolve_provider_quorum(requests, config.uris.len(), quorum, &context)
+                .await?
+                .ok_or_else(|| {
+                    AppCoreError::BadRequest(format!(
+                        "READ pinned block {} is no longer canonical at height {}",
+                        pinned_block.hash, pinned_block.number
+                    ))
+                })
         })
         .await
     }

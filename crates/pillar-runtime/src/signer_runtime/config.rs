@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashSet;
 
 pub struct RuntimeSignerConfig {
     pub wallet_definitions: Vec<WalletDefinition>,
@@ -32,8 +33,12 @@ pub fn runtime_signer_config_from_env_map(
 
     let (config_wallet_definitions, material) = match signer_type {
         SignerSdkFactoryType::AwsMnemonic => {
-            let wallet_definitions =
-                wallet_definitions_from_env_map(vars).map_err(|error| error.to_string())?;
+            let wallet_definitions = if has_env(vars, LZ_WALLETS_FILE_PATH) {
+                wallet_definitions_from_file_path_env_map(vars)
+                    .map_err(|error| error.to_string())?
+            } else {
+                wallet_definitions_from_env_map(vars).map_err(|error| error.to_string())?
+            };
             (
                 wallet_definitions,
                 RuntimeSignerMaterial::AwsMnemonic {
@@ -103,7 +108,7 @@ pub fn runtime_signer_config_from_env_map(
             ));
         }
     }
-    let wallets_by_chain_name = wallet_names_by_chain
+    let wallets_by_chain_name: HashMap<String, Vec<WalletRef>> = wallet_names_by_chain
         .into_iter()
         .map(|(chain_name, wallets)| {
             (
@@ -115,7 +120,27 @@ pub fn runtime_signer_config_from_env_map(
             )
         })
         .collect();
-    let wallet_definitions = signer_wallet_definitions_from_config(&config_wallet_definitions)?;
+    let mut wallet_definitions = signer_wallet_definitions_from_config(&config_wallet_definitions)?;
+    if matches!(material, RuntimeSignerMaterial::AwsMnemonic { .. }) {
+        // A secret is read only for a wallet and chain type that serve a configured chain, so
+        // revoking an unused wallet's secret cannot stop assembly of the active ones.
+        let active_wallets = wallets_by_chain_name
+            .values()
+            .flatten()
+            .map(|wallet| wallet.wallet_name.clone())
+            .collect::<HashSet<_>>();
+        let active_types = chain_names
+            .iter()
+            .filter_map(|chain_name| chain_type_by_chain_name.get(chain_name))
+            .filter_map(|chain_type| signer_chain_type_from_config(chain_type).ok())
+            .collect::<HashSet<_>>();
+        wallet_definitions.retain_mut(|wallet| {
+            wallet
+                .by_chain_type
+                .retain(|chain_type, _| active_types.contains(chain_type));
+            active_wallets.contains(&wallet.name) && !wallet.by_chain_type.is_empty()
+        });
+    }
 
     Ok(RuntimeSignerConfig {
         wallet_definitions,
@@ -135,10 +160,7 @@ pub fn infer_chain_type_by_chain_name_from_signer_env_map(
         .and_then(|value| SignerSdkFactoryType::parse(value).map_err(|error| error.to_string()))?;
 
     let wallet_definitions = match signer_type {
-        SignerSdkFactoryType::AwsMnemonic => {
-            wallet_definitions_from_env_map(vars).map_err(|error| error.to_string())?
-        }
-        SignerSdkFactoryType::LocalMnemonic => {
+        SignerSdkFactoryType::AwsMnemonic | SignerSdkFactoryType::LocalMnemonic => {
             if has_env(vars, LZ_WALLETS_FILE_PATH) {
                 wallet_definitions_from_file_path_env_map(vars)
                     .map_err(|error| error.to_string())?
@@ -193,10 +215,21 @@ pub(crate) fn infer_chain_type_by_chain_name_from_wallet_definitions(
                 [] => Err(format!(
                     "Cannot infer signer chain type for {chain_name}: no wallet definitions match"
                 )),
-                many => Err(format!(
-                    "Cannot infer signer chain type for {chain_name}: ambiguous wallet chain types {}",
-                    many.join(",")
-                )),
+                // Several families are declared, as when separate unrestricted EVM and Solana
+                // wallets exist: the chain's static family picks the one that applies, as the
+                // wallet selector does.
+                many => {
+                    let expected = pillar_config::static_chain_type_name(chain_name)
+                        .map_err(|error| error.to_string())?;
+                    if many.iter().any(|chain_type| chain_type == expected) {
+                        Ok((chain_name.clone(), expected.to_string()))
+                    } else {
+                        Err(format!(
+                            "Cannot infer signer chain type for {chain_name}: ambiguous wallet chain types {}",
+                            many.join(",")
+                        ))
+                    }
+                }
             }
         })
         .collect()

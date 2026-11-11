@@ -125,6 +125,17 @@ const V_ID_DIVERGENCES: [(&str, &str, &str); 4] = [
     ("zksyncsep", "10248", "10305"),
 ];
 
+/// EndpointV1-only chains upstream's union lists and this service does not advertise: runtime
+/// assembly refuses an instance holding a chain without EndpointV2 and ULN302.
+const LEGACY_ONLY_CHAINS: [(&str, &str); 6] = [
+    ("mainnet", "sepolia"),
+    ("testnet", "alpen"),
+    ("testnet", "harmony"),
+    ("testnet", "kiwi"),
+    ("testnet", "kiwi2"),
+    ("testnet", "polygoncdk"),
+];
+
 /// The vId is packed into every signed DVN call data. The fixture is what
 /// `@offchain-monorepo/static-config`'s `getVId` returns at `213cd500` for this
 /// service's available union; every chain must match it except the listed divergences,
@@ -144,6 +155,13 @@ fn v_id_by_chain_name_matches_upstream_except_where_onchain_dvns_disagree() {
         let actual = runtime_v_id_by_chain_name(environment, &chain_names).unwrap();
 
         for (chain_name, upstream_v_id) in expected {
+            if LEGACY_ONLY_CHAINS.contains(&(environment.as_str(), chain_name.as_str())) {
+                assert!(
+                    !chain_names.iter().any(|name| name == chain_name),
+                    "{environment}/{chain_name} advertised"
+                );
+                continue;
+            }
             let divergence = V_ID_DIVERGENCES
                 .iter()
                 .find(|(name, ..)| environment == "testnet" && name == chain_name);

@@ -54,15 +54,26 @@ where
 pub(crate) fn parse_solana_transaction_from_observation(
     response: &Value,
 ) -> Result<TransactionFromObservation, AppCoreError> {
-    let (normalized, from) =
-        solana_transaction_projection(response.get("result").unwrap_or(&Value::Null), None)?;
+    let (normalized, from) = solana_transaction_projection(
+        response.get("result").unwrap_or(&Value::Null),
+        SolanaInstructionBinding::ProgramSequence,
+    )?;
     let fingerprint = canonical_json_fingerprint(&normalized)?;
     Ok(TransactionFromObservation { fingerprint, from })
 }
 
+/// What a Solana projection binds of the inner instructions.
+#[derive(Clone, Copy)]
+pub(crate) enum SolanaInstructionBinding<'a> {
+    /// The program of every instruction and nothing else.
+    ProgramSequence,
+    /// The `data` of the instructions of these programs, which the source resolver decodes.
+    TrustedData(&'a std::collections::HashSet<String>),
+}
+
 pub(crate) fn solana_transaction_projection(
     result: &Value,
-    trusted_program_ids: Option<&std::collections::HashSet<String>>,
+    binding: SolanaInstructionBinding<'_>,
 ) -> Result<(Value, String), AppCoreError> {
     if result.is_null() {
         return Err(AppCoreError::Internal(
@@ -109,15 +120,19 @@ pub(crate) fn solana_transaction_projection(
         let mut normalized_instructions = Vec::with_capacity(instructions.len());
         for instruction in instructions {
             let program_id = instruction.get("programId").and_then(Value::as_str);
-            if trusted_program_ids.is_some_and(|trusted| {
-                !program_id.is_some_and(|program_id| trusted.contains(program_id))
-            }) {
-                continue;
-            }
-            // Missing raw data stays non-decodable, rather than becoming an empty payload.
+            let data = match binding {
+                SolanaInstructionBinding::ProgramSequence => None,
+                SolanaInstructionBinding::TrustedData(trusted) => {
+                    if !program_id.is_some_and(|program_id| trusted.contains(program_id)) {
+                        continue;
+                    }
+                    // Missing raw data stays non-decodable, rather than becoming an empty payload.
+                    instruction.get("data").and_then(Value::as_str)
+                }
+            };
             normalized_instructions.push(json!({
                 "programId": program_id,
-                "data": instruction.get("data").and_then(Value::as_str),
+                "data": data,
             }));
         }
         normalized_groups.push(json!({"instructions": normalized_instructions}));

@@ -481,9 +481,9 @@ async fn runtime_rpc_validation_checks_use_iota_rpc_namespace() {
 }
 
 #[tokio::test]
-async fn runtime_rpc_validation_checks_reject_non_v302_sui_payload() {
+async fn runtime_rpc_validation_checks_reject_unknown_send_version_for_sui_payload() {
     let mut event = sui_sent_event("sui", 30_350);
-    event.lz_message_id.uln_send_version = Value::from("V301");
+    event.lz_message_id.uln_send_version = Value::from("V1002");
     let calls: RecordedJsonCalls = Arc::new(Mutex::new(Vec::new()));
     let checks = sui_checks("sui", Vec::new(), calls.clone());
 

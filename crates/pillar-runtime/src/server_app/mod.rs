@@ -34,8 +34,9 @@ use crate::provider_health::{
     ProviderRankTracker, ReqwestJsonRpcTransport, RpcProviderHealthSource,
 };
 use crate::provider_snapshot::ProviderSnapshotHandle;
+#[cfg(test)]
+use crate::signer_runtime::infer_chain_type_by_chain_name_from_signer_env_map;
 use crate::signer_runtime::{
-    infer_chain_type_by_chain_name_from_signer_env_map,
     runtime_signer_assembly_from_config_with_metrics, runtime_signer_config_from_env_map,
     typed_chain_type_by_chain_name,
 };

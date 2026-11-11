@@ -129,12 +129,16 @@ where
         )
         .await?;
         if key.key_id.version.is_none()
-            || key.key_id.name != self.parsed_key_id.name
-            || self
-                .parsed_key_id
-                .version
-                .as_ref()
-                .is_some_and(|version| Some(version) != key.key_id.version.as_ref())
+            || !key
+                .key_id
+                .name
+                .eq_ignore_ascii_case(&self.parsed_key_id.name)
+            || self.parsed_key_id.version.as_ref().is_some_and(|version| {
+                !key.key_id
+                    .version
+                    .as_ref()
+                    .is_some_and(|resolved| resolved.eq_ignore_ascii_case(version))
+            })
         {
             return Err(SignerError::Message(
                 "Azure Key Vault: unresolved effective key version".into(),

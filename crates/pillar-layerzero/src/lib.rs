@@ -19,9 +19,10 @@ mod types;
 pub use abi::{
     build_evm_dvn_call_data_result, build_evm_get_read_lib_config_call_data,
     build_evm_get_receive_library_call_data, build_evm_get_uln_config_call_data,
-    build_evm_hash_lookup_call_data, build_evm_is_valid_receive_library_call_data,
-    build_evm_lz_map_call_data, build_evm_lz_reduce_call_data,
-    build_evm_uln_v2_get_app_config_call_data, build_evm_uln_v2_inbound_proof_library_call_data,
+    build_evm_hash_lookup_call_data, build_evm_inbound_payload_hash_call_data,
+    build_evm_is_valid_receive_library_call_data, build_evm_lz_map_call_data,
+    build_evm_lz_reduce_call_data, build_evm_uln_v2_get_app_config_call_data,
+    build_evm_uln_v2_inbound_proof_library_call_data,
     build_evm_v1_get_receive_library_address_call_data,
     build_evm_validation_library_get_proof_type_call_data,
     build_evm_validation_library_get_utils_version_call_data, build_evm_verifiable_call_data,
@@ -29,7 +30,8 @@ pub use abi::{
     decode_evm_hash_lookup_result, decode_evm_receive_library_result, decode_evm_uint64_result,
     decode_evm_uln_config_confirmations, decode_evm_uln_v2_app_config,
     decode_evm_verification_state, evm_address_from_pathway_value, evm_checksum_address,
-    evm_hash_lookup_is_confirmed, keccak256_hex, pack_dvn_call_data,
+    evm_hash_lookup_is_confirmed, evm_inbound_payload_hash_is_nil, keccak256_hex,
+    pack_dvn_call_data,
 };
 pub use adapter_params::{
     aptos_adapter_params_gas, decode_abi_bytes_return, decode_aptos_adapter_params,
@@ -52,18 +54,19 @@ pub use evm::{
 pub use evm_v2::build_evm_uln_v2_verify_call_data;
 pub use evm_v3::build_evm_uln_v3_verify_call_data;
 pub use other_non_evm::{
-    boc_from_base64, boc_from_base64_with_limits, boc_from_bytes, boc_from_bytes_with_limits,
-    build_ton_dvn_verify, canton_gasolina_signer_address, canton_hash_verify,
-    canton_key_fingerprint, canton_party_namespace, committable_view_is_signed,
-    decode_proxy_admin_target, decode_ton_relayer_options, derive_uln_addresses, dvn_attestation,
-    effective_receive_confirmations, required_receive_confirmations,
-    stellar_account_id_from_strkey, stellar_contract_id_from_strkey, ton_address_to_be32,
-    ton_boc_from_hex, ton_boc_to_base64, ton_payload_signed_targets, ton_state_init_address,
-    uln_default_receive_config, CantonUlnPayloadBuilder, CantonVerifyDigestInput, DerivedAddresses,
-    DvnAttestation, StarknetUlnPayloadBuilder, StellarUlnPayloadBuilder, TonContractCodeCells,
-    TonDvnVerifyOutput, TonDvnVerifyRequest, TonPathway, TonPayloadSignedRequest,
-    TonPayloadSignedTargets, TonStorageCell, TonUlnPayloadBuilder, LIVE_TON_PACKET_BOC,
-    MAX_ACCOUNT_STATE_CELLS, MAX_MESSAGE_CELLS,
+    boc_base64_bytes, boc_from_base64, boc_from_base64_with_limits, boc_from_bytes,
+    boc_from_bytes_with_limits, build_ton_dvn_verify, canton_gasolina_signer_address,
+    canton_hash_verify, canton_key_fingerprint, canton_party_namespace, committable_view_is_signed,
+    decode_proxy_admin_target, decode_proxy_admin_target_from_cell, decode_ton_relayer_options,
+    derive_uln_addresses, dvn_attestation, effective_receive_confirmations,
+    required_receive_confirmations, stellar_account_id_from_strkey,
+    stellar_contract_id_from_strkey, ton_address_to_be32, ton_boc_from_hex, ton_boc_to_base64,
+    ton_payload_signed_targets, ton_state_init_address, uln_default_receive_config,
+    CantonUlnPayloadBuilder, CantonVerifyDigestInput, DerivedAddresses, DvnAttestation,
+    StarknetUlnPayloadBuilder, StellarUlnPayloadBuilder, TonContractCodeCells, TonDvnVerifyOutput,
+    TonDvnVerifyRequest, TonPathway, TonPayloadSignedRequest, TonPayloadSignedTargets,
+    TonStorageCell, TonUlnPayloadBuilder, LIVE_TON_PACKET_BOC, MAX_ACCOUNT_STATE_CELLS,
+    MAX_MESSAGE_CELLS,
 };
 pub use packet::{
     build_evm_feather_proof, build_evm_lz_v1_packet_payload_v2,

@@ -36,7 +36,12 @@ CREATE TABLE IF NOT EXISTS pillar_audit_attempt (
 CREATE TABLE IF NOT EXISTS pillar_audit_evidence (
  attempt_id bigint NOT NULL REFERENCES pillar_audit_attempt(id), kind text NOT NULL,
  signature_hash text, recorded_at timestamptz NOT NULL DEFAULT clock_timestamp(), PRIMARY KEY(attempt_id,kind));
-CREATE INDEX IF NOT EXISTS pillar_audit_attempt_namespace ON pillar_audit_attempt(namespace,id);
+DO $$ BEGIN
+ IF to_regclass('pillar_audit_attempt_namespace') IS NULL THEN
+  CREATE INDEX pillar_audit_attempt_namespace ON pillar_audit_attempt(namespace,id);
+ END IF;
+EXCEPTION WHEN duplicate_table THEN NULL;
+END $$;
 ";
 
 struct Session {
@@ -106,18 +111,24 @@ fn webpki_roots() -> Arc<rustls::RootCertStore> {
 }
 /// An explicit provider, because the release graph enables both `ring` and `aws-lc-rs`
 /// and rustls then refuses to choose a process default.
-fn tls_connector(
-    roots: Arc<rustls::RootCertStore>,
-) -> Result<tokio_postgres_rustls::MakeRustlsConnect, Failure> {
-    let tls = rustls::ClientConfig::builder_with_provider(Arc::new(
+fn tls_connector(roots: Arc<rustls::RootCertStore>) -> Result<crate::audit_tls::AuditTls, Failure> {
+    let mut tls = rustls::ClientConfig::builder_with_provider(Arc::new(
         rustls::crypto::ring::default_provider(),
     ))
     .with_safe_default_protocol_versions()
     .map_err(|_| Failure::Configuration)?
     .with_root_certificates(roots)
     .with_no_client_auth();
-    Ok(tokio_postgres_rustls::MakeRustlsConnect::new(tls))
+    // PostgreSQL 17 requires this ALPN protocol for a direct-TLS (`sslnegotiation=direct`) start.
+    tls.alpn_protocols = vec![b"postgresql".to_vec()];
+    Ok(crate::audit_tls::AuditTls::new(tls))
 }
+/// What the intent's `wallet_hash` column holds. A request's input binding is per effective key
+/// (backend, reference and version), not per wallet name: KMS wallets are named by list
+/// position, so a name is not stable when an earlier key is added or removed. The attempt rows
+/// keep the wallet's own hash as attribution.
+const INTENT_WALLET_DOMAIN: &str = "";
+
 pub(crate) struct PostgresAuditStore {
     config: AuditConfig,
     session: Mutex<Option<Session>>,
@@ -193,6 +204,15 @@ impl PostgresAuditStore {
             failure.message()
         })
     }
+    /// Server-side limits, set inside each transaction: the startup `options` parameter they
+    /// used to travel in is refused by default PgBouncer.
+    fn local_timeouts(&self) -> String {
+        let milliseconds = self.config.timeout.as_millis().max(1);
+        format!(
+            "SET LOCAL lock_timeout = '{}ms'; SET LOCAL idle_in_transaction_session_timeout = '{milliseconds}ms'; SET LOCAL statement_timeout = '{milliseconds}ms'",
+            (milliseconds / 2).max(1),
+        )
+    }
     async fn session<'a>(
         &self,
         slot: &'a mut Option<Session>,
@@ -207,15 +227,27 @@ impl PostgresAuditStore {
                 .database_url
                 .parse()
                 .map_err(|_| Failure::Configuration)?;
+            // A smaller connect timeout in the DSN is the per-host budget, so a blackholed first
+            // host leaves time to try the next one within the whole-operation deadline.
+            let connect_timeout = config
+                .get_connect_timeout()
+                .map_or(self.config.timeout, |dsn| (*dsn).min(self.config.timeout));
             config
-                .connect_timeout(self.config.timeout)
+                .connect_timeout(connect_timeout)
                 .tcp_user_timeout(self.config.timeout)
                 .keepalives(true)
                 .keepalives_idle(std::time::Duration::from_secs(5))
                 .keepalives_interval(std::time::Duration::from_secs(1))
                 .keepalives_retries(3);
-            let milliseconds = self.config.timeout.as_millis().max(1);
-            config.options(format!("{} -c lock_timeout={}ms -c idle_in_transaction_session_timeout={}ms -c statement_timeout={}ms", config.get_options().unwrap_or(""), (milliseconds / 2).max(1), milliseconds, milliseconds));
+            // tokio-postgres would otherwise ask the OS for the account name, synchronously,
+            // while its connect future is polled, where no deadline can interrupt it.
+            if config.get_user().is_none() {
+                let user = ["PGUSER", "USER", "LOGNAME"]
+                    .iter()
+                    .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()))
+                    .ok_or(Failure::Configuration)?;
+                config.user(&user);
+            }
             let generation = lane.fetch_add(1, Ordering::AcqRel).wrapping_add(1);
             let epoch = lane.clone();
             let reachable = self.reachable.clone();
@@ -256,7 +288,16 @@ impl PostgresAuditStore {
     }
     async fn initialize(&self, slot: &mut Option<Session>) -> Result<(), Failure> {
         let session = self.session(slot, &self.generation).await?;
-        let tx = session.client.transaction().await.map_err(unavailable)?;
+        let tx = session
+            .client
+            .build_transaction()
+            .isolation_level(tokio_postgres::IsolationLevel::ReadCommitted)
+            .start()
+            .await
+            .map_err(unavailable)?;
+        tx.batch_execute(&self.local_timeouts())
+            .await
+            .map_err(unavailable)?;
         tx.execute("SELECT pg_advisory_xact_lock($1)", &[&0x70696c6c6172_i64])
             .await
             .map_err(unavailable)?;
@@ -284,7 +325,16 @@ impl PostgresAuditStore {
         intent: &AttemptIntent,
     ) -> Result<i64, Failure> {
         let session = self.session(slot, &self.generation).await?;
-        let tx = session.client.transaction().await.map_err(unavailable)?;
+        let tx = session
+            .client
+            .build_transaction()
+            .isolation_level(tokio_postgres::IsolationLevel::ReadCommitted)
+            .start()
+            .await
+            .map_err(unavailable)?;
+        tx.batch_execute(&self.local_timeouts())
+            .await
+            .map_err(unavailable)?;
         tx.batch_execute("SET LOCAL synchronous_commit = on")
             .await
             .map_err(unavailable)?;
@@ -299,12 +349,12 @@ impl PostgresAuditStore {
         let identity: &[&(dyn tokio_postgres::types::ToSql + Sync)] = &[
             namespace,
             &intent.validated.request_hash,
-            &intent.wallet_hash,
+            &INTENT_WALLET_DOMAIN,
             &intent.key.backend,
             &reference,
             &version,
         ];
-        tx.execute("INSERT INTO pillar_audit_intent(namespace,request_hash,wallet_hash,backend,key_reference_hash,key_version_hash,public_key_hash,signed_digest,algorithm,key_reference,key_version) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING", &[namespace,&intent.validated.request_hash,&intent.wallet_hash,&intent.key.backend,&reference,&version,&intent.key.public_key_hash,&intent.signed_digest,&intent.algorithm,&intent.key.reference,&intent.key.version]).await.map_err(unavailable)?;
+        tx.execute("INSERT INTO pillar_audit_intent(namespace,request_hash,wallet_hash,backend,key_reference_hash,key_version_hash,public_key_hash,signed_digest,algorithm,key_reference,key_version) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING", &[namespace,&intent.validated.request_hash,&INTENT_WALLET_DOMAIN,&intent.key.backend,&reference,&version,&intent.key.public_key_hash,&intent.signed_digest,&intent.algorithm,&intent.key.reference,&intent.key.version]).await.map_err(unavailable)?;
         let row = tx.query_one("SELECT public_key_hash,signed_digest,algorithm,key_reference,key_version FROM pillar_audit_intent WHERE namespace=$1 AND request_hash=$2 AND wallet_hash=$3 AND backend=$4 AND key_reference_hash=$5 AND key_version_hash=$6", identity).await.map_err(unavailable)?;
         if row.get::<_, String>(0) != intent.key.public_key_hash
             || row.get::<_, String>(1) != intent.signed_digest
@@ -337,7 +387,16 @@ impl PostgresAuditStore {
         signature_hash: Option<&str>,
     ) -> Result<(), Failure> {
         let session = self.session(slot, &self.generation).await?;
-        let tx = session.client.transaction().await.map_err(unavailable)?;
+        let tx = session
+            .client
+            .build_transaction()
+            .isolation_level(tokio_postgres::IsolationLevel::ReadCommitted)
+            .start()
+            .await
+            .map_err(unavailable)?;
+        tx.batch_execute(&self.local_timeouts())
+            .await
+            .map_err(unavailable)?;
         tx.batch_execute("SET LOCAL synchronous_commit = on")
             .await
             .map_err(unavailable)?;

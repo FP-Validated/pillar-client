@@ -50,6 +50,7 @@ where
             accounts.confirmations_pda,
             accounts.library_config_pda,
             accounts.default_library_config_pda,
+            accounts.payload_hash_pda,
         ]
         .map(|pubkey| bs58::encode(pubkey).into_string());
 
@@ -84,7 +85,7 @@ async fn observe_solana_payload_signed<T>(
     url: String,
     headers: HashMap<String, String>,
     request: SolanaPayloadSignedRequest,
-    pubkeys: [String; 7],
+    pubkeys: [String; 8],
 ) -> Result<PayloadSignedValidity, RpcError>
 where
     T: JsonRpcTransport,
@@ -112,7 +113,7 @@ where
             .ok_or_else(|| {
                 AppCoreError::Internal("Missing getMultipleAccounts result".to_string())
             })?;
-        if values.len() != 7 {
+        if values.len() != 8 {
             return Err(AppCoreError::Internal(
                 "Unexpected getMultipleAccounts result length".to_string(),
             ));
@@ -149,6 +150,7 @@ where
             receive_config: decoded[2].as_deref(),
             default_receive_config: decoded[3].as_deref(),
             confirmations: decoded[4].as_deref(),
+            payload_hash: decoded[7].as_deref(),
         };
         match solana_payload_is_signed(&request, accounts) {
             Ok(true) => Ok(PayloadSignedValidity::Signed),

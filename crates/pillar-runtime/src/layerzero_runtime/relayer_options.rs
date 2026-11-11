@@ -73,6 +73,11 @@ fn from_options(bytes: &[u8]) -> Result<Options, String> {
                 } else if worker_id == 2 {
                     number(js_slice(bytes, cursor, cursor + 1))?;
                     cursor += 1;
+                    // An entry holding only its index carries no option; the Sui worker-options
+                    // parser skips it, so a source quote that accepted it must not fail here.
+                    if size == 1 {
+                        continue;
+                    }
                     let option_type = number(js_slice(bytes, cursor, cursor + 1))?;
                     cursor += 1;
                     let params = js_slice(bytes, cursor, cursor + size - 2).to_vec();

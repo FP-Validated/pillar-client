@@ -49,11 +49,6 @@ fn round1_solana_projection_ignores_metadata_but_binds_consumed_fields() {
             "/result/meta/innerInstructions/0/instructions/0/programId",
             json!("OtherProgram"),
         ),
-        (
-            "inner data",
-            "/result/meta/innerInstructions/0/instructions/0/data",
-            json!("other-data"),
-        ),
     ] {
         let mut changed = first.clone();
         *changed.pointer_mut(pointer).unwrap() = value;
@@ -65,6 +60,18 @@ fn round1_solana_projection_ignores_metadata_but_binds_consumed_fields() {
         );
         assert_ne!(baseline.fingerprint, observation.fingerprint, "{name}");
     }
+    // `jsonParsed` omits an instruction's `data` where a node's parser covers its program, so
+    // providers on different builds disagree on it; only the fee payer is read from here.
+    let mut other_data = first.clone();
+    *other_data
+        .pointer_mut("/result/meta/innerInstructions/0/instructions/0/data")
+        .unwrap() = json!("other-data");
+    assert_eq!(
+        baseline.fingerprint,
+        crate::provider_health::parse_solana_transaction_from_observation(&other_data)
+            .unwrap()
+            .fingerprint
+    );
     for invalid_err in [json!(false), json!({})] {
         let artifact_name = if invalid_err.is_boolean() {
             "solana-invalid-err-boolean"

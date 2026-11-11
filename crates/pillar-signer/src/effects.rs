@@ -245,7 +245,16 @@ where
                     )))
                 }
             };
+            // The foreground path counts backend failures only; local admission and audit
+            // failures are not the backend's.
+            let backend_failure = matches!(
+                &result,
+                Err(error) if !matches!(error, SignerError::Admission(_) | SignerError::Audit(_))
+            );
             if sender.send(result).is_err() {
+                if backend_failure {
+                    pillar_core::audit::record_late_signer_failure();
+                }
                 if !caller_lost {
                     let _ = evidence(record.completion_timeout(), record.unknown()).await;
                 }

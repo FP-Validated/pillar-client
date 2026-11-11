@@ -69,7 +69,13 @@ async fn move_packet_sent_resolver_decodes_trusted_aptos_event() {
         &ProviderSnapshotHandle::from_getter(&getter),
         RecordingTransport {
             calls: Arc::new(Mutex::new(Vec::new())),
-            responses: Arc::new(Mutex::new(vec![Ok(transaction)])),
+            responses: Arc::new(Mutex::new(vec![
+                Ok(transaction),
+                Ok(json!({
+                    "block_height": "42",
+                    "block_hash": format!("0x{}", "ab".repeat(32)),
+                })),
+            ])),
         },
         EvmPacketSentResolverConfig {
             chain_name_by_eid: HashMap::from([
@@ -127,6 +133,8 @@ async fn move_packet_sent_resolver_decodes_trusted_aptos_event() {
         event.extra["sendLibrary"],
         "0x0000000000000000000000000000000000000000000000000000000000004444"
     );
+    assert_eq!(event.extra["blockNumber"], 42);
+    assert_eq!(event.extra["blockHash"], format!("0x{}", "ab".repeat(32)));
 }
 
 #[tokio::test]
@@ -169,7 +177,13 @@ async fn source_chain_parity_decodes_trusted_movement_event() {
         &ProviderSnapshotHandle::from_getter(&getter),
         RecordingTransport {
             calls: Arc::new(Mutex::new(Vec::new())),
-            responses: Arc::new(Mutex::new(vec![Ok(transaction)])),
+            responses: Arc::new(Mutex::new(vec![
+                Ok(transaction),
+                Ok(json!({
+                    "block_height": "42",
+                    "block_hash": format!("0x{}", "ab".repeat(32)),
+                })),
+            ])),
         },
         EvmPacketSentResolverConfig {
             chain_name_by_eid: HashMap::from([

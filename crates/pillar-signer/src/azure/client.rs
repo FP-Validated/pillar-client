@@ -124,11 +124,13 @@ impl AzureKmsClient for AzureKeyVaultKmsClient {
         let resolved = parse_azure_kms_key_id(&reference)?;
         if resolved.version.is_none()
             || !self.in_this_vault(&reference)
-            || resolved.name != key_id.name
-            || key_id
-                .version
-                .as_ref()
-                .is_some_and(|version| Some(version) != resolved.version.as_ref())
+            || !resolved.name.eq_ignore_ascii_case(&key_id.name)
+            || key_id.version.as_ref().is_some_and(|version| {
+                !resolved
+                    .version
+                    .as_ref()
+                    .is_some_and(|effective| effective.eq_ignore_ascii_case(version))
+            })
         {
             return Err(SignerError::Message(
                 "Azure Key Vault: public key identity changed".into(),

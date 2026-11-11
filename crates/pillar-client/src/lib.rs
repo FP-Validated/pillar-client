@@ -6,10 +6,10 @@ use pillar_core::{
     ProviderHealthSnapshot, Signature,
 };
 use regex::Regex;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, ACCEPT_ENCODING, CONTENT_TYPE};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use std::{sync::OnceLock, time::Duration};
+use std::{sync::LazyLock, time::Duration};
 
 const MAX_JSON_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 
@@ -81,12 +81,43 @@ pub struct ApiEnvelope {
     pub body: Value,
 }
 
+/// Replaces every `http(s)://` URL, including IPv6 literals and parenthesised paths, whose query
+/// or path may carry a credential.
 pub fn obfuscate_urls(input: &str) -> String {
-    static URL_REGEX: OnceLock<Regex> = OnceLock::new();
-    URL_REGEX
-        .get_or_init(|| Regex::new(r#"(?i)https?://[^\s"\\)}\]]+"#).expect("URL regex compiles"))
-        .replace_all(input, "<url-removed>")
-        .into_owned()
+    static URL_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"(?i)https?://(?:\[[^\]\s]*\]|\([^()\s"\\]*\)|[^\s"\\()\[\]}])+"#)
+            .expect("URL regex compiles")
+    });
+    URL_REGEX.replace_all(input, "<url-removed>").into_owned()
+}
+
+/// `NO_PROXY=*` must keep traffic off every proxy; the pinned HTTP stack's matcher skips IP
+/// literals for the wildcard, so it is honoured here before the client is built.
+fn no_proxy_is_wildcard() -> bool {
+    ["NO_PROXY", "no_proxy"]
+        .iter()
+        .filter_map(|name| std::env::var(name).ok())
+        .any(|value| value.split(',').any(|entry| entry.trim() == "*"))
+}
+
+fn describe_send_error(error: &reqwest::Error) -> String {
+    let class = if error.is_timeout() {
+        "timed out"
+    } else if error.is_connect() {
+        "connection failed"
+    } else if error.is_request() {
+        "request failed"
+    } else {
+        "failed"
+    };
+    let mut message = format!("error sending request ({class})");
+    let mut source = std::error::Error::source(error);
+    while let Some(cause) = source {
+        message.push_str(": ");
+        message.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    obfuscate_urls(&message)
 }
 
 #[async_trait::async_trait]
@@ -134,9 +165,14 @@ impl ReqwestPillarTransport {
                     .map_err(|error| ClientError::Transport(error.to_string()))?,
             );
         }
-        let client = reqwest::Client::builder()
+        let mut builder = reqwest::Client::builder()
             .timeout(Duration::from_secs(70))
-            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(Duration::from_secs(10))
+            .redirect(reqwest::redirect::Policy::none());
+        if no_proxy_is_wildcard() {
+            builder = builder.no_proxy();
+        }
+        let client = builder
             .build()
             .map_err(|error| ClientError::Transport(error.to_string()))?;
         Ok(Self {
@@ -149,36 +185,51 @@ impl ReqwestPillarTransport {
 #[async_trait::async_trait]
 impl PillarTransport for ReqwestPillarTransport {
     async fn post_json(&self, url: String, body: Value) -> Result<ApiEnvelope, String> {
+        let mut headers = self.headers.clone();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
         let response = self
             .client
             .post(url)
-            .headers(self.headers.clone())
-            .header("content-type", "application/json")
+            .headers(headers)
             .json(&body)
             .send()
             .await
-            .map_err(|error| error.without_url().to_string())?;
-        let status_code = response.status().as_u16();
-        let body = bounded_response_json(response).await?;
-        Ok(ApiEnvelope { status_code, body })
+            .map_err(|error| describe_send_error(&error))?;
+        let status = response.status();
+        let body = bounded_response_json(response, status.is_success()).await?;
+        Ok(ApiEnvelope {
+            status_code: status.as_u16(),
+            body,
+        })
     }
 
     async fn get_json(&self, url: String) -> Result<ApiEnvelope, String> {
+        let mut headers = self.headers.clone();
+        headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+        headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
         let response = self
             .client
             .get(url)
-            .headers(self.headers.clone())
-            .header("accept", "application/json")
+            .headers(headers)
             .send()
             .await
-            .map_err(|error| error.without_url().to_string())?;
-        let status_code = response.status().as_u16();
-        let body = bounded_response_json(response).await?;
-        Ok(ApiEnvelope { status_code, body })
+            .map_err(|error| describe_send_error(&error))?;
+        let status = response.status();
+        let body = bounded_response_json(response, status.is_success()).await?;
+        Ok(ApiEnvelope {
+            status_code: status.as_u16(),
+            body,
+        })
     }
 }
 
-async fn bounded_response_json(response: reqwest::Response) -> Result<Value, String> {
+/// A non-success status keeps its status when the body is not JSON; the body then stands in as
+/// a bounded text excerpt.
+async fn bounded_response_json(
+    response: reqwest::Response,
+    success_status: bool,
+) -> Result<Value, String> {
     if response
         .content_length()
         .is_some_and(|length| length > MAX_JSON_RESPONSE_BYTES as u64)
@@ -190,10 +241,16 @@ async fn bounded_response_json(response: reqwest::Response) -> Result<Value, Str
     let mut bytes = Vec::new();
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|error| error.without_url().to_string())?;
+        let chunk = chunk.map_err(|error| describe_send_error(&error))?;
         extend_bounded_response(&mut bytes, &chunk)?;
     }
-    pillar_core::json::parse_value_slice(&bytes).map_err(|error| error.to_string())
+    match pillar_core::json::parse_value_slice(&bytes) {
+        Ok(value) => Ok(value),
+        Err(_) if !success_status => Ok(Value::String(
+            String::from_utf8_lossy(&bytes).chars().take(512).collect(),
+        )),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 fn extend_bounded_response(buffer: &mut Vec<u8>, chunk: &[u8]) -> Result<(), String> {
@@ -342,13 +399,13 @@ where
         let first_uri = self.first_uri()?;
         let first = get_body_for_path(&self.transport, first_uri, "available-chains").await?;
         let first: Vec<String> = serde_json::from_value(first)
-            .map_err(|error| ClientError::Transport(error.to_string()))?;
+            .map_err(|error| ClientError::Transport(obfuscate_urls(&error.to_string())))?;
         let mut first_sorted = first.clone();
         first_sorted.sort();
         for uri in self.uris.iter().skip(1) {
             let candidate = get_body_for_path(&self.transport, &uri.0, "available-chains").await?;
             let mut candidate: Vec<String> = serde_json::from_value(candidate)
-                .map_err(|error| ClientError::Transport(error.to_string()))?;
+                .map_err(|error| ClientError::Transport(obfuscate_urls(&error.to_string())))?;
             candidate.sort();
             if candidate != first_sorted {
                 return Err(ClientError::Transport(obfuscate_urls(&format!(
@@ -539,7 +596,19 @@ fn ensure_success_status(url: &str, envelope: &ApiEnvelope) -> Result<(), Client
 }
 
 fn ensure_embedded_success_status(url: &str, body: &Value) -> Result<(), ClientError> {
-    if let Some(status_code) = body.get("statusCode").and_then(Value::as_u64) {
+    if let Some(value) = body.get("statusCode") {
+        let status_code = value.as_u64().or_else(|| {
+            value
+                .as_f64()
+                .filter(|float| float.fract() == 0.0 && (0.0..=65_535.0).contains(float))
+                .map(|float| float as u64)
+        });
+        let Some(status_code) = status_code else {
+            return Err(ClientError::Transport(format!(
+                "Malformed statusCode in response from {}",
+                obfuscate_urls(url)
+            )));
+        };
         let status_code = u16::try_from(status_code).unwrap_or(u16::MAX);
         if !is_success_status(status_code) {
             let body = body.get("body").unwrap_or(body);
@@ -617,7 +686,10 @@ fn evm_address_bytes(address: &str) -> Option<[u8; 20]> {
 
 fn join_url(uri: &str, path: &str) -> String {
     if path.is_empty() {
-        return uri.trim_end_matches('/').to_string();
+        return match uri.split_once('?') {
+            Some((base, query)) => format!("{}?{query}", base.trim_end_matches('/')),
+            None => uri.trim_end_matches('/').to_string(),
+        };
     }
     let (path_without_query, path_query) = path.split_once('?').unwrap_or((path, ""));
     let normalized_path = if path_without_query.starts_with('/') {

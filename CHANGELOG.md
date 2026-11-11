@@ -4,6 +4,65 @@ All notable changes to this project are documented here. This project follows
 semantic versioning for the HTTP surface, the environment-variable contract and
 the Prometheus metric names.
 
+## Unreleased
+
+Findings are those of the `pillar-client-action-required` audit (131 items); its numbers differ from the same-named entries of earlier releases below.
+
+### Security
+
+- H-06: a provider whose chain no longer holds the pinned READ block votes `source-changed`; an agreed answer is refused as "no longer canonical" instead of being dropped from the vote.
+- H-07, M-124: a quorum candidate that cannot be retained (budget or size) is kept as a withheld competing vote, so a below-quorum candidate can no longer let a smaller one win. Stellar votes retain only the consumed fields.
+- H-08: Starknet `TXN_HASH_NOT_FOUND` and `BLOCK_NOT_FOUND` are `source-changed`, not provider failures.
+- H-09: Canton confirmation timestamps are read as seconds or milliseconds by magnitude, so a unit change cannot inflate the age past the finality delay.
+- M-108: EVM receipt logs are re-indexed by position and the packet log is bound by sorted position.
+- M-109, M-110: payload-signed checks without a `dvnAddress` use a null subject on Move, Starknet and Sui and a typed optional verifier on Canton; Canton's required confirmations are range-checked before use.
+- M-106, M-112: chain-name lookups on the signing path use the environment's endpoint-id map; the legacy table is no longer a fallback there.
+- M-113, M-114, M-118, M-119, M-132, M-135: a receive-library mismatch is a vote, READ marker matching no longer consumes slots, pins on one chain share one history, `SourceChanged` and `Missing` agree under one key, a nilified READ payload hash is not "signed", and a nilified or differing Solana `PayloadHash` makes the packet re-verifiable.
+- M-115, M-116, M-117, M-130, M-131: Aptos default adapter params distinguish "not found" from errors; TON trace dispatch uses the rank key; AWS mnemonic mode honours `LZ_WALLETS_FILE_PATH`; the Solana `from` vote binds the program sequence, not parser-dependent instruction data; both-probes-timed-out is a bare timeout.
+- M-120, M-122, M-128: quorum strategy matching uses Hall's condition with incremental selection and a binary-searched prefix, not slot expansion with augmenting paths.
+- M-123: projected JSON subtrees that are dropped are charged against their own 16 MiB / 4 M-node budget.
+- M-127: a Canton response with fewer signatures than the committee quorum is refused before it is hashed.
+- M-129: READ JSON parse admission is capped per target (3 of 4 slots) and waits at most 2 s, a local admission outcome rather than a lost vote.
+- M-105: S3 and GCS configuration objects are read twice and used only when both reads agree (3 attempts), and a bucket pair whose strategy has no `_providersSha256` of its providers file is refused. Add the key before upgrading; earlier releases ignore it. `provider_config convert` writes it and `validate` reports its absence.
+- M-107, L-80, I-21, I-36: a provider's TON storage BOC is parsed once and voted by its root hash; BOCs with the `0x68ff65f3` and `0xacc3a728` magics and URL-safe or unpadded base64 are accepted.
+- M-126: `localhost` bypasses the proxy like literal loopback addresses.
+- M-136: already fixed in the current parser; no change.
+- L-09, L-69, I-29, L-75, L-82, L-93, L-96, L-106, I-11, I-13, I-14, I-18, I-20, I-24, I-27, I-35: URL and key-id redaction handles IPv6 and short identifiers, indexer credentials stay on their origin, hop-by-hop headers are dropped, `NO_PROXY=*` is honoured, error classes survive, and status codes, content types and query values are handled as the wire carries them.
+- L-52, L-58, L-59, L-65, L-67, L-74, L-86, L-88, L-89, L-99, L-104, I-34, L-107, I-25, I-16: assorted decoding and classification fixes (IOTA event cap, Besu revert text, canonical Starknet felts, static-family chain inference, Aptos trailing-slash probe, Stellar missing receiver, process rank tracker for TON, inactive-wallet scoping, case-insensitive Azure identity, sibling-packet disclosure, integral float spellings, null TON children, `0X` opcodes, bare Aptos hashes).
+- M-111: Move V301 and V302 sends carry `blockHash` and `blockNumber` read through the provider quorum, as ULNv2 does: by ledger version on Aptos and Movement, by transaction height on Initia.
+- L-55: Canton readiness binds the scanned event to the resolved packet (`PacketSent` name and commitment hash), not the nonce alone.
+- L-60, L-72, L-76: an index-only DVN option entry is skipped; Sui/IOTA duplicate-state validation serves V301 sends; a Starknet `L1_HANDLER` is refused by name in extra-context validation.
+- L-61, L-101 to L-103, L-105, I-05: audit database ALPN, idempotent index DDL, per-transaction timeouts, DSN `connect_timeout`, user fallback and Read Committed isolation.
+- L-64, L-71, L-79, L-97: the CLI health check runs before a runtime exists, accept errors evict idle connections, the runtime shuts down within 1 s of the server, and stdout logging drops records instead of blocking a worker.
+- L-70, L-91, I-06, I-38: GCP default credentials are bounded to 30 s; clients set a 10 s connect timeout; HTTP/2 is enabled.
+- L-73, L-83, L-87, L-94, L-100, I-01: bounded schema-issue reports, metrics updated only under the lock, bounded sign-stage label cardinality, bounded TON address text (the TON sender already failed closed when missing or unparseable), and legacy pathway formatting only on the error path with a linear JSON writer.
+- L-77, I-19, I-22, I-23, L-63: stage observations survive request cancellation, terminal request logs carry method and route, `/metrics` families are grouped and HTTP histograms are consistent under concurrent scrapes, and late backend signing failures are counted in `pillar_signer_late_failures_total`.
+- L-84: legacy-only EVM chains (testnet `harmony`, `kiwi`, `kiwi2`, `polygoncdk`, `alpen`; mainnet `sepolia`) are no longer advertised, as runtime assembly requires EndpointV2 and ULN302.
+- L-53, L-92, I-15, I-28: S3 configuration loads are serialized and request no response checksum (the SDK's body wrapper panics on trailer frames), the GCS client is shared, and `startup_report_from_env_map_async` reports S3 and GCS configurations.
+- L-54, L-78, L-85, I-10, I-17, I-26: the rank loop shares the cache's probe round, partial rounds persist observed failures, rank reports commit and dispatch plans read ranks under one lock, a past deadline is an admission refusal, reused health keeps its original observation time, and entry-time expiry is classified by the request deadline.
+- L-66, L-68, L-56, M-133: READ calls use ranked, entity-interleaved dispatch; bounded READ command concurrency, digest fingerprints and `plan_dispatch` for Move reads were already in place.
+- L-81, I-32: startup computes the single-entity metric under the metrics lock, and the inferred constructor forwards authentication settings and shares the handle's rank tracker.
+- L-95, I-04, I-12: an over-limit Lambda policy body is refused with a clear error, the absolute shutdown deadline is checked before a response is released, and executable-sourced GCP credentials are refused at start.
+- M-125: compressed request bodies are decoded in 1 KiB steps and refused once a stream has consumed input well beyond its output, which bounds the work empty DEFLATE blocks can cost; decompression slots also queue for up to 2 s before a 503.
+- M-121: upload bodies queue for a permit in arrival order and a stalled upload gives its permit back after three seconds, instead of being refused at once.
+- M-133, M-134: RPC admission keys on the provider entity of the dialled endpoint, and one entity holds at most three quarters of a chain's lane.
+- I-03: the 400 "block confirmations not met" body names the caller's `blockConfirmation` (`required block confirmation: N`); the observed depth is logged at debug level. This replaces upstream's `current block confirmation: N`.
+- I-09: the audit intent's conflict domain is the effective key, not the wallet name.
+- L-62: the audit database connection computes its own RFC 5929 channel binding, so SCRAM-SHA-256-PLUS is offered where the certificate's signature algorithm has a hash.
+- I-37: GCP credential headers are fetched at most once a second.
+- L-90: the constructor that takes dependencies built outside the provider handle is test-only.
+- Dependencies: `azure_security_keyvault_keys` 1.0.1 (RUSTSEC-2026-0439), `hyper` 1.12.0, `h2` 0.4.20.
+
+### Changed
+
+- `RuntimeAppValidator` Solana payload checks fetch eight accounts (the endpoint `PayloadHash` is the eighth).
+- `canton_block_confirmations` takes an optional expected commitment hash.
+- `ProviderHealthSource` gains `get_observed_provider_health`; `ProviderHealthReport.checked_at_unix_ms` is the time of the observation a reused verdict rests on.
+
+### Not changed, documented in SECURITY.md
+
+I-07, I-08 (loads are serialized), I-30, I-31, I-33, L-05, L-57, and the parts of L-55 (the committee's preimage) and L-98 (the HTTP/1 decoder's unbounded chunk-size line; a provider may legitimately hold a body open until the request deadline) that sit in a protocol or a dependency.
+
 ## 2.7.5 - 2026-11-04
 
 ### Security

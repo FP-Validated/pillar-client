@@ -166,7 +166,6 @@ fn solana_quorum_fingerprint_ignores_v1_fields_and_still_binds_the_compared_ones
         "/result/meta/err",
         "/result/transaction/message/accountKeys/0/pubkey",
         "/result/meta/innerInstructions/0/instructions/0/programId",
-        "/result/meta/innerInstructions/0/instructions/0/data",
     ] {
         let mut tampered = v1.clone();
         *tampered.pointer_mut(pointer).unwrap() = match pointer {
@@ -181,4 +180,15 @@ fn solana_quorum_fingerprint_ignores_v1_fields_and_still_binds_the_compared_ones
             assert_ne!(fingerprint, observation.unwrap().fingerprint, "{pointer}");
         }
     }
+
+    let mut other_data = v1.clone();
+    *other_data
+        .pointer_mut("/result/meta/innerInstructions/0/instructions/0/data")
+        .unwrap() = json!("11111111111111111111111111111111");
+    assert_eq!(
+        fingerprint,
+        parse_solana_transaction_from_observation(&other_data)
+            .unwrap()
+            .fingerprint
+    );
 }

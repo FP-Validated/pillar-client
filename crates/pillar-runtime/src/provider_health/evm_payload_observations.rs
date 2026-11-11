@@ -249,19 +249,38 @@ where
             None => false,
         };
         let verifiable_result = eth_call(
-            transport,
-            url,
-            headers,
+            transport.clone(),
+            url.clone(),
+            headers.clone(),
             view_contract,
             &verifiable_call_data,
         )
         .await?;
         let verification_state =
             decode_evm_verification_state(receive_version, &verifiable_result)?;
-        Ok::<(bool, u64, EvmVerificationState), AppCoreError>((
+        // A nilified READ packet keeps a non-zero hash at the endpoint, which the library view
+        // reports as verified, yet the commit still needs this DVN's fresh attestation.
+        let nilified = if receive_version == "ReadV1002"
+            && verification_state == EvmVerificationState::Verified
+        {
+            let inbound_call_data = build_evm_inbound_payload_hash_call_data(observation.proof)?;
+            let inbound_hash = eth_call(
+                transport,
+                url,
+                headers,
+                &observation.contracts.endpoint_v2,
+                &inbound_call_data,
+            )
+            .await?;
+            evm_inbound_payload_hash_is_nil(&inbound_hash)?
+        } else {
+            false
+        };
+        Ok::<(bool, u64, EvmVerificationState, bool), AppCoreError>((
             dvn_confirmed,
             inbound_confirmations,
             verification_state,
+            nilified,
         ))
     }
     .await;
@@ -270,8 +289,9 @@ where
         // The library is part of the fingerprint, not just the verdict, so two
         // providers that read different libraries fail the quorum as ambiguous
         // even when their verdicts happen to coincide.
-        Ok((dvn_confirmed, inbound_confirmations, verification_state)) => {
-            let validity = if dvn_confirmed || verification_state == EvmVerificationState::Verified
+        Ok((dvn_confirmed, inbound_confirmations, verification_state, nilified)) => {
+            let validity = if dvn_confirmed
+                || (verification_state == EvmVerificationState::Verified && !nilified)
             {
                 PayloadSignedValidity::Signed
             } else {
@@ -281,7 +301,7 @@ where
             };
             Ok((
                 format!(
-                    "{}:{receive_version}:{dvn_confirmed}:{inbound_confirmations}:{verification_state:?}",
+                    "{}:{receive_version}:{dvn_confirmed}:{inbound_confirmations}:{verification_state:?}:{nilified}",
                     receive_library.to_lowercase()
                 ),
                 validity,
@@ -289,6 +309,20 @@ where
         }
         Err(error) => Err(error.into()),
     }
+}
+
+/// Geth reports a bare `execution reverted`; Besu appends the decoded reason, as `Execution
+/// reverted (reason)`.
+fn is_execution_revert_message(message: &str) -> bool {
+    const PREFIX: &str = "execution reverted";
+    let Some(head) = message.get(..PREFIX.len()) else {
+        return false;
+    };
+    head.eq_ignore_ascii_case(PREFIX)
+        && message[PREFIX.len()..]
+            .chars()
+            .next()
+            .is_none_or(|next| matches!(next, ' ' | ':' | '('))
 }
 
 pub(crate) async fn eth_call<T>(
@@ -348,9 +382,7 @@ where
             .get("message")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        if code == Some(3)
-            || (code == Some(-32000) && message.eq_ignore_ascii_case("execution reverted"))
-        {
+        if code == Some(3) || (code == Some(-32000) && is_execution_revert_message(message)) {
             let data = match error.get("data") {
                 None => "0x".to_string(),
                 Some(value) => {

@@ -197,12 +197,18 @@ where
         let _permit = within_request_deadline(self.call_permits.acquire())
             .await?
             .map_err(closed)?;
+        // Ranked and entity-interleaved like every other quorum read, so redundant URLs of one
+        // slow entity cannot hold the chain's slots ahead of the independent voters.
+        let plan = plan_dispatch(&self.providers.rank_tracker, chain_name, quorum).await?;
         let mut requests = FuturesUnordered::new();
-        for (index, uri) in provider_config.uris.iter().enumerate() {
+        for DispatchEntry { index, uri, delay } in plan {
             let (url, headers) = provider_uri_parts(uri);
             let transport = self.transport.clone();
             let block = block.clone();
             requests.push(async move {
+                if !delay.is_zero() {
+                    tokio::time::sleep(delay).await;
+                }
                 // A call holds its chain and process permits until its quorum resolves,
                 // so a provider that never answers must lose its vote in bounded time.
                 let vote = match tokio::time::timeout(
