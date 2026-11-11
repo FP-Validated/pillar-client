@@ -29,6 +29,7 @@ Findings are those of the `pillar-client-action-required` audit (131 items); its
 - M-136: already fixed in the current parser; no change.
 - L-09, L-69, I-29, L-75, L-82, L-93, L-96, L-106, I-11, I-13, I-14, I-18, I-20, I-24, I-27, I-35: URL and key-id redaction handles IPv6 and short identifiers, indexer credentials stay on their origin, hop-by-hop headers are dropped, `NO_PROXY=*` is honoured, error classes survive, and status codes, content types and query values are handled as the wire carries them.
 - L-52, L-58, L-59, L-65, L-67, L-74, L-86, L-88, L-89, L-99, L-104, I-34, L-107, I-25, I-16: assorted decoding and classification fixes (IOTA event cap, Besu revert text, canonical Starknet felts, static-family chain inference, Aptos trailing-slash probe, Stellar missing receiver, process rank tracker for TON, inactive-wallet scoping, case-insensitive Azure identity, sibling-packet disclosure, integral float spellings, null TON children, `0X` opcodes, bare Aptos hashes).
+- M-111: Move V301 and V302 sends from Aptos and Movement carry `blockHash` and `blockNumber` read through the provider quorum, as ULNv2 does; Initia sends are unchanged (no ledger version to look a block up by).
 - L-55: Canton readiness binds the scanned event to the resolved packet (`PacketSent` name and commitment hash), not the nonce alone.
 - L-60, L-72, L-76: an index-only DVN option entry is skipped; Sui/IOTA duplicate-state validation serves V301 sends; a Starknet `L1_HANDLER` is refused by name in extra-context validation.
 - L-61, L-101 to L-103, L-105, I-05: audit database ALPN, idempotent index DDL, per-transaction timeouts, DSN `connect_timeout`, user fallback and Read Committed isolation.
@@ -52,7 +53,7 @@ Findings are those of the `pillar-client-action-required` audit (131 items); its
 
 ### Not changed, documented in SECURITY.md
 
-M-111, M-121, M-125 (residual), M-134, I-03, I-07, I-08, I-09, I-30, I-31, I-33, I-37, L-05, L-57, L-62, L-98.
+M-121, M-125 (residual), M-134, I-03, I-07, I-08, I-09, I-30, I-31, I-33, I-37, L-05, L-57, L-62, L-98; M-111 for Initia.
 
 ## 2.7.5 - 2026-11-04
 

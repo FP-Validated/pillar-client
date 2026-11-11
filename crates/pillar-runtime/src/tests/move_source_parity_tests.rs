@@ -326,7 +326,11 @@ async fn resolve_archived_v301_send(
         &ProviderSnapshotHandle::from_getter(&getter),
         RecordingTransport {
             calls: calls.clone(),
-            responses: Arc::new(Mutex::new(vec![Ok(transaction.clone()), Ok(transaction)])),
+            responses: Arc::new(Mutex::new(vec![
+                Ok(transaction.clone()),
+                Ok(json!({"block_height": "42", "block_hash": format!("0x{}", "ab".repeat(32))})),
+                Ok(transaction),
+            ])),
         },
         config.packet_sent_resolver_config,
     );
@@ -416,10 +420,20 @@ async fn archived_aptos_v301_send_resolves_to_upstreams_event() {
         event.extra["options"],
         json!({"lzReceive": {"gas": "150000", "value": "0"}})
     );
-    assert_eq!(urls.len(), 2, "the transaction, then its executor events");
+    assert_eq!(
+        urls.len(),
+        3,
+        "the transaction, its block, then its executor events"
+    );
     assert!(
-        urls[1].ends_with("/transactions/by_version/7469155248"),
+        urls[1].contains("/blocks/by_version/7469155248"),
         "{}",
         urls[1]
     );
+    assert!(
+        urls[2].ends_with("/transactions/by_version/7469155248"),
+        "{}",
+        urls[2]
+    );
+    assert_eq!(event.extra["blockNumber"], 42);
 }

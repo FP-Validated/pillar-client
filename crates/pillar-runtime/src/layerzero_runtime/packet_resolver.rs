@@ -1242,11 +1242,36 @@ where
                     )))),
                 };
                 let identity_field = if src_chain_name == "initia" { "txhash" } else { "version" };
-                if let Some(identity) = transaction.get(identity_field).and_then(|value| {
+                let identity = transaction.get(identity_field).and_then(|value| {
                     value.as_str().map(str::to_owned)
                         .or_else(|| value.as_u64().map(|number| number.to_string()))
-                }) {
-                    sent_event.extra.insert("onChainTxHash".to_string(), Value::from(identity));
+                });
+                if let Some(identity) = identity {
+                    sent_event.extra.insert("onChainTxHash".to_string(), Value::from(identity.clone()));
+                    // The block identity ULNv2 attaches, read the same way, so a configured
+                    // policy is satisfied by agreed data. Initia names transactions by hash and
+                    // has no ledger version to look a block up by.
+                    if src_chain_name != "initia" {
+                        let fetched = self
+                            .get_aptos_json(
+                                src_chain_name,
+                                |base| move_block_by_version_url(base, &identity),
+                                move_block_projection,
+                                &format!("{src_chain_name} block at version {identity}"),
+                            )
+                            .await?;
+                        let height = fetched
+                            .get("block_height")
+                            .and_then(Value::as_str)
+                            .map(pillar_core::js_parse_int)
+                            .filter(|height| height.is_finite() && height.fract() == 0.0)
+                            .map_or(Value::Null, |height| Value::from(height as i64));
+                        sent_event.extra.insert(
+                            "blockHash".to_string(),
+                            fetched.get("block_hash").cloned().unwrap_or(Value::Null),
+                        );
+                        sent_event.extra.insert("blockNumber".to_string(), height);
+                    }
                 }
                 if sent_event.lz_message_id.uln_send_version == ULN_VERSION_V301 {
                     // `onChainEvent.txHash`: the ledger version on Aptos, the hash on Initia.

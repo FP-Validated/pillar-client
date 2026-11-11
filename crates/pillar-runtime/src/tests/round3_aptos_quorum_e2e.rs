@@ -166,8 +166,8 @@ async fn round3_m12_aptos_node_release_and_indexer_differences_still_reach_quoru
         assert_archived_send(&event);
         assert_eq!(
             urls.len(),
-            4,
-            "{case}: two by_hash and two by_version reads"
+            6,
+            "{case}: two by_hash, two block and two by_version reads"
         );
         assert_eq!(
             urls.iter()

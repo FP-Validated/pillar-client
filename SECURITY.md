@@ -764,10 +764,11 @@ control is named where one exists.
   makes the publication atomic: publish the pair so each object is complete before the
   other changes, and set `_providersSha256`. Publishing both as one object needs a
   manifest change (M-105).
-- Move V301 and V302 sends carry `onChainTxHash` but not the source block identity that
-  ULNv2 attaches, so a configured extra-context policy refuses them. Attaching it needs an
-  extra agreed block read on Aptos and Movement and a block lookup on Initia, which has no
-  ledger version; it is not done (M-111).
+- Move V301 and V302 sends from Aptos and Movement now carry the source block identity
+  (`blockHash`, `blockNumber`) beside `onChainTxHash`, read through the same provider
+  quorum as ULNv2. Initia names transactions by hash and has no ledger version to look a
+  block up by, so its sends still carry only `onChainTxHash` and a configured extra-context
+  policy that requires the identity refuses them (M-111).
 - The upload and decompression budgets are process-wide. Rate-limit at the ingress, per
   client address, before the service: nothing inside it can tell callers apart (M-121).
   Decompression slots queue for up to two seconds instead of failing at once, but the work
