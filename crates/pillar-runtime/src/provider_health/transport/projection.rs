@@ -118,6 +118,7 @@ const INITIA_TRANSACTION: Node = Node::Object(&[
 ]);
 const INITIA_HEADER: Node = Node::Object(&[("height", Node::All), ("time", Node::All)]);
 const INITIA_BLOCK: Node = Node::Object(&[
+    ("block_id", Node::Object(&[("hash", Node::All)])),
     ("block", Node::Object(&[("header", INITIA_HEADER)])),
     ("sdk_block", Node::Object(&[("header", INITIA_HEADER)])),
     ("code", Node::All),
@@ -143,7 +144,13 @@ pub(super) fn for_get(url: &str) -> Option<Node> {
         Some(MOVE_TRANSACTION)
     } else if path.contains("/cosmos/tx/v1beta1/txs/") {
         Some(INITIA_TRANSACTION)
-    } else if path.ends_with("/cosmos/base/tendermint/v1beta1/blocks/latest") {
+    } else if path.ends_with("/cosmos/base/tendermint/v1beta1/blocks/latest")
+        || path
+            .rsplit_once("/cosmos/base/tendermint/v1beta1/blocks/")
+            .is_some_and(|(_, height)| {
+                !height.is_empty() && height.bytes().all(|byte| byte.is_ascii_digit())
+            })
+    {
         Some(INITIA_BLOCK)
     } else {
         None

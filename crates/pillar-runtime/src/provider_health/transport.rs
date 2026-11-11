@@ -141,7 +141,12 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         body: String,
     ) -> Result<(u16, String), RpcError> {
         let target = rpc_target_for_call()?;
-        limited_rpc(&target, self.post_form(url, headers, body)).await
+        limited_rpc(
+            &target,
+            endpoint_resource(&target, &url),
+            self.post_form(url, headers, body),
+        )
+        .await
     }
 
     async fn post_json_on(
@@ -151,7 +156,12 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         headers: HashMap<String, String>,
         body: Value,
     ) -> Result<Value, RpcError> {
-        limited_rpc(chain, self.post_json(url, headers, body)).await
+        limited_rpc(
+            chain,
+            endpoint_resource(chain, &url),
+            self.post_json(url, headers, body),
+        )
+        .await
     }
     async fn get_json_on(
         &self,
@@ -159,7 +169,12 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         url: String,
         headers: HashMap<String, String>,
     ) -> Result<Value, RpcError> {
-        limited_rpc(chain, self.get_json(url, headers)).await
+        limited_rpc(
+            chain,
+            endpoint_resource(chain, &url),
+            self.get_json(url, headers),
+        )
+        .await
     }
     async fn get_ton_json_scoped(
         &self,
@@ -167,7 +182,12 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         headers: HashMap<String, String>,
     ) -> Result<Value, RpcError> {
         let target = rpc_target_for_call()?;
-        limited_rpc(&target, self.get_ton_json(url, headers)).await
+        limited_rpc(
+            &target,
+            endpoint_resource(&target, &url),
+            self.get_ton_json(url, headers),
+        )
+        .await
     }
     async fn post_json_scoped(
         &self,
@@ -202,6 +222,7 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
                 page_body["params"][3] = Value::Bool(false);
                 let mut response = match limited_rpc(
                     &target,
+                    endpoint_resource(&target, &url),
                     self.post_json(url.clone(), headers.clone(), page_body.clone()),
                 )
                 .await
@@ -280,7 +301,12 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
             if body.get("query").and_then(Value::as_str).is_some()
                 && body.get("variables").is_some_and(Value::is_object)
             {
-                return limited_rpc(&target, self.post_json(url, headers, body)).await;
+                return limited_rpc(
+                    &target,
+                    endpoint_resource(&target, &url),
+                    self.post_json(url, headers, body),
+                )
+                .await;
             }
             let (method, mut query) =
                 super::sui_graphql::request(&body, None).ok_or(RpcError::Unavailable)?;
@@ -305,6 +331,7 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
                     query = page_query;
                     let mut response = limited_rpc(
                         &target,
+                        endpoint_resource(&target, &url),
                         self.post_json(url.clone(), headers.clone(), query.clone()),
                     )
                     .await?;
@@ -383,7 +410,12 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
                 }
                 unreachable!();
             }
-            let response = limited_rpc(&target, self.post_json(url, headers, query)).await?;
+            let response = limited_rpc(
+                &target,
+                endpoint_resource(&target, &url),
+                self.post_json(url, headers, query),
+            )
+            .await?;
             if let Some(expected) = expected_digest {
                 if response
                     .pointer("/data/transaction/digest")
@@ -401,14 +433,24 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         if target.as_ref() == "iotal1"
             && body.get("method").and_then(Value::as_str) == Some("iota_getTransactionBlock")
         {
-            let response = limited_rpc(&target, self.post_json(url, headers, body.clone())).await?;
+            let response = limited_rpc(
+                &target,
+                endpoint_resource(&target, &url),
+                self.post_json(url, headers, body.clone()),
+            )
+            .await?;
             let expected = body.pointer("/params/0").and_then(Value::as_str);
             if response.pointer("/result/digest").and_then(Value::as_str) != expected {
                 return Err(RpcError::Remote("IOTA transaction digest mismatch".into()));
             }
             return Ok(response);
         }
-        limited_rpc(&target, self.post_json(url, headers, body)).await
+        limited_rpc(
+            &target,
+            endpoint_resource(&target, &url),
+            self.post_json(url, headers, body),
+        )
+        .await
     }
     async fn get_json_scoped(
         &self,
@@ -416,7 +458,12 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         headers: HashMap<String, String>,
     ) -> Result<Value, RpcError> {
         let target = rpc_target_for_call()?;
-        limited_rpc(&target, self.get_json(url, headers)).await
+        limited_rpc(
+            &target,
+            endpoint_resource(&target, &url),
+            self.get_json(url, headers),
+        )
+        .await
     }
     async fn post_text_scoped(
         &self,
@@ -425,7 +472,12 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         body: Value,
     ) -> Result<(u16, String), RpcError> {
         let target = rpc_target_for_call()?;
-        limited_rpc(&target, self.post_text(url, headers, body)).await
+        limited_rpc(
+            &target,
+            endpoint_resource(&target, &url),
+            self.post_text(url, headers, body),
+        )
+        .await
     }
     async fn get_text_scoped(
         &self,
@@ -433,7 +485,12 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         headers: HashMap<String, String>,
     ) -> Result<(u16, String), RpcError> {
         let target = rpc_target_for_call()?;
-        limited_rpc(&target, self.get_text(url, headers)).await
+        limited_rpc(
+            &target,
+            endpoint_resource(&target, &url),
+            self.get_text(url, headers),
+        )
+        .await
     }
 }
 
@@ -488,8 +545,16 @@ fn apply_headers(
     Ok(request.headers(map))
 }
 
+/// The admission resource of a call: the provider entity the endpoint belongs to when the
+/// request has planned its dispatch, else the chain alone.
+fn endpoint_resource(chain: &str, url: &str) -> Option<String> {
+    let entity = pillar_core::execution::current()?.entity_of(chain, url)?;
+    Some(format!("{chain}/{entity}"))
+}
+
 async fn limited_rpc<T, F: Future<Output = Result<T, String>>>(
     chain: &str,
+    resource: Option<String>,
     future: F,
 ) -> Result<T, RpcError> {
     use pillar_core::execution::{current, within_deadline, Outcome};
@@ -508,7 +573,7 @@ async fn limited_rpc<T, F: Future<Output = Result<T, String>>>(
             Some(
                 resources
                     .rpc
-                    .acquire_for(lane, Some(chain))
+                    .acquire_for(lane, Some(resource.as_deref().unwrap_or(chain)))
                     .await
                     .map_err(RpcError::Admission)?,
             )
@@ -561,7 +626,12 @@ pub trait AwsLambdaInvokeClient: Send + Sync + 'static {
         function_name: &str,
         payload: Value,
     ) -> Result<Value, RpcError> {
-        limited_rpc("extra_context", self.invoke_json(function_name, payload)).await
+        limited_rpc(
+            "extra_context",
+            None,
+            self.invoke_json(function_name, payload),
+        )
+        .await
     }
 }
 

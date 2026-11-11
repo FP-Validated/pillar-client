@@ -26,6 +26,30 @@ fn move_block_projection(value: Value) -> Value {
     project_fields(value, &["block_height", "block_hash"])
 }
 
+/// The agreed part of a Cosmos block read: its hash as the `0x` hex a policy checks, and its
+/// height. A hash that is not 32 bytes of base64 is left null, which the identity check refuses.
+fn initia_block_projection(value: Value) -> Value {
+    use base64::Engine;
+    let hash = value
+        .pointer("/block_id/hash")
+        .and_then(Value::as_str)
+        .and_then(|encoded| {
+            base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .ok()
+        })
+        .filter(|bytes| bytes.len() == 32)
+        .map_or(Value::Null, |bytes| {
+            Value::from(format!("0x{}", hex::encode(bytes)))
+        });
+    let height = value
+        .pointer("/block/header/height")
+        .or_else(|| value.pointer("/sdk_block/header/height"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    json!({ "block_hash": hash, "block_height": height })
+}
+
 /// `executor_v1::AdapterParamsConfig` is read only for its table handle, so the quorum
 /// agrees on that and not on fields a node may add or order differently.
 fn aptos_adapter_params_handle_projection(value: Value) -> Value {
@@ -1249,17 +1273,46 @@ where
                 if let Some(identity) = identity {
                     sent_event.extra.insert("onChainTxHash".to_string(), Value::from(identity.clone()));
                     // The block identity ULNv2 attaches, read the same way, so a configured
-                    // policy is satisfied by agreed data. Initia names transactions by hash and
-                    // has no ledger version to look a block up by.
-                    if src_chain_name != "initia" {
-                        let fetched = self
-                            .get_aptos_json(
+                    // policy is satisfied by agreed data. Aptos and Movement look the block up by
+                    // ledger version; Initia names a transaction by hash and by block height.
+                    let fetched = if src_chain_name == "initia" {
+                        let height = transaction
+                            .get("height")
+                            .and_then(|height| {
+                                height
+                                    .as_str()
+                                    .map(str::to_owned)
+                                    .or_else(|| height.as_u64().map(|height| height.to_string()))
+                            })
+                            .filter(|height| {
+                                !height.is_empty() && height.bytes().all(|byte| byte.is_ascii_digit())
+                            });
+                        // Without a height there is no block to name, and a policy that needs
+                        // one refuses the event for the missing identity.
+                        match height {
+                            Some(height) => Some(
+                                self.get_aptos_json(
+                                    "initia",
+                                    |base| initia_block_by_height_url(base, &height),
+                                    initia_block_projection,
+                                    &format!("Initia block at height {height}"),
+                                )
+                                .await?,
+                            ),
+                            None => None,
+                        }
+                    } else {
+                        Some(
+                            self.get_aptos_json(
                                 src_chain_name,
                                 |base| move_block_by_version_url(base, &identity),
                                 move_block_projection,
                                 &format!("{src_chain_name} block at version {identity}"),
                             )
-                            .await?;
+                            .await?,
+                        )
+                    };
+                    if let Some(fetched) = fetched {
                         let height = fetched
                             .get("block_height")
                             .and_then(Value::as_str)

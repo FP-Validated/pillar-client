@@ -553,12 +553,20 @@ pub struct ExecutionResources {
     pub kms: FairBudget,
     pub parser: FairBudget,
 }
+/// Which provider entity each dialled endpoint belongs to, filled in as a request plans its
+/// dispatch. Admission keys on it so one entity cannot hold a whole chain lane.
+type KnownEndpoints = Vec<(Arc<str>, String, Arc<str>)>;
+
+#[derive(Clone, Default)]
+struct EndpointEntities(Arc<parking_lot::Mutex<KnownEndpoints>>);
+
 #[derive(Clone)]
 pub struct RequestContext {
     pub deadline: Option<Instant>,
     pub resources: Option<Arc<ExecutionResources>>,
     pub source_chain: Option<Arc<str>>,
     cause: Arc<AtomicU8>,
+    endpoints: EndpointEntities,
 }
 tokio::task_local! { static REQUEST: RequestContext; }
 impl RequestContext {
@@ -568,6 +576,7 @@ impl RequestContext {
             resources: None,
             source_chain: None,
             cause: Arc::new(AtomicU8::new(0)),
+            endpoints: EndpointEntities::default(),
         }
     }
     pub fn background() -> Self {
@@ -576,7 +585,34 @@ impl RequestContext {
             resources: None,
             source_chain: Some(Arc::from("background")),
             cause: Arc::new(AtomicU8::new(0)),
+            endpoints: EndpointEntities::default(),
         }
+    }
+    /// Records that calls to `endpoint` (a URL prefix) on `chain` go to `entity`.
+    pub fn register_endpoint(&self, chain: &str, endpoint: &str, entity: &str) {
+        let endpoint = endpoint
+            .split('?')
+            .next()
+            .unwrap_or_default()
+            .trim_end_matches('/');
+        let mut known = self.endpoints.0.lock();
+        if !known.iter().any(|(known_chain, known_endpoint, _)| {
+            &**known_chain == chain && known_endpoint == endpoint
+        }) {
+            known.push((Arc::from(chain), endpoint.to_string(), Arc::from(entity)));
+        }
+    }
+    /// The entity a call to `url` on `chain` goes to, by the longest endpoint that prefixes it.
+    pub fn entity_of(&self, chain: &str, url: &str) -> Option<Arc<str>> {
+        self.endpoints
+            .0
+            .lock()
+            .iter()
+            .filter(|(known_chain, endpoint, _)| {
+                &**known_chain == chain && url.starts_with(endpoint.as_str())
+            })
+            .max_by_key(|(_, endpoint, _)| endpoint.len())
+            .map(|(_, _, entity)| entity.clone())
     }
     pub fn timeout(&self) {
         self.cause.store(1, Ordering::Release);

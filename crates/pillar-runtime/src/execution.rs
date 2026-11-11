@@ -37,9 +37,22 @@ impl RuntimeControls {
             3,
         )?;
         parser.cap_lane("background", 1)?;
+        // One entity's endpoints share a resource key, so a slow entity can hold all but a
+        // quarter of a chain's lane and independent voters keep slots to be admitted in.
+        let rpc_per_lane = limits.rpc.per_lane;
+        let rpc_entity_limit = if rpc_per_lane <= 1 {
+            1
+        } else {
+            rpc_per_lane - (rpc_per_lane / 4).max(1)
+        };
         let resources = Arc::new(ExecutionResources {
             signing: FairBudget::new(chains.to_vec(), limits.signing)?,
-            rpc: FairBudget::new(rpc_lanes, limits.rpc)?,
+            rpc: FairBudget::with_lane_resource_limit(
+                rpc_lanes,
+                limits.rpc,
+                rpc_per_lane,
+                rpc_entity_limit,
+            )?,
             kms: FairBudget::with_lane_resource_limit(
                 external_lanes,
                 limits.kms,

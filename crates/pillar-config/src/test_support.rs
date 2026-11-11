@@ -42,12 +42,21 @@ pub fn providers_v2_from_uris_json(fixture: &str) -> (String, String) {
     }
     #[derive(serde::Serialize)]
     struct StrategyFile {
+        #[serde(rename = "_providersSha256")]
+        providers_sha256: String,
         default: Value,
         chains: IndexMap<String, Value>,
     }
+    let providers =
+        serde_json::to_string(&ProvidersFile { entities, chains }).expect("fixture serializes");
+    let providers_sha256 = {
+        use sha2::Digest;
+        hex::encode(sha2::Sha256::digest(providers.as_bytes()))
+    };
     (
-        serde_json::to_string(&ProvidersFile { entities, chains }).expect("fixture serializes"),
+        providers,
         serde_json::to_string(&StrategyFile {
+            providers_sha256,
             default: json!({ "allOf": [{ "any": 1 }] }),
             chains: strategies,
         })
@@ -70,4 +79,15 @@ pub fn providers_json(fixture: impl AsRef<str>) -> String {
 /// The quorum-strategy.json half of [`providers_v2_from_uris_json`].
 pub fn strategy_json(fixture: impl AsRef<str>) -> String {
     providers_v2_from_uris_json(fixture.as_ref()).1
+}
+
+/// `strategy` bound to the exact `providers` text it will be loaded with, for a test that edits
+/// the providers file after building the pair.
+pub fn bind_strategy(strategy: &str, providers: &str) -> String {
+    use sha2::Digest;
+    let mut strategy: Value =
+        pillar_core::json::from_str(strategy).expect("fixture strategy is JSON");
+    strategy["_providersSha256"] =
+        Value::from(hex::encode(sha2::Sha256::digest(providers.as_bytes())));
+    strategy.to_string()
 }

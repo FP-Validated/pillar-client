@@ -111,9 +111,7 @@ fn webpki_roots() -> Arc<rustls::RootCertStore> {
 }
 /// An explicit provider, because the release graph enables both `ring` and `aws-lc-rs`
 /// and rustls then refuses to choose a process default.
-fn tls_connector(
-    roots: Arc<rustls::RootCertStore>,
-) -> Result<tokio_postgres_rustls::MakeRustlsConnect, Failure> {
+fn tls_connector(roots: Arc<rustls::RootCertStore>) -> Result<crate::audit_tls::AuditTls, Failure> {
     let mut tls = rustls::ClientConfig::builder_with_provider(Arc::new(
         rustls::crypto::ring::default_provider(),
     ))
@@ -123,8 +121,14 @@ fn tls_connector(
     .with_no_client_auth();
     // PostgreSQL 17 requires this ALPN protocol for a direct-TLS (`sslnegotiation=direct`) start.
     tls.alpn_protocols = vec![b"postgresql".to_vec()];
-    Ok(tokio_postgres_rustls::MakeRustlsConnect::new(tls))
+    Ok(crate::audit_tls::AuditTls::new(tls))
 }
+/// What the intent's `wallet_hash` column holds. A request's input binding is per effective key
+/// (backend, reference and version), not per wallet name: KMS wallets are named by list
+/// position, so a name is not stable when an earlier key is added or removed. The attempt rows
+/// keep the wallet's own hash as attribution.
+const INTENT_WALLET_DOMAIN: &str = "";
+
 pub(crate) struct PostgresAuditStore {
     config: AuditConfig,
     session: Mutex<Option<Session>>,
@@ -345,12 +349,12 @@ impl PostgresAuditStore {
         let identity: &[&(dyn tokio_postgres::types::ToSql + Sync)] = &[
             namespace,
             &intent.validated.request_hash,
-            &intent.wallet_hash,
+            &INTENT_WALLET_DOMAIN,
             &intent.key.backend,
             &reference,
             &version,
         ];
-        tx.execute("INSERT INTO pillar_audit_intent(namespace,request_hash,wallet_hash,backend,key_reference_hash,key_version_hash,public_key_hash,signed_digest,algorithm,key_reference,key_version) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING", &[namespace,&intent.validated.request_hash,&intent.wallet_hash,&intent.key.backend,&reference,&version,&intent.key.public_key_hash,&intent.signed_digest,&intent.algorithm,&intent.key.reference,&intent.key.version]).await.map_err(unavailable)?;
+        tx.execute("INSERT INTO pillar_audit_intent(namespace,request_hash,wallet_hash,backend,key_reference_hash,key_version_hash,public_key_hash,signed_digest,algorithm,key_reference,key_version) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING", &[namespace,&intent.validated.request_hash,&INTENT_WALLET_DOMAIN,&intent.key.backend,&reference,&version,&intent.key.public_key_hash,&intent.signed_digest,&intent.algorithm,&intent.key.reference,&intent.key.version]).await.map_err(unavailable)?;
         let row = tx.query_one("SELECT public_key_hash,signed_digest,algorithm,key_reference,key_version FROM pillar_audit_intent WHERE namespace=$1 AND request_hash=$2 AND wallet_hash=$3 AND backend=$4 AND key_reference_hash=$5 AND key_version_hash=$6", identity).await.map_err(unavailable)?;
         if row.get::<_, String>(0) != intent.key.public_key_hash
             || row.get::<_, String>(1) != intent.signed_digest

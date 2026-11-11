@@ -1682,7 +1682,11 @@ impl RemoteProviderSource {
                 loader.load_provider_config(self.strategy.clone()),
             );
             if providers == confirm_providers? && strategy == confirm_strategy? {
-                return StaticProviderConfig::from_v2(&providers, &strategy, required_chain_names);
+                return StaticProviderConfig::from_v2_bound(
+                    &providers,
+                    &strategy,
+                    required_chain_names,
+                );
             }
         }
         Err(ConfigError::RemoteProviderConfig(
@@ -1772,6 +1776,23 @@ impl StaticProviderConfig {
     ) -> Result<Self, ConfigError> {
         Self::new(
             provider_validation::provider_configs_from_v2(providers_raw, strategy_raw)?,
+            required_chain_names,
+        )
+    }
+
+    /// [`Self::from_v2`] for a pair fetched from a bucket, whose strategy must carry the
+    /// `_providersSha256` of its providers file.
+    pub fn from_v2_bound(
+        providers_raw: &str,
+        strategy_raw: &str,
+        required_chain_names: Option<&[String]>,
+    ) -> Result<Self, ConfigError> {
+        Self::new(
+            provider_validation::provider_configs_from_v2_with(
+                providers_raw,
+                strategy_raw,
+                provider_validation::BindingPolicy::Required,
+            )?,
             required_chain_names,
         )
     }

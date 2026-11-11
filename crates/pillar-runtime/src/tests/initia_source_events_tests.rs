@@ -36,6 +36,11 @@ impl JsonRpcTransport for ScriptedInitia {
     async fn get_json(&self, url: String, _: HashMap<String, String>) -> Result<Value, String> {
         if url.contains("/cosmos/tx/v1beta1/txs/") {
             Ok(json!({"tx_response": self.transaction}))
+        } else if url.contains("/cosmos/base/tendermint/v1beta1/blocks/777") {
+            Ok(json!({
+                "block_id": {"hash": "ERERERERERERERERERERERERERERERERERERERERERE="},
+                "block": {"header": {"height": "777", "time": "2026-01-01T00:00:00Z"}}
+            }))
         } else {
             Err(format!("unexpected GET {url}"))
         }

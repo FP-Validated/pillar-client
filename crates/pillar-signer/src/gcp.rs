@@ -103,6 +103,7 @@ pub struct GoogleCloudKmsClient {
     credentials: Arc<tokio::sync::Mutex<Credentials>>,
     rebuild: CredentialSource,
     endpoint: reqwest::Url,
+    recent_headers: Arc<tokio::sync::Mutex<Option<(std::time::Instant, http::HeaderMap)>>>,
 }
 
 impl GoogleCloudKmsClient {
@@ -163,6 +164,7 @@ impl GoogleCloudKmsClient {
             credentials: Arc::new(tokio::sync::Mutex::new(credentials)),
             rebuild,
             endpoint,
+            recent_headers: Arc::default(),
         }
     }
 
@@ -239,9 +241,25 @@ impl GoogleCloudKmsClient {
         Ok(url)
     }
 
+    /// Headers are fetched at most once a second. The credential cache does not pace refreshes
+    /// after a token that is short-lived or already expired, so each request would otherwise
+    /// start another token exchange.
+    async fn credential_headers(&self) -> Result<http::HeaderMap, SignerError> {
+        const MIN_FETCH_INTERVAL: Duration = Duration::from_secs(1);
+        let mut recent = self.recent_headers.lock().await;
+        if let Some((fetched, headers)) = recent.as_ref() {
+            if fetched.elapsed() < MIN_FETCH_INTERVAL {
+                return Ok(headers.clone());
+            }
+        }
+        let headers = self.fetch_credential_headers().await?;
+        *recent = Some((std::time::Instant::now(), headers.clone()));
+        Ok(headers)
+    }
+
     /// A credential worker that hit a permanent error (a token file read that failed once) caches
     /// it for good, so a failing one is replaced by a freshly built one.
-    async fn credential_headers(&self) -> Result<http::HeaderMap, SignerError> {
+    async fn fetch_credential_headers(&self) -> Result<http::HeaderMap, SignerError> {
         let current = self.credentials.lock().await.clone();
         let first = match current.headers(http::Extensions::new()).await {
             Ok(CacheableResource::New { data, .. }) => return Ok(data),

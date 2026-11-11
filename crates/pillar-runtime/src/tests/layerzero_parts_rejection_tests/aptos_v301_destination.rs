@@ -1269,7 +1269,7 @@ async fn v301_to_aptos_refuses_before_signing_when_a_gate_fails() {
                 );
                 assert_eq!(
                     outcome.body["body"],
-                    "block confirmations not met, current block confirmation: 3"
+                    "block confirmations not met, required block confirmation: 15"
                 );
             } else if name == "expired" {
                 assert_eq!(
@@ -1629,7 +1629,7 @@ async fn v301_aptos_source_readiness_accepts_exact_confirmation_threshold() {
     assert_eq!(below.status, StatusCode::BAD_REQUEST, "{}", below.body);
     assert_eq!(
         below.body["body"],
-        "block confirmations not met, current block confirmation: 14"
+        "block confirmations not met, required block confirmation: 15"
     );
     assert_eq!(below.signatures, 0);
     let outcome = sign_v301_to_aptos(

@@ -23,13 +23,13 @@ Findings are those of the `pillar-client-action-required` audit (131 items); its
 - M-123: projected JSON subtrees that are dropped are charged against their own 16 MiB / 4 M-node budget.
 - M-127: a Canton response with fewer signatures than the committee quorum is refused before it is hashed.
 - M-129: READ JSON parse admission is capped per target (3 of 4 slots) and waits at most 2 s, a local admission outcome rather than a lost vote.
-- M-105: provider configuration objects are read twice and used only when both reads agree (3 attempts).
+- M-105: S3 and GCS configuration objects are read twice and used only when both reads agree (3 attempts), and a bucket pair whose strategy has no `_providersSha256` of its providers file is refused. Add the key before upgrading; earlier releases ignore it. `provider_config convert` writes it and `validate` reports its absence.
 - M-107, L-80, I-21, I-36: a provider's TON storage BOC is parsed once and voted by its root hash; BOCs with the `0x68ff65f3` and `0xacc3a728` magics and URL-safe or unpadded base64 are accepted.
 - M-126: `localhost` bypasses the proxy like literal loopback addresses.
 - M-136: already fixed in the current parser; no change.
 - L-09, L-69, I-29, L-75, L-82, L-93, L-96, L-106, I-11, I-13, I-14, I-18, I-20, I-24, I-27, I-35: URL and key-id redaction handles IPv6 and short identifiers, indexer credentials stay on their origin, hop-by-hop headers are dropped, `NO_PROXY=*` is honoured, error classes survive, and status codes, content types and query values are handled as the wire carries them.
 - L-52, L-58, L-59, L-65, L-67, L-74, L-86, L-88, L-89, L-99, L-104, I-34, L-107, I-25, I-16: assorted decoding and classification fixes (IOTA event cap, Besu revert text, canonical Starknet felts, static-family chain inference, Aptos trailing-slash probe, Stellar missing receiver, process rank tracker for TON, inactive-wallet scoping, case-insensitive Azure identity, sibling-packet disclosure, integral float spellings, null TON children, `0X` opcodes, bare Aptos hashes).
-- M-111: Move V301 and V302 sends from Aptos and Movement carry `blockHash` and `blockNumber` read through the provider quorum, as ULNv2 does; Initia sends are unchanged (no ledger version to look a block up by).
+- M-111: Move V301 and V302 sends carry `blockHash` and `blockNumber` read through the provider quorum, as ULNv2 does: by ledger version on Aptos and Movement, by transaction height on Initia.
 - L-55: Canton readiness binds the scanned event to the resolved packet (`PacketSent` name and commitment hash), not the nonce alone.
 - L-60, L-72, L-76: an index-only DVN option entry is skipped; Sui/IOTA duplicate-state validation serves V301 sends; a Starknet `L1_HANDLER` is refused by name in extra-context validation.
 - L-61, L-101 to L-103, L-105, I-05: audit database ALPN, idempotent index DDL, per-transaction timeouts, DSN `connect_timeout`, user fallback and Read Committed isolation.
@@ -41,9 +41,17 @@ Findings are those of the `pillar-client-action-required` audit (131 items); its
 - L-53, L-92, I-15, I-28: S3 configuration loads are serialized and request no response checksum (the SDK's body wrapper panics on trailer frames), the GCS client is shared, and `startup_report_from_env_map_async` reports S3 and GCS configurations.
 - L-54, L-78, L-85, I-10, I-17, I-26: the rank loop shares the cache's probe round, partial rounds persist observed failures, rank reports commit and dispatch plans read ranks under one lock, a past deadline is an admission refusal, reused health keeps its original observation time, and entry-time expiry is classified by the request deadline.
 - L-66, L-68, L-56, M-133: READ calls use ranked, entity-interleaved dispatch; bounded READ command concurrency, digest fingerprints and `plan_dispatch` for Move reads were already in place.
-- L-81, L-90, I-32: startup computes the single-entity metric under the metrics lock, the inferred constructor shares the handle's rank tracker and forwards authentication settings.
+- L-81, I-32: startup computes the single-entity metric under the metrics lock, and the inferred constructor forwards authentication settings and shares the handle's rank tracker.
 - L-95, I-04, I-12: an over-limit Lambda policy body is refused with a clear error, the absolute shutdown deadline is checked before a response is released, and executable-sourced GCP credentials are refused at start.
-- M-125: decompression slots queue for up to 2 s before a 503. This is a mitigation; DEFLATE block work is not bounded (see SECURITY.md).
+- M-125: compressed request bodies are decoded in 1 KiB steps and refused once a stream has consumed input well beyond its output, which bounds the work empty DEFLATE blocks can cost; decompression slots also queue for up to 2 s before a 503.
+- M-121: upload bodies queue for a permit in arrival order and a stalled upload gives its permit back after three seconds, instead of being refused at once.
+- M-133, M-134: RPC admission keys on the provider entity of the dialled endpoint, and one entity holds at most three quarters of a chain's lane.
+- I-03: the 400 "block confirmations not met" body names the caller's `blockConfirmation` (`required block confirmation: N`); the observed depth is logged at debug level. This replaces upstream's `current block confirmation: N`.
+- I-09: the audit intent's conflict domain is the effective key, not the wallet name.
+- L-62: the audit database connection computes its own RFC 5929 channel binding, so SCRAM-SHA-256-PLUS is offered where the certificate's signature algorithm has a hash.
+- I-37: GCP credential headers are fetched at most once a second.
+- L-90: the constructor that takes dependencies built outside the provider handle is test-only.
+- Dependencies: `azure_security_keyvault_keys` 1.0.1 (RUSTSEC-2026-0439), `hyper` 1.12.0, `h2` 0.4.20.
 
 ### Changed
 
@@ -53,7 +61,7 @@ Findings are those of the `pillar-client-action-required` audit (131 items); its
 
 ### Not changed, documented in SECURITY.md
 
-M-121, M-125 (residual), M-134, I-03, I-07, I-08, I-09, I-30, I-31, I-33, I-37, L-05, L-57, L-62, L-98; M-111 for Initia.
+I-07, I-08 (loads are serialized), I-30, I-31, I-33, L-05, L-57, and the parts of L-55 (the committee's preimage) and L-98 (the HTTP/1 decoder's unbounded chunk-size line; a provider may legitimately hold a body open until the request deadline) that sit in a protocol or a dependency.
 
 ## 2.7.5 - 2026-11-04
 

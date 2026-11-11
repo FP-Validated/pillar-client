@@ -231,8 +231,10 @@ where
     }
 
     /// `dependencies` was built before the provider handle exists, so its resolver and validator
-    /// keep their own handle and rank state; production composition goes through `from_env_map_with_runtime_core`.
-    pub async fn from_env_map_with_core_dependencies_inferred_chain_types(
+    /// keep their own handle and rank state; only tests compose that way, and production goes
+    /// through `from_env_map_with_runtime_core`.
+    #[cfg(test)]
+    pub(crate) async fn from_env_map_with_core_dependencies_inferred_chain_types(
         vars: HashMap<String, String>,
         transport: T,
         now_unix_ms: impl Fn() -> u64 + Send + Sync + 'static,

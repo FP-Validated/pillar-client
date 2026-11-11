@@ -31,437 +31,503 @@ where
         sent_event: &LzSentEvent,
         block_confirmation: i64,
     ) -> Result<(), AppCoreError> {
-        crate::provider_health::rpc_scope(&sent_event.lz_message_id.pathway_id.src_chain_name, async { let src_chain_name = &sent_event.lz_message_id.pathway_id.src_chain_name;
-    let snapshot = self.providers.load();
-    let provider_config = snapshot.provider_config(src_chain_name)?;
-    if provider_config.uris.is_empty() {
-        return Err(AppCoreError::Internal(format!(
-            "No provider URI for chain {src_chain_name}"
-        )));
-    }
-    if src_chain_name == "solana" {
-        let Some(pillar_core::SourceEvidence::Solana(evidence)) = sent_event.source_evidence.as_ref()
-        else {
-            return Err(AppCoreError::Internal(
-                "Missing Solana source evidence for readiness".to_string(),
-            ));
-        };
-        return self
-            .validate_solana_readiness_with_quorum(
-                src_chain_name,
-                &sent_event.tx_hash,
-                evidence.slot,
-                block_confirmation,
-                provider_config,
-            )
-            .await;
-    }
-    if src_chain_name == "ton" {
-        let agreed_seqno = sent_event
-            .extra
-            .get("blockNumber")
-            .and_then(|value| value.as_i64().or_else(|| value.as_str()?.parse().ok()))
-            .ok_or_else(|| {
-                AppCoreError::Internal(format!(
-                    "Transaction trace or masterchain info not found for {}",
-                    sent_event.tx_hash
-                ))
-            })?;
-        let quorum = required_provider_quorum(provider_config, src_chain_name)?;
-        let plan = crate::provider_health::plan_ton_v3_dispatch(&self.rank_tracker, quorum).await?;
-        let indices = plan.iter().map(|entry| entry.index).collect::<Vec<_>>();
-        let requests = FuturesUnordered::new();
-        for crate::provider_health::TonV3DispatchEntry {
-            index,
-            endpoint,
-            headers,
-            delay,
-        } in plan
-        {
-            let transport = self.transport.clone();
-            let required = block_confirmation;
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
+        crate::provider_health::rpc_scope(
+            &sent_event.lz_message_id.pathway_id.src_chain_name,
+            async {
+                let src_chain_name = &sent_event.lz_message_id.pathway_id.src_chain_name;
+                let snapshot = self.providers.load();
+                let provider_config = snapshot.provider_config(src_chain_name)?;
+                if provider_config.uris.is_empty() {
+                    return Err(AppCoreError::Internal(format!(
+                        "No provider URI for chain {src_chain_name}"
+                    )));
                 }
-                let observation = observe_ton_block_confirmations(
-                    transport,
-                    endpoint,
-                    headers,
-                    agreed_seqno,
-                    required,
-                )
-                .await;
-                (
-                    index,
-                    observation.map(|observation| {
-                        Some((observation.validity.fingerprint(), observation))
-                    }),
-                )
-            });
-        }
-        let context = "block confirmation for chain ton".to_string();
-        let observation =
-            crate::provider_health::resolve_provider_quorum_for_indices(
-                requests, indices, quorum, &context,
-            )
-            .await?;
-        return match observation.validity {
-            BlockConfirmationValidity::Sufficient { .. } => Ok(()),
-            BlockConfirmationValidity::Insufficient { .. } => {
-                Err(AppCoreError::BadRequest(format!(
-                    "block confirmations not met, current block confirmation: {}",
-                    observation.current_confirmations.unwrap_or_default()
-                )))
-            }
-            BlockConfirmationValidity::Missing => Err(AppCoreError::Internal(format!(
-                "Transaction trace or masterchain info not found for {}",
-                sent_event.tx_hash
-            ))),
-            BlockConfirmationValidity::InvalidRange => Err(AppCoreError::BadRequest(
-                "block confirmation range overflow".to_string(),
-            )),
-            BlockConfirmationValidity::SourceChanged(reason) => Err(AppCoreError::BadRequest(
-                format!("source receipt binding changed: {reason}"),
-            )),
-        };
-    }
-    if matches!(src_chain_name.as_str(), "aptos" | "initia" | "movement") {
-        let quorum = required_provider_quorum(provider_config, src_chain_name)?;
-        let plan = plan_dispatch(&self.rank_tracker, src_chain_name, quorum)
-        .await?;
-        let requests = FuturesUnordered::new();
-        for DispatchEntry { index, uri, delay } in plan {
-            let (url, headers) = move_provider_uri_parts(src_chain_name, uri);
-            let transport = self.transport.clone();
-            let chain_name = src_chain_name.to_string();
-            let tx_hash = sent_event.tx_hash.clone();
-            let required_confirmations = block_confirmation;
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
+                if src_chain_name == "solana" {
+                    let Some(pillar_core::SourceEvidence::Solana(evidence)) =
+                        sent_event.source_evidence.as_ref()
+                    else {
+                        return Err(AppCoreError::Internal(
+                            "Missing Solana source evidence for readiness".to_string(),
+                        ));
+                    };
+                    return self
+                        .validate_solana_readiness_with_quorum(
+                            src_chain_name,
+                            &sent_event.tx_hash,
+                            evidence.slot,
+                            block_confirmation,
+                            provider_config,
+                        )
+                        .await;
                 }
-                let observation = observe_move_block_confirmations(
-                    transport,
-                    &chain_name,
-                    url,
-                    headers,
-                    &tx_hash,
-                    required_confirmations,
-                )
-                .await;
-                (index, observation.map(|observation| Some((observation.validity.fingerprint(), observation))))
-            });
-        }
-        let context = format!("block confirmation for chain {src_chain_name}");
-        let observation =
-            resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
-                .await?;
-        return match observation.validity {
-            BlockConfirmationValidity::Sufficient { .. } => Ok(()),
-            BlockConfirmationValidity::Insufficient { .. } => {
-                let current_confirmations =
-                    observation.current_confirmations.unwrap_or_default();
-                Err(AppCoreError::BadRequest(format!(
-                    "block confirmations not met, current block confirmation: {current_confirmations}"
-                )))
-            }
-            BlockConfirmationValidity::Missing => Err(AppCoreError::Internal(format!(
-                "Transaction receipt or block not found for {}",
-                sent_event.tx_hash
-            ))),
-            BlockConfirmationValidity::InvalidRange => Err(AppCoreError::BadRequest(
-                "block confirmation range overflow".to_string(),
-            )),
-            BlockConfirmationValidity::SourceChanged(reason) => Err(AppCoreError::BadRequest(
-                format!("source receipt binding changed: {reason}"),
-            )),
-        };
-    }
-    if matches!(src_chain_name.as_str(), "sui" | "iotal1") {
-        let quorum = required_provider_quorum(provider_config, src_chain_name)?;
-        let plan = plan_dispatch(&self.rank_tracker, src_chain_name, quorum)
-        .await?;
-        let requests = FuturesUnordered::new();
-        for DispatchEntry { index, uri, delay } in plan {
-            let (url, headers) = provider_uri_parts(uri);
-            let transport = self.transport.clone();
-            let chain_name = src_chain_name.to_string();
-            let tx_hash = sent_event.tx_hash.clone();
-            let required_confirmations = block_confirmation;
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
-                let observation = observe_sui_block_confirmations_rpc(
-                    transport,
-                    &chain_name,
-                    url,
-                    headers,
-                    &tx_hash,
-                    required_confirmations,
-                )
-                .await;
-                let observation = observation.map(|observation| {
-                let validity = match observation.validity {
-                    SuiBlockConfirmationValidity::Sufficient => {
-                        BlockConfirmationValidity::Sufficient {
-                            receipt_block_hash: String::new(),
-                            receipt_block_number: 0,
-                        }
+                if src_chain_name == "ton" {
+                    let agreed_seqno = sent_event
+                        .extra
+                        .get("blockNumber")
+                        .and_then(|value| value.as_i64().or_else(|| value.as_str()?.parse().ok()))
+                        .ok_or_else(|| {
+                            AppCoreError::Internal(format!(
+                                "Transaction trace or masterchain info not found for {}",
+                                sent_event.tx_hash
+                            ))
+                        })?;
+                    let quorum = required_provider_quorum(provider_config, src_chain_name)?;
+                    let plan =
+                        crate::provider_health::plan_ton_v3_dispatch(&self.rank_tracker, quorum)
+                            .await?;
+                    let indices = plan.iter().map(|entry| entry.index).collect::<Vec<_>>();
+                    let requests = FuturesUnordered::new();
+                    for crate::provider_health::TonV3DispatchEntry {
+                        index,
+                        endpoint,
+                        headers,
+                        delay,
+                    } in plan
+                    {
+                        let transport = self.transport.clone();
+                        let required = block_confirmation;
+                        requests.push(async move {
+                            if !delay.is_zero() {
+                                tokio::time::sleep(delay).await;
+                            }
+                            let observation = observe_ton_block_confirmations(
+                                transport,
+                                endpoint,
+                                headers,
+                                agreed_seqno,
+                                required,
+                            )
+                            .await;
+                            (
+                                index,
+                                observation.map(|observation| {
+                                    Some((observation.validity.fingerprint(), observation))
+                                }),
+                            )
+                        });
                     }
-                    SuiBlockConfirmationValidity::Insufficient => {
-                        BlockConfirmationValidity::Insufficient {
-                            receipt_block_hash: String::new(),
-                            receipt_block_number: 0,
+                    let context = "block confirmation for chain ton".to_string();
+                    let observation = crate::provider_health::resolve_provider_quorum_for_indices(
+                        requests, indices, quorum, &context,
+                    )
+                    .await?;
+                    return match observation.validity {
+                        BlockConfirmationValidity::Sufficient { .. } => Ok(()),
+                        BlockConfirmationValidity::Insufficient { .. } => {
+                            Err(confirmations_not_met(
+                                block_confirmation,
+                                observation.current_confirmations.unwrap_or_default(),
+                            ))
                         }
+                        BlockConfirmationValidity::Missing => Err(AppCoreError::Internal(format!(
+                            "Transaction trace or masterchain info not found for {}",
+                            sent_event.tx_hash
+                        ))),
+                        BlockConfirmationValidity::InvalidRange => Err(AppCoreError::BadRequest(
+                            "block confirmation range overflow".to_string(),
+                        )),
+                        BlockConfirmationValidity::SourceChanged(reason) => {
+                            Err(AppCoreError::BadRequest(format!(
+                                "source receipt binding changed: {reason}"
+                            )))
+                        }
+                    };
+                }
+                if matches!(src_chain_name.as_str(), "aptos" | "initia" | "movement") {
+                    let quorum = required_provider_quorum(provider_config, src_chain_name)?;
+                    let plan = plan_dispatch(&self.rank_tracker, src_chain_name, quorum).await?;
+                    let requests = FuturesUnordered::new();
+                    for DispatchEntry { index, uri, delay } in plan {
+                        let (url, headers) = move_provider_uri_parts(src_chain_name, uri);
+                        let transport = self.transport.clone();
+                        let chain_name = src_chain_name.to_string();
+                        let tx_hash = sent_event.tx_hash.clone();
+                        let required_confirmations = block_confirmation;
+                        requests.push(async move {
+                            if !delay.is_zero() {
+                                tokio::time::sleep(delay).await;
+                            }
+                            let observation = observe_move_block_confirmations(
+                                transport,
+                                &chain_name,
+                                url,
+                                headers,
+                                &tx_hash,
+                                required_confirmations,
+                            )
+                            .await;
+                            (
+                                index,
+                                observation.map(|observation| {
+                                    Some((observation.validity.fingerprint(), observation))
+                                }),
+                            )
+                        });
                     }
-                    SuiBlockConfirmationValidity::Missing => BlockConfirmationValidity::Missing,
-                    SuiBlockConfirmationValidity::InvalidRange => {
-                        BlockConfirmationValidity::InvalidRange
+                    let context = format!("block confirmation for chain {src_chain_name}");
+                    let observation = resolve_provider_quorum(
+                        requests,
+                        provider_config.uris.len(),
+                        quorum,
+                        &context,
+                    )
+                    .await?;
+                    return match observation.validity {
+                        BlockConfirmationValidity::Sufficient { .. } => Ok(()),
+                        BlockConfirmationValidity::Insufficient { .. } => {
+                            let current_confirmations =
+                                observation.current_confirmations.unwrap_or_default();
+                            Err(confirmations_not_met(
+                                block_confirmation,
+                                current_confirmations,
+                            ))
+                        }
+                        BlockConfirmationValidity::Missing => Err(AppCoreError::Internal(format!(
+                            "Transaction receipt or block not found for {}",
+                            sent_event.tx_hash
+                        ))),
+                        BlockConfirmationValidity::InvalidRange => Err(AppCoreError::BadRequest(
+                            "block confirmation range overflow".to_string(),
+                        )),
+                        BlockConfirmationValidity::SourceChanged(reason) => {
+                            Err(AppCoreError::BadRequest(format!(
+                                "source receipt binding changed: {reason}"
+                            )))
+                        }
+                    };
+                }
+                if matches!(src_chain_name.as_str(), "sui" | "iotal1") {
+                    let quorum = required_provider_quorum(provider_config, src_chain_name)?;
+                    let plan = plan_dispatch(&self.rank_tracker, src_chain_name, quorum).await?;
+                    let requests = FuturesUnordered::new();
+                    for DispatchEntry { index, uri, delay } in plan {
+                        let (url, headers) = provider_uri_parts(uri);
+                        let transport = self.transport.clone();
+                        let chain_name = src_chain_name.to_string();
+                        let tx_hash = sent_event.tx_hash.clone();
+                        let required_confirmations = block_confirmation;
+                        requests.push(async move {
+                            if !delay.is_zero() {
+                                tokio::time::sleep(delay).await;
+                            }
+                            let observation = observe_sui_block_confirmations_rpc(
+                                transport,
+                                &chain_name,
+                                url,
+                                headers,
+                                &tx_hash,
+                                required_confirmations,
+                            )
+                            .await;
+                            let observation = observation.map(|observation| {
+                                let validity = match observation.validity {
+                                    SuiBlockConfirmationValidity::Sufficient => {
+                                        BlockConfirmationValidity::Sufficient {
+                                            receipt_block_hash: String::new(),
+                                            receipt_block_number: 0,
+                                        }
+                                    }
+                                    SuiBlockConfirmationValidity::Insufficient => {
+                                        BlockConfirmationValidity::Insufficient {
+                                            receipt_block_hash: String::new(),
+                                            receipt_block_number: 0,
+                                        }
+                                    }
+                                    SuiBlockConfirmationValidity::Missing => {
+                                        BlockConfirmationValidity::Missing
+                                    }
+                                    SuiBlockConfirmationValidity::InvalidRange => {
+                                        BlockConfirmationValidity::InvalidRange
+                                    }
+                                };
+                                BlockConfirmationObservation {
+                                    validity,
+                                    current_confirmations: observation.current_confirmations,
+                                }
+                            });
+                            (
+                                index,
+                                observation.map(|observation| {
+                                    Some((observation.validity.fingerprint(), observation))
+                                }),
+                            )
+                        });
+                    }
+                    let context = format!("block confirmation for chain {src_chain_name}");
+                    let observation = resolve_provider_quorum(
+                        requests,
+                        provider_config.uris.len(),
+                        quorum,
+                        &context,
+                    )
+                    .await?;
+                    return match observation.validity {
+                        BlockConfirmationValidity::Sufficient { .. } => Ok(()),
+                        BlockConfirmationValidity::Insufficient { .. } => {
+                            let current_confirmations =
+                                observation.current_confirmations.unwrap_or_default();
+                            Err(confirmations_not_met(
+                                block_confirmation,
+                                current_confirmations,
+                            ))
+                        }
+                        BlockConfirmationValidity::Missing => Err(AppCoreError::Internal(format!(
+                            "Transaction receipt or block not found for {}",
+                            sent_event.tx_hash
+                        ))),
+                        BlockConfirmationValidity::InvalidRange => Err(AppCoreError::BadRequest(
+                            "block confirmation range overflow".to_string(),
+                        )),
+                        BlockConfirmationValidity::SourceChanged(reason) => {
+                            Err(AppCoreError::BadRequest(format!(
+                                "source receipt binding changed: {reason}"
+                            )))
+                        }
+                    };
+                }
+                if src_chain_name == "canton" {
+                    let sequencer = canton_sequencer(src_chain_name, provider_config)?;
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_err(|error| AppCoreError::Internal(error.to_string()))?
+                        .as_secs_f64()
+                        .floor();
+                    let nonce = sent_event
+                        .extra
+                        .get("blockNumber")
+                        .and_then(Value::as_f64)
+                        .unwrap_or(f64::NAN);
+                    let current = canton_block_confirmations(
+                        &self.transport,
+                        &sequencer,
+                        nonce,
+                        Some(&sent_event.tx_hash),
+                        now,
+                    )
+                    .await?;
+                    if current < block_confirmation as f64 {
+                        return Err(confirmations_not_met(
+                            block_confirmation,
+                            pillar_core::js_number_f64(current),
+                        ));
+                    }
+                    return Ok(());
+                }
+                if src_chain_name == "starknet" {
+                    let source_evidence = match sent_event.source_evidence.as_ref() {
+                        Some(pillar_core::SourceEvidence::Starknet(evidence)) => evidence.clone(),
+                        _ => {
+                            return Err(AppCoreError::Internal(
+                                "Missing Starknet source evidence".to_string(),
+                            ))
+                        }
+                    };
+                    let quorum = required_provider_quorum(provider_config, src_chain_name)?;
+                    let plan = plan_dispatch(&self.rank_tracker, src_chain_name, quorum).await?;
+                    let requests = FuturesUnordered::new();
+                    for DispatchEntry { index, uri, delay } in plan {
+                        let (url, headers) = provider_uri_parts(uri);
+                        let transport = self.transport.clone();
+                        let tx_hash = sent_event.tx_hash.clone();
+                        let evidence = source_evidence.clone();
+                        let required_confirmations = block_confirmation;
+                        requests.push(async move {
+                            if !delay.is_zero() {
+                                tokio::time::sleep(delay).await;
+                            }
+                            let observation = observe_starknet_block_confirmations(
+                                transport,
+                                url,
+                                headers,
+                                &tx_hash,
+                                &evidence,
+                                required_confirmations,
+                            )
+                            .await;
+                            (
+                                index,
+                                observation.map(|observation| {
+                                    Some((observation.validity.fingerprint(), observation))
+                                }),
+                            )
+                        });
+                    }
+                    let context = format!("block confirmation for chain {src_chain_name}");
+                    let observation = resolve_provider_quorum(
+                        requests,
+                        provider_config.uris.len(),
+                        quorum,
+                        &context,
+                    )
+                    .await?;
+                    return match observation.validity {
+                        BlockConfirmationValidity::Sufficient { .. } => Ok(()),
+                        BlockConfirmationValidity::Insufficient { .. } => {
+                            let current_confirmations =
+                                observation.current_confirmations.unwrap_or_default();
+                            Err(confirmations_not_met(
+                                block_confirmation,
+                                current_confirmations,
+                            ))
+                        }
+                        BlockConfirmationValidity::Missing => Err(AppCoreError::Internal(format!(
+                            "Transaction receipt or block not found for {}",
+                            sent_event.tx_hash
+                        ))),
+                        BlockConfirmationValidity::InvalidRange => Err(AppCoreError::BadRequest(
+                            "block confirmation range overflow".to_string(),
+                        )),
+                        BlockConfirmationValidity::SourceChanged(reason) => {
+                            Err(AppCoreError::BadRequest(format!(
+                                "source receipt binding changed: {reason}"
+                            )))
+                        }
+                    };
+                }
+                if src_chain_name == "stellar" {
+                    let quorum = required_provider_quorum(provider_config, src_chain_name)?;
+                    let plan = plan_dispatch(&self.rank_tracker, src_chain_name, quorum).await?;
+                    let requests = FuturesUnordered::new();
+                    for DispatchEntry { index, uri, delay } in plan {
+                        let (url, headers) = provider_uri_parts(uri);
+                        let transport = self.transport.clone();
+                        let tx_hash = sent_event.tx_hash.clone();
+                        let required_confirmations = block_confirmation;
+                        requests.push(async move {
+                            if !delay.is_zero() {
+                                tokio::time::sleep(delay).await;
+                            }
+                            let observation = observe_stellar_block_confirmations(
+                                transport,
+                                url,
+                                headers,
+                                &tx_hash,
+                                required_confirmations,
+                            )
+                            .await;
+                            (
+                                index,
+                                observation.map(|observation| {
+                                    Some((observation.validity.fingerprint(), observation))
+                                }),
+                            )
+                        });
+                    }
+                    let context = format!("block confirmation for chain {src_chain_name}");
+                    let observation = resolve_provider_quorum(
+                        requests,
+                        provider_config.uris.len(),
+                        quorum,
+                        &context,
+                    )
+                    .await?;
+                    return match observation.validity {
+                        BlockConfirmationValidity::Sufficient { .. } => Ok(()),
+                        BlockConfirmationValidity::Insufficient { .. } => {
+                            let current_confirmations =
+                                observation.current_confirmations.unwrap_or_default();
+                            Err(confirmations_not_met(
+                                block_confirmation,
+                                current_confirmations,
+                            ))
+                        }
+                        BlockConfirmationValidity::Missing => Err(AppCoreError::Internal(format!(
+                            "Transaction receipt or block not found for {}",
+                            sent_event.tx_hash
+                        ))),
+                        BlockConfirmationValidity::InvalidRange => Err(AppCoreError::BadRequest(
+                            "block confirmation range overflow".to_string(),
+                        )),
+                        BlockConfirmationValidity::SourceChanged(reason) => {
+                            Err(AppCoreError::BadRequest(format!(
+                                "source receipt binding changed: {reason}"
+                            )))
+                        }
+                    };
+                }
+                let source_evidence = match sent_event.source_evidence.as_ref() {
+                    Some(pillar_core::SourceEvidence::Evm(evidence)) => evidence.clone(),
+                    _ => {
+                        return Err(AppCoreError::Internal(
+                            "Missing EVM source evidence for readiness".to_string(),
+                        ))
                     }
                 };
-                BlockConfirmationObservation { validity,
-                current_confirmations: observation.current_confirmations }
-                });
-                (index, observation.map(|observation| Some((observation.validity.fingerprint(), observation))))
-            });
-        }
-        let context = format!("block confirmation for chain {src_chain_name}");
-        let observation =
-            resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
-                .await?;
-        return match observation.validity {
-            BlockConfirmationValidity::Sufficient { .. } => Ok(()),
-            BlockConfirmationValidity::Insufficient { .. } => {
-                let current_confirmations =
-                    observation.current_confirmations.unwrap_or_default();
-                Err(AppCoreError::BadRequest(format!(
-                    "block confirmations not met, current block confirmation: {current_confirmations}"
-                )))
-            }
-            BlockConfirmationValidity::Missing => Err(AppCoreError::Internal(format!(
-                "Transaction receipt or block not found for {}",
-                sent_event.tx_hash
-            ))),
-            BlockConfirmationValidity::InvalidRange => Err(AppCoreError::BadRequest(
-                "block confirmation range overflow".to_string(),
-            )),
-            BlockConfirmationValidity::SourceChanged(reason) => Err(AppCoreError::BadRequest(
-                format!("source receipt binding changed: {reason}"),
-            )),
-        };
-    }
-    if src_chain_name == "canton" {
-        let sequencer = canton_sequencer(src_chain_name, provider_config)?;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|error| AppCoreError::Internal(error.to_string()))?
-            .as_secs_f64()
-            .floor();
-        let nonce = sent_event
-            .extra
-            .get("blockNumber")
-            .and_then(Value::as_f64)
-            .unwrap_or(f64::NAN);
-        let current = canton_block_confirmations(
-            &self.transport,
-            &sequencer,
-            nonce,
-            Some(&sent_event.tx_hash),
-            now,
-        )
-        .await?;
-        if current < block_confirmation as f64 {
-            return Err(AppCoreError::BadRequest(format!(
-                "block confirmations not met, current block confirmation: {}",
-                pillar_core::js_number_f64(current)
-            )));
-        }
-        return Ok(());
-    }
-    if src_chain_name == "starknet" {
-        let source_evidence = match sent_event.source_evidence.as_ref() {
-            Some(pillar_core::SourceEvidence::Starknet(evidence)) => evidence.clone(),
-            _ => {
-                return Err(AppCoreError::Internal(
-                    "Missing Starknet source evidence".to_string(),
-                ))
-            }
-        };
-        let quorum = required_provider_quorum(provider_config, src_chain_name)?;
-        let plan = plan_dispatch(&self.rank_tracker, src_chain_name, quorum)
-        .await?;
-        let requests = FuturesUnordered::new();
-        for DispatchEntry { index, uri, delay } in plan {
-            let (url, headers) = provider_uri_parts(uri);
-            let transport = self.transport.clone();
-            let tx_hash = sent_event.tx_hash.clone();
-            let evidence = source_evidence.clone();
-            let required_confirmations = block_confirmation;
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
+                let quorum = required_provider_quorum(provider_config, src_chain_name)?;
+                let plan = plan_dispatch(&self.rank_tracker, src_chain_name, quorum).await?;
+                let requests = FuturesUnordered::new();
+                for DispatchEntry { index, uri, delay } in plan {
+                    let (url, headers) = provider_uri_parts(uri);
+                    let transport = self.transport.clone();
+                    let tx_hash = sent_event.tx_hash.clone();
+                    let source_evidence = source_evidence.clone();
+                    requests.push(async move {
+                        if !delay.is_zero() {
+                            tokio::time::sleep(delay).await;
+                        }
+                        let observation = observe_block_confirmations(
+                            transport,
+                            url,
+                            headers,
+                            &tx_hash,
+                            Some(&source_evidence),
+                            block_confirmation,
+                            matches!(src_chain_name.as_str(), "polygon" | "tron"),
+                        )
+                        .await;
+                        (
+                            index,
+                            observation.map(|observation| {
+                                Some((observation.validity.fingerprint(), observation))
+                            }),
+                        )
+                    });
                 }
-                let observation = observe_starknet_block_confirmations(
-                    transport,
-                    url,
-                    headers,
-                    &tx_hash,
-                    &evidence,
-                    required_confirmations,
+                let context = format!("block confirmation for chain {src_chain_name}");
+                let observation = match resolve_provider_quorum_with_zero_signal(
+                    requests,
+                    provider_config.uris.len(),
+                    quorum,
+                    &context,
                 )
-                .await;
-                (index, observation.map(|observation| Some((observation.validity.fingerprint(), observation))))
-            });
-        }
-        let context = format!("block confirmation for chain {src_chain_name}");
-        let observation =
-            resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
-                .await?;
-        return match observation.validity {
-            BlockConfirmationValidity::Sufficient { .. } => Ok(()),
-            BlockConfirmationValidity::Insufficient { .. } => {
-                let current_confirmations =
-                    observation.current_confirmations.unwrap_or_default();
-                Err(AppCoreError::BadRequest(format!(
-                    "block confirmations not met, current block confirmation: {current_confirmations}"
-                )))
-            }
-            BlockConfirmationValidity::Missing => Err(AppCoreError::Internal(format!(
-                "Transaction receipt or block not found for {}",
-                sent_event.tx_hash
-            ))),
-            BlockConfirmationValidity::InvalidRange => Err(AppCoreError::BadRequest(
-                "block confirmation range overflow".to_string(),
-            )),
-            BlockConfirmationValidity::SourceChanged(reason) => Err(AppCoreError::BadRequest(
-                format!("source receipt binding changed: {reason}"),
-            )),
-        };
-    }
-    if src_chain_name == "stellar" {
-        let quorum = required_provider_quorum(provider_config, src_chain_name)?;
-        let plan = plan_dispatch(&self.rank_tracker, src_chain_name, quorum)
-        .await?;
-        let requests = FuturesUnordered::new();
-        for DispatchEntry { index, uri, delay } in plan {
-            let (url, headers) = provider_uri_parts(uri);
-            let transport = self.transport.clone();
-            let tx_hash = sent_event.tx_hash.clone();
-            let required_confirmations = block_confirmation;
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
-                let observation = observe_stellar_block_confirmations(
-                    transport,
-                    url,
-                    headers,
-                    &tx_hash,
-                    required_confirmations,
-                )
-                .await;
-                (index, observation.map(|observation| Some((observation.validity.fingerprint(), observation))))
-            });
-        }
-        let context = format!("block confirmation for chain {src_chain_name}");
-        let observation =
-            resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
-                .await?;
-        return match observation.validity {
-            BlockConfirmationValidity::Sufficient { .. } => Ok(()),
-            BlockConfirmationValidity::Insufficient { .. } => {
-                let current_confirmations =
-                    observation.current_confirmations.unwrap_or_default();
-                Err(AppCoreError::BadRequest(format!(
-                    "block confirmations not met, current block confirmation: {current_confirmations}"
-                )))
-            }
-            BlockConfirmationValidity::Missing => Err(AppCoreError::Internal(format!(
-                "Transaction receipt or block not found for {}",
-                sent_event.tx_hash
-            ))),
-            BlockConfirmationValidity::InvalidRange => Err(AppCoreError::BadRequest(
-                "block confirmation range overflow".to_string(),
-            )),
-            BlockConfirmationValidity::SourceChanged(reason) => Err(AppCoreError::BadRequest(
-                format!("source receipt binding changed: {reason}"),
-            )),
-        };
-    }
-    let source_evidence = match sent_event.source_evidence.as_ref() {
-        Some(pillar_core::SourceEvidence::Evm(evidence)) => evidence.clone(),
-        _ => {
-            return Err(AppCoreError::Internal(
-                "Missing EVM source evidence for readiness".to_string(),
-            ))
-        }
-    };
-    let quorum = required_provider_quorum(provider_config, src_chain_name)?;
-    let plan = plan_dispatch(&self.rank_tracker, src_chain_name, quorum)
-    .await?;
-    let requests = FuturesUnordered::new();
-    for DispatchEntry { index, uri, delay } in plan {
-        let (url, headers) = provider_uri_parts(uri);
-        let transport = self.transport.clone();
-        let tx_hash = sent_event.tx_hash.clone();
-        let source_evidence = source_evidence.clone();
-        requests.push(async move {
-            if !delay.is_zero() {
-                tokio::time::sleep(delay).await;
-            }
-            let observation = observe_block_confirmations(
-                transport,
-                url,
-                headers,
-                &tx_hash,
-                Some(&source_evidence),
-                block_confirmation,
-                matches!(src_chain_name.as_str(), "polygon" | "tron"),
-            )
-            .await;
-            (index, observation.map(|observation| Some((observation.validity.fingerprint(), observation))))
-        });
-    }
-    let context = format!("block confirmation for chain {src_chain_name}");
-    let observation = match resolve_provider_quorum_with_zero_signal(
-        requests,
-        provider_config.uris.len(),
-        quorum,
-        &context,
-    )
-    .await
-    {
-        Ok(observation) => observation,
-        Err(QuorumResolutionFailure::ZeroSuccessfulResponses) => {
-            return Err(AppCoreError::Internal(format!(
-                "Transaction receipt or block not found for {}",
-                sent_event.tx_hash
-            )));
-        }
-        Err(QuorumResolutionFailure::Other(error)) => return Err(error),
-    };
+                .await
+                {
+                    Ok(observation) => observation,
+                    Err(QuorumResolutionFailure::ZeroSuccessfulResponses) => {
+                        return Err(AppCoreError::Internal(format!(
+                            "Transaction receipt or block not found for {}",
+                            sent_event.tx_hash
+                        )));
+                    }
+                    Err(QuorumResolutionFailure::Other(error)) => return Err(error),
+                };
 
-    match observation.validity {
-        BlockConfirmationValidity::Sufficient { .. } => Ok(()),
-        BlockConfirmationValidity::Insufficient { .. } => {
-            let current_confirmations = observation.current_confirmations.unwrap_or_default();
-            Err(AppCoreError::BadRequest(format!(
-                "block confirmations not met, current block confirmation: {current_confirmations}"
-            )))
-        }
-        BlockConfirmationValidity::Missing => Err(AppCoreError::Internal(format!(
-            "Transaction receipt or block not found for {}",
-            sent_event.tx_hash
-        ))),
-        BlockConfirmationValidity::InvalidRange => Err(AppCoreError::BadRequest(
-            "block confirmation range overflow".to_string(),
-        )),
-        BlockConfirmationValidity::SourceChanged(reason) => Err(AppCoreError::BadRequest(
-            format!("source receipt binding changed: {reason}"),
-        )),
-    } }).await
+                match observation.validity {
+                    BlockConfirmationValidity::Sufficient { .. } => Ok(()),
+                    BlockConfirmationValidity::Insufficient { .. } => {
+                        let current_confirmations =
+                            observation.current_confirmations.unwrap_or_default();
+                        Err(confirmations_not_met(
+                            block_confirmation,
+                            current_confirmations,
+                        ))
+                    }
+                    BlockConfirmationValidity::Missing => Err(AppCoreError::Internal(format!(
+                        "Transaction receipt or block not found for {}",
+                        sent_event.tx_hash
+                    ))),
+                    BlockConfirmationValidity::InvalidRange => Err(AppCoreError::BadRequest(
+                        "block confirmation range overflow".to_string(),
+                    )),
+                    BlockConfirmationValidity::SourceChanged(reason) => {
+                        Err(AppCoreError::BadRequest(format!(
+                            "source receipt binding changed: {reason}"
+                        )))
+                    }
+                }
+            },
+        )
+        .await
     }
 
     async fn validate_solana_readiness_with_quorum(
@@ -508,9 +574,10 @@ where
             BlockConfirmationValidity::Sufficient { .. } => Ok(()),
             BlockConfirmationValidity::Insufficient { .. } => {
                 let current_confirmations = observation.current_confirmations.unwrap_or_default();
-                Err(AppCoreError::BadRequest(format!(
-                    "block confirmations not met, current block confirmation: {current_confirmations}"
-                )))
+                Err(confirmations_not_met(
+                    required_confirmations,
+                    current_confirmations,
+                ))
             }
             BlockConfirmationValidity::Missing => Err(AppCoreError::Internal(format!(
                 "Transaction receipt or block not found for {tx_hash}"
@@ -1302,4 +1369,16 @@ mod starknet_tests {
     async fn one_block_hash_spelled_two_ways_is_one_vote() {
         assert_eq!(vote("0xABC").await, vote("0x000abc").await);
     }
+}
+
+/// Reports the caller's own threshold. An observed depth is one provider's reading, which no
+/// quorum agreed on, so it goes to the log and not into the answer.
+fn confirmations_not_met(
+    required: impl std::fmt::Display,
+    observed: impl std::fmt::Display,
+) -> AppCoreError {
+    tracing::debug!(observed = %observed, "block confirmations below the requested depth");
+    AppCoreError::BadRequest(format!(
+        "block confirmations not met, required block confirmation: {required}"
+    ))
 }

@@ -491,7 +491,7 @@ async fn polygon_readiness_binds_canonical_header_at_receipt_height() {
     let error = result.expect_err("finalized behind the receipt is not final yet");
     assert_eq!(
         error.to_string(),
-        "block confirmations not met, current block confirmation: -1"
+        "block confirmations not met, required block confirmation: 2"
     );
     assert_eq!(tags.len(), 3, "{tags:?}");
 
@@ -822,7 +822,7 @@ async fn ton_readiness_uses_quorum_agreed_packet_block_not_forged_transaction_ha
     .expect_err("an old forged transaction hash must not satisfy readiness");
     assert_eq!(
         error.to_string(),
-        "block confirmations not met, current block confirmation: 1"
+        "block confirmations not met, required block confirmation: 5"
     );
 }
 #[tokio::test]
@@ -944,7 +944,7 @@ async fn runtime_rpc_validation_checks_rejects_insufficient_message_confirmation
 
     assert_eq!(
         err.to_string(),
-        "block confirmations not met, current block confirmation: 1"
+        "block confirmations not met, required block confirmation: 2"
     );
 }
 

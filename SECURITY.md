@@ -755,54 +755,69 @@ Addresses live in `stellar_uln_302_for_environment`,
 
 ### Audit findings with a residual risk
 
-These come from the `pillar-client-action-required` audit. Each is either deliberately
-unchanged, mitigated rather than closed, or limited by a dependency; the operator-side
-control is named where one exists.
+These come from the `pillar-client-action-required` audit. What remains is limited by a
+dependency, by a protocol this service does not define, or by the deployment's edge; the
+operator-side control is named where one exists.
 
-- Provider configuration is two objects (`providers-v2.json`, `quorum-strategy.json`). The
-  reader now requires two consecutive reads to agree and retries three times, but nothing
-  makes the publication atomic: publish the pair so each object is complete before the
-  other changes, and set `_providersSha256`. Publishing both as one object needs a
-  manifest change (M-105).
-- Move V301 and V302 sends from Aptos and Movement now carry the source block identity
-  (`blockHash`, `blockNumber`) beside `onChainTxHash`, read through the same provider
-  quorum as ULNv2. Initia names transactions by hash and has no ledger version to look a
-  block up by, so its sends still carry only `onChainTxHash` and a configured extra-context
-  policy that requires the identity refuses them (M-111).
-- The upload and decompression budgets are process-wide. Rate-limit at the ingress, per
-  client address, before the service: nothing inside it can tell callers apart (M-121).
-  Decompression slots queue for up to two seconds instead of failing at once, but the work
-  of one DEFLATE stream is bounded by its output size and member count, not by its block
-  count, so two crafted streams can still hold both slots until they finish (M-125).
-- One below-quorum provider entity can still hold several slots of a chain's RPC lane,
-  including through ULNv2 MPT building, which reads source blocks while holding the source
-  signing permit. Dispatch orders voters across entities first and a staggered URL is
-  not dialled early, but admission is keyed by chain, not by entity (M-134).
-- The confirmation count in a 400 "block confirmations not met" body is one provider's
-  observation, not an agreed value; the message matches upstream's and is unchanged (I-03).
-- Wallet names are part of the audit conflict identity. KMS wallets are named by position
-  (`KmsWallet{index}`), so inserting or removing an earlier key renames the later ones and
-  restarts their exact-request input binding. Name wallets explicitly and keep their
-  order (I-09).
+- Provider configuration fetched from S3 or GCS must carry `_providersSha256` in
+  `quorum-strategy.json`, the SHA-256 of the exact `providers-v2.json` text, and a pair
+  without it is refused at startup and on refresh (the serving configuration stays). Publish
+  the strategy with the digest of the new providers file in the same step order you already
+  use: the digest key is ignored by earlier releases, so add it before upgrading. LOCAL
+  configuration keeps the key optional. `provider_config validate` reports a missing digest
+  and `provider_config convert` writes one (M-105).
+- Move V301 and V302 sends carry the source block identity (`blockHash`, `blockNumber`)
+  beside `onChainTxHash`, read through the provider quorum: by ledger version on Aptos and
+  Movement, by transaction height on Initia, where the hash is the block id converted from
+  base64 to `0x` hex (M-111).
+- Upload bodies queue for a permit in arrival order and a stalled upload gives its permit
+  back after three seconds, so a request that arrives during a slow-upload flood is served
+  once the oldest stalled upload expires. A flood that fills every connection slot
+  (`PILLAR_MAX_CONNECTIONS`) is not something the service can tell apart from traffic: limit
+  connections and request rate per client at the ingress (M-121).
+- Compressed bodies are decoded in 1 KiB steps and refused once a stream has consumed input
+  well beyond its output (padding with empty DEFLATE blocks); streams that Node's zlib
+  would accept but no encoder produces are therefore refused (M-125).
+- RPC admission keys on the provider entity of the dialled endpoint when the request has
+  planned its dispatch, and one entity may hold at most three quarters of a chain's lane, so
+  independent voters keep slots. Endpoints the dispatch did not plan (health probes,
+  derived hosts) are keyed by chain with the same cap (M-133, M-134).
+- The 400 "block confirmations not met" body names the depth the caller asked for. The depth
+  a provider observed is one reading no quorum agreed on and is logged at debug level, as
+  `observed` (I-03).
+- The audit intent's conflict domain is the effective key (backend, reference, version), not
+  the wallet name, so renumbering positional KMS wallets no longer restarts input binding.
+  Attempt rows keep the wallet hash as attribution; intents written by earlier releases
+  carry the old name hash, so a request already in flight across the upgrade is bound afresh
+  once (I-09).
 - Provider-config and background-heartbeat ages use monotonic time, which does not advance
   while the host is suspended (I-30). The V3 debug arguments of Aptos, Sui and IOTA omit the
   target's `0x`; it is left that way because the formatter also serves digest inputs (I-31).
 - The signer address published for Aptos, Movement, Sui and IotaMove mnemonic wallets
   comes from the BIP-32 key and the signature from the SLIP-0010-seeded key. Verify
   signatures against the published `publicKey`, never against `address` (L-05).
-- Polygon and Tron finality reads assume that one provider URI gives a consistent node view
-  across the receipt, `latest`, `finalized` and receipt-height reads; the finalized head is
-  not checked to descend from the receipt block (L-57).
+- Polygon and Tron finality reads bind the canonical header at the receipt height, and assume
+  that one provider URI gives a consistent node view across the receipt, `latest`,
+  `finalized` and receipt-height reads (L-57).
+- A Canton committee signs `Keccak(type, request, response)`, which names no deployment, so
+  its answers are portable between deployments that share committee keys. Readiness now binds
+  the scanned event to the resolved packet, but the preimage is the committee's: give every
+  Canton deployment its own committee key set (L-55).
 - Dependency limits. AWS profile `duration_seconds` is not sent in AssumeRole requests
-  (`aws-config` 1.11, I-07); the SSO token cache is written non-atomically by the SDK, so
-  use an isolated cache or workload credentials (I-08); the audit database connector
-  cannot negotiate channel binding (`tokio-postgres-rustls`, L-62); `rustls-webpki`
-  0.103.15 can spend CPU on rejected candidate paths (I-33); `google-cloud-auth` does not
-  pace refreshes after short-lived successful tokens (I-37); the HTTP client's chunk-size
-  line length is not bounded below the decoded-body limit (`hyper`, L-98). S3
-  configuration reads no longer ask for a response checksum, which closes the
-  `aws-smithy-checksums` trailer panic for them (L-92), and executable-sourced GCP
-  credentials are refused at start instead of being launched without their audience (I-12).
+  (`aws-config` 1.11): set the role's maximum session duration instead (I-07). The SSO token
+  cache is written non-atomically by the SDK; configuration loads are serialized, and an
+  isolated cache or workload credentials remove the exposure (I-08). `rustls-webpki` can
+  spend CPU on rejected candidate paths and no fixed release exists (I-33). The HTTP/1
+  decoder takes chunk-size lines without a length bound, and a provider
+  may hold a response body open until the request deadline, so a provider that streams
+  framing instead of data can spend decoder time up to that deadline; a shorter cut would
+  also cut slow but honest providers, so the deadline is the bound (L-98).
+- Closed here that a dependency would have left open: S3 configuration reads no longer ask
+  for a response checksum (`aws-smithy-checksums` trailer panic, L-92); the audit database
+  connector computes its own RFC 5929 channel binding, so SCRAM-SHA-256-PLUS is offered
+  where the certificate's signature algorithm has a hash (L-62); GCP credential headers are
+  fetched at most once a second (I-37); executable-sourced GCP credentials are refused at
+  start (I-12).
 
 ### Other known gaps
 
@@ -990,12 +1005,10 @@ control is named where one exists.
   `blockNumber` and `blockHash` on TON. The V2 to V3 hydrate path keeps
   `packetEmitAddress`, which upstream's hydrated event drops. A policy that
   validates `sentEvent` against a closed schema must accept these keys.
-- The count in `block confirmations not met, current block confirmation: N` is the
-  depth one provider observed, the lowest configured index among those that
-  answered `Insufficient`, not a value the quorum agreed on: honest providers read
-  different chain heads, so the quorum agrees on the verdict only. Treat it as
-  informational; the caller's own `blockConfirmation` is the threshold that was
-  not met.
+- The 400 body is `block confirmations not met, required block confirmation: N`, where N is
+  the caller's own `blockConfirmation`. Upstream reports the depth one provider observed
+  (`current block confirmation: N`); honest providers read different chain heads, so the
+  quorum agrees on the verdict only, and that reading is logged at debug level instead.
 - With a policy configured, a ULNv2 MPT proof is refused: it attests every packet
   of its source block, so a per-message verdict cannot cover it.
 - An external extra-context policy must answer `true`, and the two transports

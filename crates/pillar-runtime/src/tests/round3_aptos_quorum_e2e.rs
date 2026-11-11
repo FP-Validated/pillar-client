@@ -365,6 +365,23 @@ impl JsonRpcTransport for InitiaPerHost {
         url: String,
         _headers: HashMap<String, String>,
     ) -> Result<Value, String> {
+        if let Some(block) = self
+            .by_host
+            .keys()
+            .find(|host| {
+                url.starts_with(&format!(
+                    "https://{host}/cosmos/base/tendermint/v1beta1/blocks/"
+                ))
+            })
+            .map(|_| {
+                json!({
+                    "block_id": {"hash": "ERERERERERERERERERERERERERERERERERERERERERE="},
+                    "block": {"header": {"height": "777", "time": "2026-01-01T00:00:00Z"}}
+                })
+            })
+        {
+            return Ok(block);
+        }
         self.by_host
             .iter()
             .find(|(host, _)| url.starts_with(&format!("https://{host}/cosmos/tx/v1beta1/txs/")))

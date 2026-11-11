@@ -602,6 +602,11 @@ pub(crate) async fn plan_dispatch_for_keys<'a>(
     keyed: Vec<(usize, String)>,
 ) -> Result<Vec<DispatchEntry<'a>>, AppCoreError> {
     let config = quorum.config();
+    if let Some(context) = pillar_core::execution::current() {
+        for (index, endpoint) in &keyed {
+            context.register_endpoint(chain_name, endpoint, &config.voters[*index].entity);
+        }
+    }
     let urls = keyed
         .iter()
         .map(|(_, key)| key.as_str())

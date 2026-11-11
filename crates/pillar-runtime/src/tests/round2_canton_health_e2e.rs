@@ -126,6 +126,10 @@ async fn canton_only(ledger: Ledger, oauth: &str) -> Outcome {
         "category": "internal",
         "entity": "canton-sequencer",
     }]);
+    let strategy = pillar_config::test_support::bind_strategy(
+        &strategy_json(&fixture),
+        &providers.to_string(),
+    );
     let chains = ["canton".to_string()];
     let metrics = Arc::new(tokio::sync::Mutex::new(PillarMetrics::new()));
     let mut owner = None;
@@ -134,7 +138,7 @@ async fn canton_only(ledger: Ledger, oauth: &str) -> Outcome {
         &pillar_config::StaticProviderConfig::new(
             pillar_config::provider_validation::provider_configs_from_v2(
                 &providers.to_string(),
-                &strategy_json(&fixture),
+                &strategy,
             )
             .unwrap(),
             Some(&chains),
@@ -157,7 +161,7 @@ async fn canton_only(ledger: Ledger, oauth: &str) -> Outcome {
             "canton".to_string(),
         ),
         (LZ_PROVIDER_CONFIG.to_string(), providers.to_string()),
-        (LZ_QUORUM_STRATEGY_CONFIG.to_string(), strategy_json(&fixture)),
+        (LZ_QUORUM_STRATEGY_CONFIG.to_string(), strategy.clone()),
         (
             pillar_config::LZ_WALLETS.to_string(),
             config_wallet_json("wallet-a", "CANTON", "secret-a"),

@@ -914,13 +914,28 @@ pub fn reject_legacy_provider_config(raw: &str) -> Result<(), ConfigError> {
 /// The `_`-prefixed strategy key holding the SHA-256 of the exact `providers-v2.json` text it was written for.
 pub const PROVIDERS_BINDING_KEY: &str = "_providersSha256";
 
+/// Whether a strategy must name the providers file it was written for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BindingPolicy {
+    Optional,
+    /// Objects fetched one at a time from a bucket can be read from different rollouts; the
+    /// strategy must then carry the digest that proves they are not.
+    Required,
+}
+
 /// A strategy that names its providers file is only valid with that file, so a bucket
 /// holding the two objects from different rollouts is refused instead of served.
 fn check_providers_binding(
     providers_raw: &str,
     bound_to: Option<&serde_json::Value>,
+    policy: BindingPolicy,
 ) -> Result<(), ConfigError> {
     let Some(bound_to) = bound_to else {
+        if policy == BindingPolicy::Required {
+            return Err(ConfigError::ProviderValidation(format!(
+                "quorum-strategy.json: `{PROVIDERS_BINDING_KEY}` is required for remote configuration, so two objects from different rollouts are never paired"
+            )));
+        }
         static UNBOUND: std::sync::Once = std::sync::Once::new();
         UNBOUND.call_once(|| {
             tracing::warn!(
@@ -1013,9 +1028,18 @@ pub fn provider_configs_from_v2(
     providers_raw: &str,
     strategy_raw: &str,
 ) -> Result<ProviderConfigs, ConfigError> {
+    provider_configs_from_v2_with(providers_raw, strategy_raw, BindingPolicy::Optional)
+}
+
+/// [`provider_configs_from_v2`] with the binding policy of where the pair came from.
+pub fn provider_configs_from_v2_with(
+    providers_raw: &str,
+    strategy_raw: &str,
+    policy: BindingPolicy,
+) -> Result<ProviderConfigs, ConfigError> {
     let providers = parse_providers_file(providers_raw)?;
     let (strategy, restrictions, bound_to) = parse_strategy_file(strategy_raw)?;
-    check_providers_binding(providers_raw, bound_to.as_ref())?;
+    check_providers_binding(providers_raw, bound_to.as_ref(), policy)?;
     let file = ProvidersFileV2 {
         entities: providers.entities.clone(),
         chains: providers

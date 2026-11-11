@@ -805,6 +805,7 @@ mod tests {
         )
         .await;
         for (name, providers, strategy, expected) in cases {
+            let strategy = pillar_config::test_support::bind_strategy(&strategy, &providers);
             let owner = RemoteProviderConfigOwner::with_loader_for_test(
                 provider_configs(SERVING_PROVIDERS),
                 Arc::new(FixedBucket {

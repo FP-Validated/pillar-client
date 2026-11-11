@@ -99,9 +99,9 @@ use packet_resolver::js_truthy;
 pub(crate) use source_events_move::{
     aptos_account_resource_url, aptos_ledger_version, aptos_table_item_url,
     aptos_transaction_by_version_url, decode_event_data, decode_move_packet_sent_events,
-    encode_path_segment, fetch_move_transaction, move_block_by_version_url,
-    move_provider_uri_parts, observe_move_block_confirmations, observe_move_block_time,
-    MoveByteFields, MovePacketSentEvent,
+    encode_path_segment, fetch_move_transaction, initia_block_by_height_url,
+    move_block_by_version_url, move_provider_uri_parts, observe_move_block_confirmations,
+    observe_move_block_time, MoveByteFields, MovePacketSentEvent,
 };
 pub(crate) use source_events_starknet::{
     decode_starknet_packet_sent_events, starknet_packet_to_lz_sent_event,
