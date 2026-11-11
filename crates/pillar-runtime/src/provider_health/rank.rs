@@ -59,6 +59,7 @@ impl ProviderRankTracker {
     }
 
     /// Unseen or stale entries default to `Normal` (see `STALE_OBSERVATION_TTL`).
+    #[cfg(test)]
     pub(crate) async fn rank_of(&self, chain_name: &str, url: &str) -> ProviderRank {
         let key = (chain_name.to_string(), url.to_string());
         let state = self.state.read().await;
@@ -68,13 +69,23 @@ impl ProviderRankTracker {
         }
     }
 
-    pub(crate) async fn record(
-        &self,
-        chain_name: &str,
-        url: &str,
-        healthy: bool,
-        latency_ms: Option<u64>,
-    ) {
+    /// The ranks of several providers of one chain from a single read, so a dispatch plan never
+    /// mixes the state before and after a report is committed.
+    pub(crate) async fn ranks_of(&self, chain_name: &str, urls: &[&str]) -> Vec<ProviderRank> {
+        let state = self.state.read().await;
+        urls.iter()
+            .map(
+                |url| match state.get(&(chain_name.to_string(), (*url).to_string())) {
+                    Some(entry) if entry.observed_at.elapsed() <= STALE_OBSERVATION_TTL => {
+                        entry.rank
+                    }
+                    _ => ProviderRank::Normal,
+                },
+            )
+            .collect()
+    }
+
+    fn ranked_entry(healthy: bool, latency_ms: Option<u64>, observed_at: Instant) -> RankedEntry {
         let rank = if !healthy {
             ProviderRank::Unhealthy
         } else if latency_ms.is_some_and(|latency| latency > HIGH_LATENCY_THRESHOLD_MS) {
@@ -82,14 +93,22 @@ impl ProviderRankTracker {
         } else {
             ProviderRank::Normal
         };
+        RankedEntry { rank, observed_at }
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn record(
+        &self,
+        chain_name: &str,
+        url: &str,
+        healthy: bool,
+        latency_ms: Option<u64>,
+    ) {
         let key = (chain_name.to_string(), url.to_string());
-        self.state.write().await.insert(
-            key,
-            RankedEntry {
-                rank,
-                observed_at: Instant::now(),
-            },
-        );
+        self.state
+            .write()
+            .await
+            .insert(key, Self::ranked_entry(healthy, latency_ms, Instant::now()));
     }
 }
 
@@ -100,6 +119,8 @@ impl ProviderRankTracker {
     /// Initia indexers, TronWeb) are skipped: dispatch never ranks them, and one
     /// sharing a key with a voting provider would overwrite that provider's rank.
     pub(crate) async fn seed_from_report(&self, report: &ProviderHealthReport) {
+        let observed_at = Instant::now();
+        let mut entries = Vec::new();
         for (chain_name, chain_report) in report.iter() {
             for entry in &chain_report.providers {
                 if !entry.observed || entry.diagnostic {
@@ -112,10 +133,16 @@ impl ProviderRankTracker {
                 } else {
                     (entry.healthy, entry.latency_ms)
                 };
-                self.record(chain_name, &entry.rank_key, healthy, latency_ms)
-                    .await;
+                entries.push((
+                    (chain_name.clone(), entry.rank_key.clone()),
+                    Self::ranked_entry(healthy, latency_ms, observed_at),
+                ));
             }
         }
+        // One write for the whole report: a dispatch reading between two entries would see half
+        // of a reprobe and could refuse for lack of healthy providers that the report as a whole
+        // has.
+        self.state.write().await.extend(entries);
     }
 }
 

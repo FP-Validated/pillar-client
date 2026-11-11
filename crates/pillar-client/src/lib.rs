@@ -6,9 +6,7 @@ use pillar_core::{
     ProviderHealthSnapshot, Signature,
 };
 use regex::Regex;
-use reqwest::header::{
-    HeaderMap, HeaderName, HeaderValue, ACCEPT, ACCEPT_ENCODING, CONTENT_TYPE,
-};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, ACCEPT_ENCODING, CONTENT_TYPE};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::{sync::LazyLock, time::Duration};

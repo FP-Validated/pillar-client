@@ -311,8 +311,8 @@ where
     }
 }
 
-/// Geth reports a bare `execution reverted`; Besu appends the decoded reason, as
-/// `Execution reverted (reason)`. Both are the same revert, whose DATA is still validated.
+/// Geth reports a bare `execution reverted`; Besu appends the decoded reason, as `Execution
+/// reverted (reason)`.
 fn is_execution_revert_message(message: &str) -> bool {
     const PREFIX: &str = "execution reverted";
     let Some(head) = message.get(..PREFIX.len()) else {

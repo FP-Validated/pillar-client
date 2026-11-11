@@ -11,12 +11,14 @@ pub(super) struct ConnectionControl {
     body_complete: AtomicBool,
     write_deadline: Mutex<Option<Instant>>,
     draining: pillar_api::ShutdownSignal,
+    grace_deadline: Arc<Mutex<Option<Instant>>>,
 }
 #[derive(Clone)]
 pub(super) struct Connections {
     entries: Arc<Mutex<Vec<Arc<ConnectionControl>>>>,
     changed: Arc<Notify>,
     draining: pillar_api::ShutdownSignal,
+    grace_deadline: Arc<Mutex<Option<Instant>>>,
 }
 pub(super) struct ConnectionRegistration {
     owner: Connections,
@@ -36,6 +38,7 @@ impl Connections {
             entries: Arc::default(),
             changed: Arc::default(),
             draining,
+            grace_deadline: Arc::default(),
         }
     }
     pub(super) fn register(
@@ -54,6 +57,7 @@ impl Connections {
             body_complete: AtomicBool::new(false),
             write_deadline: Mutex::new(None),
             draining: self.draining.clone(),
+            grace_deadline: self.grace_deadline.clone(),
         });
         self.entries.lock().push(control.clone());
         (
@@ -64,6 +68,9 @@ impl Connections {
             control,
             receiver,
         )
+    }
+    pub(super) fn set_grace_deadline(&self, deadline: Instant) {
+        *self.grace_deadline.lock() = Some(deadline);
     }
     pub(super) fn evict_idle(&self) {
         for entry in self.entries.lock().iter() {
@@ -91,6 +98,13 @@ impl Connections {
 impl ConnectionControl {
     pub(super) fn is_draining(&self) -> bool {
         self.draining.is_triggered()
+    }
+    /// Whether the shutdown grace has run out, judged by the clock and not by whether the task
+    /// that cancels connections has observed its own timer yet.
+    pub(super) fn grace_expired(&self) -> bool {
+        self.grace_deadline
+            .lock()
+            .is_some_and(|deadline| Instant::now() >= deadline)
     }
     pub(super) fn start(&self, context: pillar_core::execution::RequestContext) {
         self.idle.store(false, Ordering::Release);

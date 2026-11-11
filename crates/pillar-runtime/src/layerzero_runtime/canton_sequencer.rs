@@ -376,6 +376,16 @@ impl CantonSequencer {
         let Some(committee) = &self.committee else {
             return Ok(());
         };
+        // Hashing walks the whole untrusted response; a set too small to reach the quorum is
+        // refused before that work.
+        if signatures.len() < committee.quorum {
+            return Err(insufficient_signature_quorum(
+                signatures
+                    .iter()
+                    .filter_map(|signature| ver_hex_to_bytes(signature).err())
+                    .next_back(),
+            ));
+        }
         let mut hasher = Keccak256::new();
         write_committee_payload(signature_type, request, raw, &mut |bytes| {
             hasher.update(bytes);
@@ -394,15 +404,19 @@ impl CantonSequencer {
             }
         }
         if verified.len() < committee.quorum {
-            return Err(AppCoreError::Internal(format!(
-                "Insufficient signature quorum{}",
-                last_error
-                    .map(|error| format!(": {error}"))
-                    .unwrap_or_default()
-            )));
+            return Err(insufficient_signature_quorum(last_error));
         }
         Ok(())
     }
+}
+
+fn insufficient_signature_quorum(last_error: Option<impl std::fmt::Display>) -> AppCoreError {
+    AppCoreError::Internal(format!(
+        "Insufficient signature quorum{}",
+        last_error
+            .map(|error| format!(": {error}"))
+            .unwrap_or_default()
+    ))
 }
 
 fn unexpected_scan() -> AppCoreError {
@@ -1065,8 +1079,7 @@ fn rendered_address(chain_name: &str, raw: &str) -> String {
         .unwrap_or_else(|| raw.to_string())
 }
 
-/// The environment's own name for an endpoint id. The global legacy table spans every
-/// environment, so it must not decide what a signable pathway names.
+/// The environment's own name for an endpoint id.
 fn chain_name_for_eid(
     chain_name_by_eid: &HashMap<u32, String>,
     eid: u32,
@@ -1220,10 +1233,13 @@ fn select_canton_packet(
 
 /// `RpcCantonSdk.getBlockConfirmations`: seconds since the scan request carrying the
 /// event at this nonce was committed, against the local clock read first.
+/// With `expected_tx_hash` the event must also be the `PacketSent` of that commitment: a nonce
+/// alone names an event of any deployment the sequencer has signed answers for.
 pub(crate) async fn canton_block_confirmations<T: JsonRpcTransport>(
     transport: &T,
     sequencer: &CantonSequencer,
     nonce: f64,
+    expected_tx_hash: Option<&str>,
     now_unix_seconds: f64,
 ) -> Result<f64, AppCoreError> {
     let from = pillar_core::js_number_f64(nonce);
@@ -1244,7 +1260,15 @@ pub(crate) async fn canton_block_confirmations<T: JsonRpcTransport>(
         latest_nonce = Some(response.latest_nonce);
         for event in response.events {
             let event_nonce = property_of(Some(&event), "nonce").map_err(AppCoreError::Internal)?;
-            if js_value_to_number(event_nonce.unwrap_or(&Value::Null)) == nonce {
+            let bound = expected_tx_hash.is_none_or(|expected| {
+                event.get("name").and_then(Value::as_str) == Some(PACKET_SENT_EVENT_NAME)
+                    && event
+                        .get("commitmentTransactionHash")
+                        .map(js_value_to_string)
+                        .as_deref()
+                        == Some(expected)
+            });
+            if bound && js_value_to_number(event_nonce.unwrap_or(&Value::Null)) == nonce {
                 matched = Some(event);
                 break;
             }
@@ -1272,11 +1296,13 @@ pub(crate) async fn canton_block_confirmations<T: JsonRpcTransport>(
         })?,
         SequencerAnswer::Error => return Err(sequencer_refusal()),
     };
-    // Current sequencers report Unix seconds, older ones milliseconds. No second count reaches
-    // 1e11 for any realistic date, so the magnitude names the unit and a unit change cannot
-    // inflate the age into a bypass of the finality delay.
+    // Current sequencers report Unix seconds, older ones milliseconds.
     let raw = timestamp.to_f64();
-    let emitted = if raw >= 1e11 { (raw / 1000.0).floor() } else { raw.floor() };
+    let emitted = if raw >= 1e11 {
+        (raw / 1000.0).floor()
+    } else {
+        raw.floor()
+    };
     Ok((now_unix_seconds - emitted).max(0.0))
 }
 

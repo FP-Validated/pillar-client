@@ -16,6 +16,13 @@ pub use primitives::AgeSource;
 
 const HTTP_DURATION_BUCKETS: &[f64] = &[0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0];
 const SIGN_STAGE_DURATION_BUCKETS: &[f64] = &[0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0];
+/// Source and destination names are caller-selected from the roster, so their pairs grow with the
+/// square of it; past this many series a new pair is recorded under `other`.
+const MAX_SIGN_STAGE_SERIES: usize = 1024;
+/// Stage records waiting for the metrics lock after their request was cancelled.
+const MAX_DEFERRED_STAGE_RECORDS: usize = 4096;
+static DEFERRED_STAGE_RECORDS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
 
 pub struct PillarMetrics {
     http_requests_total: CounterMetric,
@@ -55,13 +62,41 @@ impl SignStageObserver for PillarMetricsStageObserver {
         status: SignStageStatus,
         duration_seconds: f64,
     ) {
-        self.metrics.lock().await.record_sign_stage_duration(
-            stage,
-            src_chain,
-            dst_chain,
-            status.as_str(),
-            duration_seconds,
+        let status = status.as_str();
+        if let Ok(mut metrics) = self.metrics.try_lock() {
+            metrics.record_sign_stage_duration(
+                stage,
+                src_chain,
+                dst_chain,
+                status,
+                duration_seconds,
+            );
+            return;
+        }
+        // A request can be cancelled while it waits for the lock, and a completed stage must
+        // still be counted: the record is handed to a task the request does not own.
+        use std::sync::atomic::Ordering;
+        if DEFERRED_STAGE_RECORDS.fetch_add(1, Ordering::AcqRel) >= MAX_DEFERRED_STAGE_RECORDS {
+            DEFERRED_STAGE_RECORDS.fetch_sub(1, Ordering::AcqRel);
+            return;
+        }
+        let metrics = self.metrics.clone();
+        let (stage, src_chain, dst_chain, status) = (
+            stage.to_string(),
+            src_chain.to_string(),
+            dst_chain.to_string(),
+            status.to_string(),
         );
+        tokio::spawn(async move {
+            metrics.lock().await.record_sign_stage_duration(
+                &stage,
+                &src_chain,
+                &dst_chain,
+                &status,
+                duration_seconds,
+            );
+            DEFERRED_STAGE_RECORDS.fetch_sub(1, Ordering::AcqRel);
+        });
     }
 }
 
@@ -173,12 +208,18 @@ impl PillarMetrics {
         status: &str,
         duration_seconds: f64,
     ) {
-        let labels = IndexMap::from([
+        let mut labels = IndexMap::from([
             ("stage".to_string(), stage.to_string()),
             ("src_chain".to_string(), src_chain.to_string()),
             ("dst_chain".to_string(), dst_chain.to_string()),
             ("status".to_string(), status.to_string()),
         ]);
+        if self.sign_stage_duration_seconds.series_count() >= MAX_SIGN_STAGE_SERIES
+            && !self.sign_stage_duration_seconds.has_series(&labels)
+        {
+            labels.insert("src_chain".to_string(), "other".to_string());
+            labels.insert("dst_chain".to_string(), "other".to_string());
+        }
         self.sign_stage_duration_seconds
             .observe(labels, duration_seconds);
     }
@@ -273,25 +314,32 @@ impl PillarMetrics {
             lines.push("# TYPE pillar_admission_started_total counter".into());
             lines.push("# HELP pillar_kms_hedge_skipped_total Speculative KMS calls skipped without waiting or provider execution.".into());
             lines.push("# TYPE pillar_kms_hedge_skipped_total counter".into());
-            for (name, budget) in [
+            let totals = [
                 ("sign", &resources.signing),
                 ("rpc", &resources.rpc),
                 ("kms", &resources.kms),
                 ("parser", &resources.parser),
-            ] {
-                let totals = budget.totals();
+            ]
+            .map(|(name, budget)| (name, budget.totals()));
+            for (name, totals) in &totals {
                 lines.push(format!(
                     "pillar_admission_active{{budget=\"{name}\"}} {}",
                     totals.active
                 ));
+            }
+            for (name, totals) in &totals {
                 lines.push(format!(
                     "pillar_admission_waiting{{budget=\"{name}\"}} {}",
                     totals.waiting
                 ));
+            }
+            for (name, totals) in &totals {
                 lines.push(format!(
                     "pillar_admission_started_total{{budget=\"{name}\"}} {}",
                     totals.started
                 ));
+            }
+            for (name, totals) in &totals {
                 for outcome in pillar_core::execution::Outcome::ALL {
                     lines.push(format!(
                         "pillar_admission_total{{budget=\"{name}\",outcome=\"{}\"}} {}",
@@ -299,7 +347,9 @@ impl PillarMetrics {
                         totals.outcomes[outcome as usize]
                     ));
                 }
-                if name == "kms" {
+            }
+            for (name, totals) in &totals {
+                if *name == "kms" {
                     lines.push(format!("pillar_kms_hedge_skipped_total {}", totals.skipped));
                 }
             }
@@ -310,6 +360,12 @@ impl PillarMetrics {
         lines.extend(self.provider_config_age_seconds.render());
         lines.extend(self.background_task_heartbeat_age_seconds.render());
         lines.extend(self.signer_errors_total.render());
+        lines.push("# HELP pillar_signer_late_failures_total Backend signing failures that completed after their caller had gone.".into());
+        lines.push("# TYPE pillar_signer_late_failures_total counter".into());
+        lines.push(format!(
+            "pillar_signer_late_failures_total {}",
+            pillar_core::audit::late_signer_failures()
+        ));
         lines.extend(self.provider_request_errors_total.render());
         lines.push(String::new());
         lines.join("\n")

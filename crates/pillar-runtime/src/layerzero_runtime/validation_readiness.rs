@@ -264,8 +264,14 @@ where
             .get("blockNumber")
             .and_then(Value::as_f64)
             .unwrap_or(f64::NAN);
-        let current =
-            canton_block_confirmations(&self.transport, &sequencer, nonce, now).await?;
+        let current = canton_block_confirmations(
+            &self.transport,
+            &sequencer,
+            nonce,
+            Some(&sent_event.tx_hash),
+            now,
+        )
+        .await?;
         if current < block_confirmation as f64 {
             return Err(AppCoreError::BadRequest(format!(
                 "block confirmations not met, current block confirmation: {}",
@@ -839,7 +845,9 @@ where
         ));
     }
     if jsonrpc_error_code(&canonical_response) == Some(STARKNET_BLOCK_NOT_FOUND) {
-        return Ok(source_changed("Starknet evidence block is no longer served"));
+        return Ok(source_changed(
+            "Starknet evidence block is no longer served",
+        ));
     }
     let canonical_response = readiness_response(canonical_response)?;
     let canonical = canonical_response

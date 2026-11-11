@@ -83,8 +83,7 @@ pub fn boc_from_base64_with_limits(
 }
 
 /// The two older BOC serializations, `0x68ff65f3` (indexed) and `0xacc3a728` (indexed, CRC32C),
-/// carry the same body as the generic one behind another magic. They are rewritten to the
-/// generic magic, with its flags and a recomputed checksum, so one decoder reads all three.
+/// carry the same body as the generic one behind another magic.
 fn canonical_boc_bytes(mut bytes: Vec<u8>) -> Vec<u8> {
     let with_crc = match bytes.get(..4) {
         Some([0x68, 0xff, 0x65, 0xf3]) => false,
@@ -102,7 +101,7 @@ fn canonical_boc_bytes(mut bytes: Vec<u8>) -> Vec<u8> {
         }
     }
     bytes[..4].copy_from_slice(&[0xb5, 0xee, 0x9c, 0x72]);
-    bytes[4] = 0x80 | if with_crc { 0x40 } else { 0 } | bytes[4];
+    bytes[4] |= 0x80 | if with_crc { 0x40 } else { 0 };
     if with_crc {
         let body = bytes.len() - 4;
         let checksum = crc.checksum(&bytes[..body]).to_le_bytes();

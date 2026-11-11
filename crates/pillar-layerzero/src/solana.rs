@@ -328,6 +328,8 @@ pub struct SolanaPayloadSignedAccounts {
     /// The endpoint's `ReceiveLibraryConfig` of the receiver and of the srcEid default.
     pub library_config_pda: [u8; 32],
     pub default_library_config_pda: [u8; 32],
+    /// The endpoint's `PayloadHash` of this nonce: a nilify leaves the NIL hash there.
+    pub payload_hash_pda: [u8; 32],
 }
 
 /// Raw, possibly-missing account bytes fetched for the PDAs from
@@ -342,6 +344,7 @@ pub struct SolanaFetchedPayloadSignedAccounts<'a> {
     pub receive_config: Option<&'a [u8]>,
     pub default_receive_config: Option<&'a [u8]>,
     pub confirmations: Option<&'a [u8]>,
+    pub payload_hash: Option<&'a [u8]>,
 }
 
 /// Builds a [`SolanaPayloadSignedRequest`] from a resolved sent event and the
@@ -433,6 +436,16 @@ pub fn solana_payload_signed_accounts(
         confirmations_pda,
         library_config_pda,
         default_library_config_pda,
+        payload_hash_pda: find_program_address(
+            &[
+                b"PayloadHash".as_slice(),
+                &request.receiver,
+                &src_eid_be,
+                &request.sender,
+                &request.nonce.to_be_bytes(),
+            ],
+            &endpoint_program_id,
+        )?,
     })
 }
 
@@ -455,14 +468,31 @@ pub fn solana_payload_is_signed(
     request: &SolanaPayloadSignedRequest,
     accounts: SolanaFetchedPayloadSignedAccounts<'_>,
 ) -> Result<bool, AppCoreError> {
-    if let Some(data) = accounts.nonce {
-        if decode_solana_nonce_account(data)?.inbound_nonce >= request.nonce {
-            return Ok(true);
+    // A nilified nonce, or one holding another payload's hash, is committable again, and the
+    // endpoint then still needs this DVN's attestation: the nonce shortcuts must not skip it.
+    let recommit_needed = accounts
+        .payload_hash
+        .map(|data| {
+            let hash: [u8; 32] = data
+                .get(8..40)
+                .and_then(|bytes| bytes.try_into().ok())
+                .ok_or_else(|| {
+                    AppCoreError::Internal("Solana payload hash account data too short".to_string())
+                })?;
+            Ok::<_, AppCoreError>(hash != [0u8; 32] && hash != request.payload_hash)
+        })
+        .transpose()?
+        .unwrap_or(false);
+    if !recommit_needed {
+        if let Some(data) = accounts.nonce {
+            if decode_solana_nonce_account(data)?.inbound_nonce >= request.nonce {
+                return Ok(true);
+            }
         }
-    }
-    if let Some(data) = accounts.pending_nonce {
-        if decode_solana_pending_inbound_nonce_account(data)?.contains(&request.nonce) {
-            return Ok(true);
+        if let Some(data) = accounts.pending_nonce {
+            if decode_solana_pending_inbound_nonce_account(data)?.contains(&request.nonce) {
+                return Ok(true);
+            }
         }
     }
 

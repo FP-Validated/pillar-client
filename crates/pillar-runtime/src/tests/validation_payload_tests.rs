@@ -1141,7 +1141,7 @@ async fn runtime_rpc_validation_checks_accepts_unsigned_solana_payload() {
     assert_eq!(calls[0].0, "https://solana-rpc.example");
     assert_eq!(calls[0].2["method"], "getMultipleAccounts");
     let pubkeys = calls[0].2["params"][0].as_array().unwrap();
-    assert_eq!(pubkeys.len(), 7);
+    assert_eq!(pubkeys.len(), 8);
 }
 
 #[tokio::test]

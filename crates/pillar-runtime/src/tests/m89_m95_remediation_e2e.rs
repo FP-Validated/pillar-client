@@ -866,7 +866,10 @@ async fn m94_loopback_bypasses_proxy() -> Value {
     assert_eq!(result["reqwest_hostname"], "forged", "{result}");
     let proxy_seen = proxy_seen.lock().unwrap().clone();
     assert_eq!(proxy_seen.len(), 1, "{proxy_seen:?}");
-    assert!(proxy_seen[0].contains("rpc.proxy-test.example"), "{proxy_seen:?}");
+    assert!(
+        proxy_seen[0].contains("rpc.proxy-test.example"),
+        "{proxy_seen:?}"
+    );
     let honest_seen = honest_seen.lock().unwrap().clone();
     assert_eq!(honest_seen.len(), 3, "{honest_seen:?}");
     json!({"child": result, "proxy_saw": proxy_seen, "honest_listener_saw": honest_seen})

@@ -40,16 +40,31 @@ impl RemoteProviderConfigLoader for AwsRemoteProviderConfigLoader {
     }
 }
 
+// The two objects of a configuration are fetched together; each fetch builds its own credential
+// provider, and two providers renewing one SSO session race on its token cache.
+static S3_LOAD_LOCK: Mutex<()> = Mutex::const_new(());
+
 pub(crate) async fn load_s3_provider_config(
     bucket: String,
     key: String,
     region: Option<String>,
 ) -> Result<String, ConfigError> {
+    let _serialized = S3_LOAD_LOCK.lock().await;
     let mut loader = crate::aws_client::defaults();
     let region = region.unwrap_or_else(|| "us-east-1".to_string());
     loader = loader.region(aws_config::Region::new(region));
     let config = loader.load().await;
-    let response = aws_sdk_s3::Client::new(&config)
+    // The SDK's default validates a response checksum through a body wrapper that panics on
+    // an HTTP trailer frame; a configuration object is bounded and parsed whole, so it is not
+    // asked for one.
+    let client = aws_sdk_s3::Client::from_conf(
+        aws_sdk_s3::config::Builder::from(&config)
+            .response_checksum_validation(
+                aws_sdk_s3::config::ResponseChecksumValidation::WhenRequired,
+            )
+            .build(),
+    );
+    let response = client
         .get_object()
         .bucket(bucket)
         .key(key)
@@ -69,6 +84,10 @@ pub(crate) fn gcs_bucket_resource(bucket: &str) -> String {
     format!("projects/_/buckets/{bucket}")
 }
 
+// One client for the process: its credentials refresh themselves, and a load cancelled
+// mid-authentication leaves no detached connection behind to be rebuilt by the next one.
+static GCS_CLIENT: tokio::sync::OnceCell<Storage> = tokio::sync::OnceCell::const_new();
+
 pub(crate) async fn load_gcs_provider_config(
     bucket: String,
     key: String,
@@ -76,9 +95,13 @@ pub(crate) async fn load_gcs_provider_config(
     _region: String,
 ) -> Result<String, ConfigError> {
     // A resumed read re-enters itself with no attempt limit; the next refresh is the retry.
-    let client = Storage::builder()
-        .with_read_resume_policy(google_cloud_storage::read_resume_policy::NeverResume)
-        .build()
+    let client = GCS_CLIENT
+        .get_or_try_init(|| async {
+            Storage::builder()
+                .with_read_resume_policy(google_cloud_storage::read_resume_policy::NeverResume)
+                .build()
+                .await
+        })
         .await
         .map_err(|error| ConfigError::RemoteProviderConfig(error.to_string()))?;
     let mut response = client

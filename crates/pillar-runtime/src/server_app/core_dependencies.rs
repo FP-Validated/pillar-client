@@ -113,19 +113,25 @@ where
             &provider_health_report,
         )
         .await;
-        let single_provider_chains = available_chain_names
-            .iter()
-            .filter_map(|chain_name| {
-                provider_config
-                    .get_provider_config(chain_name)
-                    .filter(|config| config.single_entity_trust_root())
-                    .map(|_| chain_name.as_str())
-            })
-            .collect::<Vec<_>>();
-        metrics
-            .lock()
-            .await
-            .set_provider_single_entity_chains(single_provider_chains.len());
+        // Read under the metrics lock the refresh also publishes under, so a refresh that landed
+        // since startup began cannot be overwritten with the configuration that preceded it.
+        let single_provider_chains = {
+            let mut registry = metrics.lock().await;
+            let serving = providers.load();
+            let chains = serving
+                .available_chain_names()
+                .iter()
+                .filter(|chain_name| {
+                    serving
+                        .provider_configs()
+                        .get(chain_name.as_str())
+                        .is_some_and(|config| config.single_entity_trust_root())
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            registry.set_provider_single_entity_chains(chains.len());
+            chains
+        };
         if !single_provider_chains.is_empty() {
             tracing::warn!(
                 target: "pillar_runtime",
@@ -172,18 +178,22 @@ where
             )
         };
         let rank_controls = controls.clone();
+        let rank_cache = provider_health_cache.clone();
         let provider_rank_refresh = tokio::spawn(async move {
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(150)).await;
                 rank_heartbeat.stamp();
                 let probed_generation = rank_refresh_providers.generation();
-                let report = rank_controls
-                    .scope(
-                        probed_generation,
-                        rank_refresh_source.get_provider_health_report(),
-                    )
+                // The cache coalesces probe rounds, so this and its own loop share one in-flight
+                // round instead of dispatching the same provider calls twice.
+                let _ = rank_controls
+                    .scope(probed_generation, rank_cache.read())
                     .await;
-                if let Ok(report) = report {
+                let now = (rank_refresh_source.now_unix_ms())();
+                if let Some(report) = rank_refresh_source
+                    .retained_report(probed_generation, now)
+                    .await
+                {
                     seed_provider_rank_if_current(
                         &rank_refresh_tracker,
                         &rank_refresh_providers,
@@ -220,6 +230,8 @@ where
         })
     }
 
+    /// `dependencies` was built before the provider handle exists, so its resolver and validator
+    /// keep their own handle and rank state; production composition goes through `from_env_map_with_runtime_core`.
     pub async fn from_env_map_with_core_dependencies_inferred_chain_types(
         vars: HashMap<String, String>,
         transport: T,
@@ -262,7 +274,7 @@ where
             dependencies,
             chain_type_by_chain_name,
             RuntimeMode::Development,
-            Arc::new(ProviderRankTracker::new()),
+            providers.rank_tracker.clone(),
             remote_provider_config,
             providers,
             metrics,

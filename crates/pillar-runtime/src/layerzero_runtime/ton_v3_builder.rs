@@ -1,8 +1,6 @@
 use super::*;
 
-use pillar_layerzero::{
-    build_ton_dvn_verify, TonContractCodeCells, TonDvnVerifyRequest,
-};
+use pillar_layerzero::{build_ton_dvn_verify, TonContractCodeCells, TonDvnVerifyRequest};
 
 const DEPRECATED_ULN_OAPPS: &[&str] = &[
     "0x4b2266a1a27489d16379cba37887f3c6c6c6d1bcf6a8fba4565f1d217cfec668",

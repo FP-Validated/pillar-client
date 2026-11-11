@@ -104,9 +104,8 @@ fn felt_decimal(felt: &str) -> Option<String> {
     num_bigint::BigUint::parse_bytes(digits.as_bytes(), 16).map(|value| value.to_string())
 }
 
-/// `getChainName(eid)` as upstream's `formatPathwayId` applies it, over the active
-/// environment's own endpoint ids. The global legacy table spans every environment, so
-/// falling back to it let a foreign-stage destination id reach the signer under a local name.
+/// `getChainName(eid)` as upstream's `formatPathwayId` applies it, over the active environment's
+/// own endpoint ids.
 pub(crate) fn chain_name_for_packet_eid(
     chain_name_by_eid: &HashMap<u32, String>,
     eid: u32,

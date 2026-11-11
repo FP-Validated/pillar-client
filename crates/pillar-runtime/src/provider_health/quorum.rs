@@ -174,8 +174,7 @@ pub(crate) struct ExactQuorumAccumulator<'a, T> {
     error_count: usize,
     deferred: Option<pillar_core::execution::BudgetError>,
     voters: BTreeMap<String, QuorumCandidate<T>>,
-    /// Providers that answered a fingerprint whose value could not be retained. They still
-    /// voted, so they keep a competing quorum visible without a second copy of the value.
+    /// Providers that answered a fingerprint whose value could not be retained.
     withheld: BTreeMap<String, BTreeSet<usize>>,
     withheld_oversized: bool,
 }
@@ -603,11 +602,16 @@ pub(crate) async fn plan_dispatch_for_keys<'a>(
     keyed: Vec<(usize, String)>,
 ) -> Result<Vec<DispatchEntry<'a>>, AppCoreError> {
     let config = quorum.config();
-    let mut ranked = Vec::with_capacity(keyed.len());
-    for (index, key) in keyed {
-        let rank = tracker.rank_of(chain_name, &key).await;
-        ranked.push((index, rank));
-    }
+    let urls = keyed
+        .iter()
+        .map(|(_, key)| key.as_str())
+        .collect::<Vec<_>>();
+    let ranks = tracker.ranks_of(chain_name, &urls).await;
+    let mut ranked = keyed
+        .iter()
+        .zip(ranks)
+        .map(|((index, _), rank)| (*index, rank))
+        .collect::<Vec<_>>();
     ranked.sort_by_key(|(_, rank)| *rank);
     let (healthy, unhealthy): (Vec<_>, Vec<_>) = ranked
         .into_iter()

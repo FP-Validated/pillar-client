@@ -330,6 +330,7 @@ async fn canton_sequencer_path_matches_gasolina() {
                             &transport,
                             &sequencer,
                             scenario["nonce"].as_f64().unwrap(),
+                            None,
                             now,
                         )
                         .await

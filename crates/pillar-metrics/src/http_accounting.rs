@@ -26,6 +26,8 @@ pub struct HttpOutcomeGuard {
     started: Instant,
     outcome: Option<Outcome>,
     quiet: bool,
+    method: &'static str,
+    route: &'static str,
 }
 pub fn normalized_method(method: &str) -> &'static str {
     match method {
@@ -54,53 +56,95 @@ impl HttpAccounting {
             "/ready" => "/ready",
             _ => "<unmatched>",
         };
-        let series = self
-            .series
-            .entry((normalized_method(method), path))
-            .or_default()
-            .clone();
+        let method = normalized_method(method);
+        let series = self.series.entry((method, path)).or_default().clone();
         series.started.fetch_add(1, Ordering::Relaxed);
         HttpOutcomeGuard {
             series,
             context,
             started: Instant::now(),
             outcome: None,
-            quiet: matches!(normalized_method(method), "GET" | "HEAD"),
+            quiet: matches!(method, "GET" | "HEAD"),
+            method,
+            route: path,
         }
     }
     pub fn render(&self) -> Vec<String> {
-        let mut lines = vec!["# HELP pillar_http_started_total Requests entering Pillar middleware accounting, not TCP delivery.".into(), "# TYPE pillar_http_started_total counter".into(), "# HELP pillar_http_outcomes_total Terminal application outcomes, including future drop; not durable crash evidence.".into(), "# TYPE pillar_http_outcomes_total counter".into(), "# HELP pillar_http_outcome_duration_seconds Application duration through completion or future drop.".into(), "# TYPE pillar_http_outcome_duration_seconds histogram".into()];
+        // Each outcome's buckets are read before its count, and are written after it and from the
+        // widest bucket down, so a scrape racing a request never sees a bucket above the count
+        // or a narrower bucket above a wider one.
+        struct Sample {
+            labels: String,
+            count: u64,
+            buckets: [u64; 10],
+            micros: u64,
+        }
+        let mut started = Vec::new();
+        let mut samples = Vec::new();
         for ((method, path), series) in &self.series {
             let labels = format!("method=\"{method}\",path=\"{path}\"");
-            lines.push(format!(
+            started.push(format!(
                 "pillar_http_started_total{{{labels}}} {}",
                 series.started.load(Ordering::Relaxed)
             ));
             for outcome in Outcome::ALL {
                 let i = outcome as usize;
-                let count = series.counts[i].load(Ordering::Relaxed);
+                let mut buckets: [u64; 10] =
+                    std::array::from_fn(|b| series.buckets[i][b].load(Ordering::Acquire));
+                let count = series.counts[i].load(Ordering::Acquire);
                 if count == 0 {
                     continue;
                 }
-                let labels = format!("{labels},outcome=\"{}\"", outcome.as_str());
-                lines.push(format!("pillar_http_outcomes_total{{{labels}}} {count}"));
-                for (b, value) in BUCKETS.iter().enumerate() {
-                    lines.push(format!(
-                        "pillar_http_outcome_duration_seconds_bucket{{{labels},le=\"{value}\"}} {}",
-                        series.buckets[i][b].load(Ordering::Relaxed)
-                    ));
+                let mut floor = 0;
+                for bucket in &mut buckets {
+                    *bucket = (*bucket).min(count).max(floor);
+                    floor = *bucket;
                 }
+                samples.push(Sample {
+                    labels: format!("{labels},outcome=\"{}\"", outcome.as_str()),
+                    count,
+                    buckets,
+                    micros: series.micros[i].load(Ordering::Acquire),
+                });
+            }
+        }
+        let mut lines = vec![
+            "# HELP pillar_http_started_total Requests entering Pillar middleware accounting, not TCP delivery.".into(),
+            "# TYPE pillar_http_started_total counter".into(),
+        ];
+        lines.extend(started);
+        lines.push("# HELP pillar_http_outcomes_total Terminal application outcomes, including future drop; not durable crash evidence.".into());
+        lines.push("# TYPE pillar_http_outcomes_total counter".into());
+        for sample in &samples {
+            lines.push(format!(
+                "pillar_http_outcomes_total{{{}}} {}",
+                sample.labels, sample.count
+            ));
+        }
+        lines.push("# HELP pillar_http_outcome_duration_seconds Application duration through completion or future drop.".into());
+        lines.push("# TYPE pillar_http_outcome_duration_seconds histogram".into());
+        for Sample {
+            labels,
+            count,
+            buckets,
+            micros,
+        } in &samples
+        {
+            for (value, bucket) in BUCKETS.iter().zip(buckets) {
                 lines.push(format!(
-                    "pillar_http_outcome_duration_seconds_bucket{{{labels},le=\"+Inf\"}} {count}"
-                ));
-                lines.push(format!(
-                    "pillar_http_outcome_duration_seconds_count{{{labels}}} {count}"
-                ));
-                lines.push(format!(
-                    "pillar_http_outcome_duration_seconds_sum{{{labels}}} {}",
-                    series.micros[i].load(Ordering::Relaxed) as f64 / 1_000_000.0
+                    "pillar_http_outcome_duration_seconds_bucket{{{labels},le=\"{value}\"}} {bucket}"
                 ));
             }
+            lines.push(format!(
+                "pillar_http_outcome_duration_seconds_bucket{{{labels},le=\"+Inf\"}} {count}"
+            ));
+            lines.push(format!(
+                "pillar_http_outcome_duration_seconds_count{{{labels}}} {count}"
+            ));
+            lines.push(format!(
+                "pillar_http_outcome_duration_seconds_sum{{{labels}}} {}",
+                *micros as f64 / 1_000_000.0
+            ));
         }
         lines
     }
@@ -142,24 +186,28 @@ impl Drop for HttpOutcomeGuard {
             .unwrap_or_else(|| self.context.dropped_outcome());
         let i = outcome as usize;
         let elapsed = self.started.elapsed();
+        self.series.counts[i].fetch_add(1, Ordering::AcqRel);
         self.series.micros[i].fetch_add(
             elapsed.as_micros().min(u64::MAX as u128) as u64,
             Ordering::Relaxed,
         );
-        for (b, value) in BUCKETS.iter().enumerate() {
+        for (b, value) in BUCKETS.iter().enumerate().rev() {
             if elapsed.as_secs_f64() <= *value {
-                self.series.buckets[i][b].fetch_add(1, Ordering::Relaxed);
+                self.series.buckets[i][b].fetch_add(1, Ordering::AcqRel);
             }
         }
-        self.series.counts[i].fetch_add(1, Ordering::Relaxed);
         if self.quiet && matches!(outcome, Outcome::Success) {
             tracing::debug!(
+                http_method = self.method,
+                http_route = self.route,
                 http_outcome = outcome.as_str(),
                 duration_ms = elapsed.as_millis(),
                 "http request terminal outcome"
             );
         } else {
             tracing::info!(
+                http_method = self.method,
+                http_route = self.route,
                 http_outcome = outcome.as_str(),
                 duration_ms = elapsed.as_millis(),
                 "http request terminal outcome"

@@ -268,8 +268,7 @@ where
     }
 
     /// Pins at different heights come from separate quorum rounds, so a provider common to two
-    /// subsets could back pins that no single chain history contains. Each provider must
-    /// confirm every pin of the chain in one view, and the quorum votes on that verdict.
+    /// subsets could back pins that no single chain history contains.
     async fn pins_share_one_history_with_quorum(
         &self,
         chain_name: &str,

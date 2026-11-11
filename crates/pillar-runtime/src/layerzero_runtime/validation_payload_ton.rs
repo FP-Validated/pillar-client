@@ -29,10 +29,10 @@ use super::*;
 use sha2::{Digest, Sha256};
 
 use pillar_layerzero::{
-    committable_view_is_signed, dvn_attestation,
-    required_receive_confirmations, ton_address_to_be32, ton_boc_to_base64,
-    ton_payload_signed_targets, uln_default_receive_config, DvnAttestation, TonContractCodeCells,
-    TonPayloadSignedRequest, TonPayloadSignedTargets, TonStorageCell, MAX_ACCOUNT_STATE_CELLS,
+    committable_view_is_signed, dvn_attestation, required_receive_confirmations,
+    ton_address_to_be32, ton_boc_to_base64, ton_payload_signed_targets, uln_default_receive_config,
+    DvnAttestation, TonContractCodeCells, TonPayloadSignedRequest, TonPayloadSignedTargets,
+    TonStorageCell, MAX_ACCOUNT_STATE_CELLS,
 };
 
 /// The per-pathway contract inputs an observation needs.

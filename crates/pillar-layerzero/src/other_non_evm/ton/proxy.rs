@@ -28,8 +28,8 @@ pub fn decode_proxy_admin_target(storage_boc_base64: &str) -> Result<Option<Stri
     decode_proxy_admin_target_from_cell(&cell)
 }
 
-/// [`decode_proxy_admin_target`] over a storage cell the caller already parsed, so a provider's
-/// BOC is parsed once. The caller may have allowed exotic cells; they are refused here.
+/// [`decode_proxy_admin_target`] over a storage cell the caller already parsed, so a provider's BOC
+/// is parsed once.
 pub fn decode_proxy_admin_target_from_cell(
     cell: &ton_core::cell::TonCell,
 ) -> Result<Option<String>, AppCoreError> {

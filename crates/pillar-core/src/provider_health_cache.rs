@@ -31,6 +31,16 @@ pub type ProviderHealthRefresh =
 pub trait ProviderHealthSource: Send + Sync + 'static {
     async fn get_provider_health(&self) -> Result<ProviderHealthSnapshot, String>;
 
+    /// The snapshot with the time of the oldest observation it rests on, when the source can
+    /// tell: a verdict reused from an earlier round must not be dated as a new measurement.
+    async fn get_observed_provider_health(
+        &self,
+    ) -> Result<(ProviderHealthSnapshot, Option<u64>), String> {
+        self.get_provider_health()
+            .await
+            .map(|snapshot| (snapshot, None))
+    }
+
     /// Identifies the provider configuration a probe result describes.
     ///
     /// The cache serves a value for up to two minutes. A configuration refresh
@@ -178,7 +188,7 @@ where
                 }
             }
 
-            let probe = self.source.get_provider_health().await;
+            let probe = self.source.get_observed_provider_health().await;
 
             // One gate for both outcomes. If the configuration moved under the
             // probe then nothing decided under it describes what is serving -
@@ -189,8 +199,8 @@ where
             }
 
             match probe {
-                Ok(value) => {
-                    self.publish(value.clone(), generation).await;
+                Ok((value, observed_at)) => {
+                    self.publish(value.clone(), generation, observed_at).await;
                     return Ok(value);
                 }
                 Err(error) => {
@@ -220,10 +230,16 @@ where
         )
     }
 
-    async fn publish(&self, value: ProviderHealthSnapshot, generation: u64) {
+    async fn publish(
+        &self,
+        value: ProviderHealthSnapshot,
+        generation: u64,
+        observed_at_unix_ms: Option<u64>,
+    ) {
+        let now = (self.now)();
         *self.state.lock().await = Some(CachedHealth {
             value,
-            checked_at_unix_ms: (self.now)(),
+            checked_at_unix_ms: observed_at_unix_ms.map_or(now, |observed| observed.min(now)),
             generation,
         });
     }

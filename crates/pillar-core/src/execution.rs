@@ -262,8 +262,15 @@ impl FairBudget {
                 return Err(BudgetError::Closed);
             }
             if Instant::now() >= deadline {
-                self.count(index, Outcome::TimedOut);
-                return Err(BudgetError::Deadline);
+                let request_expired = current()
+                    .and_then(|ctx| ctx.deadline)
+                    .is_some_and(|at| Instant::now() >= at);
+                if request_expired {
+                    self.count(index, Outcome::TimedOut);
+                    return Err(BudgetError::Deadline);
+                }
+                self.count(index, Outcome::WaitExpired);
+                return Err(BudgetError::WaitExpired);
             }
             self.dispatch(&mut state);
             if self.can_grant(&state, index, waiter.resource.as_deref()) {

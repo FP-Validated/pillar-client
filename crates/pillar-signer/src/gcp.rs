@@ -44,6 +44,53 @@ pub trait GcpKmsClient: Send + Sync + 'static {
 
 type CredentialSource = Arc<dyn Fn() -> Result<Credentials, SignerError> + Send + Sync>;
 
+/// An executable-sourced external account runs a helper that expects the audience and token type
+/// in its environment, which the SDK's default chain does not export: the helper would fail at
+/// the first signature, so the configuration is refused at start instead.
+fn reject_executable_credentials() -> Result<(), SignerError> {
+    const MAX_CREDENTIAL_FILE_BYTES: u64 = 1024 * 1024;
+    let path = std::env::var_os("GOOGLE_APPLICATION_CREDENTIALS")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            let base = std::env::var_os("CLOUDSDK_CONFIG")
+                .map(std::path::PathBuf::from)
+                .or_else(|| {
+                    std::env::var_os("HOME")
+                        .map(|home| std::path::Path::new(&home).join(".config/gcloud"))
+                })?;
+            Some(base.join("application_default_credentials.json"))
+        });
+    let Some(path) = path else {
+        return Ok(());
+    };
+    let Ok(file) = std::fs::File::open(path) else {
+        return Ok(());
+    };
+    let mut bytes = Vec::new();
+    if std::io::Read::read_to_end(
+        &mut std::io::Read::take(file, MAX_CREDENTIAL_FILE_BYTES),
+        &mut bytes,
+    )
+    .is_err()
+    {
+        return Ok(());
+    }
+    let executable = pillar_core::json::parse_value_slice(&bytes)
+        .ok()
+        .is_some_and(|credentials| {
+            credentials.get("type").and_then(serde_json::Value::as_str) == Some("external_account")
+                && credentials
+                    .pointer("/credential_source/executable")
+                    .is_some()
+        });
+    if executable {
+        return Err(SignerError::Message(
+            "GCP executable-sourced external account credentials are not supported".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn default_credentials() -> Result<Credentials, SignerError> {
     google_cloud_auth::credentials::Builder::default()
         .build()
@@ -60,6 +107,7 @@ pub struct GoogleCloudKmsClient {
 
 impl GoogleCloudKmsClient {
     pub async fn from_default_credentials() -> Result<Self, SignerError> {
+        reject_executable_credentials()?;
         let credentials = default_credentials()?;
         let credential_domain = credentials
             .universe_domain()

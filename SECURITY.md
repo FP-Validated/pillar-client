@@ -753,6 +753,56 @@ Addresses live in `stellar_uln_302_for_environment`,
 `stellar_endpoint_v2_for_environment` and `stellar_layerzero_views_for_environment`
 (`crates/pillar-runtime/src/layerzero_runtime/config/evm.rs`).
 
+### Audit findings with a residual risk
+
+These come from the `pillar-client-action-required` audit. Each is either deliberately
+unchanged, mitigated rather than closed, or limited by a dependency; the operator-side
+control is named where one exists.
+
+- Provider configuration is two objects (`providers-v2.json`, `quorum-strategy.json`). The
+  reader now requires two consecutive reads to agree and retries three times, but nothing
+  makes the publication atomic: publish the pair so each object is complete before the
+  other changes, and set `_providersSha256`. Publishing both as one object needs a
+  manifest change (M-105).
+- Move V301 and V302 sends carry `onChainTxHash` but not the source block identity that
+  ULNv2 attaches, so a configured extra-context policy refuses them. Attaching it needs an
+  extra agreed block read on Aptos and Movement and a block lookup on Initia, which has no
+  ledger version; it is not done (M-111).
+- The upload and decompression budgets are process-wide. Rate-limit at the ingress, per
+  client address, before the service: nothing inside it can tell callers apart (M-121).
+  Decompression slots queue for up to two seconds instead of failing at once, but the work
+  of one DEFLATE stream is bounded by its output size and member count, not by its block
+  count, so two crafted streams can still hold both slots until they finish (M-125).
+- One below-quorum provider entity can still hold several slots of a chain's RPC lane,
+  including through ULNv2 MPT building, which reads source blocks while holding the source
+  signing permit. Dispatch orders voters across entities first and a staggered URL is
+  not dialled early, but admission is keyed by chain, not by entity (M-134).
+- The confirmation count in a 400 "block confirmations not met" body is one provider's
+  observation, not an agreed value; the message matches upstream's and is unchanged (I-03).
+- Wallet names are part of the audit conflict identity. KMS wallets are named by position
+  (`KmsWallet{index}`), so inserting or removing an earlier key renames the later ones and
+  restarts their exact-request input binding. Name wallets explicitly and keep their
+  order (I-09).
+- Provider-config and background-heartbeat ages use monotonic time, which does not advance
+  while the host is suspended (I-30). The V3 debug arguments of Aptos, Sui and IOTA omit the
+  target's `0x`; it is left that way because the formatter also serves digest inputs (I-31).
+- The signer address published for Aptos, Movement, Sui and IotaMove mnemonic wallets
+  comes from the BIP-32 key and the signature from the SLIP-0010-seeded key. Verify
+  signatures against the published `publicKey`, never against `address` (L-05).
+- Polygon and Tron finality reads assume that one provider URI gives a consistent node view
+  across the receipt, `latest`, `finalized` and receipt-height reads; the finalized head is
+  not checked to descend from the receipt block (L-57).
+- Dependency limits. AWS profile `duration_seconds` is not sent in AssumeRole requests
+  (`aws-config` 1.11, I-07); the SSO token cache is written non-atomically by the SDK, so
+  use an isolated cache or workload credentials (I-08); the audit database connector
+  cannot negotiate channel binding (`tokio-postgres-rustls`, L-62); `rustls-webpki`
+  0.103.15 can spend CPU on rejected candidate paths (I-33); `google-cloud-auth` does not
+  pace refreshes after short-lived successful tokens (I-37); the HTTP client's chunk-size
+  line length is not bounded below the decoded-body limit (`hyper`, L-98). S3
+  configuration reads no longer ask for a response checksum, which closes the
+  `aws-smithy-checksums` trailer panic for them (L-92), and executable-sourced GCP
+  credentials are refused at start instead of being launched without their audience (I-12).
+
 ### Other known gaps
 
 - `crates/pillar-layerzero/tests/gasolina_parity/ton_dvn_verify.json` holds, for

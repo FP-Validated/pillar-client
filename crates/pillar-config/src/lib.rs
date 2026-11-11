@@ -371,18 +371,22 @@ pub fn layerzero_available_chain_names(environment: &str) -> Result<Vec<String>,
     Ok(available)
 }
 
-/// Runtime assembly needs an EndpointV2 id and the ULN302 deployments for every EVM-shaped
-/// chain it serves. A legacy-only chain listed without them would stop the whole instance from
-/// starting, so it is not advertised.
+/// Runtime assembly needs an EndpointV2 id and the ULN302 deployments for every EVM-shaped chain it
+/// serves.
 fn serves_endpoint_v2(environment: &str, chain_name: &str) -> bool {
     match static_chain_type_name(chain_name) {
         Ok("EVM" | "TRON") => {
             layerzero_evm_endpoint_id(chain_name, environment).is_ok()
-                && ["EndpointV2", "SendUln302", "ReceiveUln302", "ReceiveUln302View"]
-                    .iter()
-                    .all(|contract| {
-                        layerzero_contract_address(chain_name, environment, contract).is_ok()
-                    })
+                && [
+                    "EndpointV2",
+                    "SendUln302",
+                    "ReceiveUln302",
+                    "ReceiveUln302View",
+                ]
+                .iter()
+                .all(|contract| {
+                    layerzero_contract_address(chain_name, environment, contract).is_ok()
+                })
         }
         _ => true,
     }
@@ -1517,7 +1521,9 @@ pub fn redact_url(raw: &str) -> String {
 
 fn is_url_scheme(scheme: &str) -> bool {
     let mut chars = scheme.chars();
-    chars.next().is_some_and(|first| first.is_ascii_alphabetic())
+    chars
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic())
         && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
 }
 
@@ -1658,8 +1664,7 @@ impl RemoteProviderSource {
 
     /// Both objects are read twice and a generation is built only from a pair that did not move
     /// between the reads, so a rollout that writes the two objects one after the other is not
-    /// served half-applied. Two independent objects cannot be made atomic from the reader's
-    /// side; publishing them as one object closes the remaining window (see `SECURITY.md`).
+    /// served half-applied.
     pub async fn load(
         &self,
         loader: &(impl RemoteProviderConfigLoader + ?Sized),

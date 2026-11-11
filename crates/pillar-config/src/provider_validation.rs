@@ -274,14 +274,13 @@ fn check_requirement_set(
         return false;
     };
     // Each slot needs its own entity, so more slots than entities is unmet.
-    let total = demand.values().fold(0usize, |sum, n| sum.saturating_add(*n));
+    let total = demand
+        .values()
+        .fold(0usize, |sum, n| sum.saturating_add(*n));
     pool >= any_quorum.max(total) && every_category_subset_has_enough_entities(counts, &demand)
 }
 
-/// Whether every named-category slot can hold its own entity. By Hall's condition that holds
-/// exactly when, for every subset of the demanded categories, the entities they can draw on
-/// number at least the slots they ask for. There are only a few named categories, so the work
-/// is linear in the pool, however many slots a policy asks for.
+/// Whether every named-category slot can hold its own entity.
 fn every_category_subset_has_enough_entities(
     counts: &BTreeMap<String, BTreeSet<String>>,
     demand: &BTreeMap<String, usize>,

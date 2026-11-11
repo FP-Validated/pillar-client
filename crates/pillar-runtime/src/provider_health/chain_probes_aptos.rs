@@ -9,7 +9,10 @@ where
     T: JsonRpcTransport,
 {
     let started_at = Instant::now();
-    let result = match transport.get_json_scoped(url.clone(), headers.clone()).await {
+    let result = match transport
+        .get_json_scoped(url.clone(), headers.clone())
+        .await
+    {
         // A gateway serving the ledger base as `/v1/` redirects `/v1`, and redirects are not
         // followed; the configured spelling is only known to differ, so the slash is retried.
         Err(RpcError::Remote(message)) if message.starts_with("Provider returned HTTP 30") => {

@@ -296,7 +296,9 @@ where
                         let (normalized, _) =
                             crate::provider_health::solana_transaction_projection(
                                 &result,
-                                Some(&self.config.trusted_solana_endpoint_program_ids),
+                                crate::provider_health::SolanaInstructionBinding::TrustedData(
+                                    &self.config.trusted_solana_endpoint_program_ids,
+                                ),
                             )
                             .map_err(|error| RpcError::Remote(error.to_string()))?;
                         let fingerprint =
@@ -2529,8 +2531,44 @@ fn stellar_transaction_vote(result: Value) -> Result<(String, Value), RpcError> 
         result.pointer("/events/contractEventsXdr"),
     );
     crate::provider_health::canonical_json_fingerprint(&fields)
-        .map(|fingerprint| (fingerprint, result))
+        .map(|fingerprint| (fingerprint, stellar_consumed_fields(&result)))
         .map_err(|error| RpcError::Remote(error.to_string()))
+}
+
+/// What `decode_stellar_packet_sent_events` and the status check read.
+fn stellar_consumed_fields(result: &Value) -> Value {
+    let mut consumed = serde_json::Map::new();
+    for key in ["status", "ledger"] {
+        if let Some(value) = result
+            .get(key)
+            .filter(|value| value.is_string() || value.is_number())
+        {
+            consumed.insert(key.to_string(), value.clone());
+        }
+    }
+    if let Some(events) = result
+        .pointer("/events/contractEventsXdr")
+        .and_then(Value::as_array)
+    {
+        let events = events
+            .iter()
+            .filter_map(Value::as_array)
+            .map(|operation| {
+                Value::Array(
+                    operation
+                        .iter()
+                        .filter(|event| event.is_string())
+                        .cloned()
+                        .collect(),
+                )
+            })
+            .collect();
+        consumed.insert(
+            "events".to_string(),
+            json!({ "contractEventsXdr": Value::Array(events) }),
+        );
+    }
+    Value::Object(consumed)
 }
 
 #[cfg(test)]

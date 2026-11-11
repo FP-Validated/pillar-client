@@ -1,5 +1,4 @@
-//! Log output off the request path. Workers hand each record to a bounded queue and one thread
-//! writes it, so a stalled stdout consumer costs log lines instead of runtime workers.
+//! Log output off the request path.
 use std::io::{self, Write};
 use std::sync::mpsc::{sync_channel, SyncSender};
 use tracing_subscriber::fmt::MakeWriter;

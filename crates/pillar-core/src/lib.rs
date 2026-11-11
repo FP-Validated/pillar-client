@@ -615,12 +615,7 @@ impl PillarApp {
         })
         .await
         .map_err(|error| {
-            let render = || {
-                (
-                    pathway_json(&pathway_id),
-                    legacy_pathway_json(&pathway_id),
-                )
-            };
+            let render = || (pathway_json(&pathway_id), legacy_pathway_json(&pathway_id));
             match error {
                 AppCoreError::BadRequest(message) => {
                     let (v2_order, v1_order) = render();

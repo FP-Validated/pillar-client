@@ -19,8 +19,7 @@ where
                 }
                 if is_chain_native_payload_signed_destination(dst_chain_name) {
                     // The receive requirement does not depend on the DVN subject; only the
-                    // duplicate lookup does. Without a subject the lookup reads a null record,
-                    // so the confirmation floor is still returned to the caller.
+                    // duplicate lookup does.
                     if dst_chain_name == "canton" {
                         return self
                             .validate_canton_payload_not_signed_with_quorum(
@@ -395,7 +394,8 @@ where
         dst_chain_name: &str,
     ) -> Result<Option<u64>, AppCoreError> {
         let snapshot = self.providers.load();
-        let sequencer = canton_sequencer(dst_chain_name, snapshot.provider_config(dst_chain_name)?)?;
+        let sequencer =
+            canton_sequencer(dst_chain_name, snapshot.provider_config(dst_chain_name)?)?;
         let (signed, required) =
             canton_payload_signed(&self.transport, &sequencer, sent_event, verifier_address)
                 .await?;

@@ -106,9 +106,7 @@ pub fn build_evm_verifiable_call_data(proof: &EvmUlnProof) -> Result<String, App
     Ok(format!("0x{}", hex::encode(out)))
 }
 
-/// `EndpointV2.inboundPayloadHash(receiver, srcEid, sender, nonce)` for the packet a header
-/// names. A nilified packet keeps a non-zero hash there (the NIL sentinel), which the receive
-/// libraries' own views report as already verified.
+/// `EndpointV2.inboundPayloadHash(receiver, srcEid, sender, nonce)` for the packet a header names.
 pub fn build_evm_inbound_payload_hash_call_data(
     proof: &EvmUlnProof,
 ) -> Result<String, AppCoreError> {

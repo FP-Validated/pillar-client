@@ -377,5 +377,10 @@ async fn initia_destination_on_another_stage_is_refused() {
         .get_lz_sent_event(fixture["txHash"].as_str().unwrap(), &request)
         .await
         .unwrap_err();
-    assert!(error.to_string().contains("Did not find correct PacketSent()"), "{error}");
+    assert!(
+        error
+            .to_string()
+            .contains("Did not find correct PacketSent()"),
+        "{error}"
+    );
 }

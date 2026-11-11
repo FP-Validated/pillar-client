@@ -203,6 +203,7 @@ async fn serve_until_with_lifetime(
     };
     let started = Instant::now();
     let deadline = started + shutdown_grace;
+    connections.set_grace_deadline(deadline);
     let withdrawal_end = started + shutdown_withdrawal.min(shutdown_grace);
     shutdown_signal.trigger();
     if !shutdown_withdrawal.is_zero() {
@@ -388,6 +389,16 @@ where
             let draining = control
                 .as_ref()
                 .is_some_and(|control| control.is_draining());
+            if control
+                .as_ref()
+                .is_some_and(|control| control.grace_expired())
+            {
+                context.shutdown();
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "shutdown grace expired before the response was released",
+                ));
+            }
             if Instant::now() >= deadline || response.is_err() {
                 context.timeout();
                 if let Ok(Ok(response)) = &mut response {

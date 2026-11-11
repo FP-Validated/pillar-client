@@ -53,7 +53,8 @@ pub use signer_runtime::{
     RuntimeSignerConfig, RuntimeSignerMaterial,
 };
 pub use startup_report::{
-    startup_report_from_env_map, RuntimeMode, StartupChainReport, StartupReport,
+    startup_report_from_env_map, startup_report_from_env_map_async, RuntimeMode,
+    StartupChainReport, StartupReport,
 };
 pub use validation::{
     ExpirationValidRange, RuntimeAppValidator, RuntimeValidationChecks,

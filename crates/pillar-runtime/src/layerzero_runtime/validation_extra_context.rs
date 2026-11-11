@@ -46,6 +46,17 @@ where
                     "Runtime RPC extra-context AWS Lambda client is not configured".to_string(),
                 )
             })?;
+            // A migrated ULNv2 event carries its message twice (`message` and `extra.payload`),
+            // so a large one can pass every earlier size check and still be refused by Lambda.
+            const LAMBDA_INVOCATION_PAYLOAD_LIMIT: usize = 6 * 1024 * 1024;
+            let size = serde_json::to_vec(&payload)
+                .map_err(|error| AppCoreError::Internal(error.to_string()))?
+                .len();
+            if size > LAMBDA_INVOCATION_PAYLOAD_LIMIT {
+                return Err(AppCoreError::BadRequest(format!(
+                    "Extra context request body of {size} bytes exceeds the {LAMBDA_INVOCATION_PAYLOAD_LIMIT} byte Lambda invocation limit"
+                )));
+            }
             let response = client
                 .invoke_json_scoped(function_name, payload)
                 .await
@@ -654,6 +665,14 @@ where
         .get("result")
         .filter(|result| !result.is_null())
         .ok_or_else(|| AppCoreError::Internal("Missing Starknet transaction".to_string()))?;
+    // An L1 handler has no sender account, and a policy-origin meaning for the handler or its L1
+    // caller is not defined here: it is refused by name instead of as a malformed sender.
+    if result.get("type").and_then(Value::as_str) == Some("L1_HANDLER") {
+        return Err(AppCoreError::Internal(
+            "Starknet L1_HANDLER transactions have no sender account and are not supported by extra-context validation"
+                .to_string(),
+        ));
+    }
     let sender = result
         .get("sender_address")
         .and_then(Value::as_str)

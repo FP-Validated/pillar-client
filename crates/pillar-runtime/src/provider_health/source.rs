@@ -205,9 +205,16 @@ where
                                 && pillar_core::elapsed_ms(checked_at_unix_ms, previous.at_unix_ms)
                                     <= pillar_core::PROVIDER_HEALTH_CACHE_STALE_MS
                         }));
+                // A verdict that rests on an earlier round keeps that round's time, so the cache
+                // does not date a retained observation as fresh.
+                let reused_at = (!observed && healthy)
+                    .then(|| previous.map(|previous| previous.at_unix_ms))
+                    .flatten();
                 // Overlapping rounds can finish out of order: the newer generation, then the
-                // later probe, wins.
-                if observed
+                // later probe, wins. A round that observed a failure is stored even when some
+                // siblings were not admitted, so a later all-unadmitted round cannot resurrect
+                // an older healthy observation.
+                if (observed || !measured_healthy)
                     && previous.is_none_or(|previous| {
                         if previous.config == *config {
                             checked_at_unix_ms >= previous.at_unix_ms
@@ -230,7 +237,7 @@ where
                     chain_name.clone(),
                     ChainProviderHealthReport {
                         healthy,
-                        checked_at_unix_ms,
+                        checked_at_unix_ms: reused_at.unwrap_or(checked_at_unix_ms),
                         providers,
                     },
                 ))
@@ -271,11 +278,23 @@ where
     }
 
     async fn get_provider_health(&self) -> Result<ProviderHealthSnapshot, String> {
+        self.get_observed_provider_health()
+            .await
+            .map(|(snapshot, _)| snapshot)
+    }
+
+    async fn get_observed_provider_health(
+        &self,
+    ) -> Result<(ProviderHealthSnapshot, Option<u64>), String> {
         let report = self
             .get_provider_health_report()
             .await
             .map_err(|error| error.to_string())?;
-        Ok(provider_health_snapshot_from_report(&report))
+        let oldest = report
+            .values()
+            .map(|chain_report| chain_report.checked_at_unix_ms)
+            .min();
+        Ok((provider_health_snapshot_from_report(&report), oldest))
     }
 
     fn scope_refresh(
