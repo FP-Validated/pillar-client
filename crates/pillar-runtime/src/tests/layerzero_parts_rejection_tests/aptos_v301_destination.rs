@@ -922,8 +922,7 @@ async fn v301_to_aptos_with_a_dvn_reads_upstreams_views_and_signs_once() {
         assert_eq!(arguments(&confirmations)[2], DVN);
         let details = &outcome.body["body"]["debugInfo"]["details"];
         assert_eq!(
-            details["dvnCallData"]["targetContract"],
-            uln_301.trim_start_matches("0x"),
+            details["dvnCallData"]["targetContract"], uln_301,
             "{environment}"
         );
         assert_eq!(

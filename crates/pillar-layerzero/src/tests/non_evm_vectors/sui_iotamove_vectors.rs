@@ -43,13 +43,13 @@ async fn sui_iotamove_builder_matches_upstream_v302_hash_verify_vectors() {
             "sui",
             39_000_u64,
             "0xa3a435b92460100101237390814fd76b78120635c4cc0f3e2836ed5bfb4d0d54",
-            "3ce7457bed48ad23ee5d611dd3172ae4fbd0a22ea0e846782a7af224d905dbb0",
+            "0x3ce7457bed48ad23ee5d611dd3172ae4fbd0a22ea0e846782a7af224d905dbb0",
         ),
         (
             "iotal1",
             39_200_u64,
             "0x62c93905a668edcc42c971b69ff87e1bd4af96f1c5fdad3f0d2c68e4db0b0211",
-            "042e3bb837e5528e495124542495b9df5016acd011d89838ae529db5a814499e",
+            "0x042e3bb837e5528e495124542495b9df5016acd011d89838ae529db5a814499e",
         ),
     ];
 

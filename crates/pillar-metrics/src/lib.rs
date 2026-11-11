@@ -167,9 +167,11 @@ impl PillarMetrics {
         &mut self,
         method: &str,
         path: &str,
+        request_id: &str,
         context: pillar_core::execution::RequestContext,
     ) -> HttpOutcomeGuard {
-        self.http_accounting.begin(method, path, context)
+        self.http_accounting
+            .begin(method, path, request_id, context)
     }
     pub fn attach_execution(&mut self, resources: Arc<pillar_core::execution::ExecutionResources>) {
         self.execution = Some(resources);

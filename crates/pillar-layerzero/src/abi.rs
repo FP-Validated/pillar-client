@@ -50,7 +50,7 @@ pub(crate) fn u64_from_i64(value: i64, name: &str) -> Result<u64, AppCoreError> 
 }
 
 pub(crate) fn bytes32_hex_string(value: &str) -> Result<String, AppCoreError> {
-    Ok(hex::encode(address_to_bytes32(value)?))
+    Ok(format!("0x{}", hex::encode(address_to_bytes32(value)?)))
 }
 
 pub fn build_evm_dvn_call_data_result(

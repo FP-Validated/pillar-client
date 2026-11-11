@@ -28,6 +28,7 @@ pub struct HttpOutcomeGuard {
     quiet: bool,
     method: &'static str,
     route: &'static str,
+    request_id: String,
 }
 pub fn normalized_method(method: &str) -> &'static str {
     match method {
@@ -42,7 +43,13 @@ pub fn normalized_method(method: &str) -> &'static str {
     }
 }
 impl HttpAccounting {
-    pub fn begin(&mut self, method: &str, path: &str, context: RequestContext) -> HttpOutcomeGuard {
+    pub fn begin(
+        &mut self,
+        method: &str,
+        path: &str,
+        request_id: &str,
+        context: RequestContext,
+    ) -> HttpOutcomeGuard {
         let path = match path {
             "/" => "/",
             "/v2/resolve-and-sign" => "/v2/resolve-and-sign",
@@ -67,6 +74,7 @@ impl HttpAccounting {
             quiet: matches!(method, "GET" | "HEAD"),
             method,
             route: path,
+            request_id: request_id.to_string(),
         }
     }
     pub fn render(&self) -> Vec<String> {
@@ -198,6 +206,7 @@ impl Drop for HttpOutcomeGuard {
         }
         if self.quiet && matches!(outcome, Outcome::Success) {
             tracing::debug!(
+                request_id = %self.request_id,
                 http_method = self.method,
                 http_route = self.route,
                 http_outcome = outcome.as_str(),
@@ -206,6 +215,7 @@ impl Drop for HttpOutcomeGuard {
             );
         } else {
             tracing::info!(
+                request_id = %self.request_id,
                 http_method = self.method,
                 http_route = self.route,
                 http_outcome = outcome.as_str(),

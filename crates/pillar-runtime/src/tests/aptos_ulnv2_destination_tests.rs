@@ -506,12 +506,18 @@ async fn evm_uln_v2_to_aptos_signs_like_gasolina_through_http() {
             "{name}: routed by the Aptos receive library"
         );
         if skip {
+            // Upstream publishes the BIP-32 key's address; this service publishes the address of
+            // the key that signs (L-05), so only the signature is upstream's.
+            assert_eq!(
+                row["outcome"]["signed"]["signerAddress"],
+                "0x5e55aa0e429872e806ec6b64a699fcd31b8f6c15fff9c42535abfb82f40dfa1e"
+            );
             let expected = json!({
                 "statusCode": 200,
                 "body": {
                     "signatures": [{
                         "signature": row["outcome"]["signed"]["signature"],
-                        "address": row["outcome"]["signed"]["signerAddress"],
+                        "address": "0x7d5eed6dc48cc651356414e20747b9a15cb591cfb61a571e8489a57f2550bf3c",
                     }],
                     "payload": row["message"],
                 },

@@ -13,6 +13,34 @@ fn gasolina_parity_json(name: &str) -> String {
     })
 }
 
+/// Upstream publishes the BIP-32 key's address for Aptos-family and Sui-family mnemonic wallets;
+/// this service publishes the address of the key that signs (L-05). Signatures are unchanged.
+fn signing_key_address(upstream: &str) -> &str {
+    match upstream {
+        "0x5e55aa0e429872e806ec6b64a699fcd31b8f6c15fff9c42535abfb82f40dfa1e" => {
+            "0x7d5eed6dc48cc651356414e20747b9a15cb591cfb61a571e8489a57f2550bf3c"
+        }
+        "0x97247ef2df3999851f48b37e1fde2e154f546a64dc8251c64891900160a4fa03" => {
+            "0x3dbeb591c6ebd7e7bbfc8cfc344554d508be4e73f2c3bc62bd2f03cdf9691700"
+        }
+        other => other,
+    }
+}
+
+fn with_signing_key_addresses(mut http: Value) -> Value {
+    if let Some(signatures) = http
+        .pointer_mut("/body/body/signatures")
+        .and_then(Value::as_array_mut)
+    {
+        for signature in signatures {
+            if let Some(address) = signature["address"].as_str() {
+                signature["address"] = Value::from(signing_key_address(address));
+            }
+        }
+    }
+    http
+}
+
 /// `calculate_guid` against guids EndpointV2 itself wrote into recorded mainnet
 /// and testnet `PacketSent` events. A V2 send migrated to ReceiveUln301 is signed
 /// over this guid, so it has to be the contract's `GUID.generate`, not a lookalike.
@@ -1093,6 +1121,7 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
                     signature.address.clone(),
                     expected["signerAddress"]
                         .as_str()
+                        .map(signing_key_address)
                         .expect("upstream addressed")
                         .to_string(),
                 ),
@@ -1230,8 +1259,8 @@ async fn historical_pathways_match_gasolina_through_the_public_signing_path() {
                     .unwrap(),
             )
             .unwrap();
-            let theirs = &expected["http"][scenario];
-            if &json!({ "status": status, "body": body }) != theirs {
+            let theirs = with_signing_key_addresses(expected["http"][scenario].clone());
+            if json!({ "status": status, "body": body }) != theirs {
                 mismatches.push(format!(
                     "{id}: HTTP {scenario}\n      ours {status} {body}\n      them {theirs}"
                 ));

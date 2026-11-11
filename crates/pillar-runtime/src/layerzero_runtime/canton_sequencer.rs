@@ -280,7 +280,7 @@ impl CantonSequencer {
         let raw = parse_body("POST", status, &text).await?;
         let unexpected = || AppCoreError::Internal("Unexpected sequencer response".to_string());
         let signatures = signatures(&raw).ok_or_else(unexpected)?;
-        self.verify("contract", &request, &raw, &signatures)?;
+        let raw = self.verify("contract", request, raw, signatures).await?;
         let answer = if error_response(&raw) {
             SequencerAnswer::Error
         } else if raw.get("value").is_some() && hex_string(raw.get("stateRoot")) {
@@ -353,7 +353,7 @@ impl CantonSequencer {
                 .map(|(key, value)| ((*key).to_string(), Value::from(*value)))
                 .collect(),
         );
-        self.verify("scan", &request, &raw, &signatures)?;
+        let raw = self.verify("scan", request, raw, signatures).await?;
         let answer = if error_response(&raw) {
             SequencerAnswer::Error
         } else {
@@ -365,19 +365,21 @@ impl CantonSequencer {
     }
 
     /// `Secp256k1QuorumVerifier.verify`, or nothing at all without a committee, which is
-    /// upstream's `NoopQuorumVerifier`.
-    fn verify(
+    /// upstream's `NoopQuorumVerifier`. Hashing walks the whole untrusted response, so it runs
+    /// off the runtime workers and a few at a time process-wide (M-127).
+    async fn verify(
         &self,
-        signature_type: &str,
-        request: &Value,
-        raw: &Value,
-        signatures: &[String],
-    ) -> Result<(), AppCoreError> {
-        let Some(committee) = &self.committee else {
-            return Ok(());
+        signature_type: &'static str,
+        request: Value,
+        raw: Value,
+        signatures: Vec<String>,
+    ) -> Result<Value, AppCoreError> {
+        static VERIFICATIONS: std::sync::LazyLock<Arc<tokio::sync::Semaphore>> =
+            std::sync::LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(4)));
+        let Some(committee) = self.committee.clone() else {
+            return Ok(raw);
         };
-        // Hashing walks the whole untrusted response; a set too small to reach the quorum is
-        // refused before that work.
+        // A set too small to reach the quorum is refused before any hashing.
         if signatures.len() < committee.quorum {
             return Err(insufficient_signature_quorum(
                 signatures
@@ -386,28 +388,46 @@ impl CantonSequencer {
                     .next_back(),
             ));
         }
-        let mut hasher = Keccak256::new();
-        write_committee_payload(signature_type, request, raw, &mut |bytes| {
-            hasher.update(bytes);
-        });
-        let digest: [u8; 32] = hasher.finalize().into();
-        let mut verified = HashSet::new();
-        let mut last_error = None;
-        for signature in signatures {
-            match ver_hex_to_bytes(signature).and_then(|bytes| recover_public_key(&digest, &bytes))
-            {
-                Ok(public_key) if committee.public_keys.contains(&public_key) => {
-                    verified.insert(public_key);
-                }
-                Ok(_) => {}
-                Err(error) => last_error = Some(error),
-            }
-        }
-        if verified.len() < committee.quorum {
-            return Err(insufficient_signature_quorum(last_error));
-        }
-        Ok(())
+        let permit =
+            VERIFICATIONS.clone().acquire_owned().await.map_err(|_| {
+                AppCoreError::Internal("Committee verification is closed".to_string())
+            })?;
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            verify_committee(&committee, signature_type, &request, &raw, &signatures).map(|()| raw)
+        })
+        .await
+        .map_err(|_| AppCoreError::Internal("Committee verification failed".to_string()))?
     }
+}
+
+fn verify_committee(
+    committee: &Committee,
+    signature_type: &str,
+    request: &Value,
+    raw: &Value,
+    signatures: &[String],
+) -> Result<(), AppCoreError> {
+    let mut hasher = Keccak256::new();
+    write_committee_payload(signature_type, request, raw, &mut |bytes| {
+        hasher.update(bytes);
+    });
+    let digest: [u8; 32] = hasher.finalize().into();
+    let mut verified = HashSet::new();
+    let mut last_error = None;
+    for signature in signatures {
+        match ver_hex_to_bytes(signature).and_then(|bytes| recover_public_key(&digest, &bytes)) {
+            Ok(public_key) if committee.public_keys.contains(&public_key) => {
+                verified.insert(public_key);
+            }
+            Ok(_) => {}
+            Err(error) => last_error = Some(error),
+        }
+    }
+    if verified.len() < committee.quorum {
+        return Err(insufficient_signature_quorum(last_error));
+    }
+    Ok(())
 }
 
 fn insufficient_signature_quorum(last_error: Option<impl std::fmt::Display>) -> AppCoreError {

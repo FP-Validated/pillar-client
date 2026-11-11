@@ -98,10 +98,6 @@ impl ChainAddress for AptosChain {
             SignatureType::Ed25519
         }
     }
-
-    fn address_private_key_signature_type(&self, _is_kms: bool) -> SignatureType {
-        SignatureType::Ecdsa
-    }
 }
 
 #[derive(Clone)]
@@ -186,10 +182,6 @@ impl ChainAddress for SuiChain {
         } else {
             SignatureType::Ed25519
         }
-    }
-
-    fn address_private_key_signature_type(&self, _is_kms: bool) -> SignatureType {
-        SignatureType::Ecdsa
     }
 }
 

@@ -31,7 +31,7 @@ use tracing::Instrument;
 
 mod express;
 mod upload;
-pub use upload::RequestUploadBudget;
+pub use upload::{RequestUploadBudget, UploadPeer};
 
 use express::JSON_BODY_LIMIT_BYTES;
 
@@ -439,11 +439,12 @@ async fn request_middleware(
     let context = pillar_core::execution::current().unwrap_or_else(|| {
         pillar_core::execution::RequestContext::new(std::time::Duration::from_secs(58))
     });
-    let mut outcome = state
-        .metrics
-        .lock()
-        .await
-        .begin_http_request(method, route, context.clone());
+    let mut outcome =
+        state
+            .metrics
+            .lock()
+            .await
+            .begin_http_request(method, route, &request_id, context.clone());
 
     let mut response = if state.app.api_auth_enabled()
         && authenticated_route(method, req.uri().path(), state.app.public_sign_routes())

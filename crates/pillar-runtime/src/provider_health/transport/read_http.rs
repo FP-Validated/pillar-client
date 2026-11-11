@@ -21,15 +21,8 @@ impl std::fmt::Debug for ReadHttp {
 
 impl ReadHttp {
     pub(super) fn new() -> Result<Self, String> {
-        let roots =
-            rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        let tls = rustls::ClientConfig::builder_with_provider(Arc::new(
-            rustls::crypto::ring::default_provider(),
-        ))
-        .with_safe_default_protocol_versions()
-        .map_err(|_| "Cannot configure READ TLS".to_string())?
-        .with_root_certificates(roots)
-        .with_no_client_auth();
+        let tls = super::tls::provider_tls_config(&[])
+            .map_err(|_| "Cannot configure READ TLS".to_string())?;
         let connector = hyper_rustls::HttpsConnectorBuilder::new()
             .with_tls_config(tls.clone())
             .https_or_http()

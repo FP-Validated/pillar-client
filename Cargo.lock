@@ -3229,6 +3229,7 @@ dependencies = [
  "async-trait",
  "indexmap 2.14.0",
  "pillar-core",
+ "rustix",
  "tokio",
  "tracing",
 ]
@@ -3239,12 +3240,15 @@ version = "2.7.5"
 dependencies = [
  "async-trait",
  "aws-config",
+ "aws-credential-types",
+ "aws-runtime",
  "aws-sdk-kms",
  "aws-sdk-lambda",
  "aws-sdk-s3",
  "aws-sdk-secretsmanager",
  "aws-smithy-http-client",
  "aws-smithy-runtime-api",
+ "aws-types",
  "axum",
  "azure_core",
  "azure_identity",
