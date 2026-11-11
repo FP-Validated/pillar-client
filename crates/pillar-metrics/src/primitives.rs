@@ -145,35 +145,68 @@ impl GaugeMetric {
 /// any reason - a panic, a hang, an accidental `break` - shows an age that grows
 /// without bound, which is what the age was there to reveal.
 ///
-/// Times are `tokio::time::Instant`, so a paused test clock moves them.
+/// Times are `tokio::time::Instant`, so a paused test clock moves them. That clock stops while
+/// the host is suspended, so the time spent suspended is added from the host's own count.
 #[derive(Clone)]
 pub struct AgeSource {
     origin: Instant,
     stamped_millis: Arc<AtomicU64>,
+    stamped_suspended_millis: Arc<AtomicU64>,
+    suspended_millis: fn() -> u64,
 }
 
 impl AgeSource {
     pub(crate) fn started_now() -> Self {
+        Self::with_suspension_clock(suspended_millis)
+    }
+
+    fn with_suspension_clock(suspended_millis: fn() -> u64) -> Self {
         Self {
             origin: Instant::now(),
             stamped_millis: Arc::new(AtomicU64::new(0)),
+            stamped_suspended_millis: Arc::new(AtomicU64::new(suspended_millis())),
+            suspended_millis,
         }
     }
 
     /// Records that the thing being measured just happened.
     pub fn stamp(&self) {
+        self.stamped_suspended_millis
+            .store((self.suspended_millis)(), Ordering::SeqCst);
         self.stamped_millis
             .store(self.millis_since_origin(), Ordering::SeqCst);
     }
 
     pub fn age_seconds(&self) -> f64 {
         let stamped = self.stamped_millis.load(Ordering::SeqCst);
-        self.millis_since_origin().saturating_sub(stamped) as f64 / 1_000.0
+        let suspended = (self.suspended_millis)()
+            .saturating_sub(self.stamped_suspended_millis.load(Ordering::SeqCst));
+        self.millis_since_origin()
+            .saturating_sub(stamped)
+            .saturating_add(suspended) as f64
+            / 1_000.0
     }
 
     fn millis_since_origin(&self) -> u64 {
         u64::try_from(self.origin.elapsed().as_millis()).unwrap_or(u64::MAX)
     }
+}
+
+/// Milliseconds the host has spent suspended since boot: `CLOCK_BOOTTIME` counts suspension and
+/// `CLOCK_MONOTONIC`, which `Instant` reads, does not.
+#[cfg(target_os = "linux")]
+fn suspended_millis() -> u64 {
+    use rustix::time::{clock_gettime, ClockId};
+    let millis = |time: rustix::time::Timespec| {
+        i128::from(time.tv_sec) * 1_000 + i128::from(time.tv_nsec) / 1_000_000
+    };
+    let gap = millis(clock_gettime(ClockId::Boottime)) - millis(clock_gettime(ClockId::Monotonic));
+    u64::try_from(gap).unwrap_or(0)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn suspended_millis() -> u64 {
+    0
 }
 
 /// A gauge whose samples are read from [`AgeSource`]s at render time.
@@ -334,5 +367,25 @@ impl HistogramMetric {
             ));
         }
         lines
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AgeSource;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static SUSPENDED: AtomicU64 = AtomicU64::new(5_000);
+
+    #[tokio::test(start_paused = true)]
+    async fn age_counts_host_suspension_since_the_stamp() {
+        let source = AgeSource::with_suspension_clock(|| SUSPENDED.load(Ordering::SeqCst));
+        tokio::time::advance(std::time::Duration::from_secs(2)).await;
+        source.stamp();
+        tokio::time::advance(std::time::Duration::from_secs(3)).await;
+        SUSPENDED.fetch_add(600_000, Ordering::SeqCst);
+        assert_eq!(source.age_seconds(), 603.0);
+        source.stamp();
+        assert_eq!(source.age_seconds(), 0.0);
     }
 }

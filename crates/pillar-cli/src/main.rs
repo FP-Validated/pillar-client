@@ -308,6 +308,7 @@ fn spawn_connection(
         header_read: header_read_timeout,
     } = connection_timeouts;
     let (registration, control, close) = connections.register();
+    let peer = stream.peer_addr().ok().map(|address| address.ip());
     tasks.spawn(async move {
         let _permit = permit;
         let _registration = registration;
@@ -318,6 +319,7 @@ fn spawn_connection(
             keep_alive_timeout,
             header_read_timeout,
             lifetime,
+            peer,
             Some((control, close)),
         )
         .await
@@ -347,10 +349,12 @@ where
         header_read_timeout,
         max_connection_lifetime,
         None,
+        None,
     )
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn serve_connection_controlled<I>(
     io: I,
     app: Router,
@@ -358,6 +362,7 @@ async fn serve_connection_controlled<I>(
     keep_alive_timeout: Duration,
     header_read_timeout: Duration,
     max_connection_lifetime: Duration,
+    peer: Option<std::net::IpAddr>,
     control: Option<(
         Arc<connections::ConnectionControl>,
         tokio::sync::watch::Receiver<bool>,
@@ -382,6 +387,11 @@ where
             let (parts, body) = request.into_parts();
             let mut request = Request::from_parts(parts, Body::new(body));
             request.extensions_mut().insert(pillar_api::SocketRequest);
+            if let Some(peer) = peer {
+                request
+                    .extensions_mut()
+                    .insert(pillar_api::UploadPeer(peer));
+            }
             let mut response = context
                 .clone()
                 .scope(tokio::time::timeout_at(deadline, app.oneshot(request)))

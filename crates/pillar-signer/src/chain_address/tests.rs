@@ -83,51 +83,37 @@ async fn solana_uses_ed25519_for_non_kms_and_ecdsa_for_kms() {
 }
 
 #[tokio::test]
-async fn aptos_uses_ed25519_private_key_for_local_signing_but_ecdsa_for_address() {
-    let raw = Arc::new(RequestAwarePublicKeySigner {
-        sign_requests: Mutex::new(Vec::new()),
-        public_key_requests: Mutex::new(Vec::new()),
-        ecdsa_public_key: ecdsa_public_key_a(),
-    });
-    let signer = PillarSignerAdapter::new(raw.clone(), AptosChain, false);
-    let signature = signer.pillar_sign(&[1]).await.unwrap();
+async fn move_mnemonic_address_names_the_key_that_signs() {
+    use crate::{local_mnemonic::LocalMnemonicRawSignerAdapter, types::LocalMnemonic};
+    let mnemonic = |path: &str| {
+        Arc::new(LocalMnemonicRawSignerAdapter::new(LocalMnemonic {
+            mnemonic: zeroize::Zeroizing::new(
+                "test test test test test test test test test test test junk".to_string(),
+            ),
+            path: path.to_string(),
+        }))
+    };
+    // Prefixes of the signing keys' addresses; the BIP-32 keys give 0x5e55aa0e and 0x97247ef2.
+    let aptos = PillarSignerAdapter::new(mnemonic("m/44'/637'/0'/0'/0'"), AptosChain, false);
+    let info = aptos.get_signer_info().await.unwrap();
+    let key = [
+        &[0x04][..],
+        &hex::decode(info.public_key.trim_start_matches("0x")).unwrap(),
+    ]
+    .concat();
+    assert_eq!(info.address, AptosChain.signer_address(&key).unwrap());
+    assert!(info.address.starts_with("0x7d5eed6d"), "{}", info.address);
+    assert_eq!(aptos.pillar_sign(&[1]).await.unwrap().address, info.address);
 
-    assert_eq!(
-        signature.address,
-        "0xb459a8bef24fe3598be8b968c8e632b7992babdecfb026a80399104c8c3cd739"
-    );
-    assert_eq!(
-        raw.sign_requests.lock().await[0].private_key_signature_type,
-        SignatureType::Ed25519
-    );
-    assert_eq!(
-        raw.public_key_requests.lock().await[0].private_key_signature_type,
-        SignatureType::Ecdsa
-    );
-}
-
-#[tokio::test]
-async fn sui_uses_ed25519_private_key_for_local_signing_but_ecdsa_for_address() {
-    let raw = Arc::new(RequestAwarePublicKeySigner {
-        sign_requests: Mutex::new(Vec::new()),
-        public_key_requests: Mutex::new(Vec::new()),
-        ecdsa_public_key: ecdsa_public_key_a(),
-    });
-    let signer = PillarSignerAdapter::new(raw.clone(), SuiChain, false);
-    let signature = signer.pillar_sign(&[1]).await.unwrap();
-
-    assert_eq!(
-        signature.address,
-        "0x548572c05b35e9db5effdc688f3eae066d71297983c269299a30bd22357eef6d"
-    );
-    assert_eq!(
-        raw.sign_requests.lock().await[0].private_key_signature_type,
-        SignatureType::Ed25519
-    );
-    assert_eq!(
-        raw.public_key_requests.lock().await[0].private_key_signature_type,
-        SignatureType::Ecdsa
-    );
+    let sui = PillarSignerAdapter::new(mnemonic("m/44'/784'/0'/0'/0'"), SuiChain, false);
+    let info = sui.get_signer_info().await.unwrap();
+    let key = [
+        &[0x04][..],
+        &hex::decode(info.public_key.trim_start_matches("0x")).unwrap(),
+    ]
+    .concat();
+    assert_eq!(info.address, SuiChain.signer_address(&key).unwrap());
+    assert!(info.address.starts_with("0x3dbeb591"), "{}", info.address);
 }
 
 #[tokio::test]

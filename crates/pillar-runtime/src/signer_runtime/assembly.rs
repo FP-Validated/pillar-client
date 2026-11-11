@@ -96,10 +96,11 @@ pub async fn aws_mnemonic_signer_assembly_from_config_with_metrics(
 pub async fn production_aws_mnemonic_secret_client(
     region: Option<&String>,
 ) -> Result<AwsSecretsManagerMnemonicClient, String> {
-    let config = crate::aws_client::defaults()
-        .region(secrets_manager_region_provider(region.map(String::as_str)))
-        .load()
-        .await;
+    let config = crate::aws_client::load(
+        crate::aws_client::defaults()
+            .region(secrets_manager_region_provider(region.map(String::as_str))),
+    )
+    .await?;
     Ok(AwsSecretsManagerMnemonicClient::new(
         aws_sdk_secretsmanager::Client::new(&config),
     ))
@@ -319,7 +320,7 @@ pub async fn production_kms_raw_signer_factory_from_options(
                 config_loader =
                     config_loader.region(aws_sdk_kms::config::Region::new(region.clone()));
             }
-            let config = config_loader.load().await;
+            let config = crate::aws_client::load(config_loader).await?;
             let client = aws_sdk_kms::Client::new(&config);
             Ok(Arc::new(AwsKmsRawSignerAdapterFactory::new(Arc::new(
                 AwsSdkKmsClient::new(client),

@@ -297,6 +297,11 @@ impl GoogleCloudKmsClient {
             .await
             .map_err(|error| SignerError::Message(error.without_url().to_string()))?;
         if !response.status().is_success() {
+            // The paced headers carry no expiry, so a token that lapsed inside the pacing window
+            // is not offered to the next request.
+            if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+                *self.recent_headers.lock().await = None;
+            }
             return Err(SignerError::Message(format!(
                 "GCP KMS returned HTTP {}",
                 response.status()

@@ -203,7 +203,9 @@ jobs:
   macos-ton-release:
     name: macOS TON release lifecycle
     runs-on: macos-15
-    timeout-minutes: 20
+    # A release build from a cold cache takes about 20 minutes on this runner, and the cache is
+    # only saved after the gate, so a 20-minute budget cancels every run after a lockfile change.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master

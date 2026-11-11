@@ -40,30 +40,40 @@ impl RemoteProviderConfigLoader for AwsRemoteProviderConfigLoader {
     }
 }
 
-// The two objects of a configuration are fetched together; each fetch builds its own credential
-// provider, and two providers renewing one SSO session race on its token cache.
-static S3_LOAD_LOCK: Mutex<()> = Mutex::const_new(());
+// Loads are serialized and keep one client per region: its credential provider and identity
+// cache outlive a load, so a refresh reuses cached credentials instead of renewing the SSO
+// session, whose token cache the SDK rewrites in place (I-08).
+static S3_CLIENTS: Mutex<Vec<(String, aws_sdk_s3::Client)>> = Mutex::const_new(Vec::new());
 
 pub(crate) async fn load_s3_provider_config(
     bucket: String,
     key: String,
     region: Option<String>,
 ) -> Result<String, ConfigError> {
-    let _serialized = S3_LOAD_LOCK.lock().await;
-    let mut loader = crate::aws_client::defaults();
+    let mut clients = S3_CLIENTS.lock().await;
     let region = region.unwrap_or_else(|| "us-east-1".to_string());
-    loader = loader.region(aws_config::Region::new(region));
-    let config = loader.load().await;
-    // The SDK's default validates a response checksum through a body wrapper that panics on
-    // an HTTP trailer frame; a configuration object is bounded and parsed whole, so it is not
-    // asked for one.
-    let client = aws_sdk_s3::Client::from_conf(
-        aws_sdk_s3::config::Builder::from(&config)
-            .response_checksum_validation(
-                aws_sdk_s3::config::ResponseChecksumValidation::WhenRequired,
+    let client = match clients.iter().find(|(known, _)| *known == region) {
+        Some((_, client)) => client.clone(),
+        None => {
+            let config = crate::aws_client::load(
+                crate::aws_client::defaults().region(aws_config::Region::new(region.clone())),
             )
-            .build(),
-    );
+            .await
+            .map_err(ConfigError::RemoteProviderConfig)?;
+            // The SDK's default validates a response checksum through a body wrapper that panics
+            // on an HTTP trailer frame; a configuration object is bounded and parsed whole, so it
+            // is not asked for one.
+            let client = aws_sdk_s3::Client::from_conf(
+                aws_sdk_s3::config::Builder::from(&config)
+                    .response_checksum_validation(
+                        aws_sdk_s3::config::ResponseChecksumValidation::WhenRequired,
+                    )
+                    .build(),
+            );
+            clients.push((region, client.clone()));
+            client
+        }
+    };
     let response = client
         .get_object()
         .bucket(bucket)

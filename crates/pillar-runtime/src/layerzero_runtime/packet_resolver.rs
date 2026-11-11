@@ -2062,7 +2062,7 @@ where
     }
 
     /// `getDefaultAdapterParams`: the `executor_v1::AdapterParamsConfig` table entry for
-    /// the destination, or type 1 with zero gas when that entry cannot be read.
+    /// the destination, or type 1 with zero gas when the table has no entry for it.
     async fn aptos_default_adapter_params(
         &self,
         chain: &str,
@@ -2086,11 +2086,14 @@ where
             bytes.extend_from_slice(&0u64.to_be_bytes());
             bytes
         };
+        // A resource that was read but names no table is not the absent entry upstream defaults.
         let Some(handle) = resource
             .pointer("/data/params/handle")
             .and_then(Value::as_str)
         else {
-            return Ok(fallback());
+            return Err(AppCoreError::Internal(
+                "Aptos adapter params config carries no table handle".to_string(),
+            ));
         };
         let key = lz_message_id
             .pathway_id

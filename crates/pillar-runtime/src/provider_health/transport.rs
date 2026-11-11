@@ -3,6 +3,7 @@ use std::{future::Future, sync::LazyLock};
 
 mod projection;
 mod read_http;
+mod tls;
 
 const MAX_JSON_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_TON_ACCOUNT_RESPONSE_BYTES: usize = 32 * 1024 * 1024;
@@ -646,7 +647,7 @@ impl AwsSdkLambdaInvokeClient {
         if let Some(region) = region {
             loader = loader.region(aws_config::Region::new(region));
         }
-        let config = loader.load().await;
+        let config = crate::aws_client::load(loader).await?;
         Ok(Self {
             client: aws_sdk_lambda::Client::new(&config),
         })
@@ -709,7 +710,7 @@ pub const DEFAULT_RPC_TIMEOUT: std::time::Duration = std::time::Duration::from_m
 
 impl ReqwestJsonRpcTransport {
     pub fn new() -> Result<Self, String> {
-        let build = |client: reqwest::ClientBuilder| {
+        let build = |client: reqwest::ClientBuilder| -> Result<reqwest::Client, String> {
             let mut headers = reqwest::header::HeaderMap::new();
             // No content coding is negotiated or decoded, so the answer must not be encoded.
             headers.insert(
@@ -717,6 +718,7 @@ impl ReqwestJsonRpcTransport {
                 reqwest::header::HeaderValue::from_static("identity"),
             );
             client
+                .use_preconfigured_tls(tls::provider_tls_config(&[b"h2", b"http/1.1"])?)
                 .timeout(DEFAULT_RPC_TIMEOUT)
                 // A connector started speculatively outlives the request that raced it, and the
                 // request timeout does not cover it.

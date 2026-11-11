@@ -22,10 +22,6 @@ pub trait ChainAddress: Send + Sync + 'static {
         SignatureType::Ecdsa
     }
 
-    fn address_private_key_signature_type(&self, is_kms: bool) -> SignatureType {
-        self.private_key_signature_type(is_kms)
-    }
-
     fn transform_recovery_id(&self) -> bool {
         false
     }
@@ -107,7 +103,8 @@ where
         if let Some(address) = self.cached_address.lock().await.clone() {
             return Ok(address);
         }
-        let public_key = self.get_address_public_key().await?;
+        // The key that signs, so `address` and a recovered signature name the same signer (L-05).
+        let public_key = self.get_public_key().await?;
         let address = self
             .chain
             .signer_address_for_provider(&public_key, self.signer_adapter.kms_provider())?;
@@ -120,18 +117,6 @@ where
             .get_public_key(PublicKeyRequest {
                 signature_type: SignatureType::Ecdsa,
                 private_key_signature_type: self.chain.private_key_signature_type(self.is_kms),
-                seed_kind: self.chain.seed_kind(),
-            })
-            .await
-    }
-
-    async fn get_address_public_key(&self) -> Result<Vec<u8>, SignerError> {
-        self.signer_adapter
-            .get_public_key(PublicKeyRequest {
-                signature_type: SignatureType::Ecdsa,
-                private_key_signature_type: self
-                    .chain
-                    .address_private_key_signature_type(self.is_kms),
                 seed_kind: self.chain.seed_kind(),
             })
             .await

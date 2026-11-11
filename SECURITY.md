@@ -771,9 +771,8 @@ operator-side control is named where one exists.
   Movement, by transaction height on Initia, where the hash is the block id converted from
   base64 to `0x` hex (M-111).
 - Upload bodies queue for a permit in arrival order and a stalled upload gives its permit
-  back after three seconds, so a request that arrives during a slow-upload flood is served
-  once the oldest stalled upload expires. A flood that fills every connection slot
-  (`PILLAR_MAX_CONNECTIONS`) is not something the service can tell apart from traffic: limit
+  back after three seconds. One TCP peer (IPv6 by /64) holds or queues for at most a quarter
+  of the permits. Behind an ingress or load balancer every client is the same peer, so limit
   connections and request rate per client at the ingress (M-121).
 - Compressed bodies are decoded in 1 KiB steps and refused once a stream has consumed input
   well beyond its output (padding with empty DEFLATE blocks); streams that Node's zlib
@@ -790,12 +789,11 @@ operator-side control is named where one exists.
   Attempt rows keep the wallet hash as attribution; intents written by earlier releases
   carry the old name hash, so a request already in flight across the upgrade is bound afresh
   once (I-09).
-- Provider-config and background-heartbeat ages use monotonic time, which does not advance
-  while the host is suspended (I-30). The V3 debug arguments of Aptos, Sui and IOTA omit the
-  target's `0x`; it is left that way because the formatter also serves digest inputs (I-31).
-- The signer address published for Aptos, Movement, Sui and IotaMove mnemonic wallets
-  comes from the BIP-32 key and the signature from the SLIP-0010-seeded key. Verify
-  signatures against the published `publicKey`, never against `address` (L-05).
+- Provider-config and background-heartbeat ages add the host's suspended time on Linux; on
+  other systems they use monotonic time, which stops while the host sleeps (I-30).
+- The `address` of Aptos, Movement, Sui and IotaMove mnemonic wallets comes from the key that
+  signs. Upstream derives it from the BIP-32 key, so a registry keyed by an address recorded
+  from an earlier release or from upstream must be updated (L-05).
 - Polygon and Tron finality reads bind the canonical header at the receipt height, and assume
   that one provider URI gives a consistent node view across the receipt, `latest`,
   `finalized` and receipt-height reads (L-57).
@@ -803,21 +801,23 @@ operator-side control is named where one exists.
   its answers are portable between deployments that share committee keys. Readiness now binds
   the scanned event to the resolved packet, but the preimage is the committee's: give every
   Canton deployment its own committee key set (L-55).
-- Dependency limits. AWS profile `duration_seconds` is not sent in AssumeRole requests
-  (`aws-config` 1.11): set the role's maximum session duration instead (I-07). The SSO token
-  cache is written non-atomically by the SDK; configuration loads are serialized, and an
-  isolated cache or workload credentials remove the exposure (I-08). `rustls-webpki` can
-  spend CPU on rejected candidate paths and no fixed release exists (I-33). The HTTP/1
-  decoder takes chunk-size lines without a length bound, and a provider
-  may hold a response body open until the request deadline, so a provider that streams
-  framing instead of data can spend decoder time up to that deadline; a shorter cut would
-  also cut slow but honest providers, so the deadline is the bound (L-98).
+- Dependency limits. An AWS profile's `duration_seconds` is sent only when this service
+  assumes the role itself: a role with `source_profile` or `credential_source`; a profile
+  that sets it with `web_identity_token_file` or `mfa_serial` is refused (I-07). The SSO token
+  cache is written non-atomically by the SDK; S3 loads reuse one client per region, so its
+  cached credentials spare most renewals, and an isolated cache or workload credentials remove
+  the exposure (I-08). Provider TLS refuses more than six presented intermediates before
+  `rustls-webpki` searches paths; within that bound its search still runs on the handshake's
+  worker (I-33). The HTTP/1 decoder (hyper) accepts unbounded zero padding and whitespace in
+  a chunk-size line, and reqwest gives no hook below the decoder, so a provider that streams
+  framing instead of data can spend decoder time up to the request deadline; a shorter cut
+  would also cut slow but honest providers (L-98).
 - Closed here that a dependency would have left open: S3 configuration reads no longer ask
   for a response checksum (`aws-smithy-checksums` trailer panic, L-92); the audit database
   connector computes its own RFC 5929 channel binding, so SCRAM-SHA-256-PLUS is offered
   where the certificate's signature algorithm has a hash (L-62); GCP credential headers are
-  fetched at most once a second (I-37); executable-sourced GCP credentials are refused at
-  start (I-12).
+  fetched at most once a second and dropped after a KMS 401 (I-37); executable-sourced GCP
+  credentials are refused at start (I-12).
 
 ### Other known gaps
 

@@ -176,7 +176,7 @@ async fn destination_router_uses_aptos_builder_for_aptos_destination() {
 
     assert_eq!(
         result.details["dvnCallData"]["targetContract"],
-        "3333333333333333333333333333333333333333333333333333333333333333"
+        "0x3333333333333333333333333333333333333333333333333333333333333333"
     );
     assert!(default.calls.lock().await.is_empty());
 }

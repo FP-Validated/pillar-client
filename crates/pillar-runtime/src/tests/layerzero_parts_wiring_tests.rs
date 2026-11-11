@@ -312,7 +312,7 @@ async fn runtime_layerzero_parts_routes_aptos_destination_to_aptos_builder() {
 
     assert_eq!(
         result.details["dvnCallData"]["targetContract"],
-        "c33752e0220faf79e45385dd73fb28d681dcd9f1569a1480725507c1f3c3aba9"
+        "0xc33752e0220faf79e45385dd73fb28d681dcd9f1569a1480725507c1f3c3aba9"
     );
     assert!(recorder.calls.lock().await.is_empty());
 }

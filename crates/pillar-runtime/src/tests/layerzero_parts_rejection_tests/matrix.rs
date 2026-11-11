@@ -94,7 +94,7 @@ async fn source_chain_parity_routes_movement_destination() {
 
     assert_eq!(
         result.details["dvnCallData"]["targetContract"],
-        "c33752e0220faf79e45385dd73fb28d681dcd9f1569a1480725507c1f3c3aba9"
+        "0xc33752e0220faf79e45385dd73fb28d681dcd9f1569a1480725507c1f3c3aba9"
     );
     assert_eq!(result.details["ulnCallData"]["methodName"], "hashPropose");
     assert!(recorder.calls.lock().await.is_empty());
@@ -172,12 +172,12 @@ const MOVE_MATRIX_CASES: &[MoveMatrixCase] = &[
     MoveMatrixCase {
         chain_name: "aptos",
         dst_eid: 30_108,
-        expected_target: "c33752e0220faf79e45385dd73fb28d681dcd9f1569a1480725507c1f3c3aba9",
+        expected_target: "0xc33752e0220faf79e45385dd73fb28d681dcd9f1569a1480725507c1f3c3aba9",
     },
     MoveMatrixCase {
         chain_name: "initia",
         dst_eid: 30_326,
-        expected_target: "5aab6aa28749dd073c26c4703e14eb7e89dd6a25abc2e1f0e98de59f8203a012",
+        expected_target: "0x5aab6aa28749dd073c26c4703e14eb7e89dd6a25abc2e1f0e98de59f8203a012",
     },
 ];
 
@@ -202,14 +202,14 @@ const HASH_MATRIX_CASES: &[HashMatrixCase] = &[
         dst_eid: 30_378,
         dvn_address: None,
         expected_hash: "b15ba9d11b5958dcaae668461f92994edfdc59afce3ca6ccf8d8367040616054",
-        expected_target: "3ce7457bed48ad23ee5d611dd3172ae4fbd0a22ea0e846782a7af224d905dbb0",
+        expected_target: "0x3ce7457bed48ad23ee5d611dd3172ae4fbd0a22ea0e846782a7af224d905dbb0",
     },
     HashMatrixCase {
         chain_name: "iotal1",
         dst_eid: 30_423,
         dvn_address: None,
         expected_hash: "916f7c3c1530260b01fdd6475fd0c7fc253ccc959dce2dcbfe8bf6ac8ab6784c",
-        expected_target: "042e3bb837e5528e495124542495b9df5016acd011d89838ae529db5a814499e",
+        expected_target: "0x042e3bb837e5528e495124542495b9df5016acd011d89838ae529db5a814499e",
     },
     HashMatrixCase {
         chain_name: "starknet",

@@ -943,7 +943,7 @@ async fn aptos_payload_builder_builds_v3_hash_verify_like_typescript() {
     );
     assert_eq!(
         result.details["dvnCallData"]["targetContract"],
-        "3333333333333333333333333333333333333333333333333333333333333333"
+        "0x3333333333333333333333333333333333333333333333333333333333333333"
     );
     assert_eq!(result.details["ulnCallData"]["methodName"], "hashPropose");
 }

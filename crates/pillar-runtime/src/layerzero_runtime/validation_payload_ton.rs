@@ -373,12 +373,23 @@ where
     if !ton_boc_cell_count_fits(&bytes) {
         return Ok(TonStorageRead::Unavailable);
     }
-    Ok(
-        match pillar_layerzero::boc_from_bytes_with_limits(bytes, MAX_ACCOUNT_STATE_CELLS, false) {
-            Ok(cell) => TonStorageRead::Cell(data.to_string(), cell),
-            Err(_) => TonStorageRead::Unavailable,
-        },
-    )
+    // Every dispatched provider's storage is built before the vote, and a maximal account BOC
+    // takes tens of megabytes and tens of milliseconds to build, so those builds run off the
+    // runtime workers and a few at a time process-wide (M-107).
+    static STORAGE_BUILDS: std::sync::LazyLock<Arc<tokio::sync::Semaphore>> =
+        std::sync::LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(4)));
+    let Ok(permit) = STORAGE_BUILDS.clone().acquire_owned().await else {
+        return Ok(TonStorageRead::Unavailable);
+    };
+    let built = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        pillar_layerzero::boc_from_bytes_with_limits(bytes, MAX_ACCOUNT_STATE_CELLS, false)
+    })
+    .await;
+    Ok(match built {
+        Ok(Ok(cell)) => TonStorageRead::Cell(data.to_string(), cell),
+        _ => TonStorageRead::Unavailable,
+    })
 }
 
 fn ton_boc_cell_count_fits(bytes: &[u8]) -> bool {

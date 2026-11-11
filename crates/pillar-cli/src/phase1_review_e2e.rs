@@ -57,6 +57,7 @@ async fn deadline_boundary_returns_eof_without_envelope_100_times() {
                 Duration::from_secs(2),
                 Duration::from_secs(5),
                 None,
+                None,
             )
             .await
         });
@@ -525,11 +526,12 @@ async fn completed_response_keeps_success_after_later_shutdown() {
             let context = context.clone();
             let metrics = metrics.clone();
             async move {
-                let mut guard =
-                    metrics
-                        .lock()
-                        .await
-                        .begin_http_request("GET", "/", context.clone());
+                let mut guard = metrics.lock().await.begin_http_request(
+                    "GET",
+                    "/",
+                    "test-request",
+                    context.clone(),
+                );
                 guard.finish(200);
                 context.shutdown();
                 drop(guard);
@@ -548,6 +550,7 @@ async fn completed_response_keeps_success_after_later_shutdown() {
             Duration::from_secs(2),
             Duration::from_secs(2),
             Duration::from_secs(5),
+            None,
             None,
         )
         .await
@@ -609,8 +612,8 @@ async fn incomplete_upload_budget_preserves_health_connections_and_expires_silen
             response
         });
     }
-    // The third upload queues for a permit rather than being refused, and the health route,
-    // which takes no upload permit, answers meanwhile.
+    // The extra uploads queue rather than being refused at once, and the health route, which
+    // takes no upload permit, answers meanwhile.
     let mut health = TcpStream::connect(address).await.unwrap();
     health
         .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
@@ -622,19 +625,29 @@ async fn incomplete_upload_budget_preserves_health_connections_and_expires_silen
         .unwrap()
         .unwrap();
     assert!(healthy.starts_with(b"HTTP/1.1 200"));
-    // Two stalled uploads expire at the three-second upload deadline and free their permits;
-    // the queued one then gets one and expires in turn.
-    for deadline in [4, 1, 4] {
-        let expired = tokio::time::timeout(Duration::from_secs(deadline), uploads.join_next())
+    // A silent upload expires after a second without body progress. One peer holds a quarter of
+    // the two permits, so its uploads take turns: each queued one gets the peer's share when the
+    // previous one expires, and expires a second later.
+    let started = tokio::time::Instant::now();
+    let mut finished = Vec::new();
+    for _ in 0..3 {
+        let expired = tokio::time::timeout(Duration::from_secs(2), uploads.join_next())
             .await
             .unwrap()
             .unwrap()
             .unwrap();
         assert!(expired.starts_with(b"HTTP/1.1 408"), "{expired:?}");
+        finished.push(started.elapsed());
+    }
+    for pair in finished.windows(2) {
+        assert!(
+            pair[1] - pair[0] >= Duration::from_millis(800),
+            "uploads of one peer overlapped: {finished:?}"
+        );
     }
     stop.send(()).unwrap();
     server.await.unwrap().unwrap();
-    artifact("M27-upload-budget", "{\"connectionLimit\":4,\"incompleteBodies\":3,\"queuedUpload\":true,\"healthStatus\":200,\"silentBodyStatus\":408}");
+    artifact("M27-upload-budget", "{\"connectionLimit\":4,\"incompleteBodies\":3,\"perPeerPermits\":1,\"healthStatus\":200,\"silentBodyStatus\":408,\"samePeerUploadsSerialized\":true}");
 }
 
 #[tokio::test]
