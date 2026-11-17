@@ -314,6 +314,45 @@ widen a key's scope. In KMS mode `LAYERZERO_WALLETS` and
 `LAYERZERO_WALLETS_FILE_PATH` are refused: every `LAYERZERO_KMS_IDS` key signs
 every configured chain, and a chain-scoped wallet file would be silently ignored.
 
+## Mandatory DVN Control Gate
+
+All policy-aware runtime signing requires an online authorization from the
+configured Control Gate, independently of the optional durable audit below.
+Registry signatures and permits use distinct Ed25519 domain prefixes. Permits bind
+the exact authorization body hash, signing intent, workload, instance and process
+boot; expiry is checked before the signing effect. Missing configuration, unknown
+required facts, stale registry, invalid signature or Gate failure denies signing.
+
+The operator must maintain the asset/pathway registry from verified deployments.
+`assetGroup` is a reusable label (Ethena is one possible group), not an on-chain
+fact inferred from a token name. Chain-wide and OApp rules do not require a token
+codec. Token amount/recipient rules require a supported binding; token-sender
+rules require authenticated source evidence and must not substitute `tx.from`.
+The canonical packet address is distinct from a chain's human-readable address.
+Incomplete classification can deny otherwise unrelated traffic rather than
+silently bypass a restriction.
+
+Rate limits count first-authorized unique messages across Client instances and
+wallets, using the Control database clock and atomic admission ledger. They do
+not measure completed signatures or destination execution. Ambiguous KMS results
+consume admission; there is no refund that could exceed a configured limit.
+New restrictions are evaluated again on retry even for an admitted message.
+
+An emergency pause is a separate latch. Publishing another policy does not clear
+it; resuming requires administrator authorization and recent verified MFA.
+Authorization and pause serialize in Control, but this is not instantaneous
+revocation of already-issued permits or dispatched KMS calls. The permit lifetime
+is at most two seconds. Clock accuracy and bounded request deadlines are operational
+requirements; an in-flight backend may still finish after the pause.
+
+This controls this Client's DVN signatures, not every DVN or the destination
+protocol's verification threshold. A compromised process or another principal
+with direct KMS access is outside the in-process policy boundary: isolate KMS
+credentials and prohibit alternate ungated signing paths. Shared workload tokens
+authenticate a trust domain, not a Kubernetes Pod UID. Control availability is now
+part of signing availability; there is no offline-allow mode. Provision Control,
+credentials, trusted keys and a reviewed policy before replacing a live Client.
+
 ## Durable signing audit (default disabled)
 
 `PILLAR_AUDIT_ENABLED=false` is the default. Enabling it preserves synchronous

@@ -97,12 +97,13 @@ async fn stalled_stale_refresh_reserves_actual_target_headroom_for_http_signing(
     let mut variables = read_vertical_env_map();
     variables.insert("PILLAR_RPC_CONCURRENCY".into(), "6".into());
     variables.insert("PILLAR_RPC_CHAIN_CONCURRENCY".into(), "2".into());
-    let app =
-        RuntimeServerApp::from_env_map_with_runtime_core(variables, transport.clone(), || {
-            1_767_323_045_000
-        })
-        .await
-        .unwrap();
+    let app = RuntimeServerApp::from_env_map_with_runtime_core_for_test(
+        variables,
+        transport.clone(),
+        || 1_767_323_045_000,
+    )
+    .await
+    .unwrap();
     let resources = pillar_api::ServerApp::execution_resources(&app).unwrap();
     assert_eq!(resources.rpc.lane_capacity("background"), Some(1));
     let getter = StaticProviderConfig::new(

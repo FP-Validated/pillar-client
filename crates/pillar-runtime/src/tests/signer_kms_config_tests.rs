@@ -121,6 +121,15 @@ async fn kms_signer_assembly_uses_runtime_config_and_raw_factory() {
             "ethereum",
             "KmsWallet0",
             "0x000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+            &crate::dvn::tests::wallet_authorization(
+                "ethereum",
+                "KmsWallet0",
+                &assembly
+                    .signer_getter
+                    .backend_scope("ethereum", "KmsWallet0")
+                    .unwrap(),
+                "0x000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+            ),
         )
         .await
         .unwrap();
@@ -238,7 +247,7 @@ async fn azure_solana_signer_info_route_answers_the_registered_address() {
     let app = crate::signer_runtime::TEST_KMS_RAW_FACTORY
         .scope(
             factory,
-            RuntimeServerApp::from_env_map_with_runtime_core(vars, NoRpcTransport, || {
+            RuntimeServerApp::from_env_map_with_runtime_core_for_test(vars, NoRpcTransport, || {
                 1_767_323_045_000
             }),
         )

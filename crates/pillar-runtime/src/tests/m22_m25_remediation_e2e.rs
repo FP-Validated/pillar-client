@@ -155,6 +155,7 @@ fn core_app_with_confirmation_floor(required: u64) -> PillarApp {
         sent_event_resolver: Arc::new(FixedResolver),
         validator: Arc::new(ConfirmationFloorValidator { required }),
         signer_getter: Arc::new(FixedSigner),
+        signing_policy: Arc::new(crate::dvn::tests::TestSigningPolicy),
         legacy_chain_name_resolver: Arc::new(FixedChainResolver),
         stage_observer: Arc::new(pillar_core::NoopSignStageObserver),
         debug_mode: false,

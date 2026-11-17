@@ -1173,6 +1173,34 @@ impl<T> SentEventResolver for EvmPacketSentResolver<T>
 where
     T: JsonRpcTransport,
 {
+    async fn verified_token_sender(
+        &self,
+        event: &LzSentEvent,
+        binding: &pillar_core::dvn::AssetBinding,
+    ) -> Result<Option<pillar_core::dvn::TokenSenderEvidence>, AppCoreError> {
+        if !matches!(
+            event.source_evidence,
+            Some(pillar_core::SourceEvidence::Evm(_))
+        ) {
+            return Ok(None);
+        }
+        let chain = &event.lz_message_id.pathway_id.src_chain_name;
+        crate::provider_health::rpc_scope(chain, async {
+            let receipt = self.get_receipt_logs(chain, &event.tx_hash).await?;
+            let sender = super::dvn_evidence::oft_sender_from_receipt(event, binding, &receipt)?;
+            sender
+                .map(|address| {
+                    let evidence_digest = pillar_core::dvn::json_sha256(&receipt)?;
+                    Ok(pillar_core::dvn::TokenSenderEvidence {
+                        address,
+                        evidence_digest,
+                    })
+                })
+                .transpose()
+        })
+        .await
+    }
+
     async fn get_lz_sent_event(
         &self,
         src_tx_hash: &str,

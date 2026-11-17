@@ -7,6 +7,7 @@ pub struct RuntimeCoreAppParts {
     pub available_chain_names: Arc<dyn pillar_core::AvailableChains>,
     pub wallets_by_chain_name: HashMap<String, Vec<WalletRef>>,
     pub signer_getter: Arc<dyn SignerGetter>,
+    pub signing_policy: Arc<dyn pillar_core::dvn::SigningPolicy>,
     pub signer_info: BTreeMap<String, Vec<SignerInfo>>,
     pub provider_health: ProviderHealthSnapshot,
     pub provider_health_report: Value,
@@ -28,6 +29,7 @@ pub fn core_api_app_from_runtime_parts(parts: RuntimeCoreAppParts) -> CoreApiApp
             sent_event_resolver: parts.dependencies.sent_event_resolver,
             validator: parts.dependencies.validator,
             signer_getter: parts.signer_getter,
+            signing_policy: parts.signing_policy,
             legacy_chain_name_resolver: parts.dependencies.legacy_chain_name_resolver,
             // The same registry the HTTP surface renders, so a sign request's
             // stage timings reach `/metrics`. A no-op here leaves the
@@ -84,6 +86,14 @@ struct UlnV2SdkFactoryResolver {
 
 #[async_trait::async_trait]
 impl SentEventResolver for UlnV2SdkFactoryResolver {
+    async fn verified_token_sender(
+        &self,
+        event: &LzSentEvent,
+        binding: &pillar_core::dvn::AssetBinding,
+    ) -> Result<Option<pillar_core::dvn::TokenSenderEvidence>, AppCoreError> {
+        self.inner.verified_token_sender(event, binding).await
+    }
+
     async fn get_lz_sent_event(
         &self,
         src_tx_hash: &str,

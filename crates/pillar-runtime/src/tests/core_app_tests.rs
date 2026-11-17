@@ -250,6 +250,7 @@ fn runtime_core_app_parts(metrics: Arc<tokio::sync::Mutex<PillarMetrics>>) -> Ru
             }],
         )]),
         signer_getter: Arc::new(FixedSigner),
+        signing_policy: Arc::new(crate::dvn::tests::TestSigningPolicy),
         signer_info: BTreeMap::from([(
             "bsc".to_string(),
             vec![SignerInfo {
@@ -854,15 +855,16 @@ async fn vertical_app_with_source_receipts(
         finalized_number: env.finalized_number,
         canonical_header_number: env.canonical_header_number,
     };
-    let app =
-        RuntimeServerApp::from_env_map_with_runtime_core(vars, transport, || 1_767_323_045_000)
-            .await
-            .unwrap_or_else(|error| {
-                panic!(
-                    "the production wiring did not assemble for {}: {error}",
-                    env.environment
-                )
-            });
+    let app = RuntimeServerApp::from_env_map_with_runtime_core_for_test(vars, transport, || {
+        1_767_323_045_000
+    })
+    .await
+    .unwrap_or_else(|error| {
+        panic!(
+            "the production wiring did not assemble for {}: {error}",
+            env.environment
+        )
+    });
     (app, calls)
 }
 

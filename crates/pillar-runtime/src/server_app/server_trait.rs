@@ -162,7 +162,14 @@ where
                     .unwrap_or(false)
             })
             .await;
-        if ready && self.controls.healthy().await {
+        let policy_ready = match &self.dvn_gate {
+            Some(gate) => gate.ready().await,
+            #[cfg(test)]
+            None => true, // Only explicit cfg(test) constructors can omit the Gate.
+            #[cfg(not(test))]
+            None => false,
+        };
+        if ready && policy_ready && self.controls.healthy().await {
             pillar_api::ReadinessStatus::Ready
         } else {
             pillar_api::ReadinessStatus::NotReady

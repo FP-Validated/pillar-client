@@ -71,6 +71,7 @@ async fn run_sign<F: Future<Output = Result<Vec<u8>, SignerError>>>(
     algorithm: &'static str,
     future: F,
 ) -> Result<Vec<u8>, SignerError> {
+    let lease = pillar_core::dvn::current_signing_lease();
     let record = match identity {
         Some(identity) => match audit::begin_effect(identity, digest, algorithm).await {
             Ok(record) => record,
@@ -97,6 +98,13 @@ async fn run_sign<F: Future<Output = Result<Vec<u8>, SignerError>>>(
         maximum(),
         poll_fn(|cx| {
             if !started {
+                if let Some(lease) = &lease {
+                    if let Err(error) = lease.check() {
+                        return std::task::Poll::Ready(Err(SignerError::Message(
+                            error.to_string(),
+                        )));
+                    }
+                }
                 started = true;
                 if let Some(permit) = &mut permit {
                     permit.finish(Outcome::Unknown);
@@ -143,6 +151,7 @@ pub(crate) async fn sign_owned_effect<F>(
 where
     F: Future<Output = Result<Vec<u8>, SignerError>> + Send + 'static,
 {
+    let lease = pillar_core::dvn::current_signing_lease();
     let workers = audit::current_workers().map_err(SignerError::Audit)?;
     let mut permit = acquire(reference).await?;
     let reservation = workers.reserve().map_err(|_| {
@@ -193,6 +202,13 @@ where
                     Duration::from_millis(55_200),
                     poll_fn(|cx| {
                         if !started {
+                            if let Some(lease) = &lease {
+                                if let Err(error) = lease.check() {
+                                    return std::task::Poll::Ready(Err(SignerError::Message(
+                                        error.to_string(),
+                                    )));
+                                }
+                            }
                             started = true;
                             if let Some(permit) = &mut permit {
                                 permit.finish(Outcome::Unknown);
@@ -320,11 +336,17 @@ pub(crate) async fn local_begin<B: AsRef<[u8]>>(
     digest: &[u8],
     algorithm: &'static str,
 ) -> Result<Option<EffectRecord>, SignerError> {
+    let lease = pillar_core::dvn::current_signing_lease();
+    if let Some(lease) = &lease {
+        lease
+            .check()
+            .map_err(|error| SignerError::Message(error.to_string()))?;
+    }
     if !audit::enabled() {
         return Ok(None);
     }
     let hash = audit::fingerprint(public_key().as_ref());
-    audit::begin_effect(
+    let record = audit::begin_effect(
         EffectiveKey {
             backend: "local",
             reference: hash.clone(),
@@ -335,7 +357,13 @@ pub(crate) async fn local_begin<B: AsRef<[u8]>>(
         algorithm,
     )
     .await
-    .map_err(SignerError::Audit)
+    .map_err(SignerError::Audit)?;
+    if let Some(lease) = &lease {
+        lease
+            .check()
+            .map_err(|error| SignerError::Message(error.to_string()))?;
+    }
+    Ok(record)
 }
 pub(crate) async fn local_returned(
     record: Option<EffectRecord>,

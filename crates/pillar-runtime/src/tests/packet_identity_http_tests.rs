@@ -10,15 +10,19 @@ struct CountingSigner(Arc<AtomicUsize>);
 
 #[async_trait]
 impl SignerGetter for CountingSigner {
+    fn backend_scope(&self, chain: &str, wallet: &str) -> Result<String, AppCoreError> {
+        FixedSigner.backend_scope(chain, wallet)
+    }
     async fn pillar_sign(
         &self,
         dst_chain_name: &str,
         wallet_name: &str,
         data_hex: &str,
+        authorization: &pillar_core::dvn::SigningAuthorization,
     ) -> Result<Signature, AppCoreError> {
         self.0.fetch_add(1, Ordering::SeqCst);
         FixedSigner
-            .pillar_sign(dst_chain_name, wallet_name, data_hex)
+            .pillar_sign(dst_chain_name, wallet_name, data_hex, authorization)
             .await
     }
 }

@@ -261,7 +261,7 @@ async fn runtime_server_app_renders_the_metrics_registry_it_was_given() {
         ])),
     };
     let shared_metrics = Arc::new(tokio::sync::Mutex::new(pillar_metrics::PillarMetrics::new()));
-    let app = RuntimeServerApp::from_env_map_with_core_dependencies(
+    let app = RuntimeServerApp::from_env_map_with_core_dependencies_for_test(
         HashMap::from([
             (
                 pillar_config::PILLAR_API_AUTH_TOKENS.to_string(),

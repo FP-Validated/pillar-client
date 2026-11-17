@@ -26,6 +26,37 @@ impl<T> RuntimeServerApp<T>
 where
     T: JsonRpcTransport,
 {
+    #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn from_env_map_with_core_dependencies_for_test(
+        vars: HashMap<String, String>,
+        transport: T,
+        now_unix_ms: impl Fn() -> u64 + Send + Sync + 'static,
+        canton_ledger_auth: crate::layerzero_runtime::CantonLedgerAuth,
+        dependencies: RuntimeCoreAppDependencies,
+        chain_type_by_chain_name: HashMap<String, String>,
+        mode: RuntimeMode,
+        rank_tracker: Arc<ProviderRankTracker>,
+        remote_provider_config: Option<RemoteProviderConfigOwner>,
+        providers: ProviderSnapshotHandle,
+        metrics: Arc<Mutex<PillarMetrics>>,
+    ) -> Result<Self, String> {
+        crate::dvn::tests::with_test_policy(Self::from_env_map_with_core_dependencies(
+            vars,
+            transport,
+            now_unix_ms,
+            canton_ledger_auth,
+            dependencies,
+            chain_type_by_chain_name,
+            mode,
+            rank_tracker,
+            remote_provider_config,
+            providers,
+            metrics,
+        ))
+        .await
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn from_env_map_with_core_dependencies(
         vars: HashMap<String, String>,
@@ -50,6 +81,28 @@ where
         // The roster the handle was published with, not a recomputation: the
         // signers assembled below must match the chains actually serving.
         let available_chain_names = serving_generation.available_chain_names().to_vec();
+        #[cfg(test)]
+        let test_policy = crate::dvn::tests::test_policy_enabled();
+        #[cfg(not(test))]
+        let test_policy = false;
+        let dvn_gate = if test_policy {
+            None
+        } else {
+            Some(
+                crate::dvn::DvnGateClient::connect(
+                    crate::dvn::DvnGateConfig::from_env(&vars)?,
+                    providers.clone(),
+                )
+                .await?,
+            )
+        };
+        let signing_policy: Arc<dyn pillar_core::dvn::SigningPolicy> = match &dvn_gate {
+            Some(gate) => gate.clone(),
+            #[cfg(test)]
+            None => Arc::new(crate::dvn::tests::TestSigningPolicy),
+            #[cfg(not(test))]
+            None => return Err("DVN Gate is required".to_string()),
+        };
         let controls =
             crate::execution::RuntimeControls::new(&runtime_config, &available_chain_names).await?;
         metrics
@@ -147,6 +200,7 @@ where
             available_chain_names: Arc::new(providers.clone()),
             wallets_by_chain_name,
             signer_getter: signer_assembly.signer_getter,
+            signing_policy,
             signer_info: signer_assembly.signer_info,
             provider_health,
             provider_health_report: serde_json::to_value(&provider_health_report)
@@ -216,13 +270,22 @@ where
                 let _ = cache_controls.scope(0, refresh_cache.read()).await;
             }
         });
+        let mut background_tasks = vec![provider_rank_refresh, provider_health_cache_refresh];
+        if let Some(gate) = &dvn_gate {
+            let heartbeat = metrics
+                .lock()
+                .await
+                .register_background_task("dvn_registry_refresh");
+            background_tasks.push(gate.spawn_refresh(move || heartbeat.stamp()));
+        }
 
         Ok(Self {
             controls,
+            dvn_gate,
             runtime_config,
             providers,
             provider_health_cache,
-            background_tasks: vec![provider_rank_refresh, provider_health_cache_refresh],
+            background_tasks,
             provider_health_source,
             _remote_provider_config: remote_provider_config,
             signing_app: Some(Arc::new(signing_app)),
@@ -268,7 +331,7 @@ where
             runtime_config.environment.as_deref().unwrap_or_default(),
             &vars,
         );
-        Self::from_env_map_with_core_dependencies(
+        Self::from_env_map_with_core_dependencies_for_test(
             vars,
             transport,
             now_unix_ms,

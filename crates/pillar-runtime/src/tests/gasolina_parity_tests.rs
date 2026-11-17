@@ -823,6 +823,7 @@ async fn historical_service_app(
                 inner: assembly.signer_getter,
                 calls: signer_calls,
             }),
+            signing_policy: Arc::new(crate::dvn::tests::TestSigningPolicy),
             signer_info: BTreeMap::new(),
             provider_health,
             provider_health_report: json!({}),
@@ -912,15 +913,19 @@ struct CountingSigner {
 
 #[async_trait]
 impl SignerGetter for CountingSigner {
+    fn backend_scope(&self, chain: &str, wallet: &str) -> Result<String, AppCoreError> {
+        self.inner.backend_scope(chain, wallet)
+    }
     async fn pillar_sign(
         &self,
         dst_chain_name: &str,
         wallet_name: &str,
         data_hex: &str,
+        authorization: &pillar_core::dvn::SigningAuthorization,
     ) -> Result<pillar_core::Signature, AppCoreError> {
         self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.inner
-            .pillar_sign(dst_chain_name, wallet_name, data_hex)
+            .pillar_sign(dst_chain_name, wallet_name, data_hex, authorization)
             .await
     }
 }

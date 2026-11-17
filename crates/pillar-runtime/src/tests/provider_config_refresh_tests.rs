@@ -222,7 +222,7 @@ where
     )
     .await
     .unwrap();
-    RuntimeServerApp::from_env_map_with_core_dependencies(
+    RuntimeServerApp::from_env_map_with_core_dependencies_for_test(
         runtime_vars(),
         transport,
         || 777,
@@ -267,7 +267,7 @@ async fn startup_single_entity_gauge_uses_the_local_serving_generation() {
             LZ_QUORUM_STRATEGY_CONFIG.to_string(),
             strategy_json(fixture),
         );
-        let app = RuntimeServerApp::from_env_map_with_core_dependencies(
+        let app = RuntimeServerApp::from_env_map_with_core_dependencies_for_test(
             vars,
             AlwaysOkTransport,
             || 777,
@@ -475,7 +475,7 @@ async fn a_failed_construction_leaves_no_loop_behind() {
         Arc::new(ScriptedLoader::new(Vec::new())),
         Some(vec!["bsc".to_string()]),
     );
-    let error = RuntimeServerApp::from_env_map_with_core_dependencies(
+    let error = RuntimeServerApp::from_env_map_with_core_dependencies_for_test(
         runtime_vars(),
         transport,
         || 777,
@@ -587,7 +587,7 @@ async fn refresh_outcomes_reach_the_registry_the_app_renders() {
     )
     .await
     .unwrap();
-    let app = RuntimeServerApp::from_env_map_with_core_dependencies(
+    let app = RuntimeServerApp::from_env_map_with_core_dependencies_for_test(
         runtime_vars(),
         AlwaysOkTransport,
         || 777,
@@ -666,7 +666,7 @@ async fn a_refresh_cannot_add_a_chain_the_process_has_no_signer_for() {
     )
     .await
     .unwrap();
-    let app = RuntimeServerApp::from_env_map_with_core_dependencies(
+    let app = RuntimeServerApp::from_env_map_with_core_dependencies_for_test(
         runtime_vars(),
         AlwaysOkTransport,
         || 777,
@@ -759,7 +759,7 @@ async fn a_refresh_that_removes_a_chain_is_refused_and_the_chain_keeps_serving()
             strategy_json(TWO_CHAINS),
         ),
     ]);
-    let app = RuntimeServerApp::from_env_map_with_core_dependencies(
+    let app = RuntimeServerApp::from_env_map_with_core_dependencies_for_test(
         vars,
         AlwaysOkTransport,
         || 777,
@@ -906,7 +906,7 @@ async fn readiness_answers_from_one_generation_when_a_refresh_lands_mid_probe() 
             strategy_json(TWO_CHAINS),
         ),
     ]);
-    let app = RuntimeServerApp::from_env_map_with_core_dependencies(
+    let app = RuntimeServerApp::from_env_map_with_core_dependencies_for_test(
         vars,
         transport.clone(),
         move || now.load(std::sync::atomic::Ordering::SeqCst),
@@ -1005,7 +1005,7 @@ async fn a_health_probe_straddling_a_refresh_does_not_rank_the_replaced_endpoint
             strategy_json(SERVING_ONE),
         ),
     ]);
-    let _app = RuntimeServerApp::from_env_map_with_core_dependencies(
+    let _app = RuntimeServerApp::from_env_map_with_core_dependencies_for_test(
         vars,
         transport,
         || 777,

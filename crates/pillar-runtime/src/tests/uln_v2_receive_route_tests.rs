@@ -430,7 +430,7 @@ async fn route_app_with_feather_utils_version(
         feather_utils_version,
         feather_utils_version_at_b,
     };
-    let app = RuntimeServerApp::from_env_map_with_runtime_core(
+    let app = RuntimeServerApp::from_env_map_with_runtime_core_for_test(
         env_map(destination_uris),
         transport,
         || 1_767_323_045_000,

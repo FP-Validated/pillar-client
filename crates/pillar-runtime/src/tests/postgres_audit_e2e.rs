@@ -220,7 +220,7 @@ async fn app(
     // Boxed so a scenario that starts several runtimes keeps one pointer per start on its stack.
     Box::pin(crate::signer_runtime::TEST_KMS_RAW_FACTORY.scope(
         factory,
-        RuntimeServerApp::from_env_map_with_runtime_core(
+        RuntimeServerApp::from_env_map_with_runtime_core_for_test(
             variables(url, namespace, maximum),
             transport,
             || 1_767_323_045_000,
@@ -1063,7 +1063,7 @@ async fn postgres_audit_partial_wallet_failure_never_releases_partial_signatures
     let application = crate::signer_runtime::TEST_KMS_RAW_FACTORY
         .scope(
             factory,
-            RuntimeServerApp::from_env_map_with_runtime_core(variables, transport, || {
+            RuntimeServerApp::from_env_map_with_runtime_core_for_test(variables, transport, || {
                 1_767_323_045_000
             }),
         )

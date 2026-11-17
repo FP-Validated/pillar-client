@@ -4,6 +4,20 @@ impl<T> RuntimeServerApp<T>
 where
     T: JsonRpcTransport,
 {
+    #[cfg(test)]
+    pub(crate) async fn from_env_map_with_runtime_core_for_test(
+        vars: HashMap<String, String>,
+        transport: T,
+        now_unix_ms: impl Fn() -> u64 + Send + Sync + 'static,
+    ) -> Result<Self, String> {
+        crate::dvn::tests::with_test_policy(Self::from_env_map_with_runtime_core(
+            vars,
+            transport,
+            now_unix_ms,
+        ))
+        .await
+    }
+
     pub async fn from_env_map_with_runtime_core(
         vars: HashMap<String, String>,
         transport: T,
@@ -15,6 +29,14 @@ where
             .environment
             .clone()
             .ok_or_else(|| format!("{LZ_ENV} is required for runtime core wiring"))?;
+        // Validate mandatory Gate settings before creating any signer/provider clients.
+        #[cfg(test)]
+        let test_policy = crate::dvn::tests::test_policy_enabled();
+        #[cfg(not(test))]
+        let test_policy = false;
+        if !test_policy {
+            let _ = crate::dvn::DvnGateConfig::from_env(&vars)?;
+        }
         let mut remote_provider_config =
             RemoteProviderConfigOwner::from_env_map(&vars, &runtime_config).await?;
         let provider_config = match &remote_provider_config {

@@ -96,7 +96,7 @@ async fn round2_m09_read_codec_versions_and_empty_commands_are_guarded_before_rp
             receipt: receipt_for(&command),
             chain: ReadChain::Stable,
         };
-        let app = RuntimeServerApp::from_env_map_with_runtime_core(
+        let app = RuntimeServerApp::from_env_map_with_runtime_core_for_test(
             read_vertical_env_map(),
             transport,
             || 1_767_323_045_000,

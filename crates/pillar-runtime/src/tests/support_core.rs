@@ -100,11 +100,15 @@ pub(super) struct FixedSigner;
 
 #[async_trait]
 impl SignerGetter for FixedSigner {
+    fn backend_scope(&self, _: &str, _: &str) -> Result<String, AppCoreError> {
+        Ok("test".into())
+    }
     async fn pillar_sign(
         &self,
         dst_chain_name: &str,
         wallet_name: &str,
         data_hex: &str,
+        _authorization: &pillar_core::dvn::SigningAuthorization,
     ) -> Result<Signature, AppCoreError> {
         Ok(Signature {
             signature: format!("sig:{dst_chain_name}:{wallet_name}:{data_hex}"),

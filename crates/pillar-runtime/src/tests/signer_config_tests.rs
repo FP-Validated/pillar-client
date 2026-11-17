@@ -141,6 +141,15 @@ async fn aws_mnemonic_signer_assembly_loads_wallet_secrets_like_typescript() {
             "ethereum",
             "wallet-a",
             "0x000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+            &crate::dvn::tests::wallet_authorization(
+                "ethereum",
+                "wallet-a",
+                &assembly
+                    .signer_getter
+                    .backend_scope("ethereum", "wallet-a")
+                    .unwrap(),
+                "0x000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+            ),
         )
         .await
         .unwrap();

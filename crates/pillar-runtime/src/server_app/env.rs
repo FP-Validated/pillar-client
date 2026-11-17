@@ -78,6 +78,7 @@ where
 
         Ok(Self {
             controls,
+            dvn_gate: None,
             runtime_config,
             providers,
             provider_health_cache,

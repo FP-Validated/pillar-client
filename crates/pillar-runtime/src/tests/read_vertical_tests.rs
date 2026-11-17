@@ -438,7 +438,7 @@ async fn read_vertical_app(
         receipt: read_vertical_receipt(marker),
         chain,
     };
-    let app = RuntimeServerApp::from_env_map_with_runtime_core(
+    let app = RuntimeServerApp::from_env_map_with_runtime_core_for_test(
         read_vertical_env_map(),
         transport,
         || 1_767_323_045_000,

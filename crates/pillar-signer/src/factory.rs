@@ -85,6 +85,37 @@ where
         })
     }
 
+    /// Resolve the exact configured backend/key reference without touching a key provider.
+    pub fn signing_scope(
+        &self,
+        chain_type: ChainType,
+        wallet_name: &str,
+    ) -> Result<String, SignerError> {
+        let definition = self
+            .wallet_definition_by_wallet_name
+            .get(wallet_name)
+            .ok_or_else(|| SignerError::WalletDefinitionNotFound(wallet_name.to_string()))?
+            .by_chain_type
+            .get(&chain_type)
+            .ok_or(SignerError::ChainTypeWalletDefinitionNotFound(chain_type))?;
+        let backend = match &definition.signer_kind {
+            None | Some(WalletSignerKind::Mnemonic) => "local",
+            Some(WalletSignerKind::Kms {
+                provider: KmsProvider::Aws,
+            }) => "kms_aws",
+            Some(WalletSignerKind::Kms {
+                provider: KmsProvider::Gcp,
+            }) => "kms_gcp",
+            Some(WalletSignerKind::Kms {
+                provider: KmsProvider::Azure,
+            }) => "kms_azure",
+            Some(WalletSignerKind::Unsupported(value)) => {
+                return Err(SignerError::UnsupportedSignerType(value.clone()))
+            }
+        };
+        Ok(format!("{backend}:{}", definition.secret_name))
+    }
+
     pub async fn get_adapter(
         &self,
         chain_type: ChainType,
