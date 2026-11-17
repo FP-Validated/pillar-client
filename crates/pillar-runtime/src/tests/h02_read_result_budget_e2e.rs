@@ -748,10 +748,11 @@ async fn sign_over_http(result_bytes: usize, debug: bool) -> (u16, Value, Vec<St
         },
         result_bytes,
     };
-    let app =
-        RuntimeServerApp::from_env_map_with_runtime_core(env, transport, || 1_767_323_045_000)
-            .await
-            .unwrap_or_else(|error| panic!("the production wiring did not assemble: {error}"));
+    let app = RuntimeServerApp::from_env_map_with_runtime_core_for_test(env, transport, || {
+        1_767_323_045_000
+    })
+    .await
+    .unwrap_or_else(|error| panic!("the production wiring did not assemble: {error}"));
     let metrics = app.metrics().expect("production metrics registry");
     let response = pillar_api::router(app, "h02-read-budget")
         .oneshot(

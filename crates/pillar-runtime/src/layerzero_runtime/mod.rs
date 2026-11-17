@@ -55,6 +55,7 @@ use crate::validation::{ExpirationValidRange, RuntimeAppValidator, RuntimeValida
 
 mod canton_ledger;
 mod canton_sequencer;
+mod dvn_evidence;
 pub(crate) use canton_ledger::{
     canton_ledger_end_offset, canton_ledger_parties, parse_canton_chain_uri, CantonLedgerAuth,
 };

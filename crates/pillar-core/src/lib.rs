@@ -9,6 +9,7 @@ use sha3::{Digest, Keccak256};
 use std::{collections::HashMap, sync::Arc, time::Instant};
 
 pub mod audit;
+pub mod dvn;
 pub mod execution;
 pub mod json;
 mod provider_health_cache;
@@ -336,6 +337,16 @@ pub trait SentEventResolver: Send + Sync + 'static {
         lz_message_id: &LzMessageId,
     ) -> Result<LzSentEvent, AppCoreError>;
 
+    /// Additional source-provider quorum evidence, never inferred from tx.from.
+    /// Unsupported adapters deliberately leave the token sender UNKNOWN.
+    async fn verified_token_sender(
+        &self,
+        _event: &LzSentEvent,
+        _binding: &dvn::AssetBinding,
+    ) -> Result<Option<dvn::TokenSenderEvidence>, AppCoreError> {
+        Ok(None)
+    }
+
     /// Upstream's `lzSdk.getLZSentEvent(sentEvent)` on a ULNv2-sent event before it is
     /// rebuilt for a V3-family receive library (`hashCallDataBuilder/ulnV3.ts:54-61`);
     /// `None` is its "possible reorg" answer.
@@ -415,11 +426,14 @@ pub trait AppValidator: Send + Sync + 'static {
 
 #[async_trait]
 pub trait SignerGetter: Send + Sync + 'static {
+    fn backend_scope(&self, chain_name: &str, wallet_name: &str) -> Result<String, AppCoreError>;
+
     async fn pillar_sign(
         &self,
         dst_chain_name: &str,
         wallet_name: &str,
         data_hex: &str,
+        authorization: &dvn::SigningAuthorization,
     ) -> Result<Signature, AppCoreError>;
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -524,6 +538,7 @@ pub struct PillarApp {
     pub sent_event_resolver: Arc<dyn SentEventResolver>,
     pub validator: Arc<dyn AppValidator>,
     pub signer_getter: Arc<dyn SignerGetter>,
+    pub signing_policy: Arc<dyn dvn::SigningPolicy>,
     pub legacy_chain_name_resolver: Arc<dyn LegacyChainNameResolver>,
     pub stage_observer: Arc<dyn SignStageObserver>,
     pub debug_mode: bool,
@@ -991,6 +1006,28 @@ impl PillarApp {
                 .iter()
                 .map(|wallet| wallet.wallet_name.clone())
                 .collect::<Vec<_>>();
+            let scopes = wallet_names
+                .iter()
+                .map(|wallet_name| {
+                    Ok(dvn::SigningScope {
+                        chain_name: dst_chain_name.clone(),
+                        wallet_name: wallet_name.clone(),
+                        backend: self
+                            .signer_getter
+                            .backend_scope(dst_chain_name, wallet_name)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, AppCoreError>>()?;
+            let authorization = self
+                .signing_policy
+                .authorize(
+                    &dvn::VerifiedEnvelope::new(&sent_event, &request.signing_context),
+                    self.sent_event_resolver.as_ref(),
+                    hash_call_data_ref,
+                    scopes,
+                )
+                .await?;
+            let authorization = &authorization;
             stream::iter(wallet_names.into_iter().map(|wallet_name| async move {
                 let wallet_sign_started_at = Instant::now();
                 let signature = audit::sign_wallet(
@@ -999,6 +1036,7 @@ impl PillarApp {
                         dst_chain_name,
                         &wallet_name,
                         hash_call_data_ref,
+                        authorization,
                     ),
                 )
                 .await?;
@@ -1796,11 +1834,15 @@ mod tests {
 
     #[async_trait]
     impl SignerGetter for FixedSigner {
+        fn backend_scope(&self, _: &str, _: &str) -> Result<String, AppCoreError> {
+            Ok("test".into())
+        }
         async fn pillar_sign(
             &self,
             dst_chain_name: &str,
             wallet_name: &str,
             data_hex: &str,
+            _authorization: &dvn::SigningAuthorization,
         ) -> Result<Signature, AppCoreError> {
             Ok(Signature {
                 signature: format!("sig:{dst_chain_name}:{wallet_name}:{data_hex}"),
@@ -1816,11 +1858,15 @@ mod tests {
 
     #[async_trait]
     impl SignerGetter for DelayedSigner {
+        fn backend_scope(&self, _: &str, _: &str) -> Result<String, AppCoreError> {
+            Ok("test".into())
+        }
         async fn pillar_sign(
             &self,
             _dst_chain_name: &str,
             wallet_name: &str,
             _data_hex: &str,
+            _authorization: &dvn::SigningAuthorization,
         ) -> Result<Signature, AppCoreError> {
             let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
             self.max_active.fetch_max(active, Ordering::SeqCst);
@@ -1861,6 +1907,7 @@ mod tests {
             sent_event_resolver: Arc::new(FixedResolver),
             validator: Arc::new(NoopValidator),
             signer_getter: Arc::new(FixedSigner),
+            signing_policy: Arc::new(dvn::TestSigningPolicy),
             legacy_chain_name_resolver: Arc::new(FixedChainResolver),
             stage_observer: Arc::new(NoopSignStageObserver),
             debug_mode: true,

@@ -241,7 +241,7 @@ async fn assembled_app(
         calls: Arc::new(Mutex::new(Vec::new())),
         policy_calls: Arc::new(Mutex::new(Vec::new())),
     };
-    let app = RuntimeServerApp::from_env_map_with_runtime_core(
+    let app = RuntimeServerApp::from_env_map_with_runtime_core_for_test(
         canton_http_env(chains),
         wire.clone(),
         || 1_800_000_000_000,

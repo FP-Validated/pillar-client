@@ -422,11 +422,12 @@ async fn run_full_consumer_case(
         variables.insert(LZ_PROVIDER_CONFIG.to_string(), providers.to_string());
         variables.insert(LZ_QUORUM_STRATEGY_CONFIG.to_string(), strategy);
     }
-    let app = RuntimeServerApp::from_env_map_with_runtime_core(variables, transport, || {
-        1_767_323_045_000
-    })
-    .await
-    .unwrap_or_else(|error| panic!("production READ HTTP app did not assemble: {error}"));
+    let app =
+        RuntimeServerApp::from_env_map_with_runtime_core_for_test(variables, transport, || {
+            1_767_323_045_000
+        })
+        .await
+        .unwrap_or_else(|error| panic!("production READ HTTP app did not assemble: {error}"));
     let metrics = app.metrics().expect("production metrics registry");
     let inbound = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let inbound_address = inbound.local_addr().unwrap();

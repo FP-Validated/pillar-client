@@ -96,7 +96,7 @@ async fn health_timeout_isolated_and_startup_ready_beyond_stale_window() {
     let wire = wire(Duration::from_millis(1), true);
     let now = Arc::new(AtomicU64::new(1));
     let clock = now.clone();
-    let app = RuntimeServerApp::from_env_map_with_runtime_core(
+    let app = RuntimeServerApp::from_env_map_with_runtime_core_for_test(
         read_vertical_env_map(),
         wire.clone(),
         move || clock.load(Ordering::SeqCst),

@@ -193,7 +193,7 @@ impl HashCallDataBuilder for PassingBuilder {
         _: &SigningContext,
     ) -> Result<HashCallDataResult, AppCoreError> {
         Ok(HashCallDataResult {
-            hash_call_data: "0x".to_string(),
+            hash_call_data: format!("0x{}", "00".repeat(32)),
             details: json!({}),
         })
     }
@@ -203,7 +203,16 @@ struct PassingSigner;
 
 #[async_trait]
 impl SignerGetter for PassingSigner {
-    async fn pillar_sign(&self, _: &str, _: &str, _: &str) -> Result<Signature, AppCoreError> {
+    fn backend_scope(&self, _: &str, _: &str) -> Result<String, AppCoreError> {
+        Ok("test".into())
+    }
+    async fn pillar_sign(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+        _: &pillar_core::dvn::SigningAuthorization,
+    ) -> Result<Signature, AppCoreError> {
         Ok(Signature {
             signature: "0x".to_string(),
             address: "0x".to_string(),
@@ -241,6 +250,7 @@ fn preflight_app(resolutions: Arc<AtomicUsize>) -> PillarApp {
         sent_event_resolver: Arc::new(CountingResolver(resolutions)),
         validator: Arc::new(PassingValidator),
         signer_getter: Arc::new(PassingSigner),
+        signing_policy: Arc::new(crate::dvn::tests::TestSigningPolicy),
         legacy_chain_name_resolver: Arc::new(FixedChainResolver),
         stage_observer: Arc::new(pillar_core::NoopSignStageObserver),
         debug_mode: false,

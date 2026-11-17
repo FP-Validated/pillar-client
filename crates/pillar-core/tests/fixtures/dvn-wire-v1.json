@@ -1,0 +1,134 @@
+{
+  "fixtureVersion": "pillar.dvn-wire-fixture/v1",
+  "testOnly": true,
+  "publicKeyBase64": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+  "policy": {
+    "schemaVersion": "pillar.dvn-policy/v1",
+    "environment": "testnet",
+    "chains": [
+      {
+        "eid": 1,
+        "name": "fixture-alpha",
+        "addressFormat": "evm"
+      },
+      {
+        "eid": 2,
+        "name": "fixture-beta",
+        "addressFormat": "solana"
+      }
+    ],
+    "assetBindings": [
+      {
+        "id": "fixture-pathway",
+        "assetId": "fixture-asset",
+        "assetGroup": "fixture-group",
+        "srcEid": 1,
+        "dstEid": 2,
+        "srcOapp": "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "dstOapp": "0x0000000000000000000000000000000000000000000000000000000000000002",
+        "codec": "oft-v1",
+        "sharedDecimals": 6
+      }
+    ],
+    "rules": [
+      {
+        "id": "fixture-cap",
+        "scope": {
+          "direction": "both",
+          "assetId": "fixture-asset"
+        },
+        "paused": false,
+        "rateLimit": {
+          "windowSeconds": 60,
+          "maxMessages": 2,
+          "maxAmountSharedUnits": "18446744073709551615"
+        },
+        "blockedAddresses": []
+      }
+    ]
+  },
+  "authorizeRequest": {
+    "instanceId": "dvn-fixture-0",
+    "bootId": "fixture-boot",
+    "registryRevision": 1,
+    "subject": {
+      "environment": "testnet",
+      "protocol": "layerzero-v2",
+      "requestKind": "message",
+      "srcEid": 1,
+      "dstEid": 2,
+      "srcEndpointId": 1,
+      "dstEndpointId": 2,
+      "srcOapp": "0x0000000000000000000000000000000000000000000000000000000000000001",
+      "dstOapp": "0x0000000000000000000000000000000000000000000000000000000000000002",
+      "nonce": "18446744073709551615",
+      "payloadHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "guid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "sourceEvidenceDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "assetBindingId": "fixture-pathway",
+      "tokenRecipient": "0x0000000000000000000000000000000000000000000000000000000000000003",
+      "amountSharedUnits": "17"
+    },
+    "intentDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "walletNames": [
+      "fixture-wallet"
+    ]
+  },
+  "authorizeRequestJson": "{\"instanceId\":\"dvn-fixture-0\",\"bootId\":\"fixture-boot\",\"registryRevision\":1,\"subject\":{\"environment\":\"testnet\",\"protocol\":\"layerzero-v2\",\"requestKind\":\"message\",\"srcEid\":1,\"dstEid\":2,\"srcEndpointId\":1,\"dstEndpointId\":2,\"srcOapp\":\"0x0000000000000000000000000000000000000000000000000000000000000001\",\"dstOapp\":\"0x0000000000000000000000000000000000000000000000000000000000000002\",\"nonce\":\"18446744073709551615\",\"payloadHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"guid\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"sourceEvidenceDigest\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"assetBindingId\":\"fixture-pathway\",\"tokenRecipient\":\"0x0000000000000000000000000000000000000000000000000000000000000003\",\"amountSharedUnits\":\"17\"},\"intentDigest\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"walletNames\":[\"fixture-wallet\"]}",
+  "registry": {
+    "schemaVersion": "pillar.dvn-registry/v1",
+    "environment": "testnet",
+    "revision": 1,
+    "chains": [
+      {
+        "eid": 1,
+        "name": "fixture-alpha",
+        "addressFormat": "evm"
+      },
+      {
+        "eid": 2,
+        "name": "fixture-beta",
+        "addressFormat": "solana"
+      }
+    ],
+    "assetBindings": [
+      {
+        "id": "fixture-pathway",
+        "assetId": "fixture-asset",
+        "assetGroup": "fixture-group",
+        "srcEid": 1,
+        "dstEid": 2,
+        "srcOapp": "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "dstOapp": "0x0000000000000000000000000000000000000000000000000000000000000002",
+        "codec": "oft-v1",
+        "sharedDecimals": 6
+      }
+    ]
+  },
+  "permit": {
+    "schemaVersion": "pillar.dvn-permit/v1",
+    "decisionId": "fixture-decision",
+    "environment": "testnet",
+    "workloadId": "dvn-fixture",
+    "instanceId": "dvn-fixture-0",
+    "bootId": "fixture-boot",
+    "requestSha256": "cc6a05503847a3674aaa70da32235ee2307163dd61185c67d715fc3f378d1e5d",
+    "intentDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "policyRevision": 1,
+    "safetyEpoch": 1,
+    "issuedAtMs": 1700000000000,
+    "expiresAtMs": 1700000002000
+  },
+  "signedRegistry": {
+    "payload": "eyJzY2hlbWFWZXJzaW9uIjoicGlsbGFyLmR2bi1yZWdpc3RyeS92MSIsImVudmlyb25tZW50IjoidGVzdG5ldCIsInJldmlzaW9uIjoxLCJjaGFpbnMiOlt7ImVpZCI6MSwibmFtZSI6ImZpeHR1cmUtYWxwaGEiLCJhZGRyZXNzRm9ybWF0IjoiZXZtIn0seyJlaWQiOjIsIm5hbWUiOiJmaXh0dXJlLWJldGEiLCJhZGRyZXNzRm9ybWF0Ijoic29sYW5hIn1dLCJhc3NldEJpbmRpbmdzIjpbeyJpZCI6ImZpeHR1cmUtcGF0aHdheSIsImFzc2V0SWQiOiJmaXh0dXJlLWFzc2V0IiwiYXNzZXRHcm91cCI6ImZpeHR1cmUtZ3JvdXAiLCJzcmNFaWQiOjEsImRzdEVpZCI6Miwic3JjT2FwcCI6IjB4MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMSIsImRzdE9hcHAiOiIweDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDIiLCJjb2RlYyI6Im9mdC12MSIsInNoYXJlZERlY2ltYWxzIjo2fV19",
+    "sha256": "e9b241af5c2355b755fdde19d7915cff9ade279f5d624d0399cc32f498a3793b",
+    "signature": "QiLTr6mkjPfn3Ewi/FmafWe0nvKX0XFp64POoGuQA05gme8OnC9LJ++hbuxogjaHYq3pGT8yMCwq3REz6ml7AQ==",
+    "keyId": "dvn-fixture-key"
+  },
+  "signedPermit": {
+    "payload": "eyJzY2hlbWFWZXJzaW9uIjoicGlsbGFyLmR2bi1wZXJtaXQvdjEiLCJkZWNpc2lvbklkIjoiZml4dHVyZS1kZWNpc2lvbiIsImVudmlyb25tZW50IjoidGVzdG5ldCIsIndvcmtsb2FkSWQiOiJkdm4tZml4dHVyZSIsImluc3RhbmNlSWQiOiJkdm4tZml4dHVyZS0wIiwiYm9vdElkIjoiZml4dHVyZS1ib290IiwicmVxdWVzdFNoYTI1NiI6ImNjNmEwNTUwMzg0N2EzNjc0YWFhNzBkYTMyMjM1ZWUyMzA3MTYzZGQ2MTE4NWM2N2Q3MTVmYzNmMzc4ZDFlNWQiLCJpbnRlbnREaWdlc3QiOiJkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkIiwicG9saWN5UmV2aXNpb24iOjEsInNhZmV0eUVwb2NoIjoxLCJpc3N1ZWRBdE1zIjoxNzAwMDAwMDAwMDAwLCJleHBpcmVzQXRNcyI6MTcwMDAwMDAwMjAwMH0=",
+    "sha256": "fb9c9409bfb74e34a03c4521d3069a46657a1c14b21255b3bb5840d937f13906",
+    "signature": "9f4GzW5eVG44Vl8LNCOgl6jquyOhXa8bit/y9e8E+q9pNL/4XsJJsn/TTSALOVwZVXrcelj6NZ7jDWNDLwa+DQ==",
+    "keyId": "dvn-fixture-key"
+  }
+}

@@ -4,6 +4,7 @@ mod audit;
 mod audit_tls;
 mod aws_client;
 mod config_loader;
+mod dvn;
 mod execution;
 mod layerzero_runtime;
 mod provider_health;

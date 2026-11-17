@@ -522,11 +522,15 @@ struct RefusalCountingSigner(Arc<std::sync::atomic::AtomicUsize>);
 
 #[async_trait]
 impl SignerGetter for RefusalCountingSigner {
+    fn backend_scope(&self, _: &str, _: &str) -> Result<String, AppCoreError> {
+        Ok("test".into())
+    }
     async fn pillar_sign(
         &self,
         _dst_chain_name: &str,
         _wallet_name: &str,
         _data_hex: &str,
+        _authorization: &pillar_core::dvn::SigningAuthorization,
     ) -> Result<Signature, AppCoreError> {
         self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(Signature {

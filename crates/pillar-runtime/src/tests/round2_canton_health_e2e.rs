@@ -179,7 +179,7 @@ async fn canton_only(ledger: Ledger, oauth: &str) -> Outcome {
     }
     let canton_ledger_auth = CantonLedgerAuth::from_env_map("mainnet", &vars);
     let rank_tracker = Arc::new(ProviderRankTracker::new());
-    let app = RuntimeServerApp::from_env_map_with_core_dependencies(
+    let app = RuntimeServerApp::from_env_map_with_core_dependencies_for_test(
         vars,
         wire.clone(),
         || 1,

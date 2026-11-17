@@ -184,12 +184,18 @@ All configuration is environment based. Required:
 | Variable | Meaning |
 | --- | --- |
 | `SERVER_PORT` | TCP port to bind. |
-| `LAYERZERO_ENVIRONMENT` | `mainnet`, `testnet`, or `sandbox`/`localnet`. |
+| `LAYERZERO_ENVIRONMENT` | `mainnet` or `testnet` for the mandatory DVN policy gate. The configuration tooling also recognizes `sandbox`/`localnet`; these are not policy-gated signing environments. |
 | `PROVIDER_CONFIG_TYPE` | `LOCAL`, `S3`, or `GCS`. |
 | `SIGNER_TYPE` | `KMS`, `MNEMONIC`, or `LOCAL_MNEMONIC`. |
 | `PILLAR_API_AUTH_TOKENS` | Comma-separated bearer tokens accepted on authenticated routes. Each must be at least 32 characters. |
 | `PILLAR_PUBLIC_SIGN_ROUTES` | `true` serves `POST /` and `POST /v2/resolve-and-sign` without a bearer. Anything else, including unset, keeps them authenticated. Required for deployments that receive LayerZero DVN traffic, since LayerZero calls a registered endpoint with no credential of yours. Scoped to those two routes; the tokens above stay required either way. |
 | `PILLAR_API_AUTH_ENABLED` | `false` serves **every** route without a bearer, including `/signer-info`, `/provider-health/report` and `/metrics`, and makes `PILLAR_API_AUTH_TOKENS` optional. Anything else, including unset, keeps authentication on. Only for deployments already restricted at the network edge — e.g. an ingress source-IP allowlist — because it exposes signer identity and internal state to any caller that reaches the port. |
+| `PILLAR_DVN_GATE_URL` | HTTPS origin of the Control Gate. Plain HTTP is allowed only for loopback development. |
+| `PILLAR_DVN_GATE_TOKEN` | Dedicated `dvn-client` workload credential; keep it in the Client Secret, never policy YAML. |
+| `PILLAR_DVN_GATE_KEY_ID` | Expected Ed25519 registry/permit signing key ID. |
+| `PILLAR_DVN_GATE_PUBLIC_KEY` | Base64-encoded 32-byte Ed25519 public key, not the private signing seed. |
+| `PILLAR_DVN_WORKLOAD_ID` | Authenticated workload ID registered with Control. |
+| `PILLAR_DVN_INSTANCE_ID` | Unique Pod/process instance name matching that workload's configured prefix. |
 
 Provider configuration is upstream's `providers-v2.json` plus `quorum-strategy.json`
 (`gasolina-audit` `213cd500`), both required; the retired `{ uris, quorum }` map is
@@ -317,6 +323,36 @@ section in [SECURITY.md](SECURITY.md) before enabling it.
 
 Production guidance: use `SIGNER_TYPE=KMS`. Mnemonic backends exist for local
 development and tests; they keep key material in the process environment.
+
+### Mandatory selective signing policy
+
+Deploy the compatible `pillar-rpc` Control API and configure its dedicated DVN
+workload credential before upgrading a signing Client. Missing Gate configuration,
+an unavailable Gate, or a missing/invalid signed registry fails closed; the
+optional durable signing audit is not a policy bypass.
+
+The Client enrolls its actual chain roster, verifies the minimal signed asset
+registry, and acknowledges the applied revision. Revision-zero enrollment is
+inventory only, not readiness or an applied policy. Each signing request then
+uses the verified packet's chain/OApp identity and available token facts to request
+a short-lived permit bound to its exact intent, wallet scope, instance and boot.
+The HTTP V1/V2 envelope is unchanged; a policy refusal never reaches the signer.
+
+Control's Backoffice provides chain-direction, asset-group, asset and address-role
+pauses plus fleet-wide rolling message/asset-amount limits. Native chain display
+addresses must be converted to canonical protocol addresses; an OApp sender is
+not the token owner's wallet. Unknown required asset facts fail closed.
+Count limits charge first-authorized unique messages, not KMS calls or delivery.
+Message identity preserves native endpoint IDs, including independent READ
+channels, separately from physical chain policy scopes. Receiver-library
+migration and registry classification changes do not reset an admission or
+turn an unchanged source packet into a different message.
+
+Central pause takes effect for new authorizations at database commit. Previously
+issued permits (at most two seconds) and already-dispatched KMS operations cannot
+be recalled. A Control/Postgres outage stops new signing, unlike an RPC gateway's
+last-known-good routing mode. Never roll back to an ungated binary as an automatic
+availability fix. See [SECURITY.md](SECURITY.md#mandatory-dvn-control-gate).
 
 ## HTTP API
 

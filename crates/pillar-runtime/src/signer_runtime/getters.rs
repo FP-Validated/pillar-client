@@ -236,12 +236,25 @@ impl KmsSignerGetter {
 
 #[async_trait]
 impl SignerGetter for KmsSignerGetter {
+    fn backend_scope(&self, chain_name: &str, wallet_name: &str) -> Result<String, AppCoreError> {
+        let chain_type = self
+            .chain_type_by_chain_name
+            .get(chain_name)
+            .ok_or_else(|| AppCoreError::Internal(format!("No chain type for {chain_name}")))?;
+        self.signer_factory
+            .signing_scope(*chain_type, wallet_name)
+            .map_err(signer_failure)
+    }
+
     async fn pillar_sign(
         &self,
         dst_chain_name: &str,
         wallet_name: &str,
         data_hex: &str,
+        authorization: &pillar_core::dvn::SigningAuthorization,
     ) -> Result<Signature, AppCoreError> {
+        let backend_scope = self.backend_scope(dst_chain_name, wallet_name)?;
+        authorization.check(dst_chain_name, wallet_name, &backend_scope, data_hex)?;
         let chain_type = *self
             .chain_type_by_chain_name
             .get(dst_chain_name)
@@ -254,20 +267,37 @@ impl SignerGetter for KmsSignerGetter {
         let signer = PillarSignerAdapterKind::for_chain_type(chain_type, raw_signer, true)
             .map_err(signer_failure)?;
         let data = decode_hex_data(data_hex)?;
-        self.observe(signer.pillar_sign(&data).await, "sign")
-            .await
-            .map_err(signer_failure)
+        authorization.check(dst_chain_name, wallet_name, &backend_scope, data_hex)?;
+        self.observe(
+            authorization.scope_effect(signer.pillar_sign(&data)).await,
+            "sign",
+        )
+        .await
+        .map_err(signer_failure)
     }
 }
 
 #[async_trait]
 impl SignerGetter for LocalMnemonicSignerGetter {
+    fn backend_scope(&self, chain_name: &str, wallet_name: &str) -> Result<String, AppCoreError> {
+        let chain_type = self
+            .chain_type_by_chain_name
+            .get(chain_name)
+            .ok_or_else(|| AppCoreError::Internal(format!("No chain type for {chain_name}")))?;
+        self.signer_factory
+            .signing_scope(*chain_type, wallet_name)
+            .map_err(signer_failure)
+    }
+
     async fn pillar_sign(
         &self,
         dst_chain_name: &str,
         wallet_name: &str,
         data_hex: &str,
+        authorization: &pillar_core::dvn::SigningAuthorization,
     ) -> Result<Signature, AppCoreError> {
+        let backend_scope = self.backend_scope(dst_chain_name, wallet_name)?;
+        authorization.check(dst_chain_name, wallet_name, &backend_scope, data_hex)?;
         let chain_type = *self
             .chain_type_by_chain_name
             .get(dst_chain_name)
@@ -280,9 +310,13 @@ impl SignerGetter for LocalMnemonicSignerGetter {
         let signer = PillarSignerAdapterKind::for_chain_type(chain_type, raw_signer, false)
             .map_err(signer_failure)?;
         let data = decode_hex_data(data_hex)?;
-        self.observe(signer.pillar_sign(&data).await, "sign")
-            .await
-            .map_err(signer_failure)
+        authorization.check(dst_chain_name, wallet_name, &backend_scope, data_hex)?;
+        self.observe(
+            authorization.scope_effect(signer.pillar_sign(&data)).await,
+            "sign",
+        )
+        .await
+        .map_err(signer_failure)
     }
 }
 

@@ -68,6 +68,7 @@ rustls.workspace = true
 webpki-roots.workspace = true
 
 [dev-dependencies]
+ed25519-dalek.workspace = true
 pillar-client = { path = "../pillar-client" }
 pillar-signer = { path = "../pillar-signer", features = ["test-support"] }
 pillar-config = { path = "../pillar-config", features = ["test-support"] }

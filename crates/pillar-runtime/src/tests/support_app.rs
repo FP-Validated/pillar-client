@@ -20,6 +20,7 @@ pub(super) fn core_api_app() -> CoreApiApp {
             sent_event_resolver: Arc::new(FixedResolver),
             validator: Arc::new(NoopValidator),
             signer_getter: Arc::new(FixedSigner),
+            signing_policy: Arc::new(crate::dvn::tests::TestSigningPolicy),
             legacy_chain_name_resolver: Arc::new(FixedChainResolver),
             stage_observer: Arc::new(pillar_core::NoopSignStageObserver),
             debug_mode: true,
