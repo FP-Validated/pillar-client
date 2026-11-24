@@ -15,10 +15,15 @@ fn normalize_move_account_for_resolver(address: &str) -> String {
 }
 
 /// The fields the Move source readers consume; the rest differs between honest node releases.
+/// `height` is the Cosmos block height of an Initia transaction, which the block-identity read
+/// names the block by (GA-347); Aptos and Movement transactions have no such field and are
+/// looked up by `version`. It is consensus data, so honest nodes agree on it.
 fn move_transaction_projection(value: Value) -> Value {
     project_fields(
         value,
-        &["hash", "txhash", "version", "type", "success", "events"],
+        &[
+            "hash", "txhash", "version", "type", "success", "events", "height",
+        ],
     )
 }
 
