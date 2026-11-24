@@ -11,6 +11,8 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing_subscriber::fmt::MakeWriter;
 
+const ADMISSION_WARNING: &str = "without RPC, signing or KMS admission";
+
 struct FailingApp {
     error: String,
 }
@@ -130,8 +132,15 @@ fn caller_error_cannot_expand_logs_and_successful_status_requests_are_quiet() {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let address = listener.local_addr().unwrap();
             let (stop, stopped) = tokio::sync::oneshot::channel();
+            let router = router(app, "test");
+            // This app reports no execution resources but serves public signing routes: the
+            // router says so once, at start (GA-361), and that is the only record before a request.
+            let startup_records = String::from_utf8_lossy(&captured.lock().unwrap()).to_string();
+            assert_eq!(startup_records.lines().count(), 1, "{startup_records}");
+            assert!(startup_records.contains("WARN"), "{startup_records}");
+            assert!(startup_records.contains(ADMISSION_WARNING), "{startup_records}");
             let server = tokio::spawn(async move {
-                axum::serve(listener, router(app, "test"))
+                axum::serve(listener, router)
                     .with_graceful_shutdown(async { let _ = stopped.await; })
                     .await.unwrap();
             });
@@ -142,7 +151,7 @@ fn caller_error_cannot_expand_logs_and_successful_status_requests_are_quiet() {
                 socket.read_to_end(&mut response).await.unwrap();
                 assert!(response.starts_with(b"HTTP/1.1 200"));
             }
-            assert_eq!(captured.lock().unwrap().len(), 0, "successful status requests produced info-level records");
+            assert_eq!(captured.lock().unwrap().len(), startup_records.len(), "successful status requests produced info-level records");
             let request_id = format!("RID_MARKER{}", "r".repeat(8192));
             let post = |payload: String| {
                 let request_id = request_id.clone();
@@ -183,7 +192,9 @@ fn caller_error_cannot_expand_logs_and_successful_status_requests_are_quiet() {
     let captured = captured.lock().unwrap();
     let records = String::from_utf8_lossy(&captured);
     assert!(
-        records.lines().any(|line| line.contains("WARN")),
+        records
+            .lines()
+            .any(|line| line.contains("WARN") && !line.contains(ADMISSION_WARNING)),
         "failure warning was suppressed"
     );
     assert!(
