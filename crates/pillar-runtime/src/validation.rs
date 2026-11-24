@@ -114,7 +114,7 @@ where
         &self,
         dst_chain_name: &str,
         expiration: i64,
-    ) -> Result<(), AppCoreError> {
+    ) -> Result<Option<std::time::Instant>, AppCoreError> {
         let valid_range = ExpirationValidRange {
             min: expiration
                 .checked_sub(self.maximum_expiration)
@@ -140,6 +140,15 @@ where
             current_timestamp,
             self.maximum_expiration,
             self.maximum_expiration_grace_period,
+        )?;
+        // The destination accepts the attestation until `expiration` plus the grace period, by
+        // its own clock. Count that window from the block time just read, on the monotonic clock,
+        // so a slow check cannot leave a window that has closed looking open (GA-366).
+        let remaining = valid_range.max.saturating_sub(current_timestamp);
+        Ok(
+            std::time::Instant::now().checked_add(std::time::Duration::from_secs(
+                u64::try_from(remaining).unwrap_or(0),
+            )),
         )
     }
 

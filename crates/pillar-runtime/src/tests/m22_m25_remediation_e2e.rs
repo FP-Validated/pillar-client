@@ -110,7 +110,11 @@ impl AppValidator for ConfirmationFloorValidator {
         NoopValidator.validate_readiness(sent_event, context).await
     }
 
-    async fn validate_expiration(&self, chain: &str, expiration: i64) -> Result<(), AppCoreError> {
+    async fn validate_expiration(
+        &self,
+        chain: &str,
+        expiration: i64,
+    ) -> Result<Option<std::time::Instant>, AppCoreError> {
         NoopValidator.validate_expiration(chain, expiration).await
     }
 
