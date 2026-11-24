@@ -984,8 +984,8 @@ impl PillarApp {
         let sign_started_at = Instant::now();
         let intent = audit::prepare(&request, &sent_event, &hash_call_data)?;
         let sign_result = audit::scope_prepared(intent, async {
-            // Before the policy gate admits the message and before any wallet is touched: an
-            // attestation the destination would already reject must not consume either.
+            // Before any wallet is touched: an attestation the destination would already
+            // reject must not consume a key.
             signing_window_open(signing_deadline, expiration)?;
             let wallets = self
                 .wallets_by_chain_name
