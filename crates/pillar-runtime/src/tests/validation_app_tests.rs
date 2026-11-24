@@ -159,7 +159,7 @@ async fn runtime_app_validator_reports_when_the_acceptance_window_closes() {
         )
     };
 
-    // 100 + 30 - 60 = 70 seconds of window left.
+    // 100 + 30 - 60 = 70 seconds, and the second that equals the bound, of window left.
     let before = std::time::Instant::now();
     let open = validator(60)
         .validate_expiration("bsc", 100)
@@ -167,18 +167,18 @@ async fn runtime_app_validator_reports_when_the_acceptance_window_closes() {
         .unwrap()
         .expect("a window is reported");
     let after = std::time::Instant::now();
-    assert!(open >= before + std::time::Duration::from_secs(70));
-    assert!(open <= after + std::time::Duration::from_secs(70));
+    assert!(open >= before + std::time::Duration::from_secs(71));
+    assert!(open <= after + std::time::Duration::from_secs(71));
 
-    // The last second the bounds check still accepts: the window closes now.
+    // A block time equal to the bound is still accepted, and the window is that one second.
     let before = std::time::Instant::now();
     let closing = validator(130)
         .validate_expiration("bsc", 100)
         .await
         .unwrap()
         .expect("a window is reported");
-    assert!(closing >= before);
-    assert!(closing <= std::time::Instant::now());
+    assert!(closing >= before + std::time::Duration::from_secs(1));
+    assert!(closing <= std::time::Instant::now() + std::time::Duration::from_secs(1));
 }
 
 #[tokio::test]
