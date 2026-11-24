@@ -851,12 +851,13 @@ operator-side control is named where one exists.
   its answers are portable between deployments that share committee keys. Readiness now binds
   the scanned event to the resolved packet, but the preimage is the committee's: give every
   Canton deployment its own committee key set (L-55).
-- A request is refused with the `expired timestamp` 400 if the signing window, `expiration`
-  plus the maximum-expiration grace period counted from the block time the expiry check
-  read, has closed on the local monotonic clock when the key is about to be used. The
-  check runs after readiness and before the policy gate, and again before each wallet. The
-  block time is read from the destination chain's providers, so this bounds the time
-  between that reading and signing; it does not shorten the grace period (GA-366).
+- A request is refused with the `Expiration has already passed` 400 if the signing window,
+  `expiration` plus the maximum-expiration grace period counted from the block time the
+  expiry check read (through the whole second that equals that bound, as the check accepts
+  it), has closed on the local monotonic clock when the key is about to be used. The check
+  runs after readiness and before the policy gate, and again before each wallet. The block
+  time is read from the destination chain's providers, so this bounds the time between that
+  reading and signing; it does not shorten the grace period (GA-366).
 - Dependency limits. An AWS profile's `duration_seconds` is sent only when this service
   assumes the role itself: a role with `source_profile` or `credential_source`; a profile
   that sets it with `web_identity_token_file` or `mfa_serial` is refused (I-07). The SSO token

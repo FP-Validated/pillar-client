@@ -142,9 +142,15 @@ where
             self.maximum_expiration_grace_period,
         )?;
         // The destination accepts the attestation until `expiration` plus the grace period, by
-        // its own clock. Count that window from the block time just read, on the monotonic clock,
-        // so a slow check cannot leave a window that has closed looking open (GA-366).
-        let remaining = valid_range.max.saturating_sub(current_timestamp);
+        // its own clock, and the check above accepts a block time equal to that bound. Block
+        // times are whole seconds, so the window runs through the second that equals it: one
+        // second past `max - current_timestamp`. Count it from the block time just read, on the
+        // monotonic clock, so a slow check cannot leave a window that has closed looking open
+        // (GA-366).
+        let remaining = valid_range
+            .max
+            .saturating_sub(current_timestamp)
+            .saturating_add(1);
         Ok(
             std::time::Instant::now().checked_add(std::time::Duration::from_secs(
                 u64::try_from(remaining).unwrap_or(0),
