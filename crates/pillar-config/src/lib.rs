@@ -607,7 +607,7 @@ pub fn is_literal_loopback(url: &Url) -> bool {
 }
 
 /// Whether a request to the URL never goes through an environment proxy: a literal loopback
-/// address, or the `localhost` name (case-insensitive, one trailing dot allowed). Every HTTP
+/// address, or the `localhost` name (case-insensitive, trailing dots ignored). Every HTTP
 /// path decides proxy use through this one predicate, so a request that one client treats as
 /// local cannot be routed through a proxy by another (GA-369).
 pub fn is_proxy_exempt_target(url: &Url) -> bool {
