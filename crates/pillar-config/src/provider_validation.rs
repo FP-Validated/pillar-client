@@ -181,6 +181,15 @@ pub fn check_strategy_config_with_restrictions(
                     continue;
                 }
             };
+            if has_zero_demand_alternative(&resolved) {
+                errors.push(format!(
+                    r#"Chain "{}" {}: a oneOf alternative requires no provider entity, so allOf alone would meet it. Strategy: {}."#,
+                    chain_label(chain),
+                    endpoint_label(endpoint),
+                    strategy_diagnostic(&resolved)
+                ));
+                continue;
+            }
             if !is_strategy_satisfiable(&counts, &resolved) {
                 errors.push(format!(
                     r#"Chain "{}" {}: strategy not satisfiable. Strategy: {}."#,
@@ -233,6 +242,19 @@ pub fn is_strategy_satisfiable(
         .one_of
         .iter()
         .any(|alt| check_requirement_set(counts, &strategy.all_of, alt))
+}
+
+/// Whether a `oneOf` alternative asks for no entity at all, as `{ "internal": 0 }` does, or as
+/// `{ "internal": "max" }` does once it resolves against a pool without that category. Such an
+/// alternative is met by `allOf` alone, so it would silently remove the requirement of every
+/// other alternative. Call it on a strategy whose `"max"` values are already resolved; an
+/// unresolved `"max"` counts as a demand.
+pub fn has_zero_demand_alternative(strategy: &QuorumStrategy) -> bool {
+    strategy.one_of.iter().any(|alternative| {
+        alternative
+            .values()
+            .all(|quorum| matches!(quorum, Quorum::Count(0)))
+    })
 }
 
 /// Slots per named category and the `any` slots a requirement asks for; `None` when a quorum is
