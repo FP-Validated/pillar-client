@@ -143,6 +143,44 @@ async fn runtime_app_validator_preserves_ts_error_text_for_expiration_bounds() {
     );
 }
 
+/// GA-366: validation hands the workflow the instant the destination's acceptance window
+/// (expiration plus grace) closes, counted from the block time it read.
+#[tokio::test]
+async fn runtime_app_validator_reports_when_the_acceptance_window_closes() {
+    let validator = |current_timestamp| {
+        RuntimeAppValidator::with_expiration_bounds(
+            Arc::new(FixedValidationChecks {
+                current_timestamp,
+                calls: Arc::new(Mutex::new(Vec::new())),
+                ranges: Arc::new(Mutex::new(Vec::new())),
+            }),
+            604800,
+            30,
+        )
+    };
+
+    // 100 + 30 - 60 = 70 seconds of window left.
+    let before = std::time::Instant::now();
+    let open = validator(60)
+        .validate_expiration("bsc", 100)
+        .await
+        .unwrap()
+        .expect("a window is reported");
+    let after = std::time::Instant::now();
+    assert!(open >= before + std::time::Duration::from_secs(70));
+    assert!(open <= after + std::time::Duration::from_secs(70));
+
+    // The last second the bounds check still accepts: the window closes now.
+    let before = std::time::Instant::now();
+    let closing = validator(130)
+        .validate_expiration("bsc", 100)
+        .await
+        .unwrap()
+        .expect("a window is reported");
+    assert!(closing >= before);
+    assert!(closing <= std::time::Instant::now());
+}
+
 #[tokio::test]
 async fn runtime_app_validator_rejects_expiration_range_overflow_before_rpc() {
     let calls = Arc::new(Mutex::new(Vec::new()));
