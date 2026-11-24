@@ -98,6 +98,8 @@ pub(crate) struct UlnV2InboundProofTypeObservation {
     pub(crate) fingerprint: String,
     pub(crate) proof_type: String,
     pub(crate) utils_version: u64,
+    /// The receiver's effective `inboundBlockConfirmations`, the least an oracle may attest at.
+    pub(crate) inbound_block_confirmations: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

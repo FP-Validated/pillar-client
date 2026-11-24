@@ -144,15 +144,19 @@ where
     let proof_type = decode_evm_uint64_result(&proof_type_result)?.to_string();
 
     Ok(UlnV2InboundProofTypeObservation {
+        // The floor is read from the same config the proof library comes from, and the builder
+        // refuses requests under it, so providers must agree on it like on the library.
         fingerprint: format!(
-            "{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}",
             app_config.inbound_proof_library_version,
             proof_library_address.to_ascii_lowercase(),
             utils_version,
-            proof_type
+            proof_type,
+            app_config.inbound_block_confirmations
         ),
         proof_type,
         utils_version,
+        inbound_block_confirmations: app_config.inbound_block_confirmations,
     })
 }
 
