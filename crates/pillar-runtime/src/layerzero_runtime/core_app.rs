@@ -14,6 +14,14 @@ pub struct RuntimeCoreAppParts {
     pub metrics: Arc<tokio::sync::Mutex<PillarMetrics>>,
 }
 
+/// Assembles a signing app from already-built parts.
+///
+/// The result has no admission control: it reports no execution resources, so serving it
+/// through `pillar_api::router_with_shutdown` takes no RPC, signing or KMS permit and
+/// `ShutdownSignal::close_budgets` has nothing to close. `RuntimeServerApp` wraps every handler
+/// in `RuntimeControls::scope` and is the composition the service runs; an embedder of this
+/// function must add equivalent limits before exposing the signing routes. `router_with_shutdown`
+/// logs a warning when public signing routes are served this way.
 pub fn core_api_app_from_runtime_parts(parts: RuntimeCoreAppParts) -> CoreApiApp {
     // Without these the returned app keeps its fail-closed defaults (no tokens, signing routes
     // protected), which contradicts the configuration it was assembled from.
