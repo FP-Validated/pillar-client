@@ -308,9 +308,71 @@ pub(crate) async fn fetch_ton_transaction_trace<T: JsonRpcTransport>(
     observation
 }
 
+/// Most cells the message bodies of one trace may declare together. A body costs about 94 ns per
+/// declared cell to decode (0.77 ms for the 8,192-cell protocol maximum, release build), and the
+/// fingerprint pass and the event pass both decode it, so a trace of 512 maximal bodies was
+/// about 0.8 s of one worker. The recorded mainnet LayerZero trace carries 19 message bodies
+/// declaring 185 cells in all, so this limit is over 300 times a real trace and holds one
+/// request to about 12 ms (GA-349).
+pub(crate) const MAX_TON_TRACE_DECLARED_CELLS: usize = 1 << 16;
+
+/// Provider-supplied TON cells are decoded by synchronous code that an async worker cannot be
+/// interrupted out of, so every decode of a trace runs on the blocking pool, four at a time
+/// process-wide. A request that cannot get a slot before its deadline is refused rather than
+/// run on the worker (GA-349).
+static TON_TRACE_DECODES: std::sync::LazyLock<Arc<tokio::sync::Semaphore>> =
+    std::sync::LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(4)));
+const TON_TRACE_DECODE_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+async fn on_ton_decode_pool<R: Send + 'static>(
+    work: impl FnOnce() -> R + Send + 'static,
+) -> Result<R, RpcError> {
+    use pillar_core::execution::BudgetError;
+    let permit = pillar_core::execution::within_deadline(
+        TON_TRACE_DECODE_WAIT,
+        TON_TRACE_DECODES.clone().acquire_owned(),
+    )
+    .await
+    .map_err(RpcError::Admission)?
+    .map_err(|_| RpcError::Admission(BudgetError::Closed))?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        work()
+    })
+    .await
+    .map_err(|_| RpcError::Remote("TON trace decoder failed".to_string()))
+}
+
+/// `ton_trace_quorum_fingerprint` on the decode pool. The tree comes back with the result so the
+/// caller can keep or drop it.
+pub(crate) async fn ton_trace_quorum_fingerprint_off_worker(
+    tree: Value,
+) -> Result<(Option<String>, Value), RpcError> {
+    on_ton_decode_pool(move || (ton_trace_quorum_fingerprint(&tree), tree)).await
+}
+
+/// `decode_ton_packet_sent_events` on the decode pool.
+pub(crate) async fn decode_ton_packet_sent_events_off_worker(
+    trace: Value,
+    trusted_emitters: HashSet<String>,
+    chain_name_by_eid: HashMap<u32, String>,
+) -> Result<Vec<TonPacketSentEvent>, RpcError> {
+    on_ton_decode_pool(move || {
+        decode_ton_packet_sent_events(&trace, &trusted_emitters, &chain_name_by_eid)
+    })
+    .await
+}
+
 /// Bind every trace transaction hash, including `in_msg: null` nodes, so aliases cannot disappear from quorum identity.
+/// A trace whose bodies declare more than `MAX_TON_TRACE_DECLARED_CELLS` cells in all has no
+/// fingerprint, so it cannot win a vote.
 pub(crate) fn ton_trace_quorum_fingerprint(tree: &Value) -> Option<String> {
+    ton_trace_quorum_fingerprint_within(tree, MAX_TON_TRACE_DECLARED_CELLS)
+}
+
+fn ton_trace_quorum_fingerprint_within(tree: &Value, max_declared_cells: usize) -> Option<String> {
     let mut digests = Vec::new();
+    let mut remaining_cells = max_declared_cells;
     use sha2::Digest;
     let mut stack = vec![tree];
     while let Some(node) = stack.pop() {
@@ -320,7 +382,11 @@ pub(crate) fn ton_trace_quorum_fingerprint(tree: &Value) -> Option<String> {
         match transaction.get("in_msg") {
             None => return None,
             Some(Value::Null) => {}
-            Some(message) => digests.push(ton_message_digest(transaction, message)?),
+            Some(message) => digests.push(ton_message_digest(
+                transaction,
+                message,
+                &mut remaining_cells,
+            )?),
         }
         let children = node.get("children")?.as_array()?;
         stack.extend(children.iter().rev());
@@ -328,10 +394,18 @@ pub(crate) fn ton_trace_quorum_fingerprint(tree: &Value) -> Option<String> {
     Some(hash_fields(digests.iter().map(String::as_str)))
 }
 
-fn ton_message_digest(transaction: &Value, message: &Value) -> Option<String> {
+fn ton_message_digest(
+    transaction: &Value,
+    message: &Value,
+    remaining_cells: &mut usize,
+) -> Option<String> {
     let body = message.pointer("/message_content/body");
     let bytes =
         base64::Engine::decode(&base64::engine::general_purpose::STANDARD, body?.as_str()?).ok()?;
+    // The header names the cell count before any cell is built, so a trace over budget is
+    // refused without paying for the parse.
+    *remaining_cells =
+        remaining_cells.checked_sub(pillar_layerzero::boc_declared_cells(&bytes)?)?;
     let root = pillar_layerzero::boc_from_bytes_with_limits(
         bytes,
         pillar_layerzero::MAX_MESSAGE_CELLS,
@@ -753,6 +827,78 @@ mod tests {
             "children": []
         });
         assert!(ton_trace_quorum_fingerprint(&tree).is_some());
+    }
+
+    /// A chain of `bodies` transactions, each carrying the 40-cell body above.
+    fn trace_of_forty_cell_bodies(bodies: usize) -> Value {
+        let body = base64::engine::general_purpose::STANDARD.encode(repeated_ref_dag_boc());
+        let mut tree = serde_json::json!({
+            "transaction": {
+                "hash": format!("{:064x}", bodies + 1),
+                "in_msg": { "message_content": { "body": body } }
+            },
+            "children": []
+        });
+        for index in (1..bodies).rev() {
+            tree = serde_json::json!({
+                "transaction": {
+                    "hash": format!("{:064x}", index),
+                    "in_msg": { "message_content": { "body": body } }
+                },
+                "children": [tree]
+            });
+        }
+        tree
+    }
+
+    /// GA-349: the bodies of one trace are decoded under a budget of declared cells, so the work
+    /// a provider can make one request do is bounded by the trace, not by 512 nodes of 8,192.
+    #[test]
+    fn a_trace_over_its_declared_cell_budget_has_no_fingerprint() {
+        // Three 40-cell bodies declare 120 cells: exactly the budget.
+        assert!(ton_trace_quorum_fingerprint_within(&trace_of_forty_cell_bodies(3), 120).is_some());
+        // A fourth body declares 160 cells in all.
+        assert!(ton_trace_quorum_fingerprint_within(&trace_of_forty_cell_bodies(4), 120).is_none());
+        // The recorded mainnet trace carries 19 message bodies declaring 185 cells in all: far
+        // inside the production limit, and refused only by a budget one cell short of it.
+        let recorded =
+            ton_transaction_trace_tree(&serde_json::from_str(RECORDED).unwrap()).unwrap();
+        assert!(ton_trace_quorum_fingerprint(&recorded).is_some());
+        assert!(ton_trace_quorum_fingerprint_within(&recorded, 184).is_none());
+        assert!(ton_trace_quorum_fingerprint_within(&recorded, 185).is_some());
+    }
+
+    /// GA-349: decoding a trace goes through the shared pool and waits at most until the request
+    /// deadline, instead of running on the caller's worker with no admission at all.
+    #[tokio::test]
+    async fn trace_decoding_waits_for_the_shared_pool_and_is_refused_at_the_request_deadline() {
+        let tree = trace_of_forty_cell_bodies(1);
+        let held = TON_TRACE_DECODES
+            .clone()
+            .acquire_many_owned(4)
+            .await
+            .expect("the pool is open");
+
+        let refused =
+            pillar_core::execution::RequestContext::new(std::time::Duration::from_millis(50))
+                .scope(ton_trace_quorum_fingerprint_off_worker(tree.clone()))
+                .await;
+        assert!(
+            matches!(
+                refused,
+                Err(RpcError::Admission(
+                    pillar_core::execution::BudgetError::Deadline
+                ))
+            ),
+            "{refused:?}"
+        );
+
+        drop(held);
+        let (fingerprint, returned) = ton_trace_quorum_fingerprint_off_worker(tree.clone())
+            .await
+            .expect("a free pool decodes");
+        assert_eq!(fingerprint, ton_trace_quorum_fingerprint(&tree));
+        assert_eq!(returned, tree);
     }
     #[test]
     fn trace_fingerprint_accepts_merkle_proof_body_on_non_layerzero_message() {

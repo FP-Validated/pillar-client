@@ -110,6 +110,22 @@ fn canonical_boc_bytes(mut bytes: Vec<u8>) -> Vec<u8> {
     bytes
 }
 
+/// The cell count a BOC's header declares, read without building any cell, so a caller can
+/// charge a budget before it pays for the parse. `None` when the bytes are not a BOC header this
+/// module reads; `boc_from_bytes_with_limits` still validates everything else.
+pub fn boc_declared_cells(bytes: &[u8]) -> Option<usize> {
+    let bytes = canonical_boc_bytes(bytes.to_vec());
+    if bytes.len() < 10 || bytes[..4] != [0xb5, 0xee, 0x9c, 0x72] {
+        return None;
+    }
+    let size_bytes = usize::from(bytes[4] & 7);
+    if size_bytes == 0 || size_bytes > 4 {
+        return None;
+    }
+    let mut cursor = 6;
+    read_boc_uint(&bytes, &mut cursor, size_bytes)
+}
+
 pub fn boc_from_bytes_with_limits(
     bytes: Vec<u8>,
     max_cells: usize,
@@ -802,6 +818,24 @@ mod tests {
     fn parses_maximal_message_boc() {
         let boc = make_flat_boc(MAX_MESSAGE_CELLS);
         assert!(boc_from_bytes_with_limits(boc, MAX_MESSAGE_CELLS, true).is_ok());
+    }
+
+    #[test]
+    fn the_declared_cell_count_is_read_from_the_header_alone() {
+        for cells in [1, 2, 28, MAX_MESSAGE_CELLS, MAX_ACCOUNT_STATE_CELLS] {
+            assert_eq!(boc_declared_cells(&make_flat_boc(cells)), Some(cells));
+        }
+        // The older indexed serialization reads the same count behind its own magic.
+        let mut legacy = make_flat_boc(28);
+        legacy[..4].copy_from_slice(&[0x68, 0xff, 0x65, 0xf3]);
+        assert_eq!(boc_declared_cells(&legacy), Some(28));
+        // Bytes that are not a BOC header declare nothing, and nothing is built either way.
+        assert_eq!(boc_declared_cells(&[]), None);
+        assert_eq!(boc_declared_cells(&[0xb5, 0xee, 0x9c]), None);
+        assert_eq!(boc_declared_cells(&[0u8; 16]), None);
+        let mut bad_width = make_flat_boc(2);
+        bad_width[4] = 0;
+        assert_eq!(boc_declared_cells(&bad_width), None);
     }
 
     fn make_flat_boc(cell_count: usize) -> Vec<u8> {
