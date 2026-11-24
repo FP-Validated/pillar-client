@@ -606,6 +606,17 @@ pub fn is_literal_loopback(url: &Url) -> bool {
     }
 }
 
+/// Whether a request to the URL never goes through an environment proxy: a literal loopback
+/// address, or the `localhost` name (case-insensitive, one trailing dot allowed). Every HTTP
+/// path decides proxy use through this one predicate, so a request that one client treats as
+/// local cannot be routed through a proxy by another (GA-369).
+pub fn is_proxy_exempt_target(url: &Url) -> bool {
+    is_literal_loopback(url)
+        || url
+            .host_str()
+            .is_some_and(|host| host.trim_end_matches('.').eq_ignore_ascii_case("localhost"))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SignerSdkFactoryType {
     AwsMnemonic,
@@ -2164,6 +2175,26 @@ mod tests {
                 ConfigError::InsecureServiceUrl(EXTRA_CONTEXT_REQUEST_URL),
                 "{url} must not be accepted on mainnet"
             );
+        }
+    }
+
+    #[test]
+    fn only_loopback_addresses_and_the_localhost_name_are_exempt_from_proxies() {
+        for (url, exempt) in [
+            ("http://127.0.0.1:8545/", true),
+            ("http://127.0.0.2:8545/", true),
+            ("http://[::1]:8545/", true),
+            ("http://localhost:8545/", true),
+            ("http://LOCALHOST:8545/", true),
+            ("http://localhost.:8545/", true),
+            ("http://localhost.example:8545/", false),
+            ("http://notlocalhost:8545/", false),
+            ("http://127.0.0.1.attacker.example/", false),
+            ("http://10.0.0.1:8545/", false),
+            ("https://rpc.example/", false),
+        ] {
+            let parsed = Url::parse(url).unwrap();
+            assert_eq!(is_proxy_exempt_target(&parsed), exempt, "{url}");
         }
     }
 
