@@ -86,6 +86,45 @@ fn two_uris_of_one_entity_cannot_satisfy_a_two_entity_strategy() {
 }
 
 #[test]
+fn a_one_of_alternative_whose_max_resolves_to_a_real_entity_still_loads() {
+    let config = load(
+        PROVIDERS,
+        r#"{"default": {"allOf": [{"any": 1}]},
+            "chains": {"ethereum": {"rpc": {"allOf": [{"shared_external": 1}],
+                "oneOf": [{"internal": "max"}, {"shared_external": 2}]}}}}"#,
+    )
+    .unwrap();
+    let ethereum = config.get_provider_config("ethereum").unwrap();
+    assert_eq!(
+        canonical_strategy_key(&ethereum.strategy),
+        r#"{"allOf":[{"shared_external":1}],"oneOf":[{"internal":1},{"shared_external":2}]}"#,
+        "max resolves to the pool's one internal entity, so the alternative keeps a real demand"
+    );
+}
+
+#[test]
+fn a_hand_built_config_with_a_zero_demand_alternative_is_refused_at_dispatch() {
+    let strategy = strategy_one(vec![
+        category_req(&[(PROVIDER_CATEGORY_INTERNAL, 0)]),
+        category_req(&[(PROVIDER_CATEGORY_SHARED_EXTERNAL, 5)]),
+    ]);
+    let strategy = QuorumStrategy {
+        all_of: vec![category_req(&[(PROVIDER_CATEGORY_DEDICATED_EXTERNAL, 1)])],
+        ..strategy
+    };
+    let error = crate::ProviderConfig::new(
+        vec![ProviderUri::Uri("https://a.example".to_string())],
+        vec![ProviderVoter {
+            category: PROVIDER_CATEGORY_DEDICATED_EXTERNAL.to_string(),
+            entity: "a".to_string(),
+        }],
+        strategy,
+    )
+    .unwrap_err();
+    assert!(error.contains("requires no provider entity"), "{error}");
+}
+
+#[test]
 fn the_retired_uris_quorum_format_is_refused_with_a_migration_hint() {
     let error = message(load(
         r#"{"ethereum": {"uris": ["https://rpc.example"], "quorum": 1}}"#,
@@ -120,6 +159,24 @@ fn refuses_pairs_that_would_weaken_or_misread_the_quorum() {
             PROVIDERS,
             r#"{"default": {}}"#,
             "requires no provider agreement",
+        ),
+        (
+            "oneOf alternative resolved to no entity (max over an absent category)",
+            PROVIDERS,
+            r#"{"default": {"allOf": [{"shared_external": 1}], "oneOf": [{"internal": "max"}, {"shared_external": 5}]}}"#,
+            r#"Chain "bsc" rpc: a oneOf alternative requires no provider entity"#,
+        ),
+        (
+            "oneOf alternative that is literally zero",
+            PROVIDERS,
+            r#"{"default": {"allOf": [{"shared_external": 1}], "oneOf": [{"internal": 0}, {"shared_external": 5}]}}"#,
+            "a oneOf alternative requires no provider entity",
+        ),
+        (
+            "empty oneOf alternative",
+            PROVIDERS,
+            r#"{"default": {"allOf": [{"shared_external": 1}], "oneOf": [{}, {"shared_external": 5}]}}"#,
+            "a oneOf alternative requires no provider entity",
         ),
         (
             "max below the floor",

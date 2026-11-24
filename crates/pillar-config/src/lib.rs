@@ -1447,6 +1447,14 @@ impl ProviderConfig {
         if !resolved {
             return Err("strategy still contains an unresolved \"max\"".to_string());
         }
+        // A `oneOf` alternative that asks for no entity is met by `allOf` alone and would let a
+        // single provider stand in for every other alternative's requirement.
+        if provider_validation::has_zero_demand_alternative(&self.strategy) {
+            return Err(format!(
+                "strategy {} has a oneOf alternative that requires no provider entity",
+                provider_validation::strategy_diagnostic(&self.strategy)
+            ));
+        }
         // A strategy met by no voters at all asks for a signature without provider agreement.
         if provider_validation::is_strategy_satisfiable(
             &std::collections::BTreeMap::new(),

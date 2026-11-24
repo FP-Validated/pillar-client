@@ -59,6 +59,12 @@ Findings are those of the `pillar-client-action-required` audit (131 items); its
 - L-90: the constructor that takes dependencies built outside the provider handle is test-only.
 - Dependencies: `azure_security_keyvault_keys` 1.0.1 (RUSTSEC-2026-0439), `hyper` 1.12.0, `h2` 0.4.20.
 
+### Remediation Review (GA-345 to GA-371)
+
+Findings are those of the Remediation Review round, cited by submission ID because its `M-`, `L-` and `I-` numbers repeat earlier ones.
+
+- GA-360 (L-01): a `oneOf` alternative that asks for no entity (`{ "internal": 0 }`, `{}`, or `{ "internal": "max" }` over a pool without that category) is refused when the strategy loads and again at dispatch. It was met by `allOf` alone, so listing it beside a demanding alternative let a single provider stand in for that alternative's requirement. Configurations that relied on it no longer start; fix the alternative or remove it.
+
 ### Changed
 
 - `RuntimeAppValidator` Solana payload checks fetch eight accounts (the endpoint `PayloadHash` is the eighth).
