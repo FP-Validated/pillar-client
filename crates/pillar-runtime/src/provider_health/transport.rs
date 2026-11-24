@@ -737,12 +737,7 @@ impl ReqwestJsonRpcTransport {
 
     fn client_for(&self, url: &str) -> &reqwest::Client {
         let loopback = reqwest::Url::parse(url)
-            .map(|url| {
-                pillar_config::is_literal_loopback(&url)
-                    || url.host_str().is_some_and(|host| {
-                        host.trim_end_matches('.').eq_ignore_ascii_case("localhost")
-                    })
-            })
+            .map(|url| pillar_config::is_proxy_exempt_target(&url))
             .unwrap_or(false);
         if loopback {
             &self.loopback_client

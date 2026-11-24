@@ -66,6 +66,7 @@ Findings are those of the `pillar-client-action-required` audit (131 items); its
 Findings are those of the Remediation Review round, cited by submission ID because its `M-`, `L-` and `I-` numbers repeat earlier ones.
 
 - GA-360 (L-01): a `oneOf` alternative that asks for no entity (`{ "internal": 0 }`, `{}`, or `{ "internal": "max" }` over a pool without that category) is refused when the strategy loads and again at dispatch. It was met by `allOf` alone, so listing it beside a demanding alternative let a single provider stand in for that alternative's requirement. Configurations that relied on it no longer start; fix the alternative or remove it.
+- GA-369 (L-06): READ target calls decide proxy use with the same predicate as every other HTTP path, so `http://localhost` is no longer routed through the system proxy (with its provider headers and `eth_call` body) while a literal loopback address was not. The decision lives in `pillar_config::is_proxy_exempt_target`.
 
 ### Changed
 

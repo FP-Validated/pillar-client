@@ -811,7 +811,13 @@ async fn proxy_child() {
             )
             .await
         ),
-        "reqwest_localhost": answer(transport.post_json(localhost, HashMap::new(), body.clone()).await),
+        "reqwest_localhost": answer(transport.post_json(localhost.clone(), HashMap::new(), body.clone()).await),
+        "read_localhost": answer(
+            crate::provider_health::read_target_scope(
+                transport.post_json(localhost, HashMap::new(), body.clone())
+            )
+            .await
+        ),
         "reqwest_hostname": answer(transport.post_json(hostname, HashMap::new(), body).await),
     });
     println!("M94_RESULT {report}");
@@ -862,6 +868,9 @@ async fn m94_loopback_bypasses_proxy() -> Value {
     assert_eq!(result["reqwest_loopback"], "honest", "{result}");
     assert_eq!(result["read_loopback"], "honest", "{result}");
     assert_eq!(result["reqwest_localhost"], "honest", "{result}");
+    // GA-369: the READ client decides proxy use with the same predicate, so `localhost` is
+    // not routed through the proxy there either.
+    assert_eq!(result["read_localhost"], "honest", "{result}");
     // The proxy is live: another host name still goes through it.
     assert_eq!(result["reqwest_hostname"], "forged", "{result}");
     let proxy_seen = proxy_seen.lock().unwrap().clone();
@@ -871,7 +880,7 @@ async fn m94_loopback_bypasses_proxy() -> Value {
         "{proxy_seen:?}"
     );
     let honest_seen = honest_seen.lock().unwrap().clone();
-    assert_eq!(honest_seen.len(), 3, "{honest_seen:?}");
+    assert_eq!(honest_seen.len(), 4, "{honest_seen:?}");
     json!({"child": result, "proxy_saw": proxy_seen, "honest_listener_saw": honest_seen})
 }
 

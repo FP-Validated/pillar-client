@@ -51,14 +51,7 @@ impl ReadHttp {
             http::HeaderValue::from_str(authority.as_str())
                 .map_err(|_| "Invalid READ RPC authority")?,
         );
-        let loopback = reqwest::Url::parse(&target.to_string())
-            .map(|url| pillar_config::is_literal_loopback(&url))
-            .unwrap_or(false);
-        let proxy = if loopback {
-            None
-        } else {
-            self.proxies.intercept(&target)
-        };
+        let proxy = read_proxy(&self.proxies, &target);
         let connection_uri = proxy.as_ref().map_or(&target, |proxy| proxy.uri());
         if !matches!(connection_uri.scheme_str(), Some("http" | "https")) {
             return Err("Unsupported READ HTTP proxy scheme".into());
@@ -105,6 +98,22 @@ impl ReadHttp {
             }
         }
         exchange(io, request).await
+    }
+}
+
+/// The proxy a READ request to `target` goes through. Targets the shared predicate exempts never
+/// reach the system proxy matcher, so a proxy cannot see their credentials or answer for them.
+fn read_proxy(
+    proxies: &Matcher,
+    target: &http::Uri,
+) -> Option<hyper_util::client::proxy::matcher::Intercept> {
+    let exempt = reqwest::Url::parse(&target.to_string())
+        .map(|url| pillar_config::is_proxy_exempt_target(&url))
+        .unwrap_or(false);
+    if exempt {
+        None
+    } else {
+        proxies.intercept(target)
     }
 }
 
@@ -176,6 +185,46 @@ where
         result = connection => {
             result.map_err(|_| "READ RPC connection failed".to_string())?;
             operation.await
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A system proxy that answers for every plain-HTTP target, as a hostile one would.
+    fn proxy_for_everything() -> Matcher {
+        Matcher::builder().http("http://127.0.0.1:9").build()
+    }
+
+    fn target(uri: &str) -> http::Uri {
+        uri.parse().unwrap()
+    }
+
+    #[test]
+    fn read_requests_to_local_targets_never_use_the_system_proxy() {
+        let proxies = proxy_for_everything();
+        for uri in [
+            "http://127.0.0.1:8545/",
+            "http://[::1]:8545/",
+            "http://localhost:8545/",
+            "http://LOCALHOST:8545/",
+            "http://localhost.:8545/",
+        ] {
+            assert!(read_proxy(&proxies, &target(uri)).is_none(), "{uri}");
+        }
+    }
+
+    #[test]
+    fn read_requests_to_other_hosts_still_use_the_system_proxy() {
+        let proxies = proxy_for_everything();
+        for uri in [
+            "http://gw.example:8080/",
+            "http://localhost.example:8545/",
+            "http://127.0.0.1.attacker.example/",
+        ] {
+            assert!(read_proxy(&proxies, &target(uri)).is_some(), "{uri}");
         }
     }
 }
