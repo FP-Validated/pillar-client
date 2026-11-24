@@ -74,6 +74,8 @@ struct RouteTransport {
     feather_utils_version: u64,
     /// What `eth-rpc-b` reports instead, when the destination has two providers.
     feather_utils_version_at_b: Option<u64>,
+    /// The receiver's `inboundBlockConfirmations` as `getAppConfig` reports it.
+    inbound_floor: u64,
 }
 
 impl RouteTransport {
@@ -134,7 +136,7 @@ impl RouteTransport {
         {
             abi_uln_v2_app_config_result(
                 2,
-                64,
+                self.inbound_floor,
                 "0x1111111111111111111111111111111111111111",
                 1,
                 12,
@@ -415,6 +417,23 @@ async fn route_app_with_feather_utils_version(
     feather_utils_version: u64,
     feather_utils_version_at_b: Option<u64>,
 ) -> (RuntimeServerApp<RouteTransport>, RecordedJsonCalls) {
+    route_app_with_inbound_floor(
+        receive_library,
+        source,
+        feather_utils_version,
+        feather_utils_version_at_b,
+        BLOCK_CONFIRMATION as u64,
+    )
+    .await
+}
+
+async fn route_app_with_inbound_floor(
+    receive_library: ReceiveLibrary,
+    source: SourceChain,
+    feather_utils_version: u64,
+    feather_utils_version_at_b: Option<u64>,
+    inbound_floor: u64,
+) -> (RuntimeServerApp<RouteTransport>, RecordedJsonCalls) {
     let destination_uris: &[&str] =
         if receive_library == ReceiveLibrary::Split || feather_utils_version_at_b.is_some() {
             &["https://eth-rpc-a.example", "https://eth-rpc-b.example"]
@@ -429,6 +448,7 @@ async fn route_app_with_feather_utils_version(
         source_receipt_reads: Arc::new(Mutex::new(0)),
         feather_utils_version,
         feather_utils_version_at_b,
+        inbound_floor,
     };
     let app = RuntimeServerApp::from_env_map_with_runtime_core(
         env_map(destination_uris),
@@ -610,6 +630,37 @@ async fn v2_send_to_an_ultra_light_node_v2_destination_signs_the_v2_update_hash(
             "an unmigrated receiver is never checked on {v3_library}: {targets:?}"
         );
     }
+}
+
+/// GA-364: a V2 send has no guid, so the receive-config floor never applied to it. A request
+/// below the receiver's `inboundBlockConfirmations` is refused while building, before the signer.
+#[tokio::test]
+async fn v2_send_below_the_destination_inbound_floor_is_refused_before_the_signer() {
+    let (app, calls) = route_app_with_inbound_floor(
+        ReceiveLibrary::UltraLightNodeV2,
+        SourceChain::Stable,
+        1,
+        None,
+        BLOCK_CONFIRMATION as u64 + 1,
+    )
+    .await;
+
+    let error = app
+        .sign_request_v2(v2_request())
+        .await
+        .expect_err("a confirmation count the destination ULN rejects must not be signed");
+
+    let stages = stages_of(&app).await;
+    assert!(
+        matches!(&error, pillar_api::AppError::BadRequest(message)
+            if message.contains("is below the 13 confirmations the destination receive config requires")),
+        "{error}; calls={:#?}",
+        describe_calls(&calls)
+    );
+    assert!(
+        stages.iter().all(|stage| stage != "sign"),
+        "refused before the signer: {stages:?}"
+    );
 }
 
 /// Only `utilsVersion = 1` has a deployed FPValidator whose source fixes the proof
