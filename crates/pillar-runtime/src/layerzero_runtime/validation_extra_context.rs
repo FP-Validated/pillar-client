@@ -797,7 +797,12 @@ where
         .filter(|address| !address.is_empty())
         .ok_or_else(|| AppCoreError::Internal("Missing TON transaction sender".to_string()))?;
     let from = ton_principal_address(principal)?;
-    let fingerprint = ton_trace_quorum_fingerprint(&response)
+    // Every message body of the trace is decoded for the fingerprint: on the decode pool, under
+    // the per-trace cell budget (GA-349).
+    let (fingerprint, _trace) = ton_trace_quorum_fingerprint_off_worker(response)
+        .await
+        .map_err(AppCoreError::from)?;
+    let fingerprint = fingerprint
         .ok_or_else(|| AppCoreError::Internal("Unreadable TON transaction trace".to_string()))?;
     Ok(TransactionFromObservation { fingerprint, from })
 }

@@ -395,11 +395,15 @@ pub trait AppValidator: Send + Sync + 'static {
         signing_context: &SigningContext,
     ) -> Result<Vec<ReadBlockPin>, AppCoreError>;
 
+    /// Checks the request's expiration against the destination clock. Returns the monotonic
+    /// instant after which the destination would reject the attestation as expired, counted from
+    /// the block time just read, or `None` when the validator cannot bound it. The workflow
+    /// refuses to use a key once that instant has passed (GA-366).
     async fn validate_expiration(
         &self,
         dst_chain_name: &str,
         expiration: i64,
-    ) -> Result<(), AppCoreError>;
+    ) -> Result<Option<Instant>, AppCoreError>;
 
     async fn validate_payload_signed(
         &self,
@@ -907,7 +911,7 @@ impl PillarApp {
             self.validator
                 .validate_message_hash(&request, &sent_event)
                 .await?;
-            let (read_block_pins, (), required_confirmations) = tokio::try_join!(
+            let (read_block_pins, signing_deadline, required_confirmations) = tokio::try_join!(
                 self.validator
                     .validate_readiness(&sent_event, &request.signing_context),
                 self.validator
@@ -935,7 +939,7 @@ impl PillarApp {
             self.validator
                 .validate_extra_context(&sent_event, &request.signing_context)
                 .await?;
-            Ok::<_, AppCoreError>(read_block_pins)
+            Ok::<_, AppCoreError>((read_block_pins, signing_deadline))
         }
         .await;
         self.stage_observer
@@ -951,7 +955,9 @@ impl PillarApp {
                 validation_started_at.elapsed().as_secs_f64(),
             )
             .await;
-        sent_event.read_block_pins = validation_result?;
+        let (read_block_pins, signing_deadline) = validation_result?;
+        sent_event.read_block_pins = read_block_pins;
+        let expiration = request.signing_context.expiration();
         tracing::info!(
             src_chain = %src_chain_name,
             dst_chain = %dst_chain_name,
@@ -993,6 +999,9 @@ impl PillarApp {
         let sign_started_at = Instant::now();
         let intent = audit::prepare(&request, &sent_event, &hash_call_data)?;
         let sign_result = audit::scope_prepared(intent, async {
+            // Before the policy gate admits the message and before any wallet is touched: an
+            // attestation the destination would already reject must not consume either.
+            signing_window_open(signing_deadline, expiration)?;
             let wallets = self
                 .wallets_by_chain_name
                 .get(dst_chain_name)
@@ -1029,6 +1038,7 @@ impl PillarApp {
                 .await?;
             let authorization = &authorization;
             stream::iter(wallet_names.into_iter().map(|wallet_name| async move {
+                signing_window_open(signing_deadline, expiration)?;
                 let wallet_sign_started_at = Instant::now();
                 let signature = audit::sign_wallet(
                     &wallet_name,
@@ -1264,6 +1274,17 @@ pub fn hydrate_uln_v2_sent_event(
         hydrated.extra.insert("sendLibrary".to_string(), emitter);
     }
     Ok(hydrated)
+}
+
+/// Refuses to start a signing effect once `deadline`, the end of the destination's acceptance
+/// window measured on the local monotonic clock, has passed.
+fn signing_window_open(deadline: Option<Instant>, expiration: i64) -> Result<(), AppCoreError> {
+    match deadline {
+        Some(deadline) if Instant::now() >= deadline => Err(AppCoreError::BadRequest(format!(
+            "{EXPIRED_TIMESTAMP_ERROR_PREFIX}: expiration={expiration}, the signing window closed before the key was used"
+        ))),
+        _ => Ok(()),
+    }
 }
 
 pub fn validate_expiration_bounds(
@@ -1740,8 +1761,8 @@ mod tests {
             &self,
             _dst_chain_name: &str,
             _expiration: i64,
-        ) -> Result<(), AppCoreError> {
-            Ok(())
+        ) -> Result<Option<Instant>, AppCoreError> {
+            Ok(None)
         }
 
         async fn validate_payload_signed(
@@ -1798,8 +1819,8 @@ mod tests {
             &self,
             _dst_chain_name: &str,
             _expiration: i64,
-        ) -> Result<(), AppCoreError> {
-            Ok(())
+        ) -> Result<Option<Instant>, AppCoreError> {
+            Ok(None)
         }
 
         async fn validate_payload_signed(
@@ -1967,6 +1988,143 @@ mod tests {
             sent_event_resolver,
             ..app()
         }
+    }
+
+    /// Reports the signing deadline a runtime validator would, and takes `readiness_delay` to
+    /// finish the readiness check that runs beside the expiration check.
+    struct WindowValidator {
+        window: Duration,
+        readiness_delay: Duration,
+    }
+
+    #[async_trait]
+    impl AppValidator for WindowValidator {
+        async fn validate_message_hash(
+            &self,
+            request: &PillarApiRequestV2,
+            sent_event: &LzSentEvent,
+        ) -> Result<(), AppCoreError> {
+            NoopValidator
+                .validate_message_hash(request, sent_event)
+                .await
+        }
+
+        async fn validate_readiness(
+            &self,
+            sent_event: &LzSentEvent,
+            signing_context: &SigningContext,
+        ) -> Result<Vec<ReadBlockPin>, AppCoreError> {
+            tokio::time::sleep(self.readiness_delay).await;
+            NoopValidator
+                .validate_readiness(sent_event, signing_context)
+                .await
+        }
+
+        async fn validate_expiration(
+            &self,
+            _dst_chain_name: &str,
+            _expiration: i64,
+        ) -> Result<Option<Instant>, AppCoreError> {
+            Ok(Instant::now().checked_add(self.window))
+        }
+
+        async fn validate_payload_signed(
+            &self,
+            sent_event: &LzSentEvent,
+            verifier_address: Option<&str>,
+            dst_chain_name: &str,
+            effective_receive_version: Option<&str>,
+        ) -> Result<Option<u64>, AppCoreError> {
+            NoopValidator
+                .validate_payload_signed(
+                    sent_event,
+                    verifier_address,
+                    dst_chain_name,
+                    effective_receive_version,
+                )
+                .await
+        }
+
+        async fn validate_extra_context(
+            &self,
+            sent_event: &LzSentEvent,
+            signing_context: &SigningContext,
+        ) -> Result<(), AppCoreError> {
+            NoopValidator
+                .validate_extra_context(sent_event, signing_context)
+                .await
+        }
+
+        async fn uln_receive_version(
+            &self,
+            lz_message_id: &LzMessageId,
+        ) -> Result<String, AppCoreError> {
+            NoopValidator.uln_receive_version(lz_message_id).await
+        }
+    }
+
+    struct CountingSigner(Arc<AtomicUsize>);
+
+    #[async_trait]
+    impl SignerGetter for CountingSigner {
+        fn backend_scope(&self, _: &str, _: &str) -> Result<String, AppCoreError> {
+            Ok("test".into())
+        }
+        async fn pillar_sign(
+            &self,
+            dst_chain_name: &str,
+            wallet_name: &str,
+            data_hex: &str,
+            authorization: &dvn::SigningAuthorization,
+        ) -> Result<Signature, AppCoreError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            FixedSigner
+                .pillar_sign(dst_chain_name, wallet_name, data_hex, authorization)
+                .await
+        }
+    }
+
+    fn app_with_window(
+        window: Duration,
+        readiness_delay: Duration,
+    ) -> (PillarApp, Arc<AtomicUsize>) {
+        let signed = Arc::new(AtomicUsize::new(0));
+        let app = PillarApp {
+            validator: Arc::new(WindowValidator {
+                window,
+                readiness_delay,
+            }),
+            signer_getter: Arc::new(CountingSigner(signed.clone())),
+            ..app()
+        };
+        (app, signed)
+    }
+
+    /// GA-366: the expiration check runs beside a slow readiness check. When the destination's
+    /// acceptance window closes while readiness is still running, the key must not be used.
+    #[tokio::test]
+    async fn refuses_signing_after_the_expiry_window_closes_during_validation() {
+        let (app, signed) = app_with_window(Duration::from_millis(20), Duration::from_millis(80));
+
+        let error = app.sign_request_v2(request_v2("V302")).await.unwrap_err();
+
+        assert!(
+            matches!(&error, AppCoreError::BadRequest(text) if text.starts_with(EXPIRED_TIMESTAMP_ERROR_PREFIX)),
+            "{error:?}"
+        );
+        assert_eq!(signed.load(Ordering::SeqCst), 0, "no key was used");
+    }
+
+    /// The same slow readiness inside an open window still signs, so the refusal above is the
+    /// window and not the delay.
+    #[tokio::test]
+    async fn signs_when_the_expiry_window_outlasts_the_validation() {
+        let (app, signed) = app_with_window(Duration::from_secs(3600), Duration::from_millis(80));
+
+        let response = app.sign_request_v2(request_v2("V302")).await.unwrap();
+
+        assert_eq!(response.signatures.len(), 1);
+        assert_eq!(signed.load(Ordering::SeqCst), 1);
     }
 
     /// srcTxHash is spliced into an outbound provider URL path, so path
@@ -2213,9 +2371,9 @@ mod tests {
             &self,
             _dst_chain_name: &str,
             _expiration: i64,
-        ) -> Result<(), AppCoreError> {
+        ) -> Result<Option<Instant>, AppCoreError> {
             self.observe().await;
-            Ok(())
+            Ok(None)
         }
 
         async fn validate_payload_signed(
@@ -2318,7 +2476,7 @@ mod tests {
                 &self,
                 _dst_chain_name: &str,
                 _expiration: i64,
-            ) -> Result<(), AppCoreError> {
+            ) -> Result<Option<Instant>, AppCoreError> {
                 self.issued.fetch_add(1, Ordering::SeqCst);
                 Err(AppCoreError::BadRequest("expiration".to_string()))
             }

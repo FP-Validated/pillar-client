@@ -225,6 +225,7 @@ accepted.
 | Sui/IotaL1 event pagination | 16 MiB cumulative serialized bytes, 1,024 events and 131,072 structural units across all pages; individual pages also obey response limits |
 | JSON pre-allocation scan | 131,072 structural parse-cost units; 524,288 for TON and Canton responses. A cost estimate, not an exact element/heap-byte count |
 | JSON container nesting | 128 normally; 512 for TON and Canton responses |
+| TON trace message bodies | 65,536 declared cells in all; a trace over it has no fingerprint and cannot win a vote. Every decode of a trace (fingerprint, event read, extra-context sender) runs on a shared pool of four blocking threads and waits at most until the request deadline, then is a local admission refusal rather than a lost vote |
 | Retained JSON quorum candidate | 8 MiB estimated per representative, 64 MiB estimated shared pool |
 | READ returned data | 1 MiB per request result, per decoded lzMap/lzReduce result, per command for all request results and for all lzMap results; READ calls in flight: 4 per target chain and per command phase, 16 per process, chain permits granted in arrival order, each holding its providers' votes until its quorum resolves |
 | Configured parser waiting | Eight shared registrations plus quiet-lane reservations (at most eight plus the fixed lane count); two queued per lane; two-second admission wait |
@@ -565,6 +566,11 @@ not reproduce:
   other value is a 400 before anything is signed. Upstream's `getFeatherProof`
   signs the bare packet for 2 and throws for anything else; 2 has no deployed
   verifier source, so its meaning cannot be checked and it is not imitated.
+  The `lookupHash` and `blockData` of the proof this service reports are one value, the
+  hash of the feather proof (`derive_evm_feather_hash_info`,
+  `crates/pillar-layerzero/src/packet.rs`), as before. Whether upstream's `getFeatherProof`
+  reports the same pair has not been checked against its source, and how a destination
+  verifier uses the two fields on chain has not been observed (GA-364).
 - A trusted `PacketSent` whose destination EID this deployment cannot name is a
   non-match, so a later event in the same transaction can still resolve. Move,
   Sui, IotaL1, Starknet and Stellar consult the chain-name map and then the legacy
@@ -643,6 +649,11 @@ not reproduce:
   waits for its provider timeout.
 - Every destination, MESSAGE requests: a `blockConfirmation` below the destination's
   effective receive confirmations is a 400; upstream signs it.
+- A `V2` send (legacy ULNv2, which carries no guid) is held to the same floor: the
+  receiver's `inboundBlockConfirmations`, read with the `getAppConfig` call that
+  proof-library discovery already makes and bound into the providers' agreed observation.
+  A `blockConfirmation` below it is a 400 before anything is signed. Whether upstream
+  applies it was not checked (GA-364).
 - Sui and IOTA: an abort counts as "no confirmation record" only when raised by the
   ULN package's `receive_uln::get_confirmations`; upstream reads only the abort code.
 - A READ target body over the transport limit is an oversized-result vote; upstream
@@ -840,6 +851,13 @@ operator-side control is named where one exists.
   its answers are portable between deployments that share committee keys. Readiness now binds
   the scanned event to the resolved packet, but the preimage is the committee's: give every
   Canton deployment its own committee key set (L-55).
+- A request is refused with the `Expiration has already passed` 400 if the signing window,
+  `expiration` plus the maximum-expiration grace period counted from the block time the
+  expiry check read (through the whole second that equals that bound, as the check accepts
+  it), has closed on the local monotonic clock when the key is about to be used. The check
+  runs after readiness and before the policy gate, and again before each wallet. The block
+  time is read from the destination chain's providers, so this bounds the time between that
+  reading and signing; it does not shorten the grace period (GA-366).
 - Dependency limits. An AWS profile's `duration_seconds` is sent only when this service
   assumes the role itself: a role with `source_profile` or `credential_source`; a profile
   that sets it with `web_identity_token_file` or `mfa_serial` is refused (I-07). The SSO token

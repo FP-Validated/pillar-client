@@ -159,8 +159,12 @@ impl AppValidator for PassingValidator {
     ) -> Result<Vec<pillar_core::ReadBlockPin>, AppCoreError> {
         Ok(Vec::new())
     }
-    async fn validate_expiration(&self, _: &str, _: i64) -> Result<(), AppCoreError> {
-        Ok(())
+    async fn validate_expiration(
+        &self,
+        _: &str,
+        _: i64,
+    ) -> Result<Option<std::time::Instant>, AppCoreError> {
+        Ok(None)
     }
     async fn validate_payload_signed(
         &self,

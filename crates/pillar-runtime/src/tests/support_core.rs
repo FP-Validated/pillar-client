@@ -65,8 +65,8 @@ impl AppValidator for NoopValidator {
         &self,
         _dst_chain_name: &str,
         _expiration: i64,
-    ) -> Result<(), AppCoreError> {
-        Ok(())
+    ) -> Result<Option<std::time::Instant>, AppCoreError> {
+        Ok(None)
     }
 
     async fn validate_payload_signed(

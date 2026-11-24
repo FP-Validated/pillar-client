@@ -612,6 +612,17 @@ pub fn is_literal_loopback(url: &Url) -> bool {
     }
 }
 
+/// Whether a request to the URL never goes through an environment proxy: a literal loopback
+/// address, or the `localhost` name (case-insensitive, trailing dots ignored). Every HTTP
+/// path decides proxy use through this one predicate, so a request that one client treats as
+/// local cannot be routed through a proxy by another (GA-369).
+pub fn is_proxy_exempt_target(url: &Url) -> bool {
+    is_literal_loopback(url)
+        || url
+            .host_str()
+            .is_some_and(|host| host.trim_end_matches('.').eq_ignore_ascii_case("localhost"))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SignerSdkFactoryType {
     AwsMnemonic,
@@ -1453,6 +1464,14 @@ impl ProviderConfig {
         if !resolved {
             return Err("strategy still contains an unresolved \"max\"".to_string());
         }
+        // A `oneOf` alternative that asks for no entity is met by `allOf` alone and would let a
+        // single provider stand in for every other alternative's requirement.
+        if provider_validation::has_zero_demand_alternative(&self.strategy) {
+            return Err(format!(
+                "strategy {} has a oneOf alternative that requires no provider entity",
+                provider_validation::strategy_diagnostic(&self.strategy)
+            ));
+        }
         // A strategy met by no voters at all asks for a signature without provider agreement.
         if provider_validation::is_strategy_satisfiable(
             &std::collections::BTreeMap::new(),
@@ -2162,6 +2181,26 @@ mod tests {
                 ConfigError::InsecureServiceUrl(EXTRA_CONTEXT_REQUEST_URL),
                 "{url} must not be accepted on mainnet"
             );
+        }
+    }
+
+    #[test]
+    fn only_loopback_addresses_and_the_localhost_name_are_exempt_from_proxies() {
+        for (url, exempt) in [
+            ("http://127.0.0.1:8545/", true),
+            ("http://127.0.0.2:8545/", true),
+            ("http://[::1]:8545/", true),
+            ("http://localhost:8545/", true),
+            ("http://LOCALHOST:8545/", true),
+            ("http://localhost.:8545/", true),
+            ("http://localhost.example:8545/", false),
+            ("http://notlocalhost:8545/", false),
+            ("http://127.0.0.1.attacker.example/", false),
+            ("http://10.0.0.1:8545/", false),
+            ("https://rpc.example/", false),
+        ] {
+            let parsed = Url::parse(url).unwrap();
+            assert_eq!(is_proxy_exempt_target(&parsed), exempt, "{url}");
         }
     }
 

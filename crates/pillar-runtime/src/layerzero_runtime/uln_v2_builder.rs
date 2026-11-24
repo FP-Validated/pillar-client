@@ -1,4 +1,5 @@
 use super::*;
+use crate::provider_health::UlnV2InboundProofTypeObservation;
 
 #[derive(Clone)]
 pub(crate) struct RuntimeEvmUlnV2PayloadBuilder<T> {
@@ -102,7 +103,7 @@ where
     async fn inbound_proof_library_with_quorum(
         &self,
         sent_event: &LzSentEvent,
-    ) -> Result<(String, u64), AppCoreError> {
+    ) -> Result<UlnV2InboundProofTypeObservation, AppCoreError> {
         crate::provider_health::rpc_scope(
             &sent_event.lz_message_id.pathway_id.dst_chain_name,
             async {
@@ -163,7 +164,7 @@ where
                 let observation =
                     resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
                         .await?;
-                Ok((observation.proof_type, observation.utils_version))
+                Ok(observation)
             },
         )
         .await
@@ -198,8 +199,23 @@ where
             ));
         }
         let src_chain_name = &sent_event.lz_message_id.pathway_id.src_chain_name;
-        let (proof_type, utils_version) =
-            self.inbound_proof_library_with_quorum(sent_event).await?;
+        let UlnV2InboundProofTypeObservation {
+            proof_type,
+            utils_version,
+            inbound_block_confirmations,
+            ..
+        } = self.inbound_proof_library_with_quorum(sent_event).await?;
+        // The destination ULN takes an oracle's `updateHash` only at or above the receiver's
+        // `inboundBlockConfirmations`. A V2 send has no guid, so the floor check of the guid
+        // path never ran for it; refuse before building so no signature is spent on an
+        // attestation the destination rejects (GA-364).
+        if u64::try_from(block_confirmation)
+            .map_or(true, |requested| requested < inbound_block_confirmations)
+        {
+            return Err(AppCoreError::BadRequest(format!(
+                "blockConfirmation {block_confirmation} is below the {inbound_block_confirmations} confirmations the destination receive config requires"
+            )));
+        }
         // Aptos's V1 SDK has a feather proof builder only (`lz-v1-sdk/src/aptos/aptos.ts:93,735-740`).
         if src_chain_name == "aptos" && proof_type != "2" {
             return Err(AppCoreError::Internal(format!(
