@@ -216,7 +216,8 @@ resolves to the pool's entity count. Two URIs of one entity are one vote. Only e
 chain's `rpc` pool is dispatched; other endpoint types are validated and ignored, and a
 roster chain without an `rpc` pool does not start. A pair is refused at load when an
 entry or category is invalid, an entity is unregistered, a field is unknown, a
-strategy is unsatisfiable by its pool or needs no agreement at all, or a `"max"` falls
+strategy is unsatisfiable by its pool or needs no agreement at all (including a `oneOf`
+alternative that asks for no entity), or a `"max"` falls
 below `minimumMaxEntities`. Agreement is still exact: if two different answers could
 each meet the strategy, the call fails rather than picking one.
 
