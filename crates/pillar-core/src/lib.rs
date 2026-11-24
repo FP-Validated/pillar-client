@@ -2020,19 +2020,15 @@ mod tests {
 
     #[async_trait]
     impl SignerGetter for CountingSigner {
-        fn backend_scope(&self, _: &str, _: &str) -> Result<String, AppCoreError> {
-            Ok("test".into())
-        }
         async fn pillar_sign(
             &self,
             dst_chain_name: &str,
             wallet_name: &str,
             data_hex: &str,
-            authorization: &dvn::SigningAuthorization,
         ) -> Result<Signature, AppCoreError> {
             self.0.fetch_add(1, Ordering::SeqCst);
             FixedSigner
-                .pillar_sign(dst_chain_name, wallet_name, data_hex, authorization)
+                .pillar_sign(dst_chain_name, wallet_name, data_hex)
                 .await
         }
     }
