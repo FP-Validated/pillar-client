@@ -137,6 +137,12 @@ pub trait ServerApp: Send + Sync + 'static {
     fn metrics(&self) -> Option<Arc<Mutex<PillarMetrics>>> {
         None
     }
+    /// The RPC, signing and KMS admission budgets this app runs under, or `None` when it has
+    /// none. The router only hands them to `ShutdownSignal`, which closes them when draining
+    /// ends; the permits are taken by the app, whose handlers must run inside the scope that
+    /// carries them. An app that returns `None` serves its signing routes without any limit on
+    /// provider calls or key operations; `RuntimeServerApp` (through `RuntimeControls::scope`)
+    /// is the composition that supplies them.
     fn execution_resources(&self) -> Option<Arc<ExecutionResources>> {
         None
     }
@@ -311,6 +317,14 @@ pub fn router_with_shutdown(
 ) -> (Router, ShutdownSignal) {
     let app = Arc::new(app);
     let resources = app.execution_resources();
+    if resources.is_none() && app.public_sign_routes() {
+        // A caller who needs no credential must not also be able to run unlimited provider
+        // calls and key operations (GA-361).
+        tracing::warn!(
+            "public signing routes are served without RPC, signing or KMS admission: \
+             this app reports no execution resources; wrap it in RuntimeServerApp"
+        );
+    }
     let shared_metrics = app
         .metrics()
         .unwrap_or_else(|| Arc::new(Mutex::new(PillarMetrics::new())));
@@ -1035,6 +1049,13 @@ async fn version(
     }))
 }
 
+/// A signing app assembled from parts, without the process-level controls.
+///
+/// This type and `pillar_runtime::core_api_app_from_runtime_parts`, which builds it, carry no
+/// admission control: `execution_resources()` is `None`, so RPC, signing and KMS permits are
+/// never taken. Serve it through `RuntimeServerApp` (which wraps every handler in
+/// `RuntimeControls::scope`) unless the embedder supplies equivalent limits; the official
+/// binary already does.
 pub struct CoreApiApp {
     pub core: PillarApp,
     pub environment: String,
