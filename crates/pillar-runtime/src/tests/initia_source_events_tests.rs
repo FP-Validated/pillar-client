@@ -168,6 +168,56 @@ async fn initia_source_events_match_gasolina() {
     );
     assert_eq!(dst_name_refused, 6);
 }
+
+/// GA-347: an extra-context policy reads `blockHash` and `blockNumber` from the resolved send.
+/// The block is named by the transaction's height, which the agreed projection must keep.
+#[tokio::test]
+async fn initia_send_carries_the_block_identity_an_extra_context_policy_checks() {
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let matching = fixture["scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|scenario| scenario["name"] == "match")
+        .unwrap();
+    assert_eq!(matching["transaction"]["height"], "777");
+    let request: LzMessageId = serde_json::from_value(matching["request"].clone()).unwrap();
+    let event = scripted_resolver(
+        fixture["environment"].as_str().unwrap(),
+        &matching["transaction"],
+    )
+    .get_lz_sent_event(fixture["txHash"].as_str().unwrap(), &request)
+    .await
+    .unwrap();
+    assert_eq!(event.extra.get("blockNumber"), Some(&json!(777)));
+    assert_eq!(
+        event.extra.get("blockHash"),
+        Some(&json!(format!("0x{}", "11".repeat(32)))),
+        "the base64 block id of the scripted block, as the 0x hex a policy checks"
+    );
+}
+
+/// Near miss: a transaction that names no height has no block to read, so the send carries no
+/// block identity and a policy that needs one refuses it, rather than reading a guessed block.
+#[tokio::test]
+async fn initia_send_without_a_height_carries_no_block_identity() {
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let matching = fixture["scenarios"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|scenario| scenario["name"] == "match")
+        .unwrap();
+    let mut transaction = matching["transaction"].clone();
+    transaction.as_object_mut().unwrap().remove("height");
+    let request: LzMessageId = serde_json::from_value(matching["request"].clone()).unwrap();
+    let event = scripted_resolver(fixture["environment"].as_str().unwrap(), &transaction)
+        .get_lz_sent_event(fixture["txHash"].as_str().unwrap(), &request)
+        .await
+        .unwrap();
+    assert!(event.extra.get("blockHash").is_none());
+    assert!(event.extra.get("blockNumber").is_none());
+}
 #[tokio::test]
 async fn initia_unmapped_destination_event_does_not_mask_later_match() {
     let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
