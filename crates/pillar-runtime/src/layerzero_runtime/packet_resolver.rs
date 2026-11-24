@@ -1123,19 +1123,20 @@ where
                         &encoded_tx_hash,
                     )
                     .await;
-                    (
-                        index,
-                        observation.map(|tree| {
-                            tree.and_then(|tree| {
-                                ton_trace_contains_hash(&tree, src_tx_hash)
-                                    .then(|| {
-                                        ton_trace_quorum_fingerprint(&tree)
-                                            .map(|fingerprint| (fingerprint, tree))
-                                    })
-                                    .flatten()
-                            })
-                        }),
-                    )
+                    let observation = match observation {
+                        Ok(Some(tree)) if ton_trace_contains_hash(&tree, src_tx_hash) => {
+                            // The fingerprint decodes every message body: it runs on the
+                            // decode pool and under a per-trace cell budget (GA-349).
+                            ton_trace_quorum_fingerprint_off_worker(tree).await.map(
+                                |(fingerprint, tree)| {
+                                    fingerprint.map(|fingerprint| (fingerprint, tree))
+                                },
+                            )
+                        }
+                        Ok(_) => Ok(None),
+                        Err(error) => Err(error),
+                    };
+                    (index, observation)
                 });
             }
             let mut accumulator = ExactQuorumAccumulator::new(quorum, dispatched);
@@ -1589,8 +1590,13 @@ where
                     })?;
                 let trace = self.get_ton_transaction_trace(src_tx_hash).await?;
                 let mut first_source_fault = None;
-                for event in
-                    decode_ton_packet_sent_events(&trace, trusted, &self.config.chain_name_by_eid)
+                for event in decode_ton_packet_sent_events_off_worker(
+                    trace,
+                    trusted.clone(),
+                    self.config.chain_name_by_eid.clone(),
+                )
+                .await
+                .map_err(AppCoreError::from)?
                 {
                     let src_chain_name = match self.chain_name_for_eid(event.packet.src_eid) {
                         Ok(name) => name,

@@ -88,10 +88,12 @@ mod source_events_starknet;
 mod source_events_stellar;
 mod source_events_ton;
 #[cfg(test)]
-pub(crate) use source_events_ton::ton_transaction_trace_tree;
 pub(crate) use source_events_ton::{
-    decode_ton_packet_sent_events, fetch_ton_transaction_trace, normalize_ton_address,
-    ton_request_hash_valid, ton_trace_contains_hash, ton_trace_quorum_fingerprint,
+    decode_ton_packet_sent_events, ton_trace_quorum_fingerprint, ton_transaction_trace_tree,
+};
+pub(crate) use source_events_ton::{
+    decode_ton_packet_sent_events_off_worker, fetch_ton_transaction_trace, normalize_ton_address,
+    ton_request_hash_valid, ton_trace_contains_hash, ton_trace_quorum_fingerprint_off_worker,
 };
 mod packet_resolver;
 #[cfg(test)]
