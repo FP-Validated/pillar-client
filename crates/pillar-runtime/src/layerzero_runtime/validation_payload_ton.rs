@@ -23,10 +23,13 @@
 //!    serialized as `['num', <decimal>]` / `['tvm.Cell', <BOC base64>]`)
 //! 4. the DVN attestation lookup in `UlnConnection.hashLookups`
 
+use super::source_events_ton::{on_ton_decode_pool, TON_ADMISSION_WAIT};
 use super::ton_v3_builder::uses_deprecated_uln;
 use super::validation_payload::payload_signed_validation_result;
 use super::*;
+use crate::provider_health::{drop_json_value_safely, MAX_TON_ACCOUNT_RESPONSE_BYTES};
 use sha2::{Digest, Sha256};
+use std::sync::{atomic::Ordering, LazyLock};
 
 use pillar_layerzero::{
     committable_view_is_signed, dvn_attestation, required_receive_confirmations,
@@ -146,18 +149,14 @@ where
         let quorum = required_provider_quorum(provider_config, dst_chain_name)?;
         let plan = plan_dispatch(&self.rank_tracker, dst_chain_name, quorum).await?;
 
-        let requests = FuturesUnordered::new();
-        for DispatchEntry { index, uri, delay } in plan {
+        let requests = quorum_requests(plan, |index, uri| {
             let (url, headers) = provider_uri_parts(uri);
             let transport = self.transport.clone();
             let uln_address = targets.uln_address.clone();
             let uln_connection_address = targets.uln_connection_address.clone();
             let packet_boc_base64 = targets.packet_boc_base64.clone();
             let packet_hash_be = targets.packet_hash_be;
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
+            async move {
                 let observation = provider_response(
                     observe_ton_payload_signed(
                         transport,
@@ -175,8 +174,8 @@ where
                     .await,
                 );
                 (index, observation)
-            });
-        }
+            }
+        });
         let context = format!("payload-signed validation for chain {dst_chain_name}");
         let validity =
             resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context).await?;
@@ -213,15 +212,24 @@ where
     // answered.
     let inactive = || Ok(("0".to_string(), PayloadSignedValidity::Missing));
 
-    let (connection_storage_boc, connection_storage) =
-        match ton_storage_cell(&transport, &url, headers.clone(), uln_connection_address).await? {
-            TonStorageRead::Cell(boc, cell) => (boc, cell),
-            TonStorageRead::Inactive => return inactive(),
-            TonStorageRead::Unavailable => return Err(RpcError::Unavailable),
-        };
-    let (uln_storage_boc, uln_storage) =
-        match ton_storage_cell(&transport, &url, headers.clone(), uln_address).await? {
-            TonStorageRead::Cell(boc, cell) => (boc, cell),
+    let mut storage = TonStorageObservation::acquire().await?;
+    let connection_storage = match ton_storage_cell(
+        &transport,
+        &url,
+        headers.clone(),
+        uln_connection_address,
+        &mut storage,
+    )
+    .await?
+    {
+        TonStorageRead::Cell(cell) => cell,
+        TonStorageRead::Inactive => return inactive(),
+        TonStorageRead::Unavailable => return Err(RpcError::Unavailable),
+    };
+    let uln_storage =
+        match ton_storage_cell(&transport, &url, headers.clone(), uln_address, &mut storage).await?
+        {
+            TonStorageRead::Cell(cell) => cell,
             TonStorageRead::Inactive => return inactive(),
             TonStorageRead::Unavailable => return Err(RpcError::Unavailable),
         };
@@ -235,8 +243,6 @@ where
     digest.update(connection_hash.as_slice());
     digest.update(uln_hash.as_slice());
     let storage_fingerprint = format!("{:x}", digest.finalize());
-    drop(connection_storage_boc);
-    drop(uln_storage_boc);
     // Past this point the inputs are the agreed cells, so a decode failure is
     // deterministic rather than provider-specific: upstream decodes once, after
     // the quorum, and throws. Fingerprinted by the cells that produced it so
@@ -320,13 +326,86 @@ where
 /// quorum function.
 pub(crate) enum TonStorageRead {
     /// Active with data. Upstream fingerprints the storage BOC itself.
-    Cell(String, TonStorageCell),
+    Cell(TonStorageCell),
     /// Upstream's `'0'` bucket. Votes.
     Inactive,
     /// Transport, JSON-shape, or BOC decode failure. Must not vote: a fast
     /// failure that counted as a response could outrace a healthy provider and
     /// decide the request by itself whenever the quorum is 1.
     Unavailable,
+}
+
+// Bound the whole observation before the first body arrives, including the
+// connection cell retained while the same provider supplies the ULN cell.
+static TON_STORAGE_OBSERVATIONS: LazyLock<Arc<Semaphore>> =
+    LazyLock::new(|| Arc::new(Semaphore::new(4)));
+static TON_STORAGE_WAITERS: Semaphore = Semaphore::const_new(8);
+
+pub(crate) struct TonStorageObservation {
+    permit: Arc<tokio::sync::OwnedSemaphorePermit>,
+    remaining_bytes: usize,
+}
+
+impl TonStorageObservation {
+    pub(crate) async fn acquire() -> Result<Self, RpcError> {
+        Self::acquire_from(&TON_STORAGE_OBSERVATIONS, &TON_STORAGE_WAITERS).await
+    }
+
+    async fn acquire_from(pool: &Arc<Semaphore>, waiters: &Semaphore) -> Result<Self, RpcError> {
+        use pillar_core::execution::{within_deadline, BudgetError};
+        if pillar_core::execution::current()
+            .and_then(|context| context.deadline)
+            .is_some_and(|deadline| tokio::time::Instant::now() >= deadline)
+        {
+            return Err(RpcError::Admission(BudgetError::Deadline));
+        }
+        let permit = match pool.clone().try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(tokio::sync::TryAcquireError::Closed) => {
+                return Err(RpcError::Admission(BudgetError::Closed));
+            }
+            Err(tokio::sync::TryAcquireError::NoPermits) => {
+                let _wait = waiters
+                    .try_acquire()
+                    .map_err(|_| RpcError::Admission(BudgetError::Overloaded))?;
+                within_deadline(TON_ADMISSION_WAIT, pool.clone().acquire_owned())
+                    .await
+                    .map_err(RpcError::Admission)?
+                    .map_err(|_| RpcError::Admission(BudgetError::Closed))?
+            }
+        };
+        Ok(Self {
+            permit: Arc::new(permit),
+            remaining_bytes: 2 * MAX_TON_ACCOUNT_RESPONSE_BYTES,
+        })
+    }
+}
+
+#[cfg(test)]
+#[tokio::test(start_paused = true)]
+async fn ton_storage_wait_does_not_admit_an_account_read_after_its_deadline() {
+    use pillar_core::execution::{BudgetError, RequestContext};
+    let storage = Arc::new(Semaphore::new(1));
+    let waiting = Semaphore::new(1);
+    let held = TonStorageObservation::acquire_from(&storage, &waiting)
+        .await
+        .unwrap();
+    let result = RequestContext::new(std::time::Duration::from_millis(50))
+        .scope(TonStorageObservation::acquire_from(&storage, &waiting))
+        .await;
+    assert!(matches!(
+        result,
+        Err(RpcError::Admission(BudgetError::Deadline))
+    ));
+    assert_eq!(
+        waiting.available_permits(),
+        1,
+        "deadline releases the waiting registration"
+    );
+    drop(held);
+    let _available = TonStorageObservation::acquire_from(&storage, &waiting)
+        .await
+        .unwrap();
 }
 
 /// `fetchQuorumedStorageCell` for one provider: toncenter v2
@@ -336,6 +415,7 @@ pub(crate) async fn ton_storage_cell<T>(
     url: &str,
     headers: HashMap<String, String>,
     address: &str,
+    observation: &mut TonStorageObservation,
 ) -> Result<TonStorageRead, RpcError>
 where
     T: JsonRpcTransport,
@@ -346,12 +426,12 @@ where
         "method": "getAddressInformation",
         "params": { "address": address },
     });
-    let response = transport
+    let mut response = transport
         .post_json_scoped(url.to_string(), headers, body)
         .await?;
     // No `result` at all is a malformed answer, not a statement about the
     // contract; upstream's provider would have rejected.
-    let Some(result) = response.get("result") else {
+    let Some(result) = response.get_mut("result") else {
         return Ok(TonStorageRead::Unavailable);
     };
     let state = result.get("state").and_then(Value::as_str);
@@ -360,80 +440,37 @@ where
     if !(matches!(state, Some("active")) || state.is_none()) {
         return Ok(TonStorageRead::Inactive);
     }
-    let Some(data) = result
-        .get("data")
-        .and_then(Value::as_str)
-        .filter(|data| !data.is_empty())
-    else {
+    let Some(Value::String(data)) = result.get_mut("data").map(Value::take) else {
         return Ok(TonStorageRead::Inactive);
     };
-    let Ok(bytes) = pillar_layerzero::boc_base64_bytes(data) else {
+    drop_json_value_safely(response);
+    if data.is_empty() {
+        return Ok(TonStorageRead::Inactive);
+    }
+    let Some(remaining) = observation.remaining_bytes.checked_sub(data.len()) else {
         return Ok(TonStorageRead::Unavailable);
     };
-    if !ton_boc_cell_count_fits(&bytes) {
+    if data.len() > MAX_TON_ACCOUNT_RESPONSE_BYTES {
         return Ok(TonStorageRead::Unavailable);
     }
-    // Every dispatched provider's storage is built before the vote, and a maximal account BOC
-    // takes tens of megabytes and tens of milliseconds to build, so those builds run off the
-    // runtime workers and a few at a time process-wide (M-107).
-    static STORAGE_BUILDS: std::sync::LazyLock<Arc<tokio::sync::Semaphore>> =
-        std::sync::LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(4)));
-    let Ok(permit) = STORAGE_BUILDS.clone().acquire_owned().await else {
-        return Ok(TonStorageRead::Unavailable);
-    };
-    let built = tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        pillar_layerzero::boc_from_bytes_with_limits(bytes, MAX_ACCOUNT_STATE_CELLS, false)
-    })
-    .await;
-    Ok(match built {
-        Ok(Ok(cell)) => TonStorageRead::Cell(data.to_string(), cell),
-        _ => TonStorageRead::Unavailable,
-    })
-}
+    observation.remaining_bytes = remaining;
 
-fn ton_boc_cell_count_fits(bytes: &[u8]) -> bool {
-    if bytes.len() < 6 || bytes[..4] != [0xb5, 0xee, 0x9c, 0x72] {
-        return true;
-    }
-    let size_bytes = usize::from(bytes[4] & 0x07);
-    let offset_bytes = usize::from(bytes[5]);
-    if size_bytes == 0 || size_bytes > 4 || offset_bytes == 0 || offset_bytes > 8 {
-        return false;
-    }
-    let mut cursor = 6usize;
-    let mut read_uint = |width: usize| -> Option<usize> {
-        let end = cursor.checked_add(width)?;
-        let chunk = bytes.get(cursor..end)?;
-        cursor = end;
-        chunk.iter().try_fold(0usize, |value, byte| {
-            value.checked_mul(256)?.checked_add(usize::from(*byte))
+    // The queued decode owns only the extracted BOC. Keep its memory admission
+    // alive until a cancelled blocking job drops the BOC and its decoder state.
+    let retention = observation.permit.clone();
+    let cell = on_ton_decode_pool(move |cancelled| {
+        let _retention = retention;
+        let bytes = pillar_layerzero::boc_base64_bytes(&data)?;
+        drop(data);
+        pillar_layerzero::boc_from_bytes_cancellable(bytes, MAX_ACCOUNT_STATE_CELLS, false, || {
+            cancelled.load(Ordering::Acquire)
         })
-    };
-    let Some(cells) = read_uint(size_bytes) else {
-        return false;
-    };
-    let Some(roots) = read_uint(size_bytes) else {
-        return false;
-    };
-    let Some(_absent) = read_uint(size_bytes) else {
-        return false;
-    };
-    let Some(total_size) = read_uint(offset_bytes) else {
-        return false;
-    };
-    let Some(root_bytes) = roots.checked_mul(size_bytes) else {
-        return false;
-    };
-    let Some(data_start) = cursor.checked_add(root_bytes) else {
-        return false;
-    };
-    let Some(data_end) = data_start.checked_add(total_size) else {
-        return false;
-    };
-    cells <= MAX_ACCOUNT_STATE_CELLS
-        && total_size >= cells.saturating_mul(2)
-        && data_end <= bytes.len()
+    })
+    .await?;
+    Ok(match cell {
+        Ok(cell) => TonStorageRead::Cell(cell),
+        Err(_) => TonStorageRead::Unavailable,
+    })
 }
 
 /// `provider.v2.getView(address, 'committableView', args)`: the returned stack's
@@ -491,16 +528,6 @@ where
     }
 }
 
-#[cfg(test)]
-mod boc_header_tests {
-    use super::*;
-
-    #[test]
-    fn rejects_fourteen_byte_boc_with_impossible_declared_cell_count() {
-        let bytes = [0xb5, 0xee, 0x9c, 0x72, 1, 1, 255, 1, 0, 1, 0, 0, 0, 0];
-        assert!(!ton_boc_cell_count_fits(&bytes));
-    }
-}
 #[cfg(test)]
 mod default_receive_config_tests {
     use super::*;

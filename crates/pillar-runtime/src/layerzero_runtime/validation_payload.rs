@@ -85,18 +85,14 @@ where
                 )?)?;
                 let proof = compute_lz_packet_v1_proof_from_event(sent_event)?;
 
-                let requests = FuturesUnordered::new();
-                for DispatchEntry { index, uri, delay } in plan {
+                let requests = quorum_requests(plan, |index, uri| {
                     let (url, headers) = provider_uri_parts(uri);
                     let transport = self.transport.clone();
                     let oapp = oapp.clone();
                     let proof = proof.clone();
                     let verifier_address = verifier_address.map(ToOwned::to_owned);
                     let contracts = contracts.clone();
-                    requests.push(async move {
-                        if !delay.is_zero() {
-                            tokio::time::sleep(delay).await;
-                        }
+                    async move {
                         let observation = provider_response(
                             observe_payload_signed(
                                 transport,
@@ -114,8 +110,8 @@ where
                             .await,
                         );
                         (index, observation)
-                    });
-                }
+                    }
+                });
                 let context = format!("payload-signed validation for chain {dst_chain_name}");
                 let agreed_validity =
                     resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
@@ -192,16 +188,12 @@ where
                 .dispatch(&self.rank_tracker, dst_chain_name)
                 .await?;
 
-            let requests = FuturesUnordered::new();
-            for DispatchEntry { index, uri, delay } in plan {
+            let requests = quorum_requests(plan, |index, uri| {
                 let (url, headers) = provider_uri_parts(uri);
                 let transport = self.transport.clone();
                 let oapp = oapp.clone();
                 let contracts = contracts.clone();
-                requests.push(async move {
-                    if !delay.is_zero() {
-                        tokio::time::sleep(delay).await;
-                    }
+                async move {
                     let observation = provider_response(
                         observe_receive_uln_version(
                             transport, url, headers, &contracts, &oapp, src_eid, dst_eid,
@@ -209,8 +201,8 @@ where
                         .await,
                     );
                     (index, observation)
-                });
-            }
+                }
+            });
             let context = format!("receive library lookup for chain {dst_chain_name}");
             match resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
                 .await?
@@ -266,17 +258,13 @@ where
             let provider_config = snapshot.provider_config("aptos")?;
             let quorum = required_provider_quorum(provider_config, "aptos")?;
             let plan = plan_dispatch(&self.rank_tracker, "aptos", quorum).await?;
-            let requests = FuturesUnordered::new();
-            for DispatchEntry { index, uri, delay } in plan {
+            let requests = quorum_requests(plan, |index, uri| {
                 let (url, headers) = move_provider_uri_parts("aptos", uri);
                 let transport = self.transport.clone();
                 let function = function.clone();
                 let receiver = receiver.clone();
                 let src_eid = src_eid.clone();
-                requests.push(async move {
-                    if !delay.is_zero() {
-                        tokio::time::sleep(delay).await;
-                    }
+                async move {
                     let library = move_view_values(
                         &transport,
                         "aptos",
@@ -300,8 +288,8 @@ where
                         (format!("{version:?}"), uln.to_string())
                     }));
                     (index, observation)
-                });
-            }
+                }
+            });
             resolve_provider_quorum(
                 requests,
                 provider_config.uris.len(),
@@ -467,8 +455,7 @@ where
         let quorum = required_provider_quorum(provider_config, dst_chain_name)?;
         let plan = plan_dispatch(&self.rank_tracker, dst_chain_name, quorum).await?;
         let proof = compute_lz_packet_v1_proof_from_event(sent_event)?;
-        let requests = FuturesUnordered::new();
-        for DispatchEntry { index, uri, delay } in plan {
+        let requests = quorum_requests(plan, |index, uri| {
             let (url, headers) = move_provider_uri_parts(dst_chain_name, uri);
             let transport = self.transport.clone();
             let proof = proof.clone();
@@ -478,10 +465,7 @@ where
             let receiver = receiver.clone();
             let verifier_address = verifier_address.to_string();
             let chain_name = dst_chain_name.to_string();
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
+            async move {
                 let observation = provider_response(
                     observe_move_payload_signed(
                         transport,
@@ -502,8 +486,8 @@ where
                     .await,
                 );
                 (index, observation)
-            });
-        }
+            }
+        });
         let context = format!("payload-signed validation for chain {dst_chain_name}");
         let validity =
             resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context).await?;
@@ -544,8 +528,7 @@ where
         let quorum = required_provider_quorum(provider_config, "aptos")?;
         let plan = plan_dispatch(&self.rank_tracker, "aptos", quorum).await?;
         let proof = compute_lz_packet_v1_proof_from_event(sent_event)?;
-        let requests = FuturesUnordered::new();
-        for DispatchEntry { index, uri, delay } in plan {
+        let requests = quorum_requests(plan, |index, uri| {
             let (url, headers) = move_provider_uri_parts("aptos", uri);
             let transport = self.transport.clone();
             let contracts = contracts.clone();
@@ -554,10 +537,7 @@ where
             let sender = sender.clone();
             let verifier_address = verifier_address.to_string();
             let proof = proof.clone();
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
+            async move {
                 let observation = provider_response(
                     observe_aptos_v301_payload_signed(
                         transport,
@@ -578,8 +558,8 @@ where
                     .await,
                 );
                 (index, observation)
-            });
-        }
+            }
+        });
         let context = "payload-signed validation for chain aptos";
         let validity =
             resolve_provider_quorum(requests, provider_config.uris.len(), quorum, context).await?;
@@ -605,17 +585,13 @@ where
         let proof = compute_lz_packet_v1_proof_from_event(sent_event)?;
         let quorum = required_provider_quorum(provider_config, dst_chain_name)?;
         let plan = plan_dispatch(&self.rank_tracker, dst_chain_name, quorum).await?;
-        let requests = FuturesUnordered::new();
-        for DispatchEntry { index, uri, delay } in plan {
+        let requests = quorum_requests(plan, |index, uri| {
             let (url, headers) = provider_uri_parts(uri);
             let transport = self.transport.clone();
             let uln_address = uln_address.to_string();
             let verifier_address = verifier_address.to_string();
             let proof = proof.clone();
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
+            async move {
                 let observation = provider_response(
                     observe_starknet_payload_signed(
                         transport,
@@ -632,8 +608,8 @@ where
                     index,
                     observation.map(|value| value.map(|value| (format!("{value:?}"), value))),
                 )
-            });
-        }
+            }
+        });
         let context = format!("payload-signed validation for chain {dst_chain_name}");
         let validity =
             resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context).await?;

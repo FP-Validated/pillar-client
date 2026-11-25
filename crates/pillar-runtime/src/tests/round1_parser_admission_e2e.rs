@@ -229,16 +229,13 @@ async fn round1_parser_admission_keeps_cross_chain_headroom_and_releases_leases(
     let resources = execution_resources();
     let transport = Arc::new(ReqwestJsonRpcTransport::new().expect("reqwest transport"));
     let mut servers = Vec::new();
-    let mut urls = Vec::new();
-    for _ in 0..4 {
-        let server = stalled_json_server(br#"{"source":"A","ok":true}"#).await;
-        urls.push(server.url.clone());
-        servers.push(server);
-    }
     let mut requests = Vec::new();
-    for (index, url) in urls.into_iter().enumerate() {
+    let mut headers_seen = Vec::new();
+    let mut staged = true;
+    for index in 0..4 {
+        let mut server = stalled_json_server(br#"{"source":"A","ok":true}"#).await;
         let timeout = if index == 3 {
-            Duration::from_secs(12)
+            Duration::from_secs(2)
         } else {
             Duration::from_secs(20)
         };
@@ -246,20 +243,26 @@ async fn round1_parser_admission_keeps_cross_chain_headroom_and_releases_leases(
             transport.clone(),
             resources.clone(),
             "sourceA",
-            url,
+            server.url.clone(),
             timeout,
         )));
-    }
-    let mut headers_seen = Vec::new();
-    for server in &mut servers {
         let rx = server.headers_sent.take().expect("header signal");
-        headers_seen.push(
-            tokio::time::timeout(Duration::from_secs(5), rx)
-                .await
-                .is_ok(),
-        );
+        headers_seen.push(matches!(
+            tokio::time::timeout(Duration::from_secs(1), rx).await,
+            Ok(Ok(()))
+        ));
+        servers.push(server);
+        // Give the queued request its own deadline, shorter than the active
+        // bodies' idle limit, and make sure it is fourth into the parser.
+        staged &= settle_budget(
+            &resources,
+            (index + 1).min(3),
+            usize::from(index == 3),
+            index + 1,
+            Instant::now() + Duration::from_secs(1),
+        )
+        .await;
     }
-    let staged = settle_budget(&resources, 3, 1, 4, Instant::now() + Duration::from_secs(5)).await;
 
     let (url_b, server_b) = json_server(br#"{"source":"B","value":{"height":731}}"#).await;
     let result_b = tokio::time::timeout(
@@ -284,10 +287,15 @@ async fn round1_parser_admission_keeps_cross_chain_headroom_and_releases_leases(
     let deadline_expired = matches!(requests.remove(3).await, Ok(Err(_)));
     let after_deadline = resources.parser.totals();
     let after_deadline_rpc = resources.rpc.totals();
-    for request in requests.drain(..3) {
+    let idle_request = requests.pop().expect("active parser request");
+    for request in requests {
         request.abort();
         let _ = request.await;
     }
+    let idle_released = matches!(
+        idle_request.await,
+        Ok(Err(RpcError::Remote(error))) if error == "Provider response body stalled"
+    );
     for server in servers.drain(..) {
         server.finish().await;
     }
@@ -333,6 +341,7 @@ async fn round1_parser_admission_keeps_cross_chain_headroom_and_releases_leases(
             "deadline_request_released_parser_waiter": deadline_expired && after_deadline.waiting == 0,
             "parser_after_deadline": {"active": after_deadline.active, "waiting": after_deadline.waiting},
             "rpc_after_deadline": {"active": after_deadline_rpc.active, "waiting": after_deadline_rpc.waiting},
+            "idle_request_refused": idle_released,
             "cancel_cleanup_reached_zero": cleanup,
             "malformed_json_rejected": malformed_rejected,
             "malformed_json_cleanup_reached_zero": malformed_cleanup,
@@ -359,6 +368,7 @@ async fn round1_parser_admission_keeps_cross_chain_headroom_and_releases_leases(
     );
     assert!(deadline_expired && after_deadline.waiting == 0);
     assert_eq!((after_deadline.active, after_deadline_rpc.active), (3, 3));
+    assert!(idle_released, "a stalled body must hit the body-idle limit");
     assert!(
         malformed_rejected,
         "malformed loopback JSON must fail parsing"
@@ -369,7 +379,7 @@ async fn round1_parser_admission_keeps_cross_chain_headroom_and_releases_leases(
     );
     assert!(
         cleanup,
-        "cancelled sourceA calls must release parser and RPC leases"
+        "idle and cancelled sourceA calls must release parser and RPC leases"
     );
     assert!(matches!(
         closed_result,

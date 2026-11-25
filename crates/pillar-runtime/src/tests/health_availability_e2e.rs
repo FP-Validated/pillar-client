@@ -234,6 +234,10 @@ async fn quorum_counts_started_timeout_and_keeps_observed_disagreement_over_admi
         timeout,
         Err(crate::provider_health::RpcError::Remote(_))
     ));
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "loopback probes, not signing quorum dispatch"
+    )]
     let requests = futures::stream::FuturesUnordered::new();
     requests.push(futures::future::ready((0, Ok(Some(("a".into(), 1))))));
     requests.push(futures::future::ready((
@@ -253,6 +257,10 @@ async fn quorum_counts_started_timeout_and_keeps_observed_disagreement_over_admi
             .await
             .unwrap_err();
     assert!(error.to_string().contains("1 errors"));
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "loopback probes, not signing quorum dispatch"
+    )]
     let requests = futures::stream::FuturesUnordered::new();
     requests.push(futures::future::ready((0, Ok(Some(("a".into(), 1))))));
     requests.push(futures::future::ready((1, Ok(Some(("b".into(), 2))))));

@@ -77,10 +77,11 @@ pub(crate) use ton::*;
 pub(crate) use transport::{
     is_http_not_found, is_http_unauthorized, is_response_size_refusal, json_parser_local_error,
     parse_bounded_json, parse_bounded_large_json, parse_json_with_limits, provider_response,
+    MAX_TON_ACCOUNT_RESPONSE_BYTES, PARSER_ENTITY_SLOTS,
 };
 pub use transport::{
-    AwsLambdaInvokeClient, AwsSdkLambdaInvokeClient, JsonRpcTransport, ReqwestJsonRpcTransport,
-    RpcError,
+    AptosLookup, AwsLambdaInvokeClient, AwsSdkLambdaInvokeClient, JsonRpcTransport,
+    ReqwestJsonRpcTransport, RpcError,
 };
 pub(crate) use tron::*;
 pub(crate) use types::*;

@@ -404,11 +404,33 @@ where
         }
     }
 
-    // The reads below are of the pinned ULN302; a receiver on another library is not covered by them.
+    // A previous pinned library may remain valid during a migration. Ask the
+    // endpoint about the pinned address, not whether the new library is valid.
     if *library != StellarAddress::Contract(uln) {
-        return Ok(StellarPayloadOutcome::Validity(
-            PayloadSignedValidity::UnsupportedReceiveLibrary,
-        ));
+        let args = [
+            ScArg::Address(query.receiver),
+            ScArg::U32(query.src_eid),
+            ScArg::Address(StellarAddress::Contract(uln)),
+        ];
+        match simulate(
+            &transport,
+            &url,
+            &headers,
+            &endpoint,
+            "is_valid_receive_library",
+            &args,
+        )
+        .await?
+        {
+            Simulated::Value(ScValue::Bool(true)) => {}
+            Simulated::Value(ScValue::Bool(false)) => {
+                return Ok(StellarPayloadOutcome::Validity(
+                    PayloadSignedValidity::UnsupportedReceiveLibrary,
+                ));
+            }
+            Simulated::Value(_) => return Err(RpcError::Unavailable),
+            Simulated::Failed(error) => return Ok(simulation_failed(&error)),
+        }
     }
 
     let config = match simulate(
@@ -617,15 +639,11 @@ where
             .ok_or_else(|| AppCoreError::Internal("payload hash is not 32 bytes".to_string()))?;
         let quorum = required_provider_quorum(provider_config, dst_chain_name)?;
         let plan = plan_dispatch(&self.rank_tracker, dst_chain_name, quorum).await?;
-        let requests = FuturesUnordered::new();
-        for DispatchEntry { index, uri, delay } in plan {
+        let requests = quorum_requests(plan, |index, uri| {
             let (url, headers) = provider_uri_parts(uri);
             let transport = self.transport.clone();
             let packet_header = packet_header.clone();
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
+            async move {
                 let observation = provider_response(
                     observe_stellar_payload_signed(
                         transport,
@@ -646,8 +664,8 @@ where
                     index,
                     observation.map(|value| value.map(|value| (format!("{value:?}"), value))),
                 )
-            });
-        }
+            }
+        });
         let context = format!("payload-signed validation for chain {dst_chain_name}");
         match resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
             .await?

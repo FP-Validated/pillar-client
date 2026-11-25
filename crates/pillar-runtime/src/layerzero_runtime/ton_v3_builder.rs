@@ -77,21 +77,17 @@ where
                 plan,
             } = dispatch;
 
-            let requests = FuturesUnordered::new();
-            for DispatchEntry { index, uri, delay } in plan {
+            let requests = quorum_requests(plan, |index, uri| {
                 let (url, headers) = provider_uri_parts(uri);
                 let transport = self.transport.clone();
                 let dvn_address = dvn_address.to_string();
-                requests.push(async move {
-                    if !delay.is_zero() {
-                        tokio::time::sleep(delay).await;
-                    }
+                async move {
                     let observation = provider_response(
                         observe_ton_contract_state(transport, url, headers, &dvn_address).await,
                     );
                     (index, observation)
-                });
-            }
+                }
+            });
             let context = format!("TON DVN proxy storage for chain {dst_chain_name}");
             let target: Option<String> =
                 resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
@@ -112,12 +108,13 @@ async fn observe_ton_contract_state<T>(
 where
     T: JsonRpcTransport,
 {
-    use super::validation_payload_ton::{ton_storage_cell, TonStorageRead};
+    use super::validation_payload_ton::{ton_storage_cell, TonStorageObservation, TonStorageRead};
 
-    match ton_storage_cell(&transport, &url, headers, address).await? {
+    let mut storage = TonStorageObservation::acquire().await?;
+    match ton_storage_cell(&transport, &url, headers, address, &mut storage).await? {
         // The storage was parsed once, by the read; the target comes from that cell and the vote
         // is keyed by its representation hash, so every encoding of one storage agrees.
-        TonStorageRead::Cell(_, cell) => {
+        TonStorageRead::Cell(cell) => {
             let target = pillar_layerzero::decode_proxy_admin_target_from_cell(&cell)
                 .map_err(|_| RpcError::Unavailable)?;
             let hash = cell.hash().map_err(|_| RpcError::Unavailable)?;

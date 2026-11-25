@@ -61,16 +61,12 @@ where
                 quorum,
                 plan,
             } = dispatch;
-            let requests = FuturesUnordered::new();
-            for DispatchEntry { index, uri, delay } in plan {
+            let requests = quorum_requests(plan, |index, uri| {
                 let (url, headers) = provider_uri_parts(uri);
                 let transport = self.transport.clone();
                 let tx_hash = tx_hash.to_string();
                 let source_evidence = source_evidence.cloned();
-                requests.push(async move {
-                    if !delay.is_zero() {
-                        tokio::time::sleep(delay).await;
-                    }
+                async move {
                     let observation = provider_response(
                         observe_uln_v2_mpt_hash_info(
                             transport,
@@ -84,8 +80,8 @@ where
                     let observation =
                         observation.map(|vote| vote.map(|vote| (vote.fingerprint(), vote)));
                     (index, observation)
-                });
-            }
+                }
+            });
             let context = format!("ULN V2 derived-hash for chain {src_chain_name}");
             let vote =
                 resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
@@ -132,16 +128,12 @@ where
                     sent_event, "receiver",
                 )?)?;
 
-                let requests = FuturesUnordered::new();
-                for DispatchEntry { index, uri, delay } in plan {
+                let requests = quorum_requests(plan, |index, uri| {
                     let (url, headers) = provider_uri_parts(uri);
                     let transport = self.transport.clone();
                     let uln_v2_contract = uln_v2_contract.clone();
                     let receiver = receiver.clone();
-                    requests.push(async move {
-                        if !delay.is_zero() {
-                            tokio::time::sleep(delay).await;
-                        }
+                    async move {
                         let observation = provider_response(
                             observe_uln_v2_inbound_proof_type(
                                 transport,
@@ -158,8 +150,8 @@ where
                                 .map(|observation| (observation.fingerprint.clone(), observation))
                         });
                         (index, observation)
-                    });
-                }
+                    }
+                });
                 let context = format!("ULN V2 inbound proofType for chain {dst_chain_name}");
                 let observation =
                     resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)

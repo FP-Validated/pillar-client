@@ -33,11 +33,22 @@ impl JsonRpcTransport for PerHostAptos {
             .lock()
             .unwrap()
             .push((url.clone(), headers, json!({"method": "GET"})));
-        self.by_host
+        let transaction = self
+            .by_host
             .iter()
             .find(|(host, _)| url.starts_with(&format!("https://{host}/")))
-            .map(|(_, transaction)| transaction.clone())
-            .ok_or_else(|| format!("unexpected GET {url}"))
+            .map(|(_, transaction)| transaction)
+            .ok_or_else(|| format!("unexpected GET {url}"))?;
+        if url.contains("/blocks/by_version/") {
+            Ok(json!({
+                "block_height": "777",
+                "block_hash": format!("0x{}", "bb".repeat(32)),
+                "first_version": "7469155248",
+                "last_version": "7469155248",
+            }))
+        } else {
+            Ok(transaction.clone())
+        }
     }
 }
 
@@ -140,6 +151,7 @@ fn assert_archived_send(event: &LzSentEvent) {
         event.extra["options"],
         json!({"lzReceive": {"gas": "150000", "value": "0"}})
     );
+    assert_eq!(event.extra["blockNumber"], 777);
 }
 
 /// Round 3 M-12: two honest providers on different node releases, or with and without
@@ -246,6 +258,17 @@ impl JsonRpcTransport for AptosV1PerHost {
             Err(format!("unexpected GET {url}"))
         }
     }
+
+    async fn get_aptos_lookup(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+        _: crate::provider_health::AptosLookup,
+    ) -> Result<Option<Value>, String> {
+        self.get_json(url, headers)
+            .await
+            .map(|value| (!value.is_null()).then_some(value))
+    }
 }
 
 async fn resolve_aptos_v1_with_providers(
@@ -338,6 +361,51 @@ async fn round3_m12_aptos_v1_transaction_and_block_extras_still_reach_quorum() {
     assert_eq!(two_providers.message, one_provider.message);
     assert_eq!(two_providers.tx_hash, one_provider.tx_hash);
     assert_eq!(two_providers.extra, one_provider.extra);
+}
+
+#[tokio::test(start_paused = true)]
+async fn aptos_source_resolution_treats_typed_absence_as_disagreement() {
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../tests/gasolina_parity/aptos_v1_source.json"
+    ))
+    .unwrap();
+    let scenario = &fixture["scenarios"][0];
+    let src_tx_hash = scenario["srcTxHash"].as_str().unwrap();
+    let request: LzMessageId = serde_json::from_value(scenario["request"].clone()).unwrap();
+    let transaction = json!({
+        "version": src_tx_hash,
+        "success": true,
+        "events": scenario["events"],
+    });
+    for (absent, other_transaction) in [(true, Value::Null), (false, json!({"message":"error"}))] {
+        let result = resolve_aptos_v1_with_providers(
+            vec![
+                ProviderUri::Uri("https://aptos-a.example/v1".into()),
+                ProviderUri::Uri("https://aptos-b.example/v1".into()),
+            ],
+            1,
+            HashMap::from([
+                (
+                    "aptos-a.example",
+                    (transaction.clone(), fixture["block"].clone()),
+                ),
+                (
+                    "aptos-b.example",
+                    (other_transaction, fixture["block"].clone()),
+                ),
+            ]),
+            src_tx_hash,
+            &request,
+        )
+        .await;
+        if absent {
+            assert!(result.unwrap_err().to_string().contains("ambiguous"));
+        } else {
+            let event = result.unwrap();
+            assert_eq!(event.tx_hash, src_tx_hash);
+            assert_eq!(event.lz_message_id.nonce, request.nonce);
+        }
+    }
 }
 
 const INITIA_SOURCE_EVENTS: &str =

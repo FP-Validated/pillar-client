@@ -34,7 +34,7 @@ impl RuntimeControls {
                 wait: std::time::Duration::from_secs(2),
             },
             4,
-            3,
+            crate::provider_health::PARSER_ENTITY_SLOTS,
         )?;
         parser.cap_lane("background", 1)?;
         // One entity's endpoints share a resource key, so a slow entity can hold all but a

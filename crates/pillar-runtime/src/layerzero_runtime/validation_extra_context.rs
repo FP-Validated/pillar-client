@@ -153,20 +153,10 @@ where
                 let plan = crate::provider_health::plan_ton_v3_dispatch(&self.rank_tracker, quorum)
                     .await?;
                 let indices = plan.iter().map(|entry| entry.index).collect::<Vec<_>>();
-                let requests = FuturesUnordered::new();
-                for crate::provider_health::TonV3DispatchEntry {
-                    index,
-                    endpoint,
-                    headers,
-                    delay,
-                } in plan
-                {
+                let requests = quorum_requests(plan, |index, (endpoint, headers)| {
                     let transport = self.transport.clone();
                     let tx_hash = tx_hash.to_string();
-                    requests.push(async move {
-                        if !delay.is_zero() {
-                            tokio::time::sleep(delay).await;
-                        }
+                    async move {
                         let observation = provider_response(
                             observe_ton_transaction_from(transport, endpoint, headers, &tx_hash)
                                 .await,
@@ -176,8 +166,8 @@ where
                                 .map(|observation| (observation.fingerprint.clone(), observation))
                         });
                         (index, observation)
-                    });
-                }
+                    }
+                });
                 let context = "transaction-from for chain ton";
                 let observation = crate::provider_health::resolve_provider_quorum_for_indices(
                     requests, indices, quorum, context,
@@ -194,15 +184,11 @@ where
                 plan,
             } = dispatch;
 
-            let requests = FuturesUnordered::new();
-            for DispatchEntry { index, uri, delay } in plan {
+            let requests = quorum_requests(plan, |index, uri| {
                 let transport = self.transport.clone();
                 let tx_hash = tx_hash.to_string();
                 let chain_name = src_chain_name.to_string();
-                requests.push(async move {
-                    if !delay.is_zero() {
-                        tokio::time::sleep(delay).await;
-                    }
+                async move {
                     let observation = match chain_name.as_str() {
                         "solana" => {
                             let (url, headers) = provider_uri_parts(uri);
@@ -265,8 +251,8 @@ where
                             .map(|observation| (observation.fingerprint.clone(), observation))
                     });
                     (index, observation)
-                });
-            }
+                }
+            });
             let context = format!("transaction-from for chain {src_chain_name}");
             let observation =
                 resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
@@ -320,6 +306,7 @@ where
         fetch_move_transaction(transport, chain_name, url, headers, tx_hash)
             .await
             .map_err(AppCoreError::from)?
+            .ok_or_else(|| AppCoreError::Internal("Move transaction not found".to_string()))?
     };
     let from = if chain_name == "initia" {
         match transaction.pointer("/tx/auth_info/signer_infos/0/public_key") {

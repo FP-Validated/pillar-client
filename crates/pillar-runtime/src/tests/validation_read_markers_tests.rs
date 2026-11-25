@@ -559,6 +559,7 @@ struct ForkedReadTransport {
     reads: Arc<Mutex<HashMap<String, usize>>>,
     wrong_height: bool,
     forked: bool,
+    missing: bool,
 }
 
 #[async_trait]
@@ -573,6 +574,9 @@ impl JsonRpcTransport for ForkedReadTransport {
             let mut reads = self.reads.lock().unwrap();
             let count = reads.entry(url.clone()).or_default();
             *count += 1;
+            if *count > 1 && self.missing {
+                return Ok(json!({"result": null}));
+            }
             if *count > 1 && url.contains("bsc-b") {
                 return Ok(block_time(
                     if self.wrong_height { 65 } else { 64 },
@@ -601,6 +605,72 @@ impl JsonRpcTransport for ForkedReadTransport {
     }
 }
 
+#[derive(Clone)]
+struct ProviderMissingReadBlock {
+    tip: u64,
+}
+
+#[async_trait]
+impl JsonRpcTransport for ProviderMissingReadBlock {
+    async fn post_json(
+        &self,
+        _: String,
+        _: HashMap<String, String>,
+        body: Value,
+    ) -> Result<Value, String> {
+        match body["method"].as_str() {
+            Some("eth_call") => Ok(json!({"error":{"code":-32001,"message":"Block not found"}})),
+            Some("eth_getBlockByNumber") => Ok(json!({"result":null})),
+            Some("eth_blockNumber") => Ok(json!({"result":format!("0x{:x}", self.tip)})),
+            _ => Err("unexpected RPC method".into()),
+        }
+    }
+
+    async fn get_json(&self, _: String, _: HashMap<String, String>) -> Result<Value, String> {
+        Err("unexpected GET".into())
+    }
+}
+
+#[tokio::test]
+async fn read_pin_absence_is_a_vote_only_from_a_provider_at_the_height() {
+    use crate::provider_health::{
+        eth_call_read_observation_at_block, observe_read_block, ReadCallObservation,
+    };
+    let pin = read_pin(64, BSC_BLOCK_64_HASH);
+    let url = "https://read.example";
+    for tip in [63, 64] {
+        let transport = ProviderMissingReadBlock { tip };
+        let lookup = observe_read_block(
+            transport.clone(),
+            url.into(),
+            HashMap::new(),
+            pin.block_number,
+            None,
+        )
+        .await;
+        let read = eth_call_read_observation_at_block(
+            transport,
+            url.into(),
+            HashMap::new(),
+            "0x0000000000000000000000000000000000000001",
+            "0x",
+            &pin,
+            32,
+        )
+        .await;
+        if tip == pin.block_number {
+            assert!(matches!(lookup, Ok(None)));
+            assert_eq!(
+                read,
+                Ok(("source-changed".into(), ReadCallObservation::SourceChanged))
+            );
+        } else {
+            assert!(lookup.is_err());
+            assert!(read.is_err());
+        }
+    }
+}
+
 #[tokio::test]
 async fn read_confirmation_quorum_cannot_mix_a_pinned_block_with_another_fork() {
     let getter = StaticProviderConfig::new(
@@ -619,13 +689,19 @@ async fn read_confirmation_quorum_cannot_mix_a_pinned_block_with_another_fork() 
     .unwrap();
     let mut evidence = Vec::new();
     for timestamp in [false, true] {
-        for (forked, wrong_height) in [(false, false), (true, false), (false, true)] {
+        for (forked, wrong_height, missing) in [
+            (false, false, false),
+            (true, false, false),
+            (false, true, false),
+            (false, false, true),
+        ] {
             let checks = RuntimeRpcValidationChecks::from_getter(
                 &ProviderSnapshotHandle::from_getter(&getter),
                 ForkedReadTransport {
                     reads: Arc::new(Mutex::new(HashMap::new())),
                     wrong_height,
                     forked,
+                    missing,
                 },
             )
             .with_evm_chain_names(HashMap::from([(30_102, "bsc".to_string())]));
@@ -648,7 +724,12 @@ async fn read_confirmation_quorum_cannot_mix_a_pinned_block_with_another_fork() 
             let result = checks
                 .validate_readiness(&read_command_sent_event(command), &context)
                 .await;
-            if forked || wrong_height {
+            if missing {
+                assert!(result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("no longer canonical"));
+            } else if forked || wrong_height {
                 assert!(
                     result.is_err(),
                     "timestamp={timestamp}, forked={forked}, wrongHeight={wrong_height}"
@@ -656,7 +737,7 @@ async fn read_confirmation_quorum_cannot_mix_a_pinned_block_with_another_fork() 
             } else {
                 assert_eq!(result.unwrap(), vec![read_pin(64, BSC_BLOCK_64_HASH)]);
             }
-            evidence.push(json!({"timestamp": timestamp, "forked": forked, "wrongHeight": wrong_height, "accepted": !forked && !wrong_height}));
+            evidence.push(json!({"timestamp": timestamp, "forked": forked, "wrongHeight": wrong_height, "missing": missing, "accepted": !forked && !wrong_height && !missing}));
         }
     }
     audit_round_artifact("full-audit", "h04-read-confirmation-fork", json!(evidence));

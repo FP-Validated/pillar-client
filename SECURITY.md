@@ -82,6 +82,8 @@ The following are deployment-side controls the software cannot enforce for you:
   under two entity names are counted twice. Differing answers never merge: if two
   answers could each meet the strategy the call fails closed, which is stricter
   than upstream's first-satisfied resolution.
+  A provider not called because of local admission still counts as a possible
+  competing voter. If it could make a second quorum, the request is refused.
 - A TON `rpc` entry names two hosts. The URI itself is the v2 JSON-RPC endpoint;
   every source read (events, traces, transactions) goes to the host in its
   `v3-endpoint` query parameter, for example
@@ -120,10 +122,12 @@ The following are deployment-side controls the software cannot enforce for you:
   `suix_*` JSON-RPC, forced by Sui Foundation's decommission of fullnode JSON-RPC.
   GraphQL errors, null data and JSON-RPC error envelopes are provider failures:
   they never vote on events, transactions, objects or readiness, and in timestamp
-  checks they count as `Missing`, as any unavailable
-  provider does. A provider whose probe failed is dispatched after the healthy
-  ones instead of dropped, and one whose probe only timed out ranks as slow, not
-  unhealthy. A request is refused before any provider is called when fewer healthy
+  checks they count as `Missing`, as any unavailable provider does. Structured
+  Aptos REST lookup absence is a separate vote; a by-version lookup must supply
+  ledger progress covering that version and must not be pruned. A provider whose
+  probe failed is dispatched after the healthy ones, interleaved by entity before
+  redundant URLs, instead of dropped. A probe that only times out ranks as slow,
+  not unhealthy. A request is refused before any provider is called when fewer healthy
   providers than the quorum needs remain. A live mainnet capture showed that
   `simulateTransaction` still succeeds
   with a wrong shared `version`, so that field is advisory (fixture:
@@ -205,11 +209,12 @@ The following are deployment-side controls the software cannot enforce for you:
 - Serve `ReadV1002` targets from providers that implement EIP-1898 block
   parameters with `requireCanonical`. Every READ `eth_call` is pinned to the
   block hash readiness validated and is never retried by number, so a provider
-  that rejects the object form cannot vote, and a chain whose providers all
-  reject it cannot be read. Probe every endpoint, and any proxy in front of it,
-  before routing READ traffic: an `eth_call` with
-  `{"blockHash": <a recent canonical hash>, "requireCanonical": true}` must
-  return a result, and the same call with an unknown hash must return an error.
+  that cannot read the pin is counted as having lost its vote unless it supplies
+  same-provider canonical evidence that contradicts the pin. A missing height
+  requires proof that its tip reached that height. There is no data read by
+  number as a fallback. Probe every endpoint, and any proxy in front of it:
+  an `eth_call` with `{"blockHash": <a recent canonical hash>, "requireCanonical": true}`
+  must return a result; the same call with an unknown hash must return an error.
   Reth answers both ways as required; on public mainnet Reth endpoints the
   unknown hash returns `block not found: canonical hash ...`.
 
@@ -226,14 +231,14 @@ accepted.
 | JSON pre-allocation scan | 131,072 structural parse-cost units; 524,288 for TON and Canton responses. A cost estimate, not an exact element/heap-byte count |
 | JSON container nesting | 128 normally; 512 for TON and Canton responses |
 | TON trace message bodies | 65,536 declared cells in all; a trace over it has no fingerprint and cannot win a vote. Every decode of a trace (fingerprint, event read, extra-context sender) runs on a shared pool of four blocking threads and waits at most until the request deadline, then is a local admission refusal rather than a lost vote |
-| Retained JSON quorum candidate | 8 MiB estimated per representative, 64 MiB estimated shared pool |
+| TON account storage observations | Four active and eight waiting; admission precedes download and is held while the observation owns its cells. Up to 32 MiB encoded per response and 64 MiB total per observation; both trace and account decode use the same four blocking slots |
+| Retained JSON quorum candidate | 8 MiB estimated per representative and per entity within a chain, 16 MiB per chain (also bounds any single quorum), 64 MiB process-wide |
 | READ returned data | 1 MiB per request result, per decoded lzMap/lzReduce result, per command for all request results and for all lzMap results; READ calls in flight: 4 per target chain and per command phase, 16 per process, chain permits granted in arrival order, each holding its providers' votes until its quorum resolves |
 | Configured parser waiting | Eight shared registrations plus quiet-lane reservations (at most eight plus the fixed lane count); two queued per lane; two-second admission wait |
 | Calls without execution resources | Four shared active slots, at most eight waiting registrations |
 | Canton numeric input | 1,024 bytes before trimming/conversion; decimal parsing is linear |
 | Canton committee response | At most 64 signatures, at most 130 hex characters each; configured quorum cannot exceed 64 |
 | READ command / caller resolutions | 1–256 requests plus an optional compute marker; at most 257 caller timestamp markers; command, request and compute codec version 1 only |
-| READ returned data | 1 MiB per request result, per decoded lzMap/lzReduce result, per command for all request results and for all lzMap results; READ calls in flight: 2 per command phase, 4 per target chain, 8 per process, granted in arrival order, each holding its providers' votes until its quorum resolves |
 | Provider health response text | Linear, case-insensitive HTTP(S) URL redaction before UTF-8-safe truncation; at most a 64 KiB prefix plus a byte-count marker per diagnostic string |
 
 An object containing an HTTP(S) URL in a key is compact-serialized and redacted as
@@ -260,12 +265,16 @@ either limit are refused before allocation.
 The transport holds a parser permit while downloading/buffering a body; Lambda
 holds it through the invocation. Moving the permit after download would leave
 those buffers outside the shared bound. This deliberately trades concurrency for
-bounded work: one target cannot consume all four slots, but several slow targets
-can exhaust them. HTTP/Lambda extra-context shares the `extra_context` target:
-three active plus two queued operations. Local capacity or drain failures remain
-admission outcomes, not failed provider votes. Background RPC admission is capped
-at three to fit one background parser slot and two waiters; foreground saturation
-can still defer probes and reduce health freshness.
+bounded work: each configured entity may hold two parser slots, each target at
+most three in the configured or READ pool, and several slow entities can still
+exhaust a pool. A body that produces no data for five seconds loses its slot;
+the request deadline still bounds the total. Local capacity or drain failures
+remain admission outcomes, not provider-health faults. Background RPC admission
+is capped to fit one background parser slot and two waiters; foreground
+saturation can still defer probes and reduce health freshness.
+For configured signing resources, use `pillar_admission_active{budget="parser"}`
+and `pillar_admission_waiting{budget="parser"}` to distinguish saturation from
+remote provider errors.
 
 Quorum retains one JSON representative per fingerprint and streams fingerprints
 instead of storing a second full JSON string. The pool is an estimate, **not a
@@ -792,6 +801,12 @@ checks that they agree). `layerzero_rollout_block_reason` does not block Stellar
 it blocks only `moninet` and `ton`, both on `testnet`. For TON testnet, a delivered
 packet on a `UlnConnection` was read with a `VERIFIED` verdict and offline tests
 replay it; the gate stays until the operator decides the rollout.
+
+During a library migration the pinned ULN302 remains usable only if EndpointV2
+reports it as valid for the receiver and source endpoint. Validation still reads
+the pinned library's config and confirmations. This behavior is covered by
+offline Soroban XDR tests, not by a live migration or signature.
+
 Confirm with:
 
 ```bash

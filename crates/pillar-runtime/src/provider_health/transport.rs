@@ -1,12 +1,16 @@
 use super::*;
-use std::{future::Future, sync::LazyLock};
+use std::{
+    future::Future,
+    sync::{LazyLock, Mutex, Weak},
+    time::Duration,
+};
 
 mod projection;
 mod read_http;
 mod tls;
 
 const MAX_JSON_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
-const MAX_TON_ACCOUNT_RESPONSE_BYTES: usize = 32 * 1024 * 1024;
+pub(crate) const MAX_TON_ACCOUNT_RESPONSE_BYTES: usize = 32 * 1024 * 1024;
 // Canton has no query for one packet or one sender, so a scan or a ledger update is read whole.
 const MAX_CANTON_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_PAGINATED_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
@@ -17,6 +21,8 @@ const MAX_TON_JSON_PARSE_NODES: usize = 512 * 1024;
 const MAX_JSON_STRING_BYTES: usize = MAX_JSON_RESPONSE_BYTES;
 const MAX_JSON_NESTING: usize = 512;
 const MAX_CONCURRENT_JSON_PARSERS: usize = 4;
+pub(crate) const PARSER_ENTITY_SLOTS: usize = 2;
+const PROVIDER_BODY_IDLE: Duration = Duration::from_secs(5);
 const MAX_WAITING_JSON_PARSERS: usize = 8;
 const JSON_PARSER_OVERLOADED: &str = "Provider JSON parser capacity exhausted";
 const JSON_PARSER_CLOSED: &str = "Provider JSON parser is draining";
@@ -75,6 +81,30 @@ pub(crate) fn provider_response<T, E: Into<RpcError>>(
     }
 }
 
+/// The Aptos REST lookups for which a structured 404 is source evidence.
+#[derive(Clone, Copy, Debug)]
+pub enum AptosLookup {
+    TransactionByHash,
+    TransactionByVersion(u64),
+    BlockByVersion(u64),
+}
+
+impl AptosLookup {
+    fn absence_code(self, headers: &reqwest::header::HeaderMap) -> Option<&'static str> {
+        let (version, code) = match self {
+            Self::TransactionByHash => return Some("transaction_not_found"),
+            Self::TransactionByVersion(version) => (version, "transaction_not_found"),
+            Self::BlockByVersion(version) => (version, "block_not_found"),
+        };
+        let parse = |value: &reqwest::header::HeaderValue| value.to_str().ok()?.parse::<u64>().ok();
+        let tip = headers.get("x-aptos-ledger-version").and_then(parse)?;
+        let within_history = headers
+            .get("x-aptos-ledger-oldest-version")
+            .is_none_or(|value| parse(value).is_some_and(|oldest| oldest <= version));
+        (tip >= version && within_history).then_some(code)
+    }
+}
+
 #[async_trait]
 pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
     async fn post_json(
@@ -89,6 +119,26 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         url: String,
         headers: HashMap<String, String>,
     ) -> Result<Value, String>;
+
+    /// `None` denotes a lookup-specific, structured absence, not a failed RPC.
+    async fn get_aptos_lookup(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+        _lookup: AptosLookup,
+    ) -> Result<Option<Value>, String> {
+        self.get_json(url, headers).await.map(Some)
+    }
+
+    async fn get_aptos_lookup_scoped(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+        lookup: AptosLookup,
+    ) -> Result<Option<Value>, RpcError> {
+        let target = rpc_target_for_call()?;
+        limited_rpc(&target, self.get_aptos_lookup(url, headers, lookup)).await
+    }
 
     /// TON v3 traces may exceed serde_json's default nesting limit. This opt-in
     /// path is deliberately separate so every other provider keeps its normal parser.
@@ -142,12 +192,7 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         body: String,
     ) -> Result<(u16, String), RpcError> {
         let target = rpc_target_for_call()?;
-        limited_rpc(
-            &target,
-            endpoint_resource(&target, &url),
-            self.post_form(url, headers, body),
-        )
-        .await
+        limited_rpc(&target, self.post_form(url, headers, body)).await
     }
 
     async fn post_json_on(
@@ -157,12 +202,7 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         headers: HashMap<String, String>,
         body: Value,
     ) -> Result<Value, RpcError> {
-        limited_rpc(
-            chain,
-            endpoint_resource(chain, &url),
-            self.post_json(url, headers, body),
-        )
-        .await
+        limited_rpc(chain, self.post_json(url, headers, body)).await
     }
     async fn get_json_on(
         &self,
@@ -170,12 +210,7 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         url: String,
         headers: HashMap<String, String>,
     ) -> Result<Value, RpcError> {
-        limited_rpc(
-            chain,
-            endpoint_resource(chain, &url),
-            self.get_json(url, headers),
-        )
-        .await
+        limited_rpc(chain, self.get_json(url, headers)).await
     }
     async fn get_ton_json_scoped(
         &self,
@@ -183,12 +218,7 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         headers: HashMap<String, String>,
     ) -> Result<Value, RpcError> {
         let target = rpc_target_for_call()?;
-        limited_rpc(
-            &target,
-            endpoint_resource(&target, &url),
-            self.get_ton_json(url, headers),
-        )
-        .await
+        limited_rpc(&target, self.get_ton_json(url, headers)).await
     }
     async fn post_json_scoped(
         &self,
@@ -223,7 +253,6 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
                 page_body["params"][3] = Value::Bool(false);
                 let mut response = match limited_rpc(
                     &target,
-                    endpoint_resource(&target, &url),
                     self.post_json(url.clone(), headers.clone(), page_body.clone()),
                 )
                 .await
@@ -302,12 +331,7 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
             if body.get("query").and_then(Value::as_str).is_some()
                 && body.get("variables").is_some_and(Value::is_object)
             {
-                return limited_rpc(
-                    &target,
-                    endpoint_resource(&target, &url),
-                    self.post_json(url, headers, body),
-                )
-                .await;
+                return limited_rpc(&target, self.post_json(url, headers, body)).await;
             }
             let (method, mut query) =
                 super::sui_graphql::request(&body, None).ok_or(RpcError::Unavailable)?;
@@ -332,7 +356,6 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
                     query = page_query;
                     let mut response = limited_rpc(
                         &target,
-                        endpoint_resource(&target, &url),
                         self.post_json(url.clone(), headers.clone(), query.clone()),
                     )
                     .await?;
@@ -411,12 +434,7 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
                 }
                 unreachable!();
             }
-            let response = limited_rpc(
-                &target,
-                endpoint_resource(&target, &url),
-                self.post_json(url, headers, query),
-            )
-            .await?;
+            let response = limited_rpc(&target, self.post_json(url, headers, query)).await?;
             if let Some(expected) = expected_digest {
                 if response
                     .pointer("/data/transaction/digest")
@@ -434,24 +452,14 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         if target.as_ref() == "iotal1"
             && body.get("method").and_then(Value::as_str) == Some("iota_getTransactionBlock")
         {
-            let response = limited_rpc(
-                &target,
-                endpoint_resource(&target, &url),
-                self.post_json(url, headers, body.clone()),
-            )
-            .await?;
+            let response = limited_rpc(&target, self.post_json(url, headers, body.clone())).await?;
             let expected = body.pointer("/params/0").and_then(Value::as_str);
             if response.pointer("/result/digest").and_then(Value::as_str) != expected {
                 return Err(RpcError::Remote("IOTA transaction digest mismatch".into()));
             }
             return Ok(response);
         }
-        limited_rpc(
-            &target,
-            endpoint_resource(&target, &url),
-            self.post_json(url, headers, body),
-        )
-        .await
+        limited_rpc(&target, self.post_json(url, headers, body)).await
     }
     async fn get_json_scoped(
         &self,
@@ -459,12 +467,7 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         headers: HashMap<String, String>,
     ) -> Result<Value, RpcError> {
         let target = rpc_target_for_call()?;
-        limited_rpc(
-            &target,
-            endpoint_resource(&target, &url),
-            self.get_json(url, headers),
-        )
-        .await
+        limited_rpc(&target, self.get_json(url, headers)).await
     }
     async fn post_text_scoped(
         &self,
@@ -473,12 +476,7 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         body: Value,
     ) -> Result<(u16, String), RpcError> {
         let target = rpc_target_for_call()?;
-        limited_rpc(
-            &target,
-            endpoint_resource(&target, &url),
-            self.post_text(url, headers, body),
-        )
-        .await
+        limited_rpc(&target, self.post_text(url, headers, body)).await
     }
     async fn get_text_scoped(
         &self,
@@ -486,12 +484,7 @@ pub trait JsonRpcTransport: Clone + Send + Sync + 'static {
         headers: HashMap<String, String>,
     ) -> Result<(u16, String), RpcError> {
         let target = rpc_target_for_call()?;
-        limited_rpc(
-            &target,
-            endpoint_resource(&target, &url),
-            self.get_text(url, headers),
-        )
-        .await
+        limited_rpc(&target, self.get_text(url, headers)).await
     }
 }
 
@@ -546,16 +539,8 @@ fn apply_headers(
     Ok(request.headers(map))
 }
 
-/// The admission resource of a call: the provider entity the endpoint belongs to when the
-/// request has planned its dispatch, else the chain alone.
-fn endpoint_resource(chain: &str, url: &str) -> Option<String> {
-    let entity = pillar_core::execution::current()?.entity_of(chain, url)?;
-    Some(format!("{chain}/{entity}"))
-}
-
 async fn limited_rpc<T, F: Future<Output = Result<T, String>>>(
     chain: &str,
-    resource: Option<String>,
     future: F,
 ) -> Result<T, RpcError> {
     use pillar_core::execution::{current, within_deadline, Outcome};
@@ -570,6 +555,11 @@ async fn limited_rpc<T, F: Future<Output = Result<T, String>>>(
                 chain
             } else {
                 "background"
+            };
+            let resource = if lane == "background" {
+                None
+            } else {
+                super::rpc_context::provider_key(chain)
             };
             Some(
                 resources
@@ -627,12 +617,7 @@ pub trait AwsLambdaInvokeClient: Send + Sync + 'static {
         function_name: &str,
         payload: Value,
     ) -> Result<Value, RpcError> {
-        limited_rpc(
-            "extra_context",
-            None,
-            self.invoke_json(function_name, payload),
-        )
-        .await
+        limited_rpc("extra_context", self.invoke_json(function_name, payload)).await
     }
 }
 
@@ -799,6 +784,28 @@ impl JsonRpcTransport for ReqwestJsonRpcTransport {
             None => bounded_json_response(response).await,
         }
     }
+
+    async fn get_aptos_lookup(
+        &self,
+        url: String,
+        headers: HashMap<String, String>,
+        lookup: AptosLookup,
+    ) -> Result<Option<Value>, String> {
+        let projection = projection::for_get(&url);
+        let request = apply_headers(self.client_for(&url).get(url), headers)?;
+        let response = request
+            .send()
+            .await
+            .map_err(|error| error.without_url().to_string())?;
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return aptos_lookup_absence(response, lookup).await;
+        }
+        let value = match projection {
+            Some(projection) => projection::response(response, projection).await?,
+            None => bounded_json_response(response).await?,
+        };
+        Ok(Some(value))
+    }
     async fn get_ton_json(
         &self,
         url: String,
@@ -872,6 +879,35 @@ pub(crate) fn is_response_size_refusal(error: &RpcError) -> bool {
 
 /// undici's message for a request that never got a response (`TypeError: fetch failed`).
 pub(crate) const FETCH_FAILED: &str = "fetch failed";
+
+async fn aptos_lookup_absence(
+    response: reqwest::Response,
+    lookup: AptosLookup,
+) -> Result<Option<Value>, String> {
+    const MAX_APTOS_ERROR_BYTES: usize = 4096;
+    const NOT_FOUND: &str = "Provider returned HTTP 404 Not Found";
+    let expected = lookup
+        .absence_code(response.headers())
+        .ok_or_else(|| NOT_FOUND.to_string())?;
+    let mut permit = acquire_json_parse_slot().await?;
+    let result = async {
+        let bytes = bounded_response_bytes_with_limit(response, MAX_APTOS_ERROR_BYTES).await?;
+        let error = parse_json_with_limits(&bytes, false)
+            .map_err(|_| "Malformed Aptos lookup error".to_string())?;
+        let code = error.get("error_code").and_then(Value::as_str);
+        let matches_lookup = code == Some(expected)
+            || (!matches!(lookup, AptosLookup::TransactionByHash)
+                && code == Some("version_not_found"));
+        if matches_lookup && error.get("message").is_some_and(Value::is_string) {
+            Ok(None)
+        } else {
+            Err(NOT_FOUND.to_string())
+        }
+    }
+    .await;
+    permit.finish(&result);
+    result
+}
 
 async fn bounded_text_response(response: reqwest::Response) -> Result<(u16, String), String> {
     let mut permit = acquire_json_parse_slot().await?;
@@ -959,8 +995,7 @@ async fn bounded_response_bytes_with_limit(
     }
     let mut bytes = Vec::new();
     let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|error| error.without_url().to_string())?;
+    while let Some(chunk) = next_body_chunk(&mut stream).await? {
         if limit == MAX_JSON_RESPONSE_BYTES {
             extend_bounded_json(&mut bytes, &chunk)?;
         } else {
@@ -975,6 +1010,24 @@ async fn bounded_response_bytes_with_limit(
         }
     }
     Ok(bytes)
+}
+
+/// Bound waits for actual body data, including when the HTTP decoder needs more
+/// framing bytes. The RPC deadline still bounds the entire download.
+async fn next_body_chunk(
+    stream: &mut (impl futures::Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Unpin),
+) -> Result<Option<bytes::Bytes>, String> {
+    tokio::time::timeout(PROVIDER_BODY_IDLE, async {
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|error| error.without_url().to_string())?;
+            if !chunk.is_empty() {
+                return Ok(Some(chunk));
+            }
+        }
+        Ok(None)
+    })
+    .await
+    .map_err(|_| "Provider response body stalled".to_string())?
 }
 
 pub(crate) fn json_parser_local_error(error: &str) -> Option<RpcError> {
@@ -1002,25 +1055,34 @@ impl Drop for JsonParseWaiter {
 
 struct JsonParsePermit {
     budget: Option<pillar_core::execution::BudgetPermit>,
+    _entity: Option<tokio::sync::OwnedSemaphorePermit>,
     _target: Option<tokio::sync::OwnedSemaphorePermit>,
     _global: tokio::sync::OwnedSemaphorePermit,
 }
 
-// One READ target may hold all but one of the pool, so a single address cannot take the slots
-// every other READ parse in the process needs.
-static READ_TARGET_SLOTS: LazyLock<
-    std::sync::Mutex<std::collections::HashMap<Arc<str>, std::sync::Arc<tokio::sync::Semaphore>>>,
-> = LazyLock::new(Default::default);
+type ParsePartitionMap = Mutex<HashMap<Arc<str>, Weak<tokio::sync::Semaphore>>>;
+static PARSE_PARTITIONS: LazyLock<ParsePartitionMap> = LazyLock::new(Default::default);
 
-fn read_target_slots(target: Arc<str>) -> std::sync::Arc<tokio::sync::Semaphore> {
-    READ_TARGET_SLOTS
+fn parse_partition(key: Arc<str>, limit: usize) -> Arc<tokio::sync::Semaphore> {
+    let mut entries = PARSE_PARTITIONS
         .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .entry(target)
-        .or_insert_with(|| {
-            std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_JSON_PARSERS - 1))
-        })
-        .clone()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(partition) = entries.get(&key).and_then(Weak::upgrade) {
+        return partition;
+    }
+    entries.retain(|_, partition| partition.strong_count() != 0);
+    let partition = Arc::new(tokio::sync::Semaphore::new(limit));
+    entries.insert(key, Arc::downgrade(&partition));
+    partition
+}
+
+async fn acquire_entity_parser(
+    partition: Option<Arc<tokio::sync::Semaphore>>,
+) -> Result<Option<tokio::sync::OwnedSemaphorePermit>, tokio::sync::AcquireError> {
+    match partition {
+        Some(partition) => partition.acquire_owned().await.map(Some),
+        None => Ok(None),
+    }
 }
 
 impl JsonParsePermit {
@@ -1037,23 +1099,30 @@ impl JsonParsePermit {
 
 async fn acquire_json_parse_slot() -> Result<JsonParsePermit, String> {
     use pillar_core::execution::{current, BudgetError};
+    let target = super::rpc_context::rpc_target();
+    let resource = target.as_deref().and_then(super::rpc_context::provider_key);
     if super::rpc_context::in_read_target_scope() {
-        let target = super::rpc_context::rpc_target().unwrap_or_else(|| Arc::from("read"));
+        let target = target.unwrap_or_else(|| Arc::from("read"));
+        let entity = resource.map(|key| parse_partition(key, PARSER_ENTITY_SLOTS));
         let admitted =
             pillar_core::execution::within_deadline(std::time::Duration::from_secs(2), async {
-                let per_target = read_target_slots(target).acquire_owned().await?;
+                let entity = acquire_entity_parser(entity).await?;
+                let per_target = parse_partition(target, MAX_CONCURRENT_JSON_PARSERS - 1)
+                    .acquire_owned()
+                    .await?;
                 let global = READ_JSON_PARSE_SLOTS.clone().acquire_owned().await?;
-                Ok::<_, tokio::sync::AcquireError>((per_target, global))
+                Ok::<_, tokio::sync::AcquireError>((entity, per_target, global))
             })
             .await;
         // A wait that ends in capacity refusal is a local admission outcome, not a lost vote.
-        let (per_target, global) = match admitted {
+        let (entity, per_target, global) = match admitted {
             Ok(Ok(permits)) => permits,
             Ok(Err(_)) => return Err(JSON_PARSER_CLOSED.to_string()),
             Err(_) => return Err(JSON_PARSER_OVERLOADED.to_string()),
         };
         return Ok(JsonParsePermit {
             budget: None,
+            _entity: entity,
             _target: Some(per_target),
             _global: global,
         });
@@ -1067,13 +1136,14 @@ async fn acquire_json_parse_slot() -> Result<JsonParsePermit, String> {
             .as_ref()
             .and_then(|context| context.source_chain.as_deref())
         {
-            Some(source) if source != "background" => super::rpc_context::rpc_target()
-                .ok_or_else(|| "RPC target provenance is missing".to_string())?,
+            Some(source) if source != "background" => {
+                target.ok_or_else(|| "RPC target provenance is missing".to_string())?
+            }
             _ => Arc::from("background"),
         };
         let mut permit = resources
             .parser
-            .acquire_for(&lane, Some(&lane))
+            .acquire_for(&lane, resource.as_deref())
             .await
             .map_err(|error| match error {
                 BudgetError::Deadline | BudgetError::WaitExpired | BudgetError::Overloaded => {
@@ -1096,12 +1166,23 @@ async fn acquire_json_parse_slot() -> Result<JsonParsePermit, String> {
         };
         return Ok(JsonParsePermit {
             budget: Some(permit),
+            _entity: None,
             _target: None,
             _global: permit_global,
         });
     }
-    let permit = if let Ok(permit) = JSON_PARSE_SLOTS.clone().try_acquire_owned() {
-        permit
+    let entity = resource.map(|key| parse_partition(key, PARSER_ENTITY_SLOTS));
+    let try_slots = || {
+        let per_entity = entity
+            .as_ref()
+            .map(|partition| partition.clone().try_acquire_owned())
+            .transpose()
+            .ok()?;
+        let global = JSON_PARSE_SLOTS.clone().try_acquire_owned().ok()?;
+        Some((per_entity, global))
+    };
+    let (entity, global) = if let Some(permits) = try_slots() {
+        permits
     } else {
         JSON_PARSE_WAITERS
             .fetch_update(
@@ -1111,18 +1192,20 @@ async fn acquire_json_parse_slot() -> Result<JsonParsePermit, String> {
             )
             .map_err(|_| JSON_PARSER_OVERLOADED.to_string())?;
         let _waiter = JsonParseWaiter;
-        pillar_core::execution::within_deadline(
-            DEFAULT_RPC_TIMEOUT,
-            JSON_PARSE_SLOTS.clone().acquire_owned(),
-        )
+        pillar_core::execution::within_deadline(DEFAULT_RPC_TIMEOUT, async {
+            let per_entity = acquire_entity_parser(entity).await?;
+            let global = JSON_PARSE_SLOTS.clone().acquire_owned().await?;
+            Ok::<_, tokio::sync::AcquireError>((per_entity, global))
+        })
         .await
         .map_err(|_| JSON_PARSER_OVERLOADED.to_string())?
         .map_err(|_| JSON_PARSER_OVERLOADED.to_string())?
     };
     Ok(JsonParsePermit {
         budget: None,
+        _entity: entity,
         _target: None,
-        _global: permit,
+        _global: global,
     })
 }
 
@@ -1325,6 +1408,52 @@ fn extend_bounded_json(buffer: &mut Vec<u8>, chunk: &[u8]) -> Result<(), String>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn aptos_absence_requires_the_lookup_code_and_a_covered_version() {
+        let response = |code: &str, tip: u64, oldest: u64| {
+            reqwest::Response::from(
+                http::Response::builder()
+                    .status(404)
+                    .header("x-aptos-ledger-version", tip)
+                    .header("x-aptos-ledger-oldest-version", oldest)
+                    .body(json!({"message":"not found", "error_code":code}).to_string())
+                    .unwrap(),
+            )
+        };
+        let lookup = AptosLookup::BlockByVersion(42);
+        assert_eq!(
+            aptos_lookup_absence(response("version_not_found", 42, 40), lookup).await,
+            Ok(None)
+        );
+        for (code, tip, oldest) in [
+            ("version_not_found", 41, 40),
+            ("version_not_found", 45, 43),
+            ("transaction_not_found", 45, 40),
+        ] {
+            assert!(aptos_lookup_absence(response(code, tip, oldest), lookup)
+                .await
+                .is_err());
+        }
+        assert_eq!(
+            aptos_lookup_absence(
+                response("transaction_not_found", 45, 40),
+                AptosLookup::TransactionByHash
+            )
+            .await,
+            Ok(None)
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn provider_body_idle_limit_counts_time_without_data() {
+        let mut stream =
+            futures::stream::iter([Ok(bytes::Bytes::new())]).chain(futures::stream::pending());
+        assert_eq!(
+            next_body_chunk(&mut stream).await,
+            Err("Provider response body stalled".into())
+        );
+    }
 
     #[test]
     fn bounded_json_buffer_rejects_oversized_provider_response() {

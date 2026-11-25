@@ -38,7 +38,9 @@
 //! [`candidate`]: ProviderSnapshotHandle::candidate
 
 use crate::provider_health::ProviderRankTracker;
-use crate::provider_health::{plan_dispatch, required_provider_quorum, DispatchEntry, QuorumRule};
+use crate::provider_health::{
+    plan_dispatch, plan_read_dispatch, required_provider_quorum, DispatchEntry, QuorumRule,
+};
 use pillar_config::{ProviderConfig, ProviderConfigs};
 use pillar_core::AppCoreError;
 use std::sync::{Arc, RwLock};
@@ -114,13 +116,29 @@ impl RuntimeProviderSnapshot {
             plan,
         })
     }
+
+    pub(crate) async fn read_dispatch<'a>(
+        &'a self,
+        rank_tracker: &ProviderRankTracker,
+        chain_name: &str,
+        stall_budget: std::time::Duration,
+    ) -> Result<ChainDispatch<'a>, AppCoreError> {
+        let config = self.provider_config(chain_name)?;
+        let quorum = required_provider_quorum(config, chain_name)?;
+        let plan = plan_read_dispatch(rank_tracker, chain_name, quorum, stall_budget).await?;
+        Ok(ChainDispatch {
+            config,
+            quorum,
+            plan,
+        })
+    }
 }
 
 /// One chain's dispatch decision, all of it from a single generation.
 pub(crate) struct ChainDispatch<'a> {
     pub(crate) config: &'a ProviderConfig,
     pub(crate) quorum: QuorumRule<'a>,
-    pub(crate) plan: Vec<DispatchEntry<'a>>,
+    pub(crate) plan: Vec<DispatchEntry<&'a pillar_config::ProviderUri>>,
 }
 
 /// The handle every consumer holds: a slot containing the generation now

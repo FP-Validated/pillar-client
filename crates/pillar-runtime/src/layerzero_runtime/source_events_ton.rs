@@ -1,7 +1,10 @@
 use super::*;
 use crate::provider_health::drop_json_value_safely;
 use base64::Engine;
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::atomic::{AtomicBool, Ordering},
+};
 #[cfg(test)]
 use ton_core::cell::BoC;
 use ton_core::cell::TonCell;
@@ -316,31 +319,55 @@ pub(crate) async fn fetch_ton_transaction_trace<T: JsonRpcTransport>(
 /// request to about 12 ms (GA-349).
 pub(crate) const MAX_TON_TRACE_DECLARED_CELLS: usize = 1 << 16;
 
-/// Provider-supplied TON cells are decoded by synchronous code that an async worker cannot be
-/// interrupted out of, so every decode of a trace runs on the blocking pool, four at a time
-/// process-wide. A request that cannot get a slot before its deadline is refused rather than
-/// run on the worker (GA-349).
-static TON_TRACE_DECODES: std::sync::LazyLock<Arc<tokio::sync::Semaphore>> =
+/// Trace and account BOC decoding share four blocking jobs. A join dropped by
+/// cancellation signals preflight to stop and aborts jobs not yet started.
+static TON_DECODES: std::sync::LazyLock<Arc<tokio::sync::Semaphore>> =
     std::sync::LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(4)));
-const TON_TRACE_DECODE_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+pub(super) const TON_ADMISSION_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 
-async fn on_ton_decode_pool<R: Send + 'static>(
-    work: impl FnOnce() -> R + Send + 'static,
+struct TonDecodeTask<R> {
+    join: tokio::task::JoinHandle<Result<R, RpcError>>,
+    cancel: Arc<AtomicBool>,
+}
+
+impl<R> Drop for TonDecodeTask<R> {
+    fn drop(&mut self) {
+        self.cancel.store(true, Ordering::Release);
+        self.join.abort();
+    }
+}
+
+pub(super) async fn on_ton_decode_pool<R: Send + 'static>(
+    work: impl FnOnce(&AtomicBool) -> R + Send + 'static,
 ) -> Result<R, RpcError> {
     use pillar_core::execution::BudgetError;
     let permit = pillar_core::execution::within_deadline(
-        TON_TRACE_DECODE_WAIT,
-        TON_TRACE_DECODES.clone().acquire_owned(),
+        TON_ADMISSION_WAIT,
+        TON_DECODES.clone().acquire_owned(),
     )
     .await
     .map_err(RpcError::Admission)?
     .map_err(|_| RpcError::Admission(BudgetError::Closed))?;
-    tokio::task::spawn_blocking(move || {
+    let deadline = pillar_core::execution::current().and_then(|context| context.deadline);
+    let cancel = Arc::new(AtomicBool::new(false));
+    let flag = cancel.clone();
+    let join = tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        work()
-    })
-    .await
-    .map_err(|_| RpcError::Remote("TON trace decoder failed".to_string()))
+        if flag.load(Ordering::Acquire)
+            || deadline.is_some_and(|deadline| tokio::time::Instant::now() >= deadline)
+        {
+            return Err(RpcError::Admission(BudgetError::Deadline));
+        }
+        Ok(work(&flag))
+    });
+    let mut task = TonDecodeTask { join, cancel };
+    let result = match deadline {
+        Some(deadline) => tokio::time::timeout_at(deadline, &mut task.join)
+            .await
+            .map_err(|_| RpcError::Admission(BudgetError::Deadline))?,
+        None => (&mut task.join).await,
+    };
+    result.map_err(|_| RpcError::Remote("TON cell decoder failed".to_string()))?
 }
 
 /// `ton_trace_quorum_fingerprint` on the decode pool. The tree comes back with the result so the
@@ -348,7 +375,7 @@ async fn on_ton_decode_pool<R: Send + 'static>(
 pub(crate) async fn ton_trace_quorum_fingerprint_off_worker(
     tree: Value,
 ) -> Result<(Option<String>, Value), RpcError> {
-    on_ton_decode_pool(move || (ton_trace_quorum_fingerprint(&tree), tree)).await
+    on_ton_decode_pool(move |_| (ton_trace_quorum_fingerprint(&tree), tree)).await
 }
 
 /// `decode_ton_packet_sent_events` on the decode pool.
@@ -357,7 +384,7 @@ pub(crate) async fn decode_ton_packet_sent_events_off_worker(
     trusted_emitters: HashSet<String>,
     chain_name_by_eid: HashMap<u32, String>,
 ) -> Result<Vec<TonPacketSentEvent>, RpcError> {
-    on_ton_decode_pool(move || {
+    on_ton_decode_pool(move |_| {
         decode_ton_packet_sent_events(&trace, &trusted_emitters, &chain_name_by_eid)
     })
     .await
@@ -873,7 +900,7 @@ mod tests {
     #[tokio::test]
     async fn trace_decoding_waits_for_the_shared_pool_and_is_refused_at_the_request_deadline() {
         let tree = trace_of_forty_cell_bodies(1);
-        let held = TON_TRACE_DECODES
+        let held = TON_DECODES
             .clone()
             .acquire_many_owned(4)
             .await
@@ -899,6 +926,26 @@ mod tests {
             .expect("a free pool decodes");
         assert_eq!(fingerprint, ton_trace_quorum_fingerprint(&tree));
         assert_eq!(returned, tree);
+    }
+
+    #[tokio::test]
+    async fn dropping_a_running_decode_signals_cancellation() {
+        let (started, running) = tokio::sync::oneshot::channel();
+        let (finished, stopped) = tokio::sync::oneshot::channel();
+        let work = tokio::spawn(on_ton_decode_pool(move |cancel| {
+            started.send(()).unwrap();
+            let end = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            while !cancel.load(Ordering::Acquire) && std::time::Instant::now() < end {
+                std::thread::park_timeout(std::time::Duration::from_millis(1));
+            }
+            finished.send(cancel.load(Ordering::Acquire)).unwrap();
+        }));
+        running.await.expect("decoder entered its work");
+        work.abort();
+        assert!(
+            stopped.await.unwrap(),
+            "running worker never observed cancellation"
+        );
     }
     #[test]
     fn trace_fingerprint_accepts_merkle_proof_body_on_non_layerzero_message() {

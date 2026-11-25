@@ -217,6 +217,60 @@ async fn runtime_evm_read_payload_resolver_caps_process_wide_read_call_concurren
     assert_eq!(peak.load(Ordering::SeqCst), 2);
 }
 
+#[tokio::test(start_paused = true)]
+async fn read_command_resolves_64_batches_with_redundant_providers() {
+    use pillar_config::provider_validation::{ProviderVoter, Quorum, QuorumStrategy};
+    use std::{sync::atomic::AtomicUsize, time::Duration};
+    let voter_names = ["a", "a", "b", "c", "d"];
+    let pool = ProviderConfig::new(
+        (0..voter_names.len())
+            .map(|i| ProviderUri::Uri(format!("https://read-{i}.example")))
+            .collect(),
+        voter_names
+            .into_iter()
+            .map(|entity| ProviderVoter {
+                category: "shared_external".into(),
+                entity: entity.into(),
+            })
+            .collect(),
+        QuorumStrategy {
+            all_of: vec![std::collections::BTreeMap::from([(
+                "any".into(),
+                Quorum::Count(2),
+            )])],
+            one_of: Vec::new(),
+        },
+    )
+    .unwrap();
+    let getter = StaticProviderConfig::new(IndexMap::from([("bsc".into(), pool)]), None).unwrap();
+    let resolver = RuntimeEvmReadPayloadResolver::new(
+        &ProviderSnapshotHandle::from_getter(&getter),
+        ReadConcurrencyTransport {
+            active: Arc::new(AtomicUsize::new(0)),
+            peak: Arc::new(AtomicUsize::new(0)),
+        },
+        HashMap::from([(30_102, "bsc".to_string())]),
+    );
+    let mut sent_event = read_command_sent_event(evm_read_command_with_repeated_block_markers(256));
+    sent_event.read_block_pins = bsc_read_block_pins();
+    let context = SigningContext::Read {
+        expiration: 123,
+        skip_v_id: None,
+        dvn_address: None,
+        resolved_timestamp_time_markers: Vec::new(),
+    };
+    let deadline = Duration::from_secs(5);
+    let result = pillar_core::execution::RequestContext::new(deadline)
+        .scope(tokio::time::timeout(
+            deadline,
+            resolver.resolve_payload(&sent_event, &context),
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(result, "1234".repeat(256));
+}
+
 #[tokio::test]
 async fn runtime_evm_read_payload_resolver_calls_request_block_marker() {
     let calls = Arc::new(Mutex::new(Vec::new()));

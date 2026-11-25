@@ -116,8 +116,7 @@ where
         let quorum = required_provider_quorum(provider_config, dst_chain_name)?;
         let plan = plan_dispatch(&self.rank_tracker, dst_chain_name, quorum).await?;
 
-        let requests = FuturesUnordered::new();
-        for DispatchEntry { index, uri, delay } in plan {
+        let requests = quorum_requests(plan, |index, uri| {
             let (url, headers) = provider_uri_parts(uri);
             let transport = self.transport.clone();
             let chain_name = dst_chain_name.to_string();
@@ -128,10 +127,7 @@ where
             let voter = &provider_config.voters[index];
             let entity = serde_json::to_string(&(dst_chain_name, &voter.category, &voter.entity))
                 .expect("provider entity strings serialize");
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
+            async move {
                 let _entity_permit = match budget.acquire_for(&chain_name, Some(&entity)).await {
                     Ok(permit) => permit,
                     Err(error) => return (index, Err(RpcError::Admission(error))),
@@ -155,8 +151,8 @@ where
                     .await,
                 );
                 (index, observation)
-            });
-        }
+            }
+        });
         let context = format!("payload-signed validation for chain {dst_chain_name}");
         let validity =
             resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context).await?;

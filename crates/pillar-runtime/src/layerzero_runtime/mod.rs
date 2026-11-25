@@ -39,16 +39,17 @@ use crate::provider_health::{
     block_matches_resolved_timestamp, evm_receipt_fingerprint, extra_context_sent_event_payload,
     is_http_not_found, lz_message_id_matches, lz_message_identity_matches, normalize_address,
     normalize_address_map, numeric_response, observe_block_confirmations, observe_block_time,
-    observe_payload_signed, observe_receive_uln_version, observe_solana_transaction_from,
-    observe_transaction_from, observe_uln_v2_inbound_proof_type, observe_uln_v2_mpt_hash_info,
-    parse_block_timestamp_seconds, pathway_extra_string_value, pathway_extra_u32,
-    pathway_extra_u64, plan_dispatch, provider_response, provider_uri_parts,
-    required_provider_quorum, resolve_provider_quorum, resolve_provider_quorum_with_zero_signal,
-    strip_hex_prefix, timestamp_validity, ton_v3_provider_uri_parts, uln_version_value,
-    AwsLambdaInvokeClient, BlockConfirmationObservation, BlockConfirmationValidity, BlockTime,
-    DispatchEntry, EvmPayloadSignedObservation, EvmTransactionReceipt, ExactQuorumAccumulator,
-    JsonRpcTransport, PayloadSignedValidity, ProviderRankTracker, QuorumResolutionFailure,
-    ReceiveUlnVersion, RpcError, TimestampValidity, UlnV2MptVote,
+    observe_payload_signed, observe_read_block, observe_receive_uln_version,
+    observe_solana_transaction_from, observe_transaction_from, observe_uln_v2_inbound_proof_type,
+    observe_uln_v2_mpt_hash_info, parse_block_timestamp_seconds, pathway_extra_string_value,
+    pathway_extra_u32, pathway_extra_u64, plan_dispatch, provider_response, provider_uri_parts,
+    quorum_requests, required_provider_quorum, resolve_provider_quorum,
+    resolve_provider_quorum_with_zero_signal, strip_hex_prefix, timestamp_validity,
+    ton_v3_provider_uri_parts, uln_version_value, AptosLookup, AwsLambdaInvokeClient,
+    BlockConfirmationObservation, BlockConfirmationValidity, BlockTime,
+    EvmPayloadSignedObservation, EvmTransactionReceipt, ExactQuorumAccumulator, JsonRpcTransport,
+    PayloadSignedValidity, ProviderRankTracker, QuorumResolutionFailure, ReceiveUlnVersion,
+    RpcError, TimestampValidity, UlnV2MptVote,
 };
 use crate::provider_snapshot::ChainDispatch;
 use crate::validation::{ExpirationValidRange, RuntimeAppValidator, RuntimeValidationChecks};
@@ -130,7 +131,7 @@ mod validation_payload_stellar;
 mod validation_payload_sui;
 mod validation_payload_ton;
 #[cfg(test)]
-pub(crate) use validation_payload_ton::{ton_storage_cell, TonStorageRead};
+pub(crate) use validation_payload_ton::{ton_storage_cell, TonStorageObservation, TonStorageRead};
 mod validation_read_markers;
 mod validation_readiness;
 mod validation_timestamp;

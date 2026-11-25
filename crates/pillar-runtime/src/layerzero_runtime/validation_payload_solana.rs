@@ -54,15 +54,11 @@ where
         ]
         .map(|pubkey| bs58::encode(pubkey).into_string());
 
-        let requests = FuturesUnordered::new();
-        for DispatchEntry { index, uri, delay } in plan {
+        let requests = quorum_requests(plan, |index, uri| {
             let (url, headers) = provider_uri_parts(uri);
             let transport = self.transport.clone();
             let pubkeys = pubkeys.clone();
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
+            async move {
                 let observation =
                     observe_solana_payload_signed(transport, url, headers, request, pubkeys).await;
                 (
@@ -70,8 +66,8 @@ where
                     provider_response(observation)
                         .map(|observation| observation.map(|value| (format!("{value:?}"), value))),
                 )
-            });
-        }
+            }
+        });
         let context = format!("payload-signed validation for chain {dst_chain_name}");
         let agreed_validity =
             resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context).await?;

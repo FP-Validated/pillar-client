@@ -188,7 +188,17 @@ pub(crate) async fn observe_block_time<T>(
 where
     T: JsonRpcTransport,
 {
-    let response = transport
+    let response = evm_block_response(&transport, url, headers, block_tag).await?;
+    parse_block_time_observation(&response)
+}
+
+async fn evm_block_response<T: JsonRpcTransport>(
+    transport: &T,
+    url: String,
+    headers: HashMap<String, String>,
+    block_tag: &str,
+) -> Result<Value, AppCoreError> {
+    transport
         .post_json_scoped(
             url,
             headers,
@@ -200,8 +210,56 @@ where
             }),
         )
         .await
-        .map_err(AppCoreError::from)?;
-    parse_block_time_observation(&response)
+        .map_err(AppCoreError::from)
+}
+
+/// Only an explicit null block from a provider that has reached this height
+/// disproves the pin. A lagging provider or an RPC error cannot vote on it.
+pub(crate) async fn observe_read_block<T: JsonRpcTransport>(
+    transport: T,
+    url: String,
+    headers: HashMap<String, String>,
+    height: u64,
+    known_head: Option<i64>,
+) -> Result<Option<BlockTimeObservation>, AppCoreError> {
+    let response = evm_block_response(
+        &transport,
+        url.clone(),
+        headers.clone(),
+        &format!("0x{height:x}"),
+    )
+    .await?;
+    if response.get("error").is_some() {
+        return Err(RpcError::Unavailable.into());
+    }
+    if response.get("result").is_some_and(Value::is_null) {
+        let head = match known_head {
+            Some(head) => u64::try_from(head).ok(),
+            None => {
+                let head = transport.post_json_scoped(
+                    url,
+                    headers,
+                    json!({"method": "eth_blockNumber", "params": [], "id": 1, "jsonrpc": "2.0"}),
+                ).await?;
+                if head.get("error").is_some() {
+                    return Err(RpcError::Unavailable.into());
+                }
+                head.get("result")
+                    .and_then(numeric_response)
+                    .and_then(|value| value.parse().ok())
+            }
+        };
+        return if head.is_some_and(|head| head >= height) {
+            Ok(None)
+        } else {
+            Err(RpcError::Unavailable.into())
+        };
+    }
+    let block = parse_block_time_observation(&response)?;
+    if u64::try_from(block.block.number).ok() != Some(height) {
+        return Err(RpcError::Unavailable.into());
+    }
+    Ok(Some(block))
 }
 
 pub(crate) fn parse_receipt_block_placement(response: &Value) -> Result<(String, i64), String> {

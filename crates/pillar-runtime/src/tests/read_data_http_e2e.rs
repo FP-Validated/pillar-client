@@ -168,13 +168,17 @@ fn http_provider_env(
     env
 }
 
-async fn read_http_request(stream: TcpStream) -> Result<(TcpStream, HttpRequest), String> {
+async fn read_http_request(stream: TcpStream) -> Result<Option<(TcpStream, HttpRequest)>, String> {
     let mut reader = BufReader::new(stream);
     let mut request_line = String::new();
-    reader
+    let bytes = reader
         .read_line(&mut request_line)
         .await
         .map_err(|error| error.to_string())?;
+    if bytes == 0 {
+        // A quorum can cancel another provider's dial before it sends a request.
+        return Ok(None);
+    }
     let mut request_line_parts = request_line.split_whitespace();
     let method = request_line_parts.next().unwrap_or_default();
     let path = request_line_parts.next().unwrap_or_default();
@@ -209,14 +213,14 @@ async fn read_http_request(stream: TcpStream) -> Result<(TcpStream, HttpRequest)
         .await
         .map_err(|error| error.to_string())?;
     let body = serde_json::from_slice(&body_bytes).map_err(|error| error.to_string())?;
-    Ok((
+    Ok(Some((
         reader.into_inner(),
         HttpRequest {
             path: path.to_string(),
             headers,
             body,
         },
-    ))
+    )))
 }
 
 async fn respond_json(stream: &mut TcpStream, body: &Value) -> Result<(), String> {
@@ -237,7 +241,9 @@ async fn respond_json(stream: &mut TcpStream, body: &Value) -> Result<(), String
 }
 
 async fn serve_one(stream: TcpStream, state: &HttpFixtureState) -> Result<(), String> {
-    let (mut stream, request) = read_http_request(stream).await?;
+    let Some((mut stream, request)) = read_http_request(stream).await? else {
+        return Ok(());
+    };
     state.wire_requests.lock().push(CapturedHttpRequest {
         path: request.path.clone(),
         headers: request.headers.clone(),
