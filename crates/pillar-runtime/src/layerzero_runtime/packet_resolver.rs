@@ -149,6 +149,46 @@ fn project_fields(value: Value, keys: &[&str]) -> Value {
     )
 }
 
+/// An explicit absence can block an otherwise eligible positive fingerprint.
+/// A failed or malformed read supplies no such evidence.
+fn move_lookup_vote(
+    response: Result<Option<Value>, RpcError>,
+    project: fn(Value) -> Value,
+) -> Result<(String, Value), RpcError> {
+    match response? {
+        Some(value)
+            if value.is_object()
+                && value.get("error").is_none()
+                && value.get("error_code").is_none()
+                && value.get("type").and_then(Value::as_str) != Some("pending_transaction") =>
+        {
+            let value = project(value);
+            if value.as_object().is_some_and(serde_json::Map::is_empty) {
+                return Err(RpcError::Unavailable);
+            }
+            let fingerprint = crate::provider_health::canonical_json_fingerprint(&value)
+                .map_err(|error| RpcError::Remote(error.to_string()))?;
+            Ok((fingerprint, value))
+        }
+        Some(_) => Err(RpcError::Unavailable),
+        None => Ok(("absent".into(), Value::Null)),
+    }
+}
+
+fn require_move_lookup(value: Value, context: &str) -> Result<Value, AppCoreError> {
+    if value.is_null() {
+        Err(AppCoreError::Internal(format!("{context} not found")))
+    } else {
+        Ok(value)
+    }
+}
+
+fn ledger_lookup_version(version: &str) -> Result<u64, AppCoreError> {
+    version
+        .parse()
+        .map_err(|_| AppCoreError::Internal("Aptos ledger version is out of range".into()))
+}
+
 #[derive(Clone)]
 pub struct EvmPacketSentResolver<T> {
     providers: crate::provider_snapshot::ProviderSnapshotHandle,
@@ -287,9 +327,8 @@ where
         let snapshot = self.providers.load();
         let provider_config = snapshot.provider_config(src_chain_name)?;
         let quorum = required_provider_quorum(provider_config, src_chain_name)?;
-        let mut requests = FuturesUnordered::new();
         let plan = plan_dispatch(&self.providers.rank_tracker, src_chain_name, quorum).await?;
-        for DispatchEntry { index, uri, delay } in plan {
+        let mut requests = quorum_requests(plan, |index, uri| {
             let transport = self.transport.clone();
             let (url, headers) = provider_uri_parts(uri);
             let request = json!({
@@ -305,14 +344,11 @@ where
                 "id": 1,
                 "jsonrpc": "2.0",
             });
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
+            async move {
                 let response = transport.post_json_scoped(url, headers, request).await;
                 (index, provider_response(response))
-            });
-        }
+            }
+        });
         let mut accumulator = ExactQuorumAccumulator::new(quorum, 0..provider_config.uris.len());
         while let Some((index, response)) = requests.next().await {
             let observation = response.and_then(|response| {
@@ -339,7 +375,7 @@ where
             });
             match observation {
                 Ok(Some((fingerprint, value))) => {
-                    accumulator.record_json_result(index, fingerprint, value)?;
+                    accumulator.record_json_result(src_chain_name, index, fingerprint, value)?;
                 }
                 Ok(None) => {
                     accumulator.record_result(index, Ok(None))?;
@@ -376,55 +412,40 @@ where
         let snapshot = self.providers.load();
         let provider_config = snapshot.provider_config(chain_name)?;
         let quorum = required_provider_quorum(provider_config, chain_name)?;
-        let mut requests = FuturesUnordered::new();
         let plan = plan_dispatch(&self.providers.rank_tracker, chain_name, quorum).await?;
-        for DispatchEntry { index, uri, delay } in plan {
+        let mut requests = quorum_requests(plan, |index, uri| {
             let transport = self.transport.clone();
             let (url, headers) = move_provider_uri_parts(chain_name, uri);
             let chain_name = chain_name.to_string();
             let tx_hash = src_tx_hash.to_string();
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
+            async move {
                 (
                     index,
                     fetch_move_transaction(transport, &chain_name, url, headers, &tx_hash).await,
                 )
-            });
-        }
+            }
+        });
+        let context = format!("Move transaction for {src_tx_hash}");
         let mut accumulator = ExactQuorumAccumulator::new(quorum, 0..provider_config.uris.len());
         while let Some((index, response)) = requests.next().await {
-            let observation = provider_response(response).and_then(|response| {
-                response
-                    .map(|value| {
-                        let value = move_transaction_projection(value);
-                        crate::provider_health::canonical_json_fingerprint(&value)
-                            .map(|fingerprint| (fingerprint, value))
-                            .map_err(|error| RpcError::Remote(error.to_string()))
-                    })
-                    .transpose()
-            });
-            match observation {
-                Ok(Some((fingerprint, value))) => {
-                    accumulator.record_json_result(index, fingerprint, value)?;
+            match move_lookup_vote(response, move_transaction_projection) {
+                Ok((fingerprint, value)) => {
+                    accumulator.record_json_result(chain_name, index, fingerprint, value)?;
                 }
-                Ok(None) => accumulator.record_result(index, Ok(None))?,
                 Err(error) => accumulator.record_result(index, Err(error))?,
             }
             if let Some(value) = accumulator.unambiguous_result() {
-                return Ok(value);
+                return require_move_lookup(value, &context);
             }
             if !accumulator.can_reach_quorum() {
                 break;
             }
         }
-        self.finish_quorum(
-            chain_name,
-            accumulator,
-            &format!("Move transaction for {src_tx_hash}"),
+        require_move_lookup(
+            self.finish_quorum(chain_name, accumulator, &context)
+                .await?,
+            &context,
         )
-        .await
     }
 
     /// One Aptos-family REST GET, agreed by the provider quorum on fields used by its caller.
@@ -432,58 +453,52 @@ where
         &self,
         chain: &str,
         url_for: impl Fn(&str) -> Option<String>,
+        lookup: Option<AptosLookup>,
         projection: fn(Value) -> Value,
         context: &str,
     ) -> Result<Value, AppCoreError> {
         let snapshot = self.providers.load();
         let provider_config = snapshot.provider_config(chain)?;
         let quorum = required_provider_quorum(provider_config, chain)?;
-        let mut requests = FuturesUnordered::new();
         let plan = plan_dispatch(&self.providers.rank_tracker, chain, quorum).await?;
-        for DispatchEntry { index, uri, delay } in plan {
+        let mut requests = quorum_requests(plan, |index, uri| {
             let transport = self.transport.clone();
             let (base, headers) = move_provider_uri_parts(chain, uri);
             let url = url_for(&base);
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
-                let response = match url {
-                    Some(url) => transport.get_json_scoped(url, headers).await,
-                    None => Err(RpcError::Remote(
+            async move {
+                let response = match (url, lookup) {
+                    (Some(url), Some(lookup)) => {
+                        transport
+                            .get_aptos_lookup_scoped(url, headers, lookup)
+                            .await
+                    }
+                    (Some(url), None) => transport.get_json_scoped(url, headers).await.map(Some),
+                    (None, _) => Err(RpcError::Remote(
                         "Unusable Aptos ledger version".to_string(),
                     )),
                 };
                 (index, response)
-            });
-        }
+            }
+        });
         let mut accumulator = ExactQuorumAccumulator::new(quorum, 0..provider_config.uris.len());
         while let Some((index, response)) = requests.next().await {
-            let observation = provider_response(response).and_then(|response| {
-                response
-                    .map(|value| {
-                        let value = projection(value);
-                        crate::provider_health::canonical_json_fingerprint(&value)
-                            .map(|fingerprint| (fingerprint, value))
-                            .map_err(|error| RpcError::Remote(error.to_string()))
-                    })
-                    .transpose()
-            });
-            match observation {
-                Ok(Some((fingerprint, value))) => {
-                    accumulator.record_json_result(index, fingerprint, value)?;
+            match move_lookup_vote(response, projection) {
+                Ok((fingerprint, value)) => {
+                    accumulator.record_json_result(chain, index, fingerprint, value)?;
                 }
-                Ok(None) => accumulator.record_result(index, Ok(None))?,
                 Err(error) => accumulator.record_result(index, Err(error))?,
             }
             if let Some(value) = accumulator.unambiguous_result() {
-                return Ok(value);
+                return require_move_lookup(value, context);
             }
             if !accumulator.can_reach_quorum() {
                 break;
             }
         }
-        self.finish_quorum(chain, accumulator, context).await
+        require_move_lookup(
+            self.finish_quorum(chain, accumulator, context).await?,
+            context,
+        )
     }
 
     /// `LZAptosSdk.getLZSentEventFromSrcTxHash`: the transaction at the ledger version
@@ -501,6 +516,9 @@ where
             .get_aptos_json(
                 "aptos",
                 |base| aptos_transaction_by_version_url(base, &version),
+                Some(AptosLookup::TransactionByVersion(ledger_lookup_version(
+                    &version,
+                )?)),
                 move_transaction_projection,
                 &format!("Aptos transaction at version {version}"),
             )
@@ -555,6 +573,9 @@ where
                         .get_aptos_json(
                             "aptos",
                             |base| move_block_by_version_url(base, &version),
+                            Some(AptosLookup::BlockByVersion(ledger_lookup_version(
+                                &version,
+                            )?)),
                             move_block_projection,
                             &format!("Aptos block at version {version}"),
                         )
@@ -740,19 +761,13 @@ where
                 Some(method) if method.ends_with("_queryEvents") => move_events_projection,
                 _ => |value| value,
             };
-            let mut requests = FuturesUnordered::new();
             let plan = plan_dispatch(&self.providers.rank_tracker, chain_name, quorum).await?;
-            for DispatchEntry { index, uri, delay } in plan {
+            let mut requests = quorum_requests(plan, |index, uri| {
                 let transport = self.transport.clone();
                 let (url, headers) = provider_uri_parts(uri);
                 let body = body.clone();
-                requests.push(async move {
-                    if !delay.is_zero() {
-                        tokio::time::sleep(delay).await;
-                    }
-                    (index, transport.post_json_scoped(url, headers, body).await)
-                });
-            }
+                async move { (index, transport.post_json_scoped(url, headers, body).await) }
+            });
             let mut accumulator =
                 ExactQuorumAccumulator::new(quorum, 0..provider_config.uris.len());
             while let Some((index, response)) = requests.next().await {
@@ -783,7 +798,7 @@ where
                 });
                 match observation {
                     Ok(Some((fingerprint, value))) => {
-                        accumulator.record_json_result(index, fingerprint, value)?;
+                        accumulator.record_json_result(chain_name, index, fingerprint, value)?;
                     }
                     Ok(None) => accumulator.record_result(index, Ok(None))?,
                     Err(error) => accumulator.record_result(index, Err(error))?,
@@ -1084,7 +1099,6 @@ where
             let snapshot = self.providers.load();
             let provider_config = snapshot.provider_config("ton")?;
             let quorum = required_provider_quorum(provider_config, "ton")?;
-            let mut requests = FuturesUnordered::new();
             let keyed = provider_config
                 .uris
                 .iter()
@@ -1101,26 +1115,22 @@ where
             )
             .await?;
             let dispatched = plan.iter().map(|entry| entry.index).collect::<Vec<_>>();
-            for DispatchEntry { index, uri, delay } in plan {
+            let Some(encoded_tx_hash) = encode_path_segment(src_tx_hash) else {
+                return Err(AppCoreError::BadRequest(format!(
+                    "srcTxHash {src_tx_hash} cannot be used as a TON trace query value"
+                )));
+            };
+            let mut requests = quorum_requests(plan, |index, uri| {
                 let (endpoint, _, headers) = ton_v3_provider_uri_parts(uri)
                     .expect("dispatch includes only eligible TON v3 endpoints");
-                // Sink-side refusal, as in `move_tx_url`; the core's `srcTxHash` shape
-                // check is the first gate, not the only one.
-                let Some(encoded_tx_hash) = encode_path_segment(src_tx_hash) else {
-                    return Err(AppCoreError::BadRequest(format!(
-                        "srcTxHash {src_tx_hash} cannot be used as a TON trace query value"
-                    )));
-                };
+                let encoded_tx_hash = encoded_tx_hash.as_str();
                 let transport = self.transport.clone();
-                requests.push(async move {
-                    if !delay.is_zero() {
-                        tokio::time::sleep(delay).await;
-                    }
+                async move {
                     let observation = fetch_ton_transaction_trace(
                         &transport,
                         &endpoint,
                         &headers,
-                        &encoded_tx_hash,
+                        encoded_tx_hash,
                     )
                     .await;
                     let observation = match observation {
@@ -1137,13 +1147,13 @@ where
                         Err(error) => Err(error),
                     };
                     (index, observation)
-                });
-            }
+                }
+            });
             let mut accumulator = ExactQuorumAccumulator::new(quorum, dispatched);
             while let Some((index, observation)) = requests.next().await {
                 match observation {
                     Ok(Some((fingerprint, value))) => {
-                        accumulator.record_json_result(index, fingerprint, value)?;
+                        accumulator.record_json_result("ton", index, fingerprint, value)?;
                     }
                     Ok(None) => accumulator.record_result(index, Ok(None))?,
                     Err(error) => accumulator.record_result(index, Err(error))?,
@@ -1328,6 +1338,7 @@ where
                                 self.get_aptos_json(
                                     "initia",
                                     |base| initia_block_by_height_url(base, &height),
+                                    None,
                                     initia_block_projection,
                                     &format!("Initia block at height {height}"),
                                 )
@@ -1340,6 +1351,7 @@ where
                             self.get_aptos_json(
                                 src_chain_name,
                                 |base| move_block_by_version_url(base, &identity),
+                                Some(AptosLookup::BlockByVersion(ledger_lookup_version(&identity)?)),
                                 move_block_projection,
                                 &format!("{src_chain_name} block at version {identity}"),
                             )
@@ -1872,24 +1884,20 @@ where
         let snapshot = self.providers.load();
         let provider_config = snapshot.provider_config(chain)?;
         let quorum = required_provider_quorum(provider_config, chain)?;
-        let mut requests = FuturesUnordered::new();
         let plan = plan_dispatch(&self.providers.rank_tracker, chain, quorum).await?;
-        for DispatchEntry { index, uri, delay } in plan {
+        let mut requests = quorum_requests(plan, |index, uri| {
             let transport = self.transport.clone();
             let (base, headers) = move_provider_uri_parts(chain, uri);
             let url = url_for(&base);
             let body = body.clone();
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
+            async move {
                 let response = match url {
                     Some(url) => transport.post_json_scoped(url, headers, body).await,
                     None => Err(RpcError::Remote("Unusable Aptos table handle".to_string())),
                 };
                 (index, response)
-            });
-        }
+            }
+        });
         let mut accumulator = ExactQuorumAccumulator::new(quorum, 0..provider_config.uris.len());
         while let Some((index, response)) = requests.next().await {
             // An absent table entry is an answer the providers can agree on; every other
@@ -1914,7 +1922,7 @@ where
             });
             match observation {
                 Ok(Some((fingerprint, value))) => {
-                    accumulator.record_json_result(index, fingerprint, value)?;
+                    accumulator.record_json_result(chain, index, fingerprint, value)?;
                 }
                 Ok(None) => accumulator.record_result(index, Ok(None))?,
                 Err(error) => accumulator.record_result(index, Err(error))?,
@@ -1966,6 +1974,9 @@ where
             .get_aptos_json(
                 chain,
                 |base| aptos_transaction_by_version_url(base, ledger_version),
+                Some(AptosLookup::TransactionByVersion(ledger_lookup_version(
+                    ledger_version,
+                )?)),
                 move_transaction_projection,
                 "Aptos transaction",
             )
@@ -2116,6 +2127,7 @@ where
             .get_aptos_json(
                 chain,
                 |base| aptos_account_resource_url(base, &source.layerzero_account, &resource_type),
+                None,
                 aptos_adapter_params_handle_projection,
                 "Aptos adapter params config",
             )

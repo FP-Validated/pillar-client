@@ -123,8 +123,20 @@ pub(super) async fn run(
     let fixture = fixture();
     let xdr = |name: &str| return_xdr(&fixture, name);
     let seen = Arc::new(Mutex::new(Vec::new()));
+    let mut calls = fixture["calls"].clone();
+    let mut pinned_args = base64::engine::general_purpose::STANDARD
+        .decode(calls["is_valid_receive_library"].as_str().unwrap())
+        .unwrap();
+    let pinned = pillar_layerzero::stellar_contract_id_from_strkey(
+        crate::layerzero_runtime::config::stellar_uln_302_for_environment("mainnet").unwrap(),
+    )
+    .unwrap();
+    let at = pinned_args.len() - pinned.len();
+    pinned_args[at..].copy_from_slice(&pinned);
+    calls["is_valid_pinned_receive_library"] =
+        Value::from(base64::engine::general_purpose::STANDARD.encode(pinned_args));
     let transport = SorobanReplay {
-        calls: fixture["calls"].clone(),
+        calls,
         returns: returns
             .into_iter()
             .map(|(function, outcome)| (function, outcome.map(&xdr).map_err(str::to_string)))
@@ -241,10 +253,11 @@ async fn stellar_payload_signed_refuses_an_invalid_override_library() {
     );
     assert_eq!(seen, ["get_receive_library", "is_valid_receive_library"]);
 
-    // A valid override that is not the pinned ULN302 is refused, not read through the pinned one.
+    // A different current override does not help after the pinned library's grace expires.
     let (outcome, seen) = run([
         ("get_receive_library", Ok("overrideLibrary")),
         ("is_valid_receive_library", Ok("valid")),
+        ("is_valid_pinned_receive_library", Ok("invalid")),
         ("effective_receive_uln_config", Ok("config15")),
         ("confirmations", Ok("noConfirmations")),
         ("uln_verifiable", Ok("verifying")),
@@ -254,13 +267,21 @@ async fn stellar_payload_signed_refuses_an_invalid_override_library() {
         matches!(&outcome, Err(AppCoreError::BadRequest(message)) if message.contains("cannot validate")),
         "{outcome:?}"
     );
-    assert_eq!(seen, ["get_receive_library", "is_valid_receive_library"]);
+    assert_eq!(
+        seen,
+        [
+            "get_receive_library",
+            "is_valid_receive_library",
+            "is_valid_pinned_receive_library"
+        ]
+    );
 }
 
 #[tokio::test]
 async fn stellar_payload_signed_refuses_a_default_library_other_than_the_pinned_uln() {
     let (outcome, seen) = run([
         ("get_receive_library", Ok("foreignDefaultLibrary")),
+        ("is_valid_pinned_receive_library", Ok("invalid")),
         ("effective_receive_uln_config", Ok("config15")),
         ("confirmations", Ok("confirmations15")),
         ("uln_verifiable", Ok("verified")),
@@ -270,7 +291,24 @@ async fn stellar_payload_signed_refuses_a_default_library_other_than_the_pinned_
         matches!(&outcome, Err(AppCoreError::BadRequest(message)) if message.contains("cannot validate")),
         "{outcome:?}"
     );
-    assert_eq!(seen, ["get_receive_library"]);
+    assert_eq!(
+        seen,
+        ["get_receive_library", "is_valid_pinned_receive_library"]
+    );
+}
+
+#[tokio::test]
+async fn stellar_accepts_pinned_uln302_only_while_endpoint_allows_it() {
+    let (outcome, _) = run([
+        ("get_receive_library", Ok("overrideLibrary")),
+        ("is_valid_receive_library", Ok("valid")),
+        ("is_valid_pinned_receive_library", Ok("valid")),
+        ("effective_receive_uln_config", Ok("config15")),
+        ("confirmations", Ok("noConfirmations")),
+        ("uln_verifiable", Ok("verifying")),
+    ])
+    .await;
+    assert_eq!(outcome, Ok(Some(15)));
 }
 
 #[tokio::test]

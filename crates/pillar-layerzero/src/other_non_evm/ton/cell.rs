@@ -114,8 +114,12 @@ fn canonical_boc_bytes(mut bytes: Vec<u8>) -> Vec<u8> {
 /// charge a budget before it pays for the parse. `None` when the bytes are not a BOC header this
 /// module reads; `boc_from_bytes_with_limits` still validates everything else.
 pub fn boc_declared_cells(bytes: &[u8]) -> Option<usize> {
-    let bytes = canonical_boc_bytes(bytes.to_vec());
-    if bytes.len() < 10 || bytes[..4] != [0xb5, 0xee, 0x9c, 0x72] {
+    if bytes.len() < 10
+        || !matches!(
+            &bytes[..4],
+            [0xb5, 0xee, 0x9c, 0x72] | [0x68, 0xff, 0x65, 0xf3] | [0xac, 0xc3, 0xa7, 0x28]
+        )
+    {
         return None;
     }
     let size_bytes = usize::from(bytes[4] & 7);
@@ -123,7 +127,7 @@ pub fn boc_declared_cells(bytes: &[u8]) -> Option<usize> {
         return None;
     }
     let mut cursor = 6;
-    read_boc_uint(&bytes, &mut cursor, size_bytes)
+    read_boc_uint(bytes, &mut cursor, size_bytes)
 }
 
 pub fn boc_from_bytes_with_limits(
@@ -131,11 +135,30 @@ pub fn boc_from_bytes_with_limits(
     max_cells: usize,
     reject_exotic: bool,
 ) -> Result<TonCell, AppCoreError> {
+    boc_from_bytes_cancellable(bytes, max_cells, reject_exotic, || false)
+}
+
+/// Check cancellation during preflight and traversal. `ton_core`'s verified
+/// construction is one non-interruptible step; callers must bound its concurrency.
+pub fn boc_from_bytes_cancellable(
+    bytes: Vec<u8>,
+    max_cells: usize,
+    reject_exotic: bool,
+    cancelled: impl Fn() -> bool,
+) -> Result<TonCell, AppCoreError> {
+    let stopped = || map_err("TON BOC decode cancelled");
+    if cancelled() {
+        return Err(stopped());
+    }
     let bytes = canonical_boc_bytes(bytes);
     if !boc_header_is_safe(&bytes, max_cells) {
         return Err(map_err("invalid BOC header"));
     }
-    if boc_max_depth(&bytes).is_none_or(|depth| depth > MAX_CELL_DEPTH) {
+    let depth = boc_max_depth(&bytes, &cancelled);
+    if cancelled() {
+        return Err(stopped());
+    }
+    if depth.is_none_or(|depth| depth > MAX_CELL_DEPTH) {
         return Err(map_err("TON cell depth exceeds protocol limit"));
     }
     catch_unwind(AssertUnwindSafe(|| {
@@ -143,14 +166,25 @@ pub fn boc_from_bytes_with_limits(
             .map_err(map_err)?
             .single_root()
             .map_err(map_err)?;
+        if cancelled() {
+            return Err(stopped());
+        }
         root.hash().map_err(map_err)?;
         root.depth().map_err(map_err)?;
+        // The verified SDK already visits every cell; this walk is only needed
+        // when the consumer additionally forbids exotic cells.
+        if !reject_exotic {
+            return Ok(root);
+        }
         let mut cells = vec![root.clone()];
         let mut visited = std::collections::HashSet::new();
+        let mut steps = 0usize;
         while let Some(cell) = cells.pop() {
-            if reject_exotic
-                && (cell.cell_type() != CellType::Ordinary || cell.level_mask().mask() != 0)
-            {
+            if steps.is_multiple_of(1024) && cancelled() {
+                return Err(stopped());
+            }
+            steps += 1;
+            if cell.cell_type() != CellType::Ordinary || cell.level_mask().mask() != 0 {
                 return Err(map_err("exotic TON cells are not supported"));
             }
             let refs = cell.refs();
@@ -215,7 +249,7 @@ fn boc_header_is_safe(bytes: &[u8], max_cells: usize) -> bool {
     if cells == 0
         || cells > max_cells
         || cells > data_size / 2
-        || roots == 0
+        || roots != 1
         || roots.checked_add(absent).is_none_or(|n| n > cells)
     {
         return false;
@@ -249,7 +283,7 @@ fn boc_header_is_safe(bytes: &[u8], max_cells: usize) -> bool {
 }
 // Bound every declared cell, reachable or not, before constructing TonCells: the parser
 // builds and drops all of them, so one deep unreachable chain would recurse on drop.
-fn boc_max_depth(bytes: &[u8]) -> Option<usize> {
+fn boc_max_depth(bytes: &[u8], cancelled: &impl Fn() -> bool) -> Option<usize> {
     let flags = *bytes.get(4)?;
     let has_idx = flags & 0x80 != 0;
     let size_bytes = usize::from(flags & 7);
@@ -278,6 +312,9 @@ fn boc_max_depth(bytes: &[u8]) -> Option<usize> {
     }
     let mut refs_by_cell = Vec::with_capacity(cells);
     for index in 0..cells {
+        if index.is_multiple_of(1024) && cancelled() {
+            return None;
+        }
         let d1 = *bytes.get(cursor)?;
         let d2 = *bytes.get(cursor + 1)?;
         cursor += 2;
@@ -287,13 +324,12 @@ fn boc_max_depth(bytes: &[u8]) -> Option<usize> {
         }
         cursor = cursor.checked_add(usize::from(d2 / 2 + d2 % 2))?;
         let refs_count = usize::from(d1 & 7);
-        let mut refs = Vec::with_capacity(refs_count);
-        for _ in 0..refs_count {
-            let reference = read_boc_uint(bytes, &mut cursor, size_bytes)?;
-            if reference <= index || reference >= cells {
+        let mut refs = [0; TonCell::MAX_REFS_COUNT];
+        for reference in refs.get_mut(..refs_count)? {
+            *reference = read_boc_uint(bytes, &mut cursor, size_bytes)?;
+            if *reference <= index || *reference >= cells {
                 return None;
             }
-            refs.push(reference);
         }
         refs_by_cell.push(refs);
     }
@@ -302,7 +338,13 @@ fn boc_max_depth(bytes: &[u8]) -> Option<usize> {
     }
     let mut depths = vec![0usize; cells];
     for index in (0..cells).rev() {
-        for &reference in &refs_by_cell[index] {
+        if index.is_multiple_of(1024) && cancelled() {
+            return None;
+        }
+        for &reference in refs_by_cell[index]
+            .iter()
+            .take_while(|&&reference| reference != 0)
+        {
             depths[index] = depths[index].max(depths[reference].checked_add(1)?);
         }
     }
@@ -692,17 +734,17 @@ mod tests {
     #[test]
     fn refuses_a_chain_that_would_overflow_ton_cell_depth() {
         let boc = make_deep_chain(MAX_CELL_DEPTH + 2);
-        assert_eq!(boc_max_depth(&boc), Some(MAX_CELL_DEPTH + 1));
+        assert_eq!(boc_max_depth(&boc, &|| false), Some(MAX_CELL_DEPTH + 1));
         assert!(boc_from_bytes_with_limits(boc, MAX_ACCOUNT_STATE_CELLS, true).is_err());
     }
 
     #[test]
     fn refuses_an_unreachable_chain_deeper_than_ton_cell_depth() {
         let at_limit = make_unreachable_chain(MAX_CELL_DEPTH + 1);
-        assert_eq!(boc_max_depth(&at_limit), Some(MAX_CELL_DEPTH));
+        assert_eq!(boc_max_depth(&at_limit, &|| false), Some(MAX_CELL_DEPTH));
         assert!(boc_from_bytes_with_limits(at_limit, MAX_MESSAGE_CELLS, true).is_ok());
         let deeper = make_unreachable_chain(MAX_CELL_DEPTH + 2);
-        assert_eq!(boc_max_depth(&deeper), Some(MAX_CELL_DEPTH + 1));
+        assert_eq!(boc_max_depth(&deeper, &|| false), Some(MAX_CELL_DEPTH + 1));
         assert!(boc_from_bytes_with_limits(deeper, MAX_MESSAGE_CELLS, false).is_err());
     }
 
@@ -904,7 +946,7 @@ mod tests {
         with_hashes.extend_from_slice(leaf.hash().unwrap().as_slice());
         with_hashes.extend_from_slice(&leaf.depth().unwrap().to_be_bytes());
         with_hashes.push(0xcd);
-        assert_eq!(boc_max_depth(&with_hashes), Some(1));
+        assert_eq!(boc_max_depth(&with_hashes, &|| false), Some(1));
         let parsed = boc_from_bytes(with_hashes).expect("BoC with stored hashes");
         assert_eq!(parsed.hash().unwrap(), root.hash().unwrap());
     }

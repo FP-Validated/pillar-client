@@ -65,6 +65,18 @@ pub(crate) struct RuntimeReadResolvedResponse {
 struct ReadBlocks<'a> {
     resolved_markers: &'a [ResolvedTimestampTimeMarker],
     pins: &'a [ReadBlockPin],
+    stall_budget: std::time::Duration,
+}
+
+pub(super) fn read_stall_budget(waves: usize) -> std::time::Duration {
+    let remaining = pillar_core::execution::current()
+        .and_then(|context| context.deadline)
+        .map_or(READ_CALL_TIMEOUT, |deadline| {
+            deadline.saturating_duration_since(tokio::time::Instant::now())
+        });
+    // At most a quarter of the remaining time is spent waiting to start providers, across
+    // all sequential waves. Provider execution and queueing still need the rest of the deadline.
+    remaining / u32::try_from(waves.max(1)).unwrap_or(u32::MAX) / 4
 }
 
 impl<T> RuntimeEvmReadPayloadResolver<T>
@@ -154,10 +166,8 @@ where
 
     /// The call is issued against the exact block readiness validated, as an
     /// EIP-1898 `{blockHash, requireCanonical: true}` parameter. A provider
-    /// whose canonical chain no longer contains that block, or that does not
-    /// understand the object form, errors and loses its vote; there is
-    /// deliberately no number-tagged fallback, because that is the read that
-    /// could come from a sibling block the validator never saw.
+    /// that proves the block has changed votes against it; a provider that cannot
+    /// prove either view abstains. There is no number-tagged fallback for the data.
     async fn call_evm_view_at_marker(
         &self,
         target_eid: u32,
@@ -183,7 +193,6 @@ where
         let snapshot = self.providers.load();
         let provider_config = snapshot.provider_config(chain_name)?;
         let quorum = required_provider_quorum(provider_config, chain_name)?;
-        let block = json!({ "blockHash": pin.block_hash, "requireCanonical": true });
         let closed = |_| AppCoreError::Admission(pillar_core::execution::BudgetError::Closed);
         let lane = self
             .chain_permits
@@ -199,16 +208,13 @@ where
             .map_err(closed)?;
         // Ranked and entity-interleaved like every other quorum read, so redundant URLs of one
         // slow entity cannot hold the chain's slots ahead of the independent voters.
-        let plan = plan_dispatch(&self.providers.rank_tracker, chain_name, quorum).await?;
-        let mut requests = FuturesUnordered::new();
-        for DispatchEntry { index, uri, delay } in plan {
+        let plan = crate::provider_health::plan_read_dispatch(
+            &self.providers.rank_tracker, chain_name, quorum, blocks.stall_budget,
+        ).await?;
+        let mut requests = quorum_requests(plan, |index, uri| {
             let (url, headers) = provider_uri_parts(uri);
             let transport = self.transport.clone();
-            let block = block.clone();
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
+            async move {
                 // A call holds its chain and process permits until its quorum resolves,
                 // so a provider that never answers must lose its vote in bounded time.
                 let vote = match tokio::time::timeout(
@@ -220,7 +226,7 @@ where
                             headers,
                             to,
                             call_data,
-                            block,
+                            pin,
                             max_result_bytes,
                         ),
                     ),
@@ -241,8 +247,8 @@ where
                     Err(_) => Err(RpcError::Remote("provider response timed out".to_string())),
                 };
                 (index, vote)
-            });
-        }
+            }
+        });
         let mut accumulator = ExactQuorumAccumulator::new(quorum, 0..provider_config.uris.len());
         while let Some((index, observation)) = requests.next().await {
             accumulator.record_result(index, observation)?;
@@ -359,11 +365,18 @@ where
                 "Invalid protocol type for read payload resolver".to_string(),
             ));
         };
+        let command = decode_evm_read_command(&sent_event.message)?;
+        let batches = command.requests.len().div_ceil(self.per_chain);
+        let waves = batches
+            + command.compute.as_ref().map_or(0, |compute| {
+                usize::from(compute.setting != EvmReadComputeSetting::OnlyReduce) * batches
+                    + usize::from(compute.setting != EvmReadComputeSetting::OnlyMap)
+            });
         let blocks = ReadBlocks {
             resolved_markers: resolved_timestamp_time_markers,
             pins: &sent_event.read_block_pins,
+            stall_budget: read_stall_budget(waves),
         };
-        let command = decode_evm_read_command(&sent_event.message)?;
         let request_bytes = AtomicUsize::new(0);
         let calls = command
             .requests
@@ -403,6 +416,10 @@ where
 
     let mut results = Vec::with_capacity(calls.len());
     let mut pending = calls.into_iter().enumerate();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "READ command ordering, not provider dispatch"
+    )]
     let mut running = FuturesUnordered::new();
     for (index, call) in pending.by_ref().take(limit) {
         running.push(tagged(index, call));
@@ -450,5 +467,8 @@ fn read_observation_result(
             "ReadV1002 command is unresolvable: execution reverted at the pinned block".into(),
         )),
         ReadCallObservation::ResultTooLarge => Err(result_too_large()),
+        ReadCallObservation::SourceChanged => Err(AppCoreError::BadRequest(
+            "READ pinned block is no longer canonical".into(),
+        )),
     }
 }

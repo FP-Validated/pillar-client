@@ -213,7 +213,6 @@ async fn canton_roster() -> Value {
 }
 
 async fn one_of_admission() -> Value {
-    use futures::stream::FuturesUnordered;
     use pillar_config::provider_validation::{ProviderVoter, Quorum, QuorumStrategy};
     use std::time::Duration;
     let voters = (0..10)
@@ -238,18 +237,16 @@ async fn one_of_admission() -> Value {
         .await
         .unwrap();
     let slots = Arc::new(tokio::sync::Semaphore::new(8));
-    let requests = FuturesUnordered::new();
-    for entry in plan {
+    let requests = crate::provider_health::quorum_requests(plan, |index, _| {
         let slots = slots.clone();
-        requests.push(async move {
-            tokio::time::sleep(entry.delay).await;
+        async move {
             let _permit = slots.acquire().await.unwrap();
-            if entry.index < 8 {
+            if index < 8 {
                 std::future::pending::<()>().await;
             }
-            (entry.index, Ok(Some(("agreed".to_string(), 42u32))))
-        });
-    }
+            (index, Ok(Some(("agreed".to_string(), 42u32))))
+        }
+    });
     let result = tokio::time::timeout(
         Duration::from_secs(2),
         resolve_provider_quorum(requests, config.uris.len(), rule, "oneOf admission"),
@@ -569,14 +566,15 @@ async fn large_ton_account() -> Value {
     let url = format!("http://{}/", listener.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let transport = ReqwestJsonRpcTransport::new().unwrap();
+    let mut storage = TonStorageObservation::acquire().await.unwrap();
     let state = rpc_scope(
         "ton",
-        ton_storage_cell(&transport, &url, HashMap::new(), "0:00"),
+        ton_storage_cell(&transport, &url, HashMap::new(), "0:00", &mut storage),
     )
     .await
     .unwrap();
     match state {
-        TonStorageRead::Cell(data, _) => assert_eq!(data.len(), encoded.len()),
+        TonStorageRead::Cell(cell) => assert_eq!(cell.data_len_bits(), 127 * 8),
         _ => panic!("valid large TON account state was refused"),
     }
     let ordinary = rpc_scope(

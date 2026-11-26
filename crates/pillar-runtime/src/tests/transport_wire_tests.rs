@@ -688,6 +688,7 @@ async fn ton_depth_limit_and_trace_traversal_are_worker_safe_over_http() {
             usize,
             Result<Option<(String, Value)>, crate::provider_health::RpcError>,
         );
+        #[expect(clippy::disallowed_methods, reason = "synthetic quorum futures")]
         let requests: futures::stream::FuturesUnordered<
             futures::future::BoxFuture<'static, QuorumResult>,
         > = futures::stream::FuturesUnordered::new();
@@ -750,6 +751,7 @@ async fn ton_depth_limit_and_trace_traversal_are_worker_safe_over_http() {
         let canceled_dropped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let canceled_signal = DropSignal(canceled_dropped.clone());
         let canceled_trace = selected.clone();
+        #[expect(clippy::disallowed_methods, reason = "synthetic quorum futures")]
         let canceled_requests: futures::stream::FuturesUnordered<
             futures::future::BoxFuture<'static, QuorumResult>,
         > = futures::stream::FuturesUnordered::new();

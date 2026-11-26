@@ -196,8 +196,7 @@ pub(super) async fn response(
     let download = async move {
         let mut stream = response.bytes_stream();
         let mut total = 0usize;
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|error| error.without_url().to_string())?;
+        while let Some(chunk) = next_body_chunk(&mut stream).await? {
             total = total
                 .checked_add(chunk.len())
                 .filter(|bytes| *bytes <= MAX_WIRE_BYTES)

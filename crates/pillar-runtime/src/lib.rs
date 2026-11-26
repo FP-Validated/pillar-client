@@ -37,7 +37,7 @@ pub use layerzero_runtime::{
     RuntimeRpcValidationChecks,
 };
 pub use provider_health::{
-    normalize_provider_health_entry, AwsLambdaInvokeClient, AwsSdkLambdaInvokeClient,
+    normalize_provider_health_entry, AptosLookup, AwsLambdaInvokeClient, AwsSdkLambdaInvokeClient,
     JsonRpcTransport, ReqwestJsonRpcTransport, RpcError, RpcProviderHealthSource,
 };
 pub use provider_snapshot::{ProviderSnapshotHandle, RuntimeProviderSnapshot};

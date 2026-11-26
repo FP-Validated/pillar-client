@@ -324,6 +324,10 @@ where
             return Err(ClientError::NoUris);
         }
 
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "client signing services, not chain RPC providers"
+        )]
         let mut requests = FuturesUnordered::new();
         for uri in &self.uris {
             let uri_string = uri.0.clone();

@@ -25,19 +25,9 @@ where
         let quorum = required_provider_quorum(provider_config, dst_chain_name)?;
         let plan = crate::provider_health::plan_ton_v3_dispatch(&self.rank_tracker, quorum).await?;
         let indices = plan.iter().map(|entry| entry.index).collect::<Vec<_>>();
-        let requests = FuturesUnordered::new();
-        for crate::provider_health::TonV3DispatchEntry {
-            index,
-            endpoint,
-            headers,
-            delay,
-        } in plan
-        {
+        let requests = quorum_requests(plan, |index, (endpoint, headers)| {
             let transport = self.transport.clone();
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
+            async move {
                 let timestamp =
                     provider_response(observe_ton_block_time(transport, endpoint, headers).await);
                 let observation =
@@ -46,8 +36,8 @@ where
                     index,
                     observation.map(|observation| Some((format!("{:?}", observation.0), observation))),
                 )
-            });
-        }
+            }
+        });
         let context = "block timestamp for chain ton";
         let (agreed_validity, timestamp) =
             crate::provider_health::resolve_provider_quorum_for_indices(
@@ -79,19 +69,15 @@ where
     } = dispatch;
 
     if dst_chain_name == "solana" {
-        let requests = FuturesUnordered::new();
-        for DispatchEntry { index, uri, delay } in plan {
+        let requests = quorum_requests(plan, |index, uri| {
             let (url, headers) = provider_uri_parts(uri);
             let transport = self.transport.clone();
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
+            async move {
                 let timestamp = provider_response(observe_solana_block_time(transport, url, headers).await);
                 let observation = timestamp.map(|timestamp| (timestamp_validity(timestamp, valid_range), timestamp));
                 (index, observation.map(|observation| Some((format!("{:?}", observation.0), observation))))
-            });
-        }
+            }
+        });
         let context = format!("block timestamp for chain {dst_chain_name}");
         let (agreed_validity, timestamp) =
             resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
@@ -110,21 +96,17 @@ where
         });
     }
     if matches!(dst_chain_name, "aptos" | "initia" | "movement") {
-        let requests = FuturesUnordered::new();
-        for DispatchEntry { index, uri, delay } in plan {
+        let requests = quorum_requests(plan, |index, uri| {
             let (url, headers) = move_provider_uri_parts(dst_chain_name, uri);
             let transport = self.transport.clone();
             let chain_name = dst_chain_name.to_string();
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
+            async move {
                 let timestamp =
                     provider_response(observe_move_block_time(transport, &chain_name, url, headers).await);
                 let observation = timestamp.map(|timestamp| (timestamp_validity(timestamp, valid_range), timestamp));
                 (index, observation.map(|observation| Some((format!("{:?}", observation.0), observation))))
-            });
-        }
+            }
+        });
         let context = format!("block timestamp for chain {dst_chain_name}");
         let (agreed_validity, timestamp) =
             resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
@@ -143,21 +125,17 @@ where
         });
     }
     if matches!(dst_chain_name, "sui" | "iotal1") {
-        let requests = FuturesUnordered::new();
-        for DispatchEntry { index, uri, delay } in plan {
+        let requests = quorum_requests(plan, |index, uri| {
             let (url, headers) = provider_uri_parts(uri);
             let transport = self.transport.clone();
             let chain_name = dst_chain_name.to_string();
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
+            async move {
                 let timestamp =
                     provider_response(observe_sui_block_time_rpc(transport, &chain_name, url, headers).await);
                 let observation = timestamp.map(|timestamp| (timestamp_validity(timestamp, valid_range), timestamp));
                 (index, observation.map(|observation| Some((format!("{:?}", observation.0), observation))))
-            });
-        }
+            }
+        });
         let context = format!("block timestamp for chain {dst_chain_name}");
         let (agreed_validity, timestamp) =
             resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
@@ -177,19 +155,15 @@ where
     }
 
     if dst_chain_name == "starknet" {
-        let requests = FuturesUnordered::new();
-        for DispatchEntry { index, uri, delay } in plan {
+        let requests = quorum_requests(plan, |index, uri| {
             let (url, headers) = provider_uri_parts(uri);
             let transport = self.transport.clone();
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
+            async move {
                 let timestamp = provider_response(observe_starknet_block_time(transport, url, headers).await);
                 let observation = timestamp.map(|timestamp| (timestamp_validity(timestamp, valid_range), timestamp));
                 (index, observation.map(|observation| Some((format!("{:?}", observation.0), observation))))
-            });
-        }
+            }
+        });
         let context = format!("block timestamp for chain {dst_chain_name}");
         let (agreed_validity, timestamp) =
             resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
@@ -208,19 +182,15 @@ where
         });
     }
     if dst_chain_name == "stellar" {
-        let requests = FuturesUnordered::new();
-        for DispatchEntry { index, uri, delay } in plan {
+        let requests = quorum_requests(plan, |index, uri| {
             let (url, headers) = provider_uri_parts(uri);
             let transport = self.transport.clone();
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
+            async move {
                 let timestamp = provider_response(observe_stellar_block_time(transport, url, headers).await);
                 let observation = timestamp.map(|timestamp| (timestamp_validity(timestamp, valid_range), timestamp));
                 (index, observation.map(|observation| Some((format!("{:?}", observation.0), observation))))
-            });
-        }
+            }
+        });
         let context = format!("block timestamp for chain {dst_chain_name}");
         let (agreed_validity, timestamp) =
             resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
@@ -238,14 +208,10 @@ where
             ))
         });
     }
-    let requests = FuturesUnordered::new();
-    for DispatchEntry { index, uri, delay } in plan {
+    let requests = quorum_requests(plan, |index, uri| {
         let (url, headers) = provider_uri_parts(uri);
         let transport = self.transport.clone();
-        requests.push(async move {
-            if !delay.is_zero() {
-                tokio::time::sleep(delay).await;
-            }
+        async move {
             let response = transport.post_json_scoped(url,
             headers,
             json!({
@@ -258,8 +224,8 @@ where
             let timestamp = provider_response(response).map(|response| response.and_then(|response| parse_block_timestamp_seconds(&response).ok()));
             let observation = timestamp.map(|timestamp| (timestamp_validity(timestamp, valid_range), timestamp));
             (index, observation.map(|observation| Some((format!("{:?}", observation.0), observation))))
-        });
-    }
+        }
+    });
     let context = format!("block timestamp for chain {dst_chain_name}");
     let (agreed_validity, timestamp) =
         resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)

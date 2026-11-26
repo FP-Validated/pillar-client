@@ -76,20 +76,10 @@ where
                         crate::provider_health::plan_ton_v3_dispatch(&self.rank_tracker, quorum)
                             .await?;
                     let indices = plan.iter().map(|entry| entry.index).collect::<Vec<_>>();
-                    let requests = FuturesUnordered::new();
-                    for crate::provider_health::TonV3DispatchEntry {
-                        index,
-                        endpoint,
-                        headers,
-                        delay,
-                    } in plan
-                    {
+                    let requests = quorum_requests(plan, |index, (endpoint, headers)| {
                         let transport = self.transport.clone();
                         let required = block_confirmation;
-                        requests.push(async move {
-                            if !delay.is_zero() {
-                                tokio::time::sleep(delay).await;
-                            }
+                        async move {
                             let observation = observe_ton_block_confirmations(
                                 transport,
                                 endpoint,
@@ -104,8 +94,8 @@ where
                                     Some((observation.validity.fingerprint(), observation))
                                 }),
                             )
-                        });
-                    }
+                        }
+                    });
                     let context = "block confirmation for chain ton".to_string();
                     let observation = crate::provider_health::resolve_provider_quorum_for_indices(
                         requests, indices, quorum, &context,
@@ -136,17 +126,13 @@ where
                 if matches!(src_chain_name.as_str(), "aptos" | "initia" | "movement") {
                     let quorum = required_provider_quorum(provider_config, src_chain_name)?;
                     let plan = plan_dispatch(&self.rank_tracker, src_chain_name, quorum).await?;
-                    let requests = FuturesUnordered::new();
-                    for DispatchEntry { index, uri, delay } in plan {
+                    let requests = quorum_requests(plan, |index, uri| {
                         let (url, headers) = move_provider_uri_parts(src_chain_name, uri);
                         let transport = self.transport.clone();
                         let chain_name = src_chain_name.to_string();
                         let tx_hash = sent_event.tx_hash.clone();
                         let required_confirmations = block_confirmation;
-                        requests.push(async move {
-                            if !delay.is_zero() {
-                                tokio::time::sleep(delay).await;
-                            }
+                        async move {
                             let observation = observe_move_block_confirmations(
                                 transport,
                                 &chain_name,
@@ -162,8 +148,8 @@ where
                                     Some((observation.validity.fingerprint(), observation))
                                 }),
                             )
-                        });
-                    }
+                        }
+                    });
                     let context = format!("block confirmation for chain {src_chain_name}");
                     let observation = resolve_provider_quorum(
                         requests,
@@ -199,17 +185,13 @@ where
                 if matches!(src_chain_name.as_str(), "sui" | "iotal1") {
                     let quorum = required_provider_quorum(provider_config, src_chain_name)?;
                     let plan = plan_dispatch(&self.rank_tracker, src_chain_name, quorum).await?;
-                    let requests = FuturesUnordered::new();
-                    for DispatchEntry { index, uri, delay } in plan {
+                    let requests = quorum_requests(plan, |index, uri| {
                         let (url, headers) = provider_uri_parts(uri);
                         let transport = self.transport.clone();
                         let chain_name = src_chain_name.to_string();
                         let tx_hash = sent_event.tx_hash.clone();
                         let required_confirmations = block_confirmation;
-                        requests.push(async move {
-                            if !delay.is_zero() {
-                                tokio::time::sleep(delay).await;
-                            }
+                        async move {
                             let observation = observe_sui_block_confirmations_rpc(
                                 transport,
                                 &chain_name,
@@ -251,8 +233,8 @@ where
                                     Some((observation.validity.fingerprint(), observation))
                                 }),
                             )
-                        });
-                    }
+                        }
+                    });
                     let context = format!("block confirmation for chain {src_chain_name}");
                     let observation = resolve_provider_quorum(
                         requests,
@@ -324,17 +306,13 @@ where
                     };
                     let quorum = required_provider_quorum(provider_config, src_chain_name)?;
                     let plan = plan_dispatch(&self.rank_tracker, src_chain_name, quorum).await?;
-                    let requests = FuturesUnordered::new();
-                    for DispatchEntry { index, uri, delay } in plan {
+                    let requests = quorum_requests(plan, |index, uri| {
                         let (url, headers) = provider_uri_parts(uri);
                         let transport = self.transport.clone();
                         let tx_hash = sent_event.tx_hash.clone();
                         let evidence = source_evidence.clone();
                         let required_confirmations = block_confirmation;
-                        requests.push(async move {
-                            if !delay.is_zero() {
-                                tokio::time::sleep(delay).await;
-                            }
+                        async move {
                             let observation = observe_starknet_block_confirmations(
                                 transport,
                                 url,
@@ -350,8 +328,8 @@ where
                                     Some((observation.validity.fingerprint(), observation))
                                 }),
                             )
-                        });
-                    }
+                        }
+                    });
                     let context = format!("block confirmation for chain {src_chain_name}");
                     let observation = resolve_provider_quorum(
                         requests,
@@ -387,16 +365,12 @@ where
                 if src_chain_name == "stellar" {
                     let quorum = required_provider_quorum(provider_config, src_chain_name)?;
                     let plan = plan_dispatch(&self.rank_tracker, src_chain_name, quorum).await?;
-                    let requests = FuturesUnordered::new();
-                    for DispatchEntry { index, uri, delay } in plan {
+                    let requests = quorum_requests(plan, |index, uri| {
                         let (url, headers) = provider_uri_parts(uri);
                         let transport = self.transport.clone();
                         let tx_hash = sent_event.tx_hash.clone();
                         let required_confirmations = block_confirmation;
-                        requests.push(async move {
-                            if !delay.is_zero() {
-                                tokio::time::sleep(delay).await;
-                            }
+                        async move {
                             let observation = observe_stellar_block_confirmations(
                                 transport,
                                 url,
@@ -411,8 +385,8 @@ where
                                     Some((observation.validity.fingerprint(), observation))
                                 }),
                             )
-                        });
-                    }
+                        }
+                    });
                     let context = format!("block confirmation for chain {src_chain_name}");
                     let observation = resolve_provider_quorum(
                         requests,
@@ -455,16 +429,12 @@ where
                 };
                 let quorum = required_provider_quorum(provider_config, src_chain_name)?;
                 let plan = plan_dispatch(&self.rank_tracker, src_chain_name, quorum).await?;
-                let requests = FuturesUnordered::new();
-                for DispatchEntry { index, uri, delay } in plan {
+                let requests = quorum_requests(plan, |index, uri| {
                     let (url, headers) = provider_uri_parts(uri);
                     let transport = self.transport.clone();
                     let tx_hash = sent_event.tx_hash.clone();
                     let source_evidence = source_evidence.clone();
-                    requests.push(async move {
-                        if !delay.is_zero() {
-                            tokio::time::sleep(delay).await;
-                        }
+                    async move {
                         let observation = observe_block_confirmations(
                             transport,
                             url,
@@ -481,8 +451,8 @@ where
                                 Some((observation.validity.fingerprint(), observation))
                             }),
                         )
-                    });
-                }
+                    }
+                });
                 let context = format!("block confirmation for chain {src_chain_name}");
                 let observation = match resolve_provider_quorum_with_zero_signal(
                     requests,
@@ -540,15 +510,11 @@ where
     ) -> Result<(), AppCoreError> {
         let quorum = required_provider_quorum(provider_config, src_chain_name)?;
         let plan = plan_dispatch(&self.rank_tracker, src_chain_name, quorum).await?;
-        let requests = FuturesUnordered::new();
-        for DispatchEntry { index, uri, delay } in plan {
+        let requests = quorum_requests(plan, |index, uri| {
             let (url, headers) = provider_uri_parts(uri);
             let transport = self.transport.clone();
             let tx_hash = tx_hash.to_string();
-            requests.push(async move {
-                if !delay.is_zero() {
-                    tokio::time::sleep(delay).await;
-                }
+            async move {
                 let observation = observe_solana_slot_confirmations(
                     transport,
                     url,
@@ -564,8 +530,8 @@ where
                     observation
                         .map(|observation| Some((observation.validity.fingerprint(), observation))),
                 )
-            });
-        }
+            }
+        });
         let context = format!("block confirmation for chain {src_chain_name}");
         let observation =
             resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context).await?;

@@ -714,18 +714,12 @@ where
                     tokens(&raw, &uri)?,
                 ));
             }
-            let requests = FuturesUnordered::new();
-            for DispatchEntry { index, delay, .. } in plan {
-                let Some((url, token)) = targets.get(index).cloned() else {
-                    continue;
-                };
+            let requests = quorum_requests(plan, |index, _| {
+                let (url, token) = targets[index].clone();
                 let transport = self.transport.clone();
                 let party = party.to_string();
                 let update_id = update_id.to_string();
-                requests.push(async move {
-                    if !delay.is_zero() {
-                        tokio::time::sleep(delay).await;
-                    }
+                async move {
                     let observation = provider_response(
                         observe_canton_transaction_from(transport, url, token, party, update_id)
                             .await,
@@ -735,8 +729,8 @@ where
                             .map(|observation| (observation.fingerprint.clone(), observation))
                     });
                     (index, observation)
-                });
-            }
+                }
+            });
             let observation = resolve_provider_quorum(
                 requests,
                 config.uris.len(),

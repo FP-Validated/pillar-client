@@ -6,4 +6,5 @@ disallowed-methods = [
     { path = "serde_json::Deserializer::from_slice", reason = "use pillar_core::json or pillar_core::json::UntrustedValue" },
     { path = "serde_json::Deserializer::from_reader", reason = "use pillar_core::json or pillar_core::json::UntrustedValue" },
     { path = "reqwest::Response::json", reason = "read the body under a byte cap and parse it with pillar_core::json" },
+    { path = "futures::stream::FuturesUnordered::new", reason = "use provider_health::quorum_requests for provider fan-out so each RPC carries its configured admission key" },
 ]

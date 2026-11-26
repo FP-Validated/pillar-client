@@ -454,25 +454,26 @@ pub(crate) async fn fetch_move_transaction<T>(
     base: String,
     headers: HashMap<String, String>,
     tx_hash: &str,
-) -> Result<Value, crate::provider_health::RpcError>
+) -> Result<Option<Value>, RpcError>
 where
     T: JsonRpcTransport,
 {
-    let response = transport
-        .get_json_scoped(
-            move_tx_url(chain_name, &base, tx_hash).ok_or_else(|| {
-                crate::provider_health::RpcError::Remote(format!(
-                    "Unusable transaction hash for {chain_name}"
-                ))
-            })?,
-            headers,
-        )
-        .await?;
-    Ok(if chain_name == "initia" {
-        unwrap_initia_tx(response)
-    } else {
-        response
-    })
+    let url = move_tx_url(chain_name, &base, tx_hash)
+        .ok_or_else(|| RpcError::Remote(format!("Unusable transaction hash for {chain_name}")))?;
+    match chain_name {
+        "aptos" | "movement" => {
+            transport
+                .get_aptos_lookup_scoped(url, headers, AptosLookup::TransactionByHash)
+                .await
+        }
+        "initia" => transport
+            .get_json_scoped(url, headers)
+            .await
+            .map(|value| Some(unwrap_initia_tx(value))),
+        _ => Err(RpcError::Configuration(
+            "Unsupported Move transaction lookup",
+        )),
+    }
 }
 
 pub(crate) async fn observe_move_block_confirmations<T>(
@@ -509,17 +510,21 @@ where
     let transaction = match ledger_version {
         Some(_) => Value::Null,
         None => {
-            let transaction = super::validation_readiness::readiness_response(
-                fetch_move_transaction(
-                    transport.clone(),
-                    chain_name,
-                    base.clone(),
-                    headers.clone(),
-                    tx_hash,
-                )
-                .await,
-            )?;
-            transaction
+            let Some(transaction) = fetch_move_transaction(
+                transport.clone(),
+                chain_name,
+                base.clone(),
+                headers.clone(),
+                tx_hash,
+            )
+            .await?
+            else {
+                return Ok(BlockConfirmationObservation {
+                    validity: BlockConfirmationValidity::Missing,
+                    current_confirmations: None,
+                });
+            };
+            super::validation_readiness::readiness_response(Ok(transaction))?
         }
     };
     if transaction.get("type").and_then(Value::as_str) == Some("pending_transaction") {
@@ -563,9 +568,22 @@ where
                 "Move provider transaction response has malformed version".to_string(),
             ));
         };
-        let block = super::validation_readiness::readiness_response(
-            transport.get_json_scoped(url, headers.clone()).await,
-        )?;
+        let block = transport
+            .get_aptos_lookup_scoped(
+                url,
+                headers.clone(),
+                AptosLookup::BlockByVersion(version.parse().map_err(|_| {
+                    RpcError::Remote("Move provider transaction version is out of range".into())
+                })?),
+            )
+            .await?;
+        let Some(block) = block else {
+            return Ok(BlockConfirmationObservation {
+                validity: BlockConfirmationValidity::Missing,
+                current_confirmations: None,
+            });
+        };
+        let block = super::validation_readiness::readiness_response(Ok(block))?;
         let block_height = block
             .get("block_height")
             .and_then(Value::as_i64)
@@ -996,6 +1014,7 @@ mod tests {
             "0xtx",
         )
         .await
+        .unwrap()
         .unwrap();
         assert_eq!(response["version"], "7");
         assert_eq!(
@@ -1017,6 +1036,7 @@ mod tests {
             "ABC",
         )
         .await
+        .unwrap()
         .unwrap();
         assert_eq!(response["height"], "42");
         assert_eq!(
@@ -1099,6 +1119,7 @@ mod tests {
         let config = pillar_config::StaticProviderConfig::new(configs, None).unwrap();
         let provider_config = config.get_provider_config("aptos").unwrap();
         let quorum = required_provider_quorum(provider_config, "aptos").unwrap();
+        #[expect(clippy::disallowed_methods, reason = "synthetic confirmation votes")]
         let requests = FuturesUnordered::new();
         for (index, block_response) in [json!({}), Value::Null].into_iter().enumerate() {
             let (transport, _) = transport(vec![Ok(block_response)]);
@@ -1181,6 +1202,7 @@ mod tests {
         let config = pillar_config::StaticProviderConfig::new(configs, None).unwrap();
         let provider_config = config.get_provider_config("aptos").unwrap();
         let quorum = required_provider_quorum(provider_config, "aptos").unwrap();
+        #[expect(clippy::disallowed_methods, reason = "synthetic confirmation votes")]
         let requests = FuturesUnordered::new();
         for (index, response) in [
             json!({"version": ".."}),

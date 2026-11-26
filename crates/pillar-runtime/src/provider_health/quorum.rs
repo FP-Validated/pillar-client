@@ -10,97 +10,142 @@ use std::{
     future::Future,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc, LazyLock,
+        Arc, LazyLock, Mutex,
     },
 };
 
 const MAX_JSON_QUORUM_CANDIDATE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_JSON_RETAINED_VALUE_BYTES: usize = 8 * 1024 * 1024;
+const MAX_JSON_CHAIN_BYTES: usize = MAX_JSON_QUORUM_CANDIDATE_BYTES / 4;
+const MAX_JSON_ENTITY_BYTES: usize = MAX_JSON_RETAINED_VALUE_BYTES;
 static JSON_QUORUM_BUDGET: LazyLock<JsonQuorumBudget> =
     LazyLock::new(|| JsonQuorumBudget::new(MAX_JSON_QUORUM_CANDIDATE_BYTES));
 
 #[derive(Clone)]
 pub(crate) struct JsonQuorumBudget {
     limit: usize,
-    used: Arc<AtomicUsize>,
+    used: Arc<Mutex<JsonRetention>>,
+}
+
+#[derive(Default)]
+struct JsonRetention {
+    bytes: usize,
+    chains: HashMap<Arc<str>, ChainRetention>,
+}
+
+#[derive(Default)]
+struct ChainRetention {
+    bytes: usize,
+    entities: HashMap<Arc<str>, usize>,
 }
 
 impl JsonQuorumBudget {
     pub(crate) fn new(limit: usize) -> Self {
         Self {
             limit,
-            used: Arc::new(AtomicUsize::new(0)),
+            used: Arc::new(Mutex::new(JsonRetention::default())),
         }
     }
 
     #[cfg(test)]
     pub(crate) fn used(&self) -> usize {
-        self.used.load(Ordering::Acquire)
+        self.lock().bytes
     }
 
-    fn reserve(&self, bytes: usize) -> Option<JsonMemoryLease> {
-        let mut current = self.used.load(Ordering::Acquire);
-        loop {
-            let next = current.checked_add(bytes)?;
-            if next > self.limit {
-                return None;
-            }
-            match self.used.compare_exchange_weak(
-                current,
-                next,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => {
-                    return Some(JsonMemoryLease {
-                        bytes,
-                        used: self.used.clone(),
-                    });
-                }
-                Err(observed) => current = observed,
-            }
-        }
+    fn lock(&self) -> std::sync::MutexGuard<'_, JsonRetention> {
+        self.used
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
-    fn grow(&self, lease: &mut JsonMemoryLease, bytes: usize) -> bool {
-        if !Arc::ptr_eq(&self.used, &lease.used) {
+
+    fn reserve(&self, chain: &str, entity: &str, bytes: usize) -> Option<JsonMemoryLease> {
+        let mut usage = self.lock();
+        let existing = usage.chains.get_key_value(chain);
+        let chain = existing.map_or_else(|| Arc::from(chain), |(key, _)| key.clone());
+        let entity = existing
+            .and_then(|(_, part)| part.entities.get_key_value(entity))
+            .map_or_else(|| Arc::from(entity), |(key, _)| key.clone());
+        if !usage.charge(self.limit, &chain, &entity, bytes) {
+            return None;
+        }
+        Some(JsonMemoryLease {
+            budget: self.clone(),
+            chain,
+            entity,
+            bytes,
+        })
+    }
+
+    fn grow(&self, lease: &mut JsonMemoryLease, entity: &str, bytes: usize) -> bool {
+        if !Arc::ptr_eq(&self.used, &lease.budget.used) {
             return false;
         }
         if bytes <= lease.bytes {
             return true;
         }
-        let delta = bytes - lease.bytes;
-        let mut current = self.used.load(Ordering::Acquire);
-        loop {
-            let Some(next) = current.checked_add(delta) else {
-                return false;
-            };
-            if next > self.limit {
-                return false;
-            }
-            match self.used.compare_exchange_weak(
-                current,
-                next,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => {
-                    lease.bytes = bytes;
-                    return true;
-                }
-                Err(observed) => current = observed,
-            }
+        // Agreement can reuse a representative, but cannot charge a bigger one
+        // to a different provider's share.
+        if lease.entity.as_ref() != entity
+            || !self
+                .lock()
+                .charge(self.limit, &lease.chain, &lease.entity, bytes - lease.bytes)
+        {
+            return false;
         }
+        lease.bytes = bytes;
+        true
+    }
+}
+
+impl JsonRetention {
+    fn charge(&mut self, limit: usize, chain: &Arc<str>, entity: &Arc<str>, bytes: usize) -> bool {
+        if bytes > limit - self.bytes {
+            return false;
+        }
+        let retained = self.chains.get(chain);
+        let by_chain = retained.map_or(0, |part| part.bytes);
+        let by_entity = retained
+            .and_then(|part| part.entities.get(entity))
+            .copied()
+            .unwrap_or(0);
+        if bytes > MAX_JSON_CHAIN_BYTES - by_chain || bytes > MAX_JSON_ENTITY_BYTES - by_entity {
+            return false;
+        }
+        self.bytes += bytes;
+        let retained = self.chains.entry(chain.clone()).or_default();
+        retained.bytes += bytes;
+        *retained.entities.entry(entity.clone()).or_default() += bytes;
+        true
     }
 }
 
 struct JsonMemoryLease {
+    budget: JsonQuorumBudget,
+    chain: Arc<str>,
+    entity: Arc<str>,
     bytes: usize,
-    used: Arc<AtomicUsize>,
 }
 
 impl Drop for JsonMemoryLease {
     fn drop(&mut self) {
-        self.used.fetch_sub(self.bytes, Ordering::AcqRel);
+        let mut usage = self.budget.lock();
+        usage.bytes -= self.bytes;
+        let part = usage
+            .chains
+            .get_mut(&self.chain)
+            .expect("active JSON chain lease");
+        part.bytes -= self.bytes;
+        let used = part
+            .entities
+            .get_mut(&self.entity)
+            .expect("active JSON entity lease");
+        *used -= self.bytes;
+        if *used == 0 {
+            part.entities.remove(&self.entity);
+        }
+        if part.bytes == 0 {
+            usage.chains.remove(&self.chain);
+        }
     }
 }
 
@@ -173,6 +218,7 @@ pub(crate) struct ExactQuorumAccumulator<'a, T> {
     pending: BTreeSet<usize>,
     error_count: usize,
     deferred: Option<pillar_core::execution::BudgetError>,
+    unasked: Vec<usize>,
     voters: BTreeMap<String, QuorumCandidate<T>>,
     /// Providers that answered a fingerprint whose value could not be retained.
     withheld: BTreeMap<String, BTreeSet<usize>>,
@@ -187,6 +233,7 @@ impl<'a, T> ExactQuorumAccumulator<'a, T> {
             pending: dispatched.into_iter().collect(),
             error_count: 0,
             deferred: None,
+            unasked: Vec::new(),
             voters: BTreeMap::new(),
             withheld: BTreeMap::new(),
             withheld_oversized: false,
@@ -264,6 +311,7 @@ impl<'a, T> ExactQuorumAccumulator<'a, T> {
             Err(RpcError::Admission(error)) => {
                 self.pending.remove(&index);
                 self.deferred.get_or_insert(error);
+                self.unasked.push(index);
             }
             Err(RpcError::Remote(_) | RpcError::Unavailable) => {
                 tracing::error!(target: "pillar_runtime", provider = index, "provider quorum vote error");
@@ -282,12 +330,17 @@ impl<'a, T> ExactQuorumAccumulator<'a, T> {
                 .any(|indices| self.rule.is_met_by(indices.iter().chain(&self.pending)))
     }
 
-    fn candidates(&self) -> Vec<String> {
-        self.buckets()
-            .into_iter()
-            .filter(|(_, indices)| self.rule.is_met_by(indices))
-            .map(|(fingerprint, _)| fingerprint.clone())
-            .collect()
+    fn competing_quorum<'i>(
+        &self,
+        winner: &str,
+        buckets: &'i BTreeMap<&String, BTreeSet<usize>>,
+        unseen: impl Iterator<Item = &'i usize> + Clone,
+    ) -> bool {
+        self.rule.is_met_by(unseen.clone())
+            || buckets.iter().any(|(fingerprint, indices)| {
+                fingerprint.as_str() != winner
+                    && self.rule.is_met_by(indices.iter().chain(unseen.clone()))
+            })
     }
 
     pub(crate) fn unambiguous_result(&mut self) -> Option<T> {
@@ -300,14 +353,13 @@ impl<'a, T> ExactQuorumAccumulator<'a, T> {
         if candidates.next().is_some() {
             return None;
         }
-        // A response not seen yet could still meet the rule from pending providers alone,
-        // or join one already recorded.
-        if self.rule.is_met_by(&self.pending)
-            || buckets.iter().any(|(fingerprint, indices)| {
-                *fingerprint != candidate
-                    && self.rule.is_met_by(indices.iter().chain(&self.pending))
-            })
-        {
+        // An unanswered provider, including one not admitted locally, can be
+        // part of a competing quorum. Local capacity isn't negative evidence.
+        if self.competing_quorum(
+            candidate,
+            &buckets,
+            self.pending.iter().chain(&self.unasked),
+        ) {
             return None;
         }
         let fingerprint = candidate.clone();
@@ -318,23 +370,34 @@ impl<'a, T> ExactQuorumAccumulator<'a, T> {
     }
 
     pub(crate) fn finish(mut self, context: &str) -> Result<T, AppCoreError> {
-        let candidates = self.candidates();
-        let distinct = self.buckets().len();
+        let buckets = self.buckets();
+        let distinct = buckets.len();
+        let mut candidates = buckets
+            .iter()
+            .filter(|(_, indices)| self.rule.is_met_by(*indices));
         let error_count = self.error_count;
         let incomplete = || {
             AppCoreError::Internal(format!(
                 "No {context} quorum: response set is ambiguous or incomplete; {distinct} distinct successful responses, {error_count} errors"
             ))
         };
-        let [fingerprint] = candidates.as_slice() else {
-            if candidates.is_empty() && distinct <= 1 {
+        let candidate = candidates.next();
+        let Some((fingerprint, _)) = candidate.filter(|_| candidates.next().is_none()) else {
+            if candidate.is_none() && distinct <= 1 {
                 if let Some(error) = self.deferred {
                     return Err(AppCoreError::Admission(error));
                 }
             }
             return Err(incomplete());
         };
-        match self.voters.remove(fingerprint) {
+        if let Some(error) = self.deferred {
+            if self.competing_quorum(fingerprint, &buckets, self.unasked.iter()) {
+                return Err(AppCoreError::Admission(error));
+            }
+        }
+        let fingerprint = (*fingerprint).clone();
+        drop(buckets);
+        match self.voters.remove(&fingerprint) {
             Some(candidate) => Ok(candidate.value),
             None => Err(match self.deferred {
                 Some(error) => AppCoreError::Admission(error),
@@ -350,13 +413,15 @@ impl<'a, T> ExactQuorumAccumulator<'a, T> {
 impl<'a> ExactQuorumAccumulator<'a, Value> {
     pub(crate) fn record_json_result(
         &mut self,
+        chain: &str,
         index: usize,
         fingerprint: String,
         value: Value,
     ) -> Result<bool, AppCoreError> {
-        self.record_json_result_with_budget(index, fingerprint, value, &JSON_QUORUM_BUDGET)
+        self.record_json_result_in(chain, index, fingerprint, value, &JSON_QUORUM_BUDGET)
     }
 
+    #[cfg(test)]
     pub(crate) fn record_json_result_with_budget(
         &mut self,
         index: usize,
@@ -364,6 +429,27 @@ impl<'a> ExactQuorumAccumulator<'a, Value> {
         value: Value,
         budget: &JsonQuorumBudget,
     ) -> Result<bool, AppCoreError> {
+        self.record_json_result_in("test", index, fingerprint, value, budget)
+    }
+
+    fn record_json_result_in(
+        &mut self,
+        chain: &str,
+        index: usize,
+        fingerprint: String,
+        value: Value,
+        budget: &JsonQuorumBudget,
+    ) -> Result<bool, AppCoreError> {
+        let entity = self
+            .rule
+            .config()
+            .voters
+            .get(index)
+            .ok_or_else(|| {
+                AppCoreError::Internal("Quorum observation has no configured voter".into())
+            })?
+            .entity
+            .as_str();
         let replacing = self
             .voters
             .get(&fingerprint)
@@ -377,20 +463,11 @@ impl<'a> ExactQuorumAccumulator<'a, Value> {
             self.record(index, Some((fingerprint, value)));
             return Ok(true);
         }
-        let covered = self
-            .voters
-            .get(&fingerprint)
-            .and_then(|candidate| candidate.lease.as_ref())
-            .is_some_and(|lease| Arc::ptr_eq(&budget.used, &lease.used) && bytes <= lease.bytes);
-        if covered {
-            self.record(index, Some((fingerprint, value)));
-            return Ok(true);
-        }
         let grew = self
             .voters
             .get_mut(&fingerprint)
             .and_then(|candidate| candidate.lease.as_mut())
-            .is_some_and(|lease| budget.grow(lease, bytes));
+            .is_some_and(|lease| budget.grow(lease, entity, bytes));
         if grew {
             self.record(index, Some((fingerprint, value)));
             return Ok(true);
@@ -405,7 +482,7 @@ impl<'a> ExactQuorumAccumulator<'a, Value> {
             self.record_withheld(index, fingerprint);
             return Ok(false);
         }
-        let Some(lease) = budget.reserve(bytes) else {
+        let Some(lease) = budget.reserve(chain, entity, bytes) else {
             self.deferred
                 .get_or_insert(pillar_core::execution::BudgetError::Overloaded);
             self.record_withheld(index, fingerprint);
@@ -513,10 +590,89 @@ pub(crate) const DEFAULT_STALL_TIMEOUT: std::time::Duration =
     std::time::Duration::from_millis(2_000);
 
 #[derive(Debug)]
-pub(crate) struct DispatchEntry<'a> {
+pub(crate) struct DispatchEntry<P> {
     pub(crate) index: usize,
-    pub(crate) uri: &'a pillar_config::ProviderUri,
-    pub(crate) delay: std::time::Duration,
+    pub(crate) uri: P,
+    delay: std::time::Duration,
+    chain: Arc<str>,
+    resource: Arc<str>,
+    expedite: bool,
+}
+
+impl<P> DispatchEntry<P> {
+    pub(super) fn map_uri<U>(self, map: impl FnOnce(usize, P) -> U) -> DispatchEntry<U> {
+        DispatchEntry {
+            index: self.index,
+            uri: map(self.index, self.uri),
+            delay: self.delay,
+            chain: self.chain,
+            resource: self.resource,
+            expedite: self.expedite,
+        }
+    }
+}
+
+struct DispatchWave {
+    outstanding: AtomicUsize,
+    released: tokio::sync::Semaphore,
+}
+
+/// Start the observations with the identity assigned by the plan, not an identity inferred
+/// later from a URL. Dropping the stream cancels both deferred and running observations.
+pub(crate) fn quorum_requests<P, F>(
+    plan: Vec<DispatchEntry<P>>,
+    mut observe: impl FnMut(usize, P) -> F,
+) -> FuturesUnordered<impl Future<Output = F::Output>>
+where
+    F: Future,
+{
+    #[expect(clippy::disallowed_methods, reason = "the provider dispatch boundary")]
+    let requests = FuturesUnordered::new();
+    let wave = if plan.first().is_some_and(|entry| entry.expedite) {
+        let immediate = plan.partition_point(|entry| entry.delay.is_zero());
+        (immediate < plan.len()).then(|| {
+            Arc::new(DispatchWave {
+                outstanding: AtomicUsize::new(immediate),
+                released: tokio::sync::Semaphore::new(0),
+            })
+        })
+    } else {
+        None
+    };
+    for DispatchEntry {
+        index,
+        uri,
+        delay,
+        chain,
+        resource,
+        ..
+    } in plan
+    {
+        let future = observe(index, uri);
+        let wave = wave.clone();
+        requests.push(async move {
+            if !delay.is_zero() {
+                if let Some(wave) = &wave {
+                    tokio::select! {
+                        () = tokio::time::sleep(delay) => {}
+                        _ = wave.released.acquire() => {}
+                    }
+                } else {
+                    tokio::time::sleep(delay).await;
+                }
+            }
+            let result = super::rpc_context::provider_scope(chain, resource, future).await;
+            if delay.is_zero() {
+                if let Some(wave) = wave {
+                    if wave.outstanding.fetch_sub(1, Ordering::AcqRel) == 1 {
+                        wave.released.close();
+                    }
+                }
+            }
+            result
+        });
+    }
+    requests
 }
 
 /// The identity a provider entry dials, keying both the probe's rank write and
@@ -573,9 +729,22 @@ pub(crate) async fn plan_dispatch<'a>(
     tracker: &ProviderRankTracker,
     chain_name: &str,
     quorum: QuorumRule<'a>,
-) -> Result<Vec<DispatchEntry<'a>>, AppCoreError> {
+) -> Result<Vec<DispatchEntry<&'a ProviderUri>>, AppCoreError> {
     let total = quorum.config().uris.len();
     plan_dispatch_for_indices(tracker, chain_name, quorum, 0..total).await
+}
+
+/// In a serial READ command, the initial wave includes enough providers that its
+/// complement alone cannot decide a different result, when the healthy set permits it.
+/// The remaining voters still take part in the same ambiguity check.
+pub(crate) async fn plan_read_dispatch<'a>(
+    tracker: &ProviderRankTracker,
+    chain_name: &str,
+    quorum: QuorumRule<'a>,
+    stall_budget: std::time::Duration,
+) -> Result<Vec<DispatchEntry<&'a ProviderUri>>, AppCoreError> {
+    let keyed = key_dispatch_indices(chain_name, quorum, 0..quorum.config().uris.len());
+    plan_ranked_dispatch(tracker, chain_name, quorum, keyed, Some(stall_budget)).await
 }
 
 /// [`plan_dispatch`] over the providers able to serve this call; the rest are never asked.
@@ -584,13 +753,25 @@ pub(crate) async fn plan_dispatch_for_indices<'a>(
     chain_name: &str,
     quorum: QuorumRule<'a>,
     eligible_indices: impl IntoIterator<Item = usize>,
-) -> Result<Vec<DispatchEntry<'a>>, AppCoreError> {
-    let config = quorum.config();
-    let keyed = eligible_indices
-        .into_iter()
-        .map(|index| (index, provider_rank_key(chain_name, &config.uris[index])))
-        .collect();
+) -> Result<Vec<DispatchEntry<&'a ProviderUri>>, AppCoreError> {
+    let keyed = key_dispatch_indices(chain_name, quorum, eligible_indices);
     plan_dispatch_for_keys(tracker, chain_name, quorum, keyed).await
+}
+
+fn key_dispatch_indices(
+    chain: &str,
+    quorum: QuorumRule<'_>,
+    indices: impl IntoIterator<Item = usize>,
+) -> Vec<(usize, String)> {
+    indices
+        .into_iter()
+        .map(|index| {
+            (
+                index,
+                provider_rank_key(chain, &quorum.config().uris[index]),
+            )
+        })
+        .collect()
 }
 
 /// [`plan_dispatch_for_indices`] ranking each provider by the given key, for a call that
@@ -600,13 +781,18 @@ pub(crate) async fn plan_dispatch_for_keys<'a>(
     chain_name: &str,
     quorum: QuorumRule<'a>,
     keyed: Vec<(usize, String)>,
-) -> Result<Vec<DispatchEntry<'a>>, AppCoreError> {
+) -> Result<Vec<DispatchEntry<&'a ProviderUri>>, AppCoreError> {
+    plan_ranked_dispatch(tracker, chain_name, quorum, keyed, None).await
+}
+
+async fn plan_ranked_dispatch<'a>(
+    tracker: &ProviderRankTracker,
+    chain_name: &str,
+    quorum: QuorumRule<'a>,
+    keyed: Vec<(usize, String)>,
+    read_stall_budget: Option<std::time::Duration>,
+) -> Result<Vec<DispatchEntry<&'a ProviderUri>>, AppCoreError> {
     let config = quorum.config();
-    if let Some(context) = pillar_core::execution::current() {
-        for (index, endpoint) in &keyed {
-            context.register_endpoint(chain_name, endpoint, &config.voters[*index].entity);
-        }
-    }
     let urls = keyed
         .iter()
         .map(|(_, key)| key.as_str())
@@ -621,8 +807,7 @@ pub(crate) async fn plan_dispatch_for_keys<'a>(
     let (healthy, unhealthy): (Vec<_>, Vec<_>) = ranked
         .into_iter()
         .partition(|(_, rank)| *rank != ProviderRank::Unhealthy);
-    let healthy_indices = healthy.iter().map(|(index, _)| *index).collect::<Vec<_>>();
-    if !quorum.is_met_by(&healthy_indices) {
+    if !quorum.is_met_by(healthy.iter().map(|(index, _)| index)) {
         return Err(AppCoreError::Internal(format!(
             "Not enough healthy providers to meet quorum {} for chain {chain_name} \
              ({} healthy of {} configured)",
@@ -648,7 +833,23 @@ pub(crate) async fn plan_dispatch_for_keys<'a>(
             &config.strategy,
         )
     };
-    let first_wave = min_providers_for_strategy(&ordered, &config.strategy).max(1);
+    let mut first_wave = min_providers_for_strategy(&ordered, &config.strategy).max(1);
+    let healthy_count = ordered.len();
+    // Rank has no distinctions left in the unhealthy tail. Round-robin the entities
+    // there so every independent voter is tried before redundant URLs.
+    let mut rounds = HashMap::new();
+    let mut unhealthy = unhealthy
+        .into_iter()
+        .map(|(index, _)| {
+            let ordinal = rounds
+                .entry(config.voters[index].entity.as_str())
+                .or_insert(0usize);
+            let round = *ordinal;
+            *ordinal += 1;
+            (round, index)
+        })
+        .collect::<Vec<_>>();
+    unhealthy.sort_by_key(|(round, _)| *round);
     let order = ordered
         .iter()
         .map(|provider| {
@@ -657,19 +858,43 @@ pub(crate) async fn plan_dispatch_for_keys<'a>(
                 .parse::<usize>()
                 .expect("ids are provider indices")
         })
-        .chain(unhealthy.into_iter().map(|(index, _)| index));
+        .chain(unhealthy.into_iter().map(|(_, index)| index))
+        .collect::<Vec<_>>();
     let stagger_cap = pillar_core::execution::current()
         .and_then(|context| context.deadline)
         .map(|deadline| deadline.saturating_duration_since(tokio::time::Instant::now()) / 4);
+    let step = if let Some(read_cap) = read_stall_budget {
+        // Removing a prefix can only make its suffix less able to meet the rule.
+        let (mut lower, mut upper) = (first_wave, healthy_count);
+        while lower < upper {
+            let middle = lower + (upper - lower) / 2;
+            if quorum.is_met_by(&order[middle..]) {
+                lower = middle + 1;
+            } else {
+                upper = middle;
+            }
+        }
+        first_wave = lower;
+        let slots = u32::try_from((order.len() - first_wave).max(1)).unwrap_or(u32::MAX);
+        let cap = stagger_cap.map_or(read_cap, |remaining| read_cap.min(remaining));
+        DEFAULT_STALL_TIMEOUT.min(cap / slots)
+    } else {
+        DEFAULT_STALL_TIMEOUT
+    };
+    let chain: Arc<str> = Arc::from(chain_name);
     Ok(order
+        .into_iter()
         .enumerate()
         .map(|(position, index)| {
             let behind = (position + 1).saturating_sub(first_wave);
-            let delay = DEFAULT_STALL_TIMEOUT * behind as u32;
+            let delay = step.saturating_mul(u32::try_from(behind).unwrap_or(u32::MAX));
             DispatchEntry {
                 index,
                 uri: &config.uris[index],
                 delay: stagger_cap.map_or(delay, |cap| delay.min(cap)),
+                resource: Arc::from(format!("{chain}/{}", config.voters[index].entity)),
+                chain: chain.clone(),
+                expedite: read_stall_budget.is_some(),
             }
         })
         .collect())
@@ -753,9 +978,145 @@ mod tests {
         assert!(accumulator.finish("test").is_err());
     }
 
+    #[test]
+    fn local_admission_does_not_hide_an_unasked_quorum() {
+        use pillar_core::execution::BudgetError;
+        let config = pool(uris(4), 2);
+        for both_unasked in [false, true] {
+            let mut vote = ExactQuorumAccumulator::new(rule(&config), 0..4);
+            vote.record(0, Some(("agreed".into(), 42)));
+            vote.record(1, Some(("agreed".into(), 42)));
+            vote.record_result(2, Err(RpcError::Admission(BudgetError::Overloaded)))
+                .unwrap();
+            vote.record_result(
+                3,
+                if both_unasked {
+                    Err(RpcError::Admission(BudgetError::Overloaded))
+                } else {
+                    Err(RpcError::Unavailable)
+                },
+            )
+            .unwrap();
+            if both_unasked {
+                assert!(vote.unambiguous_result().is_none());
+                assert_eq!(
+                    vote.finish("read"),
+                    Err(AppCoreError::Admission(BudgetError::Overloaded))
+                );
+            } else {
+                assert_eq!(vote.unambiguous_result(), Some(42));
+            }
+        }
+    }
+
+    #[test]
+    fn retention_preserves_independent_chain_and_entity_capacity() {
+        let budget = JsonQuorumBudget::new(MAX_JSON_QUORUM_CANDIDATE_BYTES);
+        let first = budget.reserve("a", "x", MAX_JSON_ENTITY_BYTES).unwrap();
+        assert!(budget.reserve("a", "x", 1).is_none());
+        let second = budget
+            .reserve("a", "y", MAX_JSON_CHAIN_BYTES - MAX_JSON_ENTITY_BYTES)
+            .unwrap();
+        assert!(budget.reserve("a", "z", 1).is_none());
+        let independent = budget.reserve("b", "x", MAX_JSON_ENTITY_BYTES).unwrap();
+        drop((first, second, independent));
+        assert_eq!(budget.used(), 0);
+        assert!(budget.reserve("a", "x", MAX_JSON_ENTITY_BYTES).is_some());
+    }
+
+    #[derive(Clone)]
+    struct ConcurrentReads(Arc<tokio::sync::Barrier>);
+
+    #[async_trait]
+    impl JsonRpcTransport for ConcurrentReads {
+        async fn post_json(
+            &self,
+            _: String,
+            _: HashMap<String, String>,
+            _: Value,
+        ) -> Result<Value, String> {
+            Err("unexpected POST".into())
+        }
+
+        async fn get_json(&self, _: String, _: HashMap<String, String>) -> Result<Value, String> {
+            self.0.wait().await;
+            Ok(json!({"result": 42}))
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn independently_configured_rpcs_can_hold_admission_together() {
+        use pillar_core::execution::{
+            BudgetLimits, ExecutionResources, FairBudget, RequestContext,
+        };
+        let header_provider = |key: &str| ProviderUri::UriWithHeaders {
+            uri: "https://rpc.example".into(),
+            headers: HashMap::from([("x-api-key".into(), key.into())]),
+        };
+        let ton_provider = |suffix: &str| {
+            ProviderUri::Uri(format!(
+            "https://ton-{suffix}.example/api/v2?v3-endpoint=https%3A%2F%2Fton-{suffix}.example",
+        ))
+        };
+        for (chain, uris) in [
+            (
+                "ethereum",
+                vec![header_provider("one"), header_provider("two")],
+            ),
+            (
+                "ethereum",
+                vec![
+                    ProviderUri::Uri("https://rpc.example/?project=a".into()),
+                    ProviderUri::Uri("https://rpc.example/?project=b".into()),
+                ],
+            ),
+            ("ton", vec![ton_provider("one"), ton_provider("two")]),
+        ] {
+            let config = pool(uris, 2);
+            let tracker = ProviderRankTracker::new();
+            let plan = if chain == "ton" {
+                plan_ton_v3_dispatch(&tracker, rule(&config)).await.unwrap()
+            } else {
+                plan_dispatch(&tracker, chain, rule(&config))
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|entry| entry.map_uri(|_, uri| provider_uri_parts(uri)))
+                    .collect()
+            };
+            let limits = BudgetLimits {
+                active: 2,
+                per_lane: 2,
+                waiting: 2,
+                per_lane_waiting: 2,
+                wait: Duration::from_secs(1),
+            };
+            let budget =
+                FairBudget::with_lane_resource_limit(vec![chain.into()], limits, 2, 1).unwrap();
+            let mut context = RequestContext::new(Duration::from_secs(1));
+            context.resources = Some(Arc::new(ExecutionResources {
+                signing: budget.clone(),
+                parser: budget.clone(),
+                kms: budget.clone(),
+                rpc: budget,
+            }));
+            context.source_chain = Some(Arc::from(chain));
+            let transport = ConcurrentReads(Arc::new(tokio::sync::Barrier::new(2)));
+            let requests = quorum_requests(plan, |_, (url, headers)| {
+                transport.get_ton_json_scoped(url, headers)
+            });
+            let replies = context.scope(requests.collect::<Vec<_>>()).await;
+            assert_eq!(replies.len(), 2);
+            assert!(replies
+                .into_iter()
+                .all(|reply| reply.is_ok_and(|body| body["result"] == 42)));
+        }
+    }
+
     #[tokio::test]
     async fn impossible_quorum_cancels_pending_providers_without_waiting() {
         let config = pool(uris(2), 2);
+        #[expect(clippy::disallowed_methods, reason = "synthetic quorum futures")]
         let requests = FuturesUnordered::new();
         for index in 0..2 {
             requests.push(async move {
@@ -907,6 +1268,7 @@ mod tests {
 
     #[tokio::test]
     async fn provider_quorum_cancels_slow_request_when_result_is_unambiguous() {
+        #[expect(clippy::disallowed_methods, reason = "synthetic quorum futures")]
         let requests = FuturesUnordered::new();
         for (index, delay, fingerprint) in [
             (0, Duration::from_millis(10), "agreed"),
@@ -1090,6 +1452,35 @@ mod tests {
         assert_eq!(plan[0].index, 1);
         assert_eq!(plan[1].index, 2);
         assert_eq!(plan[2].index, 0);
+    }
+
+    #[tokio::test]
+    async fn unhealthy_independent_voters_are_tried_before_redundant_urls() {
+        let tracker = ProviderRankTracker::new();
+        for index in 1..4 {
+            tracker
+                .record(
+                    "hoodi",
+                    &format!("https://rpc-{index}.example"),
+                    false,
+                    None,
+                )
+                .await;
+        }
+        let config = entity_pool(
+            &[
+                ("internal", "healthy"),
+                ("shared_external", "a"),
+                ("shared_external", "a"),
+                ("shared_external", "b"),
+            ],
+            any(1),
+        );
+        let plan = plan_dispatch(&tracker, "hoodi", rule(&config))
+            .await
+            .unwrap();
+        let order = plan.iter().map(|entry| entry.index).collect::<Vec<_>>();
+        assert_eq!(order, [0, 1, 3, 2]);
     }
 
     #[tokio::test]

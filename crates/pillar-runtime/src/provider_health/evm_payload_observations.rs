@@ -344,6 +344,7 @@ pub(crate) enum ReadCallObservation {
     NoCode,
     ExecutionRevert,
     ResultTooLarge,
+    SourceChanged,
 }
 
 /// A provider's domain observation must remain a vote until entity quorum resolves it.
@@ -354,13 +355,14 @@ pub(crate) async fn eth_call_read_observation_at_block<T>(
     headers: HashMap<String, String>,
     to: &str,
     data: &str,
-    block: Value,
+    pin: &pillar_core::ReadBlockPin,
     max_result_bytes: usize,
 ) -> Result<(String, ReadCallObservation), AppCoreError>
 where
     T: JsonRpcTransport,
 {
     use sha2::{Digest, Sha256};
+    let block = json!({"blockHash": pin.block_hash, "requireCanonical": true});
 
     let mut response = transport
         .post_json_scoped(
@@ -397,19 +399,44 @@ where
             let fingerprint = format!("execution-revert:{:x}", Sha256::digest(data.as_bytes()));
             return Ok((fingerprint, ReadCallObservation::ExecutionRevert));
         }
+        // EIP-1898 recommends these codes, but clients also use them for unrelated
+        // failures. A fresh header from this same provider, not the error text,
+        // determines whether its view contradicts the pin.
+        if matches!(code, Some(-32000 | -32001))
+            && read_pin_changed(transport, url, headers, pin).await?
+        {
+            return Ok(("source-changed".into(), ReadCallObservation::SourceChanged));
+        }
         return Err(AppCoreError::Internal(
             "JSON-RPC eth_call returned an error".into(),
         ));
     }
 
+    if response.get("result").is_some_and(Value::is_null) {
+        return if read_pin_changed(transport, url, headers, pin).await? {
+            Ok(("source-changed".into(), ReadCallObservation::SourceChanged))
+        } else {
+            Err(AppCoreError::Internal("Missing eth_call result".into()))
+        };
+    }
     let Some(Value::String(mut value)) = response.get_mut("result").map(Value::take) else {
         return Err(AppCoreError::Internal("Missing eth_call result".into()));
     };
     validate_evm_data(&value, "eth_call")?;
     if value == "0x" {
-        let code = eth_get_code_at_block(transport, url, headers, to, block).await?;
-        if code == "0x" {
-            return Ok(("no-code".into(), ReadCallObservation::NoCode));
+        match eth_get_code_at_block(transport.clone(), url.clone(), headers.clone(), to, block)
+            .await
+        {
+            Ok(code) if code == "0x" => return Ok(("no-code".into(), ReadCallObservation::NoCode)),
+            Ok(_) => {}
+            Err(error) => {
+                if !matches!(&error, AppCoreError::Admission(_))
+                    && read_pin_changed(transport, url, headers, pin).await?
+                {
+                    return Ok(("source-changed".into(), ReadCallObservation::SourceChanged));
+                }
+                return Err(error);
+            }
         }
     }
     // Honest providers agree on an oversized result, so it is a vote rather than an error.
@@ -424,6 +451,23 @@ where
         format!("data:{:x}", Sha256::digest(value.as_bytes())),
         ReadCallObservation::Data { value },
     ))
+}
+
+async fn read_pin_changed<T: JsonRpcTransport>(
+    transport: T,
+    url: String,
+    headers: HashMap<String, String>,
+    pin: &pillar_core::ReadBlockPin,
+) -> Result<bool, AppCoreError> {
+    observe_read_block(transport, url, headers, pin.block_number, None)
+        .await
+        .map(|block| {
+            !block.is_some_and(|block| block.block.hash.eq_ignore_ascii_case(&pin.block_hash))
+        })
+        .map_err(|error| match error {
+            AppCoreError::Admission(_) => error,
+            _ => AppCoreError::Internal("Cannot verify the READ pin with the provider".into()),
+        })
 }
 
 /// `block` is a JSON-RPC block parameter: a tag string, or an EIP-1898 object

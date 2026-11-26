@@ -186,13 +186,15 @@ where
                 headers.insert((marker.chain_name.as_str(), marker.block_number - 1));
             }
         }
+        let batches = headers.len().div_ceil(4) + requirements.len().div_ceil(4);
+        let stall_budget = super::read_payload::read_stall_budget(batches + requirements.len() / 2);
         let mut blocks = HashMap::with_capacity(headers.len());
         let mut headers = headers.into_iter();
         loop {
             let mut pending = FuturesOrdered::new();
             for (chain, height) in headers.by_ref().take(4) {
                 pending.push_back(async move {
-                    self.block_time_with_quorum(chain, height)
+                    self.block_time_with_quorum(chain, height, stall_budget)
                         .await
                         .map(|block| ((chain, height), block))
                 });
@@ -225,7 +227,9 @@ where
             for ((chain, height), (required, kind)) in requirements.by_ref().take(4) {
                 let block = &blocks[&(chain, height)];
                 pending.push_back(async move {
-                    let (sufficient, latest) = self.block_confirmation_satisfied_with_quorum(chain, block, required).await?;
+                    let (sufficient, latest) = self.block_confirmation_satisfied_with_quorum(
+                        chain, block, required, stall_budget
+                    ).await?;
                     if !sufficient {
                         return Err(AppCoreError::BadRequest(format!(
                             "Block confirmation for chainName {chain} for {kind} is greater than current block number: {required} > {latest}"
@@ -251,20 +255,11 @@ where
                 .filter(|pin| pin.chain_name == chain)
                 .collect::<Vec<_>>();
             if chain_pins.len() > 1 {
-                self.pins_share_one_history_with_quorum(chain, &chain_pins)
+                self.pins_share_one_history_with_quorum(chain, &chain_pins, stall_budget)
                     .await?;
             }
         }
         Ok(pins)
-    }
-
-    async fn block_time_with_quorum(
-        &self,
-        chain_name: &str,
-        block_number: i64,
-    ) -> Result<BlockTime, AppCoreError> {
-        self.block_time_for_tag_with_quorum(chain_name, &format!("0x{block_number:x}"))
-            .await
     }
 
     /// Pins at different heights come from separate quorum rounds, so a provider common to two
@@ -273,58 +268,49 @@ where
         &self,
         chain_name: &str,
         pins: &[&ReadBlockPin],
+        stall_budget: std::time::Duration,
     ) -> Result<(), AppCoreError> {
-        let expected = pins
-            .iter()
-            .map(|pin| (pin.block_number, pin.block_hash.clone()))
-            .collect::<Vec<_>>();
         crate::provider_health::rpc_scope(chain_name, async {
             let snapshot = self.providers.load();
-            let dispatch = snapshot.dispatch(&self.rank_tracker, chain_name).await?;
+            let dispatch = snapshot.read_dispatch(&self.rank_tracker, chain_name, stall_budget).await?;
             let ChainDispatch { config, quorum, plan } = dispatch;
-            let requests = FuturesUnordered::new();
-            for DispatchEntry { index, uri, delay } in plan {
+            let requests = quorum_requests(plan, |index, uri| {
                 let (url, headers) = provider_uri_parts(uri);
                 let transport = self.transport.clone();
-                let expected = expected.clone();
-                requests.push(async move {
-                    if !delay.is_zero() {
-                        tokio::time::sleep(delay).await;
-                    }
+                async move {
                     let observation = async {
-                        use futures::{StreamExt, TryStreamExt};
                         // Two reads at a time keep several providers inside the chain's RPC lane.
-                        let consistent = futures::stream::iter(expected)
-                            .map(|(block_number, block_hash)| {
+                        let mut reads = futures::stream::iter(0..pins.len())
+                            .map(|index| {
+                                let pin = pins[index];
                                 let transport = transport.clone();
                                 let url = url.clone();
                                 let headers = headers.clone();
                                 async move {
-                                    let observed = observe_block_time(
-                                        transport,
-                                        url,
-                                        headers,
-                                        &format!("0x{block_number:x}"),
-                                    )
-                                    .await?;
-                                    Ok::<bool, AppCoreError>(
-                                        u64::try_from(observed.block.number).ok()
-                                            == Some(block_number)
-                                            && observed.block.hash.eq_ignore_ascii_case(&block_hash),
-                                    )
+                                    observe_read_block(transport, url, headers, pin.block_number, None)
+                                        .await
+                                        .map(|block| block.is_some_and(|observed| {
+                                            observed.block.hash.eq_ignore_ascii_case(&pin.block_hash)
+                                        }))
                                 }
                             })
-                            .buffer_unordered(2)
-                            .try_fold(true, |all, ok| async move { Ok(all && ok) })
-                            .await?;
-                        Ok::<_, AppCoreError>(if consistent { "consistent" } else { "diverged" })
+                            .buffer_unordered(2);
+                        let mut failure = None;
+                        while let Some(read) = reads.next().await {
+                            match read {
+                                Ok(false) => return Ok("diverged"),
+                                Ok(true) => {}
+                                Err(error) => { failure.get_or_insert(error); }
+                            }
+                        }
+                        failure.map_or(Ok("consistent"), Err)
                     }
                     .await;
                     let vote = provider_response(observation)
                         .map(|result| result.map(|verdict| (verdict.to_string(), verdict)));
                     (index, vote)
-                });
-            }
+                }
+            });
             let context = format!("READ pinned blocks of one history for chain {chain_name}");
             match resolve_provider_quorum(requests, config.uris.len(), quorum, &context).await? {
                 "consistent" => Ok(()),
@@ -341,6 +327,7 @@ where
         chain_name: &str,
         pinned_block: &BlockTime,
         required_block_number: i64,
+        stall_budget: std::time::Duration,
     ) -> Result<(bool, i64), AppCoreError> {
         crate::provider_health::rpc_scope(chain_name, async {
             let owned_chain = chain_name.to_string();
@@ -354,26 +341,22 @@ where
                 )));
             }
             let snapshot = self.providers.load();
-            let dispatch = snapshot.dispatch(&self.rank_tracker, chain_name).await?;
+            let dispatch = snapshot.read_dispatch(&self.rank_tracker, chain_name, stall_budget).await?;
             let ChainDispatch { config, quorum, plan } = dispatch;
-            let requests = FuturesUnordered::new();
-            for DispatchEntry { index, uri, delay } in plan {
+            let pinned_height = u64::try_from(pinned_block.number)
+                .map_err(|_| AppCoreError::Internal("Invalid READ block height".into()))?;
+            let requests = quorum_requests(plan, |index, uri| {
                 let (url, headers) = provider_uri_parts(uri);
                 let transport = self.transport.clone();
-                requests.push(async move {
-                    if !delay.is_zero() {
-                        tokio::time::sleep(delay).await;
-                    }
+                async move {
                     let observation = async {
                         let latest = observe_block_time(
                             transport.clone(), url.clone(), headers.clone(), "latest",
                         ).await?;
-                        let canonical = observe_block_time(
-                            transport, url, headers, &format!("0x{:x}", pinned_block.number),
+                        let canonical = observe_read_block(
+                            transport, url, headers, pinned_height, Some(latest.block.number),
                         ).await?;
-                        if canonical.block.number != pinned_block.number
-                            || !canonical.block.hash.eq_ignore_ascii_case(&pinned_block.hash)
-                        {
+                        if !canonical.is_some_and(|block| block.block.hash.eq_ignore_ascii_case(&pinned_block.hash)) {
                             return Ok::<_, AppCoreError>(None);
                         }
                         Ok(Some(latest))
@@ -392,8 +375,8 @@ where
                         })
                     });
                     (index, vote)
-                });
-            }
+                }
+            });
             let context = format!("READ block confirmation threshold for chain {chain_name}");
             resolve_provider_quorum(requests, config.uris.len(), quorum, &context)
                 .await?
@@ -407,10 +390,11 @@ where
         .await
     }
 
-    async fn block_time_for_tag_with_quorum(
+    async fn block_time_with_quorum(
         &self,
         chain_name: &str,
-        block_tag: &str,
+        block_number: i64,
+        stall_budget: std::time::Duration,
     ) -> Result<BlockTime, AppCoreError> {
         crate::provider_health::rpc_scope(chain_name, async {
             // Time-marker block resolution is EVM-only, matching TS
@@ -427,37 +411,41 @@ where
             chain_type.as_deref().unwrap_or("unknown")
         )));
             }
+            let height = u64::try_from(block_number)
+                .map_err(|_| AppCoreError::BadRequest("Invalid READ block height".into()))?;
             let snapshot = self.providers.load();
-            let dispatch = snapshot.dispatch(&self.rank_tracker, chain_name).await?;
+            let dispatch = snapshot
+                .read_dispatch(&self.rank_tracker, chain_name, stall_budget)
+                .await?;
             let ChainDispatch {
                 config: provider_config,
                 quorum,
                 plan,
             } = dispatch;
-            let requests = FuturesUnordered::new();
-            for DispatchEntry { index, uri, delay } in plan {
+            let requests = quorum_requests(plan, |index, uri| {
                 let (url, headers) = provider_uri_parts(uri);
                 let transport = self.transport.clone();
-                let block_tag = block_tag.to_string();
-                requests.push(async move {
-                    if !delay.is_zero() {
-                        tokio::time::sleep(delay).await;
-                    }
+                async move {
                     let observation = provider_response(
-                        observe_block_time(transport, url, headers, &block_tag).await,
-                    );
-                    let observation = observation.map(|observation| {
-                        observation
-                            .map(|observation| (observation.fingerprint.clone(), observation))
+                        observe_read_block(transport, url, headers, height, None).await,
+                    )
+                    .map(|vote| {
+                        vote.map(|block| match block {
+                            Some(block) => (block.fingerprint, Some(block.block)),
+                            None => ("source-changed".into(), None),
+                        })
                     });
                     (index, observation)
-                });
-            }
-            let context = format!("block for chain {chain_name} block {block_tag}");
-            let observation =
-                resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
-                    .await?;
-            Ok(observation.block)
+                }
+            });
+            let context = format!("block for chain {chain_name} block 0x{height:x}");
+            resolve_provider_quorum(requests, provider_config.uris.len(), quorum, &context)
+                .await?
+                .ok_or_else(|| {
+                    AppCoreError::BadRequest(format!(
+                        "READ block at height {height} is not canonical on chain {chain_name}"
+                    ))
+                })
         })
         .await
     }

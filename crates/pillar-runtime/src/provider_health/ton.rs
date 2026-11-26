@@ -1,11 +1,6 @@
 use super::*;
 
-pub(crate) struct TonV3DispatchEntry {
-    pub(crate) index: usize,
-    pub(crate) endpoint: String,
-    pub(crate) headers: HashMap<String, String>,
-    pub(crate) delay: std::time::Duration,
-}
+type TonV3Endpoint = (String, HashMap<String, String>);
 
 /// The rank key of a TON provider's `v3-endpoint`, written by its v3 probe and read by
 /// v3 dispatch. It is prefixed so it can never be a primary provider's key.
@@ -24,7 +19,7 @@ pub(crate) fn ton_v3_rank_key(uri: &ProviderUri) -> Option<String> {
 pub(crate) async fn plan_ton_v3_dispatch(
     tracker: &ProviderRankTracker,
     quorum: QuorumRule<'_>,
-) -> Result<Vec<TonV3DispatchEntry>, AppCoreError> {
+) -> Result<Vec<DispatchEntry<TonV3Endpoint>>, AppCoreError> {
     let config = quorum.config();
     let mut capable = Vec::new();
     let mut keyed = Vec::new();
@@ -49,16 +44,12 @@ pub(crate) async fn plan_ton_v3_dispatch(
     let plan = plan_dispatch_for_keys(tracker, "ton", quorum, keyed).await?;
     Ok(plan
         .into_iter()
-        .map(|DispatchEntry { index, delay, .. }| {
-            let (endpoint, headers) = parts_by_index[index]
-                .take()
-                .expect("eligible TON v3 provider");
-            TonV3DispatchEntry {
-                index,
-                endpoint,
-                headers,
-                delay,
-            }
+        .map(|entry| {
+            entry.map_uri(|index, _| {
+                parts_by_index[index]
+                    .take()
+                    .expect("eligible TON v3 provider")
+            })
         })
         .collect())
 }
