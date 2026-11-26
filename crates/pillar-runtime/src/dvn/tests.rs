@@ -159,6 +159,19 @@ fn requires_gate_configuration_and_refuses_credentials_in_urls() {
         "https://policy.example/".into(),
     );
     assert!(DvnGateConfig::from_env(&vars).is_ok());
+    let ca_file = "PILLAR_DVN_GATE_CA_FILE";
+    vars.insert(ca_file.into(), " ".into());
+    assert!(DvnGateConfig::from_env(&vars).is_err());
+    vars.insert(
+        ca_file.into(),
+        concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml").into(),
+    );
+    let gate = DvnGateConfig::from_env(&vars).unwrap();
+    assert!(gate.transport().unwrap_err().contains(ca_file));
+    vars.insert("PILLAR_DVN_GATE_URL".into(), "http://127.0.0.1/".into());
+    assert!(DvnGateConfig::from_env(&vars).is_err());
+    vars.remove(ca_file);
+    assert!(DvnGateConfig::from_env(&vars).is_ok());
     vars.remove("PILLAR_DVN_GATE_TOKEN");
     assert!(DvnGateConfig::from_env(&vars).is_err());
 }

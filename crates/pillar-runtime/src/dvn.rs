@@ -19,6 +19,7 @@ use tokio::sync::RwLock;
 
 pub(crate) struct DvnGateConfig {
     url: url::Url,
+    ca_file: Option<String>,
     token: String,
     verifier: EnvelopeVerifier,
     environment: Environment,
@@ -53,6 +54,10 @@ impl DvnGateConfig {
                 "PILLAR_DVN_GATE_URL must be an HTTPS origin (HTTP literal loopback only)".into(),
             );
         }
+        let ca_file = vars.get("PILLAR_DVN_GATE_CA_FILE");
+        if ca_file.is_some_and(|path| path.trim().is_empty() || url.scheme() != "https") {
+            return Err("PILLAR_DVN_GATE_CA_FILE must be a nonempty path for an HTTPS Gate".into());
+        }
         let verifier = EnvelopeVerifier::new(
             required("PILLAR_DVN_GATE_KEY_ID")?,
             &required("PILLAR_DVN_GATE_PUBLIC_KEY")?,
@@ -60,12 +65,35 @@ impl DvnGateConfig {
         .map_err(|error| error.to_string())?;
         Ok(Self {
             url,
+            ca_file: ca_file.cloned(),
             token: required("PILLAR_DVN_GATE_TOKEN")?,
             verifier,
             environment,
             workload_id: required("PILLAR_DVN_WORKLOAD_ID")?,
             instance_id: required("PILLAR_DVN_INSTANCE_ID")?,
         })
+    }
+
+    fn transport(&self) -> Result<reqwest::Client, String> {
+        let mut builder = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(Duration::from_secs(5));
+        if let Some(path) = &self.ca_file {
+            let pem = std::fs::read(path)
+                .map_err(|error| format!("Cannot read PILLAR_DVN_GATE_CA_FILE: {error}"))?;
+            let roots = reqwest::Certificate::from_pem_bundle(&pem)
+                .map_err(|_| "Invalid PEM in PILLAR_DVN_GATE_CA_FILE".to_string())?;
+            if roots.is_empty() {
+                return Err("No CA certificates in PILLAR_DVN_GATE_CA_FILE".into());
+            }
+            builder = builder.tls_built_in_root_certs(false);
+            for root in roots {
+                builder = builder.add_root_certificate(root);
+            }
+        }
+        builder
+            .build()
+            .map_err(|_| "Cannot initialize DVN Gate transport".to_string())
     }
 }
 
@@ -118,11 +146,7 @@ impl DvnGateClient {
             &mut random,
         )
         .map_err(|_| "Cannot initialize DVN boot identity".to_string())?;
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(Duration::from_secs(5))
-            .build()
-            .map_err(|_| "Cannot initialize DVN Gate transport".to_string())?;
+        let client = config.transport()?;
         let gate = Arc::new(Self {
             config,
             client,

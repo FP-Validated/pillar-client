@@ -11,6 +11,7 @@ Findings are those of the `pillar-client-action-required` audit (131 items); its
 ### Security
 
 - Require an online DVN Control Gate before signing through any runtime backend. Signed registry enrollment and intent-bound, short-lived permits enforce chain/direction, asset-group, address-role and fleet-wide admission policies. Missing Gate configuration or unavailable policy authority now fails closed; provision Control and the `PILLAR_DVN_*` settings before upgrading a live Client.
+- An HTTPS DVN Gate with a private CA can use `PILLAR_DVN_GATE_CA_FILE`. The configured CA bundle replaces public roots only for Gate requests; an unreadable or invalid bundle prevents signing startup.
 - Update locked `quinn-udp` to 0.5.16 and `rustix` to 1.1.6 for RUSTSEC-2026-0538 and RUSTSEC-2026-0486 without adding advisory exceptions.
 - H-06: a provider whose chain no longer holds the pinned READ block votes `source-changed`; an agreed answer is refused as "no longer canonical" instead of being dropped from the vote.
 - H-07, M-124: a quorum candidate that cannot be retained (budget or size) is kept as a withheld competing vote, so a below-quorum candidate can no longer let a smaller one win. Stellar votes retain only the consumed fields.

@@ -191,6 +191,7 @@ All configuration is environment based. Required:
 | `PILLAR_PUBLIC_SIGN_ROUTES` | `true` serves `POST /` and `POST /v2/resolve-and-sign` without a bearer. Anything else, including unset, keeps them authenticated. Required for deployments that receive LayerZero DVN traffic, since LayerZero calls a registered endpoint with no credential of yours. Scoped to those two routes; the tokens above stay required either way. |
 | `PILLAR_API_AUTH_ENABLED` | `false` serves **every** route without a bearer, including `/signer-info`, `/provider-health/report` and `/metrics`, and makes `PILLAR_API_AUTH_TOKENS` optional. Anything else, including unset, keeps authentication on. Only for deployments already restricted at the network edge — e.g. an ingress source-IP allowlist — because it exposes signer identity and internal state to any caller that reaches the port. |
 | `PILLAR_DVN_GATE_URL` | HTTPS origin of the Control Gate. Plain HTTP is allowed only for loopback development. |
+| `PILLAR_DVN_GATE_CA_FILE` | Optional path to a PEM CA bundle for an HTTPS Gate. Replaces the public roots only for Gate traffic; hostname and signed registry/permit verification still apply. |
 | `PILLAR_DVN_GATE_TOKEN` | Dedicated `dvn-client` workload credential; keep it in the Client Secret, never policy YAML. |
 | `PILLAR_DVN_GATE_KEY_ID` | Expected Ed25519 registry/permit signing key ID. |
 | `PILLAR_DVN_GATE_PUBLIC_KEY` | Base64-encoded 32-byte Ed25519 public key, not the private signing seed. |
